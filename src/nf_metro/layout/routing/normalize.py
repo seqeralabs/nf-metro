@@ -6184,7 +6184,32 @@ def _distinct_line_order(chans: list[_VChannel], graph: MetroGraph) -> list[str]
         return -1 if a < b else (1 if a > b else 0)
 
     order = sorted(rep_x, key=functools.cmp_to_key(cmp))
-    return _recorded_departure_line_order(order, chans, graph)
+    return _recorded_departure_line_order(_fork_line_order(order, chans), chans, graph)
+
+
+def _fork_line_order(order: list[str], chans: list[_VChannel]) -> list[str]:
+    """*order* with the lines parting at one fork, each turning from its
+    departure lane straight into the gap, in the fork's lane order carried
+    round that turn (the outside lane takes the outside column).  Read from
+    the channels' own route points, so no frame sign enters."""
+    forks: dict[str, dict[str, tuple[float, str]]] = defaultdict(dict)
+    for ch in chans:
+        pts = ch.route.points
+        if ch.idx == 1 and abs(pts[0][1] - pts[1][1]) <= COORD_TOLERANCE:
+            turn = (pts[1][0] - pts[0][0]) * (pts[2][1] - pts[1][1])
+            lane = -pts[0][1] if turn > 0 else pts[0][1]
+            forks[ch.route.edge.source].setdefault(
+                ch.route.line_id, (lane, ch.route.edge.target)
+            )
+    seen = [lid for lines in forks.values() for lid in lines]
+    for lines in forks.values():
+        if len({t for _, t in lines.values()}) > 1 and all(
+            seen.count(lid) == 1 for lid in lines
+        ):
+            slots = sorted(order.index(lid) for lid in lines)
+            for slot, lid in zip(slots, sorted(lines, key=lambda k: lines[k])):
+                order[slot] = lid
+    return order
 
 
 def _recorded_departure_line_order(
