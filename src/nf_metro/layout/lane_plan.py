@@ -3228,45 +3228,22 @@ def _stored_offsets(graph: MetroGraph, plan: LanePlan) -> dict[tuple[str, str], 
     return out
 
 
-def _line_neighbour(
-    graph: MetroGraph, node: str, line_id: str, held: Mapping[tuple[str, str], float]
-) -> float | None:
-    """The offset *line_id* holds at the nearest recorded node up its edges
-    from *node*, else down them: a node placed after the seal splits an edge
-    its line keeps its lane along."""
-    for walk in (graph.edges_to, graph.edges_from):
-        seen, frontier = {node}, [node]
-        while frontier:
-            ahead = []
-            for here in frontier:
-                for edge in walk(here):
-                    if edge.line_id != line_id:
-                        continue
-                    other = edge.source if walk == graph.edges_to else edge.target
-                    if other in seen:
-                        continue
-                    seen.add(other)
-                    if (other, line_id) in held:
-                        return held[(other, line_id)]
-                    ahead.append(other)
-            frontier = ahead
-    return None
-
-
 def planned_offsets(
     graph: MetroGraph, plan: LanePlan, step: float
 ) -> dict[tuple[str, str], float]:
     """Every station line's offset: *plan*'s lane in *step* units, as its
-    drawing reads it; a node the record lacks takes its line's nearest
-    recorded neighbour's, a line with none lane zero."""
+    drawing reads it.  The record holds every station line; one it lacks
+    fails closed."""
     held = _stored_offsets(graph, plan)
     out: dict[tuple[str, str], float] = {}
     for node in graph.stations:
         for lid in graph.station_lines(node):
             lanes = held.get((node, lid))
             if lanes is None:
-                lanes = _line_neighbour(graph, node, lid, held)
-            out[(node, lid)] = 0.0 if lanes is None else lanes * step
+                raise RuntimeError(
+                    f"the lane plan holds no lane for {lid!r} at {node!r}"
+                )
+            out[(node, lid)] = lanes * step
     return out
 
 

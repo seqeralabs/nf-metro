@@ -1616,9 +1616,8 @@ through the record's draw accessors (`planned_offsets` in
   Rail-mode and sectionless layouts never reach 5.1 and hold no record.
 - **Invariants preserved**: The record reads no lane offset, route or draft.
   `compute_station_offsets` returns exactly
-  `planned_offsets(graph, record, step)`; a station line the record lacks
-  (a node placed after the seal that splits a recorded edge) takes its line's
-  nearest recorded neighbour's lane.
+  `planned_offsets(graph, record, step)`; the record holds every station
+  line, and one it lacks fails closed.
 - **Readers**: `compute_station_offsets`; routing's approach-side consumers
   (the same-row bypass entry, the left-entry over-top and far-left U-turn
   wraps, the row-level bottom-row climb), the perpendicular-entry crossing
