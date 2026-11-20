@@ -1,0 +1,41 @@
+%%metro title: Fuzz 8400709
+%%metro line: l0 | Index | #e6194b
+%%metro line: l1 | Count_Classify_Bam | #3cb44b
+%%metro line: l2 | Dedup | #4363d8
+%%metro line: l3 | Sort_Report | #f58231
+%%metro line: l4 | Cluster | #911eb4
+%%metro line: l5 | Index | #46f0f0
+
+graph LR
+    subgraph sec0 [Cluster 0]
+        s0n0[export]
+        s0n1[polish_count_dedup]
+        s0n2[pca]
+        s0n3[merge_report]
+        s0n0 -->|l0| s0n2
+        s0n2 -->|l0,l1,l2,l4,l5| s0n3
+        s0n0 -->|l2,l4,l5| s0n1
+        s0n1 -->|l2,l4,l5| s0n2
+    end
+    subgraph sec1 [Merge 1]
+        %%metro direction: TB
+        s1n0[markdup_cluster]
+        s1n1[qc]
+        s1n3[summarise]
+        s1n0 -->|l1,l5| s1n1
+        s1n1 -->|l1| s1n3
+        s1n0 -->|l3| s1n3
+    end
+    subgraph sec2 [Align_Align 2]
+        s2n0[ASSEMBLE_CALL]
+        s2n1[cluster]
+        s2n0 -->|l0,l4,l5| s2n1
+    end
+    s0n3 -->|l0,l1,l5| s1n0
+    s1n0 -->|l0| s2n0
+    s1n3 -->|l1| s2n1
+    s0n3 -->|l2,l4| s2n0
+    s1n3 -->|l3| s2n0
+    s0n2 -->|l4| s1n3
+    s1n1 -->|l5| s2n0
+    s0n3 -->|l5| s2n1

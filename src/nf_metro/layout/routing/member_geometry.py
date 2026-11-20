@@ -2250,11 +2250,8 @@ def _allocate_bundle_around_claims(
     for item, claim, _ in crowded:
         route, pts = item.candidate.route, item.candidate.route.points
         keys = [(route.edge.source, lid) for lid in (route.line_id, *claim.line_ids)]
-        if (
-            route.edge.source in claim.source_junction_ids
-            and item.channel.idx == 1
-            and all(key in lanes for key in keys)
-        ):
+        shared = route.edge.source in claim.source_junction_ids
+        if shared and item.channel.idx == 1 and all(key in lanes for key in keys):
             turn = (pts[1][0] - pts[0][0]) * (pts[2][1] - pts[1][1])
             mine, *theirs = (lanes[key] for key in keys)
             sides = {math.copysign(1.0, (v - mine) * turn) for v in theirs if v != mine}
