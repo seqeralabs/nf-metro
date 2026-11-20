@@ -315,3 +315,31 @@ def test_a_far_side_branch_hugs_the_sections_it_passes(
     assert max(y for line in branch for _x, y in line) < (
         exit_section.bbox_y + exit_section.bbox_h
     )
+
+
+def test_lines_descending_from_one_fork_take_its_lanes_round_the_turn() -> None:
+    """``l1`` and ``l2`` leave ``__junction_8`` east on its planned lanes and
+    both turn down into the gap beyond it, ``l2`` on a convergence claim that
+    ``l1``'s member bundle is moved clear of.  The side ``l1`` moves to is the
+    fork's: each column is its line's lane carried round the turn, the inner
+    lane on the inner column, so the descents never cross each other."""
+    fork = "__junction_8"
+    _graph, drawn = _render(LR_TOP)
+    lanes = _RECORDS[LR_TOP].tracks.lanes  # type: ignore[attr-defined]
+    descents = {
+        route.line_id: line
+        for route, line in drawn
+        if route.edge.source == fork
+        and len(line) > 2
+        and abs(line[1][0] - line[2][0]) <= COORD_TOLERANCE
+    }
+    assert set(descents) == {"l1", "l2"}
+    (x0, _), (x1, y1), (_, y2) = descents["l1"][:3]
+    turn = (x1 - x0) * (y2 - y1)
+    order = (lanes[(fork, "l1")] - lanes[(fork, "l2")]) * turn
+    assert (descents["l1"][1][0] - descents["l2"][1][0]) * order < 0
+    assert not any(
+        segments_properly_cross(p0, p1, q0, q1, reject_collinear_touch=True)
+        for p0, p1 in pairwise(descents["l1"])
+        for q0, q1 in pairwise(descents["l2"])
+    )

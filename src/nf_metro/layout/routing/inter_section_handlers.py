@@ -1294,8 +1294,8 @@ def _left_exit_wrap_over_top_y(f: _InterFacts) -> float | None:
     lane plan's approach record loops the connector over the target's top
     (:attr:`SideRule.OVER_TOP`, decided from placement by
     :func:`left_exit_wrap_over_top_y`), the loop traverses the band ABOVE the
-    target row (:func:`_gap_above_channel_y`) between its ascent and descent;
-    otherwise it keeps the dip (``None``).
+    target row (:func:`_gap_above_channel_y`); otherwise it keeps the dip
+    (``None``).
     """
     approach = _approach_record(f.graph, f.edge)
     if approach is None or approach.rule is not SideRule.OVER_TOP:
@@ -1419,6 +1419,12 @@ def _right_entry_cross_row_channel_y(f: _InterFacts) -> float | None:
         return None
     if f.tgt_row is not None and _right_entry_gap_above_is_clear(f):
         return _gap_above_channel_y(f.ctx, f.tgt_row)
+    return _right_entry_below_channel_y(f)
+
+
+def _right_entry_below_channel_y(f: _InterFacts) -> float:
+    """The around-below channel of a RIGHT-entry wrap: below every section in
+    the column range, the target row included."""
     src_col = f.src_col if f.src_col is not None else 0
     tgt_col = f.tgt_col if f.tgt_col is not None else src_col
     return bypass_bottom_y(
@@ -3045,18 +3051,18 @@ def _route_bottom_exit_junction_via_gap(
     if (hy - src.y) * (src.y - exit_y) < 0 and exit_row is not None:
         # The target lies back across the exit's own row: the traverse runs in
         # the channel on the exit's side of that row, clear of its header badges.
+        bottom = exit_side is PortSide.BOTTOM
         gy = (
             header_corridor_y(
                 ctx.graph, exit_row, below=True, base_radius=ctx.curve_radius
             )
-            if exit_side is PortSide.BOTTOM
+            if bottom
             else row_top_edge(ctx.graph, exit_row)
             - INTER_ROW_HEADER_CLEARANCE
             - ctx.curve_radius
         )
         # A branch the record sends round the far side drops past the section
         # and hugs the far edges of the sections between it and the target.
-        bottom = exit_side is PortSide.BOTTOM
         if _recorded_side(ctx.graph, edge) == ("above" if bottom else "below"):
             assert exit_col is not None
             drop_x = _corridor_descent_x(ctx, exit_col + 1, ep_row, 0.0)
@@ -5634,7 +5640,6 @@ def _perp_entry_l_record(
     transition_leg: int,
     line_id: str,
     fan_source_offsets: tuple[float, ...] | None,
-    seated_in_gap: bool = False,
 ) -> _PerpEntryLGeometry:
     """Complete a perpendicular-entry record from its centreline.
 
@@ -5654,7 +5659,6 @@ def _perp_entry_l_record(
             transition_leg,
             fan_source_offsets,
             _SourceSeam(_leg_direction(points[0], points[-1]), None, None, None),
-            seated_in_gap,
         )
     source_offset, target_offset = next(
         (source, target)
@@ -5674,7 +5678,6 @@ def _perp_entry_l_record(
             points[0][0],
             points[1][0] + right_normal_axis_sign(turn_direction) * member_offset,
         ),
-        seated_in_gap,
     )
 
 
@@ -6065,10 +6068,10 @@ def _perp_entry_l_geometry(
         transition_leg,
         edge.line_id,
         fan_source_offsets,
-        seated_in_gap,
     )
     return replace(
         record,
+        seated_in_gap=seated_in_gap,
         landing_anchors=_perp_entry_turn_anchors(
             ctx, edge, tgt, tgt_sec, points, is_top
         ),
@@ -8345,19 +8348,4 @@ def _route_right_entry_around_below(f: _InterFacts) -> RoutedPath:
     The approach to the port arrives from ``vx >= ex`` (the port's own
     outward side), never crossing the section interior.
     """
-    # Bypass Y below all sections in the column range so the route clears
-    # every intervening section, including the target row.
-    ctx = f.ctx
-    src_col, src_row = f.src_col, f.src_row
-    ep_col = f.tgt_col
-    bc_src_col = src_col if src_col is not None else 0
-    bc_tgt_col = ep_col if ep_col is not None else bc_src_col
-    channel_y_base = bypass_bottom_y(
-        ctx.graph,
-        bc_src_col,
-        bc_tgt_col,
-        BYPASS_CLEARANCE,
-        src_row=src_row,
-        cross_row=True,
-    )
-    return _build_right_entry_wrap_route(f, channel_y_base)
+    return _build_right_entry_wrap_route(f, _right_entry_below_channel_y(f))

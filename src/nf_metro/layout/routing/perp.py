@@ -49,6 +49,7 @@ from nf_metro.layout.routing.context import (
 from nf_metro.layout.routing.corners import reversed_offset
 from nf_metro.parser.model import (
     MetroGraph,
+    Port,
     PortSide,
 )
 
@@ -65,9 +66,8 @@ def _lane_stacked_perp_entry(graph: MetroGraph, port_id: str) -> bool:
 def _planned_entry_crossing(
     ctx: _RoutingCtx, entry_port_id: str, line_id: str, port_x: float
 ) -> float:
-    """Where the lane plan crosses *line_id* through a lane-stacked TOP or
-    BOTTOM entry: its offset read along the right-hand normal of the entry's
-    travel."""
+    """Where the lane plan crosses *line_id* through a TOP or BOTTOM entry:
+    its offset read along the right-hand normal of the entry's travel."""
     side = ctx.graph.ports[entry_port_id].side
     sign = right_normal_axis_sign(ENTRY_SIDE_DIRECTION[side])
     return port_x + sign * _get_offset(ctx, entry_port_id, line_id)
@@ -208,3 +208,32 @@ def _perp_riser_lateral(
         return _get_offset(ctx, station_id, line_id)
     off = _get_offset(ctx, station_id, line_id)
     return reversed_offset(off, _max_offset_at(ctx, station_id))
+
+
+def perp_corridor_feeder(graph: MetroGraph, port_id: str) -> Port | None:
+    """The perpendicular exit port feeding entry *port_id* over the corridor.
+
+    A TOP/BOTTOM exit port on a same-row section rises into the inter-row
+    corridor band and runs across to feed a perpendicular entry (the
+    up-and-over shape); the exit and entry ports then share the corridor Y.
+    The drop out of that entry must continue the corridor's per-line descent
+    order, so it needs the feeding exit port's side.
+
+    A perpendicular exit that drops across rows into the entry below (the
+    LR -> TB top-drop) is *not* collinear with the entry and keeps its own
+    drop convention, so it is excluded by the shared-Y test.
+
+    This mirrors the exemption in ``_guard_perp_entry_feed_not_collinear``:
+    that guard permits exactly the collinear perp-exit feed this routes.
+    """
+    entry_y = graph.stations[port_id].y
+    for feed in graph.edges_to(port_id):
+        port = graph.ports.get(feed.source)
+        if (
+            port is not None
+            and not port.is_entry
+            and port.side in (PortSide.TOP, PortSide.BOTTOM)
+            and abs(graph.station_for_edge_source(feed).y - entry_y) <= COORD_TOLERANCE
+        ):
+            return port
+    return None

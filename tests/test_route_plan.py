@@ -805,6 +805,13 @@ def test_every_routable_corpus_connector_and_leg_has_exact_plan_coverage() -> No
             # seed_41 aborts in its convergence plan; test_hash_seed_determinism.py
             # pins that abort with its defect classes.
             continue
+        if (
+            path
+            == ROOT / "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd"
+        ):
+            # Aborts in production (on main too, ruling P) in its exit-turn plan;
+            # test_known_curve_aborts.py pins that abort (#2094 line 7et).
+            continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             graph, routes, plan = _observe(path)

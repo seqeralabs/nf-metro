@@ -50,20 +50,23 @@ def test_riboseq_confluence_routes_without_band_descent_crossing() -> None:
     assert check_merge_confluence_band_order(routes, graph) == []
 
 
-def test_annotation_stays_outer_from_band_through_port_fan() -> None:
-    """``annotation`` wraps outer end-to-end into ``orf_calling``'s LEFT port.
+def test_the_outer_line_stays_outer_from_band_through_port_fan() -> None:
+    """The line outer on the shared band wraps outer end-to-end into
+    ``orf_calling``'s LEFT port.
 
-    ``annotation`` holds the outer side of the U-wrap: outer (upper) on the
-    shared approach band, and outer (lower) on the internal lane once inside the
-    port, while ``riboseq`` reaches the same port through a merge junction on the
-    inner side.  An internal lane order that seats ``annotation`` inner while its
-    band and descent stay outer crosses the two lines in the port throat, so the
-    outer approach must carry through to the outer internal lane (#1835).
+    ``annotation`` and ``riboseq`` share the U-wrap into the port, ``annotation``
+    directly and ``riboseq`` through a merge junction; the lane plan decides
+    which of the two rides outer.  Whichever does holds the outer side all the
+    way: upper on the shared approach band, the farther descent column, the
+    lower lane at the port, and the larger internal offset once inside.  An
+    internal lane order that seats it inner while its band and descent stay
+    outer crosses the two lines in the port throat (#1835).
     """
     graph, routes = _route(RIBOSEQ_MMD)
     offsets = compute_station_offsets(graph)
 
     band_y: dict[str, float] = {}
+    peel_x: dict[str, float] = {}
     for rp in routes:
         if not rp.is_inter_section or _terminal_entry_port_id(graph, rp) != PORT:
             continue
@@ -71,6 +74,7 @@ def test_annotation_stays_outer_from_band_through_port_fan() -> None:
         if tail is None:
             continue
         band_y[rp.line_id] = min(band_y.get(rp.line_id, tail.trunk_y), tail.trunk_y)
+        peel_x[rp.line_id] = tail.peel_x
 
     arrival_y = {
         rp.line_id: rp.points[-1][1]
@@ -78,14 +82,12 @@ def test_annotation_stays_outer_from_band_through_port_fan() -> None:
         if rp.is_inter_section and rp.edge.target == PORT
     }
 
-    # Approach band: annotation descends from the row above, so it rides the
-    # upper (smaller-Y) band while riboseq's merge trunk sits below it.
-    assert band_y["annotation"] < band_y["riboseq"]
-    # Arrival at the port: annotation lands on the outer (lower, larger-Y) lane.
-    assert arrival_y["annotation"] > arrival_y["riboseq"]
-    # Internal fan: the outer approach must continue onto the outer (larger
-    # offset) internal lane, or annotation crosses riboseq inside the throat.
-    assert offsets[(PORT, "annotation")] > offsets[(PORT, "riboseq")]
+    assert set(band_y) == {"annotation", "riboseq"}
+    outer, inner = sorted(band_y, key=band_y.__getitem__)
+    assert band_y[outer] < band_y[inner]
+    assert peel_x[outer] < peel_x[inner]
+    assert arrival_y[outer] > arrival_y[inner]
+    assert offsets[(PORT, outer)] > offsets[(PORT, inner)]
 
 
 def test_check_catches_a_planted_confluence_crossing() -> None:
@@ -98,14 +100,16 @@ def test_check_catches_a_planted_confluence_crossing() -> None:
         for rp in routes
         if rp.line_id == "riboseq" and rp.edge.target.startswith("__merge")
     )
-    # Re-seat the exempt annotation descent inboard of the riboseq column, onto the
-    # port Y riboseq holds, so the band and descent orders disagree at the band's turn.
+    # Re-seat the annotation descent across the riboseq column, onto the far
+    # side of the port Y riboseq holds, so the band and descent orders disagree
+    # at the band's turn.
     rib_peel_x = riboseq.points[-3][0]
     rib_port_y = riboseq.points[-1][1]
+    across = 1.0 if annotation.points[-3][0] < rib_peel_x else -1.0
     pts = list(annotation.points)
-    pts[-3] = (rib_peel_x + 4.0, pts[-3][1])
-    pts[-2] = (rib_peel_x + 4.0, rib_port_y - 4.0)
-    pts[-1] = (pts[-1][0], rib_port_y - 4.0)
+    pts[-3] = (rib_peel_x + 4.0 * across, pts[-3][1])
+    pts[-2] = (rib_peel_x + 4.0 * across, rib_port_y - 4.0 * across)
+    pts[-1] = (pts[-1][0], rib_port_y - 4.0 * across)
     annotation.points = pts
     violations = check_merge_confluence_band_order(routes, graph)
     assert any(

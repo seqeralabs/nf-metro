@@ -67,8 +67,10 @@ def _descent_x_in_band(
 
 
 def test_branch_a_leadout_clears_feeder_descents() -> None:
-    """Branch A's l1 output turns down to the right of the feeder descents that
-    share the gap just right of its column, so no two turns self-meet."""
+    """Branch A's l1 output turns down clear of the feeder descents that share
+    the gap just right of its column, so no two turns self-meet.  The lane plan
+    seats the wrap descent and the fan branch in the gap; the lead-out keeps a
+    full corner radius from each, on whichever side its slot lies."""
     _graph, routes = _route(FIXTURES / "target_entry_runway_bypass.mmd")
 
     # The Branch A / Branch B column gap the three lines descend through.
@@ -83,11 +85,11 @@ def test_branch_a_leadout_clears_feeder_descents() -> None:
         routes, "__junction_14", "target__entry_left", gap_lo, gap_hi
     )
 
-    assert branch_a_leadout > feeder_l1_descent + CURVE_RADIUS, (
+    assert abs(branch_a_leadout - feeder_l1_descent) > CURVE_RADIUS, (
         f"Branch A lead-out {branch_a_leadout} self-meets the Feeder L1 descent "
         f"{feeder_l1_descent}"
     )
-    assert branch_a_leadout > feeder_l2_turn + CURVE_RADIUS, (
+    assert abs(branch_a_leadout - feeder_l2_turn) > CURVE_RADIUS, (
         f"Branch A lead-out {branch_a_leadout} clashes with the Feeder L2 turn "
         f"{feeder_l2_turn}"
     )

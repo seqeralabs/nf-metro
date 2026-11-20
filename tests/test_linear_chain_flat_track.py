@@ -120,13 +120,17 @@ def test_seed_72_s5_source_order_maps_to_descending_turn_columns() -> None:
 
 
 def test_two_line_off_row_fan_keeps_peel_order() -> None:
+    """``main`` leaves the fork on the upper lane and peels off first, so it
+    descends one lane outside ``side``, in the order the two left the fork."""
     observed = _observed(BYPASS_TWO_LINE)
     junction = "__junction_3"
-
-    assert {
+    lanes = {
         line_id: (
             _route_from(observed, junction, line_id).points[0][1],
             _first_vertical_x(_route_from(observed, junction, line_id).points),
         )
         for line_id in ("main", "side")
-    } == {"main": (120.0, 453.0), "side": (124.0, 457.0)}
+    }
+
+    assert lanes["side"][0] - lanes["main"][0] == 4.0
+    assert lanes["side"][1] - lanes["main"][1] == 4.0

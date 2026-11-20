@@ -15,6 +15,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     graph_offset_step,
 )
+from nf_metro.layout.lane_plan import build_lane_plan
 from nf_metro.layout.routing import common as routing_common
 from nf_metro.layout.routing import compute_station_offsets, normalize, route_edges
 from nf_metro.layout.routing import invariants as routing_invariants
@@ -456,6 +457,8 @@ def test_same_target_vertical_bundle_guard_is_fail_loud_and_non_vacuous() -> Non
     violations = checker(graph, routes)
     assert {violation.line_id for violation in violations} == {"a"}
 
+    # The render guards read the lane plan a layout seals before routing.
+    graph._lane_plan = build_lane_plan(graph)
     with pytest.raises(
         routing_invariants.CurveInvariantError,
         match="same-destination final vertical bundle",

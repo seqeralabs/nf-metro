@@ -53,8 +53,8 @@ from nf_metro.layout.routing.perp import (
     _perp_entry_crossing_x,
     _perp_riser_lateral,
     _planned_entry_crossing,
+    perp_corridor_feeder,
 )
-from nf_metro.layout.routing.perp_columns import perp_corridor_feeder
 from nf_metro.parser.model import (
     Edge,
     PortSide,

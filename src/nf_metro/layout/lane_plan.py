@@ -151,7 +151,8 @@ run's entry port past one of its stations where the other stops (a *breeze*):
 it steps up past both.  The run's stations then hold no lane none of its lines
 rides: the lanes between their outermost close up in order about its lowest
 pinned lane (else its lowest), lanes beyond them keeping their distance, where
-that moves no lane it keeps but a seam pin's.
+that moves no pinned lane: a line a straight seam pins never steps lanes along
+the straight run.
 
 **Lines in a seam-pinned run.**  Outside a part entered by bundles, a line
 riding no entry of a run holding a seam-pinned entry lies beside the fixed
@@ -174,13 +175,12 @@ there arriving from upstream and the other is born there leaving
 downstream.
 
 **Readers.**  Offsets runs write the record's lanes (:func:`planned_offsets`);
-routing reads the approaches and far sides (:func:`recorded_lane_plan`).
+routing reads the approaches, far sides and fork lanes (:func:`recorded_lane_plan`).
 Validation observes (:func:`observing`).
 """
 
 from __future__ import annotations
 
-import itertools
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -721,8 +721,9 @@ class _Tracks:
                 or (here.x - there.x) * vx + (here.y - there.y) * vy <= 0
             ):
                 continue
-            at = getattr(there, axis) + sign * across[node][lid] * self.step
-            k = _on_grid(sign * (at - getattr(here, axis)) / self.step)
+            base = there.x if axis == "x" else there.y
+            at = base + sign * across[node][lid] * self.step
+            k = _on_grid(sign * (at - (here.x if axis == "x" else here.y)) / self.step)
             if k is not None and not _boxes_across(graph, port_id, node, at, axis):
                 out.add(k)
         return out
@@ -910,6 +911,14 @@ class _Tracks:
         by_lane = sorted(lines, key=lambda lid: (lanes[lid], lid))
         return tuple(by_lane if self.senses[entry_id] > 0 else reversed(by_lane))
 
+    def _feeders(self, entry_id: str) -> dict[str, list[str]]:
+        """Each node feeding *entry_id*, with the lines it feeds there."""
+        feeding: dict[str, list[str]] = {}
+        for lid in self.graph.station_lines(entry_id):
+            for node, _via in self.builder.upstream_sources(entry_id, lid):
+                feeding.setdefault(node, []).append(lid)
+        return feeding
+
     def _record_interleaves(self, entry_id: str) -> None:
         """A line whose lane at *entry_id* lies between the lanes of a
         feeding exit's bundle that does not carry it crosses that bundle."""
@@ -917,15 +926,11 @@ class _Tracks:
         lines = graph.station_lines(entry_id)
         if any((entry_id, lid) not in self.lanes for lid in lines):
             return
-        feeding: dict[str, set[str]] = {}
-        for lid in lines:
-            for node, _via in self.builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, set()).add(lid)
-        for node, carried in sorted(feeding.items()):
+        for node, carried in sorted(self._feeders(entry_id).items()):
             held = sorted(self.lanes[(entry_id, lid)] for lid in carried)
             if node not in graph.ports or len(held) < 2:
                 continue
-            for lid in sorted(set(lines) - carried):
+            for lid in sorted(set(lines).difference(carried)):
                 if held[0] < self.lanes[(entry_id, lid)] < held[-1]:
                     self.forced.append(
                         ForcedCrossing(
@@ -953,8 +958,8 @@ class _Tracks:
             if t == -(tx + ty) and d and (entry_id, e.line_id) in lanes:
                 joins.append(((t, d), t * (src.x * ux + src.y * uy), src.id, e.line_id))
         sec, side = graph.ports[entry_id].section_id, self.senses[entry_id] * (ux or -1)
-        for (td, ahead, _b, lid), (td2, behind, a, m) in itertools.product(
-            joins, joins
+        for (td, ahead, _b, lid), (td2, behind, a, m) in (
+            (j, k) for j in joins for k in joins
         ):
             past = (
                 (lanes[(entry_id, lid)] - lanes[(entry_id, m)]) * side * td[0] * td[1]
@@ -966,12 +971,8 @@ class _Tracks:
         """Each feeding exit's bundle of *entry_id*'s lines, two or more, in
         its order read up the entry's lane index."""
         graph, builder = self.graph, self.builder
-        feeding: dict[str, list[str]] = {}
-        for lid in graph.station_lines(entry_id):
-            for node, _via in builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, []).append(lid)
         bundles = []
-        for node, carried in sorted(feeding.items()):
+        for node, carried in sorted(self._feeders(entry_id).items()):
             held = builder.order_of(node) if node in graph.ports else None
             if len(carried) < 2 or held is None or held.lines is None:
                 continue
@@ -994,10 +995,7 @@ class _Tracks:
                 pins[lid] = min(found)
         if not pins:
             return pins
-        feeding: dict[str, list[str]] = {}
-        for lid in graph.station_lines(entry_id):
-            for node, _via in builder.upstream_sources(entry_id, lid):
-                feeding.setdefault(node, []).append(lid)
+        feeding = self._feeders(entry_id)
         for lid in sorted(pins):
             bundles = [
                 (node, carried)
@@ -1754,11 +1752,9 @@ class _Tracks:
                 else v - hi + len(held) - 1
             )
 
-        seamed = {lid for n in members for lid in self.seam_lanes.get(n, ())}
-        kept = [lid for lid in fixed if lid not in seamed]
-        anchor = min((lanes[lid] for lid in kept or fixed), default=lo)
+        anchor = min((lanes[lid] for lid in fixed), default=lo)
         packed = {lid: anchor - close(anchor) + close(v) for lid, v in lanes.items()}
-        if all(packed[lid] == lanes[lid] for lid in kept):
+        if all(packed[lid] == lanes[lid] for lid in fixed):
             lanes = packed
         for n in members:
             if n in self.seam_lanes:
@@ -2929,16 +2925,14 @@ def lane_plan_of(graph: MetroGraph) -> LanePlan:
     """The layout's sealed record; else, sealing it at the first run at or
     after 5.1 outside :func:`observing`, the record the current placement
     plans."""
-    if graph._lane_plan is not None:
-        return graph._lane_plan
+    plan = recorded_lane_plan(graph)
+    if plan is not None:
+        return plan
+    plan = build_lane_plan(graph)
     observed = _OBSERVED.get()
     if observed is not None:
-        held = observed.get(id(graph))
-        if held is None or held[0] is not graph:
-            held = observed[id(graph)] = (graph, build_lane_plan(graph))
-        return held[1]
-    plan = build_lane_plan(graph)
-    if JUNCTIONS_POSITIONED in graph._stages_completed:
+        observed[id(graph)] = (graph, plan)
+    elif JUNCTIONS_POSITIONED in graph._stages_completed:
         graph._lane_plan = plan
     return plan
 

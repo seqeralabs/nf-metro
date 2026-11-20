@@ -5976,28 +5976,27 @@ def test_no_label_keeps_a_push_out_its_wrapped_block_has_outgrown(fixture):
     )
 
 
-def test_entry_arrival_permutes_lanes_rather_than_sharing_one():
-    """The arriving line reaches its approach lane by exchange, not by sharing.
+def test_entry_arrival_hands_over_on_one_flat_lane():
+    """The arriving line runs in flat and hands its lane on at the station.
 
-    ``same_destination_vertical_convergence`` reserves ``s1``'s second slot for the
-    line entering the section, which arrives on the lane the trunk draws.  The
-    run in is flat because that line traded slots with the one originating at
-    the first station, so both stations still spread as many lanes as they carry
-    lines; collapsing the two onto one lane would draw the same flat run and is
-    what this rules out.
+    ``obstacle_feed`` enters ``s1`` and ends at ``n1_0``, where ``obstacle`` is
+    born; ``obstacle`` ends at ``n1_1``, where ``upper`` is born.  Each pair
+    touches at one station only, one arriving to terminate and one born there
+    leaving, so they never coexist on the run and the lane plan hands the lane
+    over: the run in is flat and the three draw one straight track.
     """
     graph = _layout("topologies/same_destination_vertical_convergence.mmd")
     offsets = compute_station_offsets(graph)
     route_edges(graph, station_offsets=offsets)
 
     arrival = offsets[("s1__entry_left_5", "obstacle_feed")]
-    assert offsets[("n1_0", "obstacle_feed")] == pytest.approx(arrival)
-    for station_id in ("n1_0", "n1_1"):
-        lines = graph.station_lines(station_id)
-        lanes = {round(offsets[(station_id, line_id)], 2) for line_id in lines}
-        assert len(lanes) == len(lines), (
-            f"{station_id}: {len(lines)} lines share {len(lanes)} lane(s) {lanes}"
-        )
+    assert set(graph.station_lines("n1_0")) == {"obstacle", "obstacle_feed"}
+    assert set(graph.station_lines("n1_1")) == {"obstacle", "upper"}
+    assert [
+        offsets[(station_id, line_id)]
+        for station_id in ("n1_0", "n1_1")
+        for line_id in graph.station_lines(station_id)
+    ] == pytest.approx([arrival] * 4)
 
 
 # ---------------------------------------------------------------------------

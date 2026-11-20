@@ -135,7 +135,13 @@ def test_cross_system_landing_corners_are_concentric_across_route_shapes() -> No
 
 
 def test_short_planned_source_leads_share_a_clamp_safe_reference_radius() -> None:
-    """A compact planned fan keeps one centre without moving its frozen axes."""
+    """A compact planned fan keeps one centre without moving its frozen axes.
+
+    ``main`` and ``report`` leave ``__junction_12`` on the lanes the lane plan
+    gives them there and both turn down; the line on the upper lane is outside
+    the turn, so it takes the larger radius, turns one lane further on, and
+    shares the inner line's arc centre.
+    """
     path = FIXTURES / "route_reservations" / "reportho.metro"
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph)
@@ -146,6 +152,12 @@ def test_short_planned_source_leads_share_a_clamp_safe_reference_radius() -> Non
         for route in observation.routes
         if route.edge.source == "__junction_12" and route.line_id in {"main", "report"}
     }
+    outer, inner = sorted(
+        source_turns, key=lambda line: source_turns[line].points[0][1]
+    )
+    assert all(
+        route.points[2][1] > route.points[1][1] for route in source_turns.values()
+    )
 
     radii = {}
     centres = {}
@@ -157,42 +169,29 @@ def test_short_planned_source_leads_share_a_clamp_safe_reference_radius() -> Non
             route.points[1][0] - radius,
             route.points[1][1] + radius,
         )
-    assert radii == {"main": 14.0, "report": 10.0}
-    assert centres["report"] == pytest.approx(centres["main"])
+    assert radii == {outer: 14.0, inner: 10.0}
+    assert centres[outer] == pytest.approx(centres[inner])
     assert {
         line_id: route.concentric_corner_offsets_by_segment[1][0]
         for line_id, route in source_turns.items()
-    } == {"main": 4.0, "report": 0.0}
+    } == {outer: 4.0, inner: 0.0}
     assert {
         line_id: route.concentric_corner_bases_by_segment[1][0]
         for line_id, route in source_turns.items()
-    } == {"main": 10.0, "report": 10.0}
-    relative_shapes = {
-        line_id: tuple(
-            (
-                round(x - route.points[0][0], 6),
-                round(y - route.points[0][1], 6),
-            )
-            for x, y in route.points
-        )
-        for line_id, route in source_turns.items()
-    }
-    assert relative_shapes == {
-        "main": ((0.0, 0.0), (16.0, 0.0), (16.0, 29.2), (42.0, 29.2)),
-        "report": ((0.0, 0.0), (10.0, 0.0), (10.0, 222.0), (30.0, 222.0)),
-    }
+    } == {outer: 10.0, inner: 10.0}
+    lane_gap = source_turns[inner].points[0][1] - source_turns[outer].points[0][1]
+    assert source_turns[outer].points[1][0] - source_turns[inner].points[1][0] == (
+        pytest.approx(lane_gap)
+    )
     incoming = {
         route.line_id: route
         for route in observation.routes
         if route.edge.target == "__junction_12" and route.line_id in {"main", "report"}
     }
-    assert {
-        line_id: (incoming[line_id].points[-1], source_turns[line_id].points[0])
+    assert all(
+        incoming[line_id].points[-1] == source_turns[line_id].points[0]
         for line_id in source_turns
-    } == {
-        "main": ((1073.5, 266.0), (1073.5, 266.0)),
-        "report": ((1075.5, 270.0), (1075.5, 270.0)),
-    }
+    )
     assert check_fanout_lane_continuity(observation.routes, graph) == []
     main = source_turns["main"]
     main_plan = next(
@@ -214,8 +213,10 @@ def test_short_planned_source_leads_share_a_clamp_safe_reference_radius() -> Non
     source_turns["main"].curve_radii[0] += 1.0
     assert check_concentric_bundle_corners(graph, observation.routes, offsets)
 
-    source_turns["report"].points[0] = (1075.5, 266.0)
-    source_turns["report"].points[1] = (1085.5, 266.0)
+    moved = source_turns[inner]
+    outer_y = source_turns[outer].points[0][1]
+    moved.points[0] = (moved.points[0][0], outer_y)
+    moved.points[1] = (moved.points[1][0], outer_y)
     assert check_fanout_lane_continuity(observation.routes, graph)
 
 

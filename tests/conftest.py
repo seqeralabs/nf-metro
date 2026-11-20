@@ -288,6 +288,12 @@ def diff_station_coords(before: Coords, after: Coords, tol: float = 1e-6) -> lis
 # --- Parse/layout helpers ---
 
 
+def _exit_turn_error() -> type[Exception]:
+    from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
+
+    return ExitTurnInvariantError
+
+
 def known_curve_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
     """Strict xfail for a map whose render aborts on a tracked curve defect."""
     from nf_metro.layout.routing.invariants import CurveInvariantError
@@ -329,12 +335,13 @@ CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
         )
     ),
     "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd": (
-        known_curve_abort(
-            "#2121",
-            "#2151",
-            reason="the BT TOP exit into sec1's TOP entry crosses l0 and l1 at "
-            "both of its turns; sec4's RIGHT exit into sec5's LEFT entry "
-            "reverses l1 and l2 at the corner",
+        pytest.mark.xfail(
+            raises=_exit_turn_error(),
+            strict=True,
+            reason="ruling P (aborts on main too): #2094 line 7et (exit-turn "
+            "planner reads the record; planned != drawn at the straight "
+            "continuation): straight continuation changed source lane at sec0's "
+            "TOP exit, ahead of the tracked curve defects #2121, #2151",
         )
     ),
     "tests/fixtures/regressions/perp_exit_single_feeder_landing.mmd": (
