@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from test_co_row_diagonal_group import ENTRY_RUNWAY_SIBLING
-from test_entry_frame_through_junction import STRANDED_BRANCH_MMD
+from test_entry_frame_through_junction import STRANDED_BRANCH_MMD, _polylines
 
 import nf_metro.layout.routing.exit_turns as exit_turns_module
 from nf_metro.api import render_string
@@ -146,3 +146,49 @@ def test_a_column_beside_a_counter_runner_waits_for_the_joint_allocation(
     assert first[1] == exit_turns_module.GAP_ALLOCATION_PENDING
     assert later and later[-1][1] is None
     assert later[-1][2]
+
+
+def _vertical_x(points: list[tuple[float, float]], lo: float, hi: float) -> float:
+    (x,) = {
+        x0
+        for (x0, _y0), (x1, _y1) in zip(points, points[1:])
+        if x0 == x1 and lo < x0 < hi
+    }
+    return x
+
+
+def test_a_leg_from_a_junction_inside_the_gap_turns_away_from_it() -> None:
+    # junction_6 stands at x=410 in the 400..450 gap's left half: its descent
+    # takes the right side, past the bundle climbing into sec2, so its turn
+    # has the runway.
+    polylines = _polylines(STRANDED_BRANCH_MMD)
+    descent = _vertical_x(
+        polylines["__junction_6", "sec3__entry_left_3", "l1"], 400, 450
+    )
+    climb = [
+        _vertical_x(polylines["__junction_5", "sec2__entry_left_2", line], 400, 450)
+        for line in ("l0", "l2")
+    ]
+    assert descent >= max(climb) + 12.0
+
+
+def test_a_lines_counter_running_leg_rides_its_loop_lane() -> None:
+    # l2 loops into sec3's RIGHT entry and leaves sec3 up the same 1150..1200
+    # gap into sec4: the riser rides the loop's lane and l1/l3's over-top nest
+    # steps a counter-running clearance past it.  The map's l2 loop crosses
+    # sec3 (main's drawing), which aborts a default render, so it renders
+    # permissively here.
+    polylines = _polylines("%%metro permissive: true\n" + MULTI_SOURCE)
+
+    def column(source: str, target: str, line: str) -> float:
+        return _vertical_x(polylines[source, target, line], 1150, 1200)
+
+    loop = column("sec1__exit_right_2", "sec3__entry_right_5", "l2")
+    riser = column("sec3__exit_right_3", "sec4__entry_left_6", "l2")
+    nest = sorted(
+        column("sec2__exit_right_1", "sec3__entry_right_5", line)
+        for line in ("l1", "l3")
+    )
+    assert riser == loop
+    assert nest[0] - loop == 12.0
+    assert nest[1] - nest[0] == 4.0

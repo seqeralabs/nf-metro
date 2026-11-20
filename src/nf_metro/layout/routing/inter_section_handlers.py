@@ -48,7 +48,11 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     section_bbox_span,
 )
-from nf_metro.layout.lane_plan import approach_source, recorded_lane_plan
+from nf_metro.layout.lane_plan import (
+    approach_source,
+    gap_counter_runners,
+    recorded_lane_plan,
+)
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
 from nf_metro.layout.port_order_plan import (
     SideRule,
@@ -4949,7 +4953,13 @@ def _perp_exit_outward_loop(
         )
     )
     inner = _outward_loop_inner_lanes(ctx, port_id, {edge.line_id}, is_top)
-    outer = len(_looping_lanes(ctx, port_id)) - 1 - inner
+    outer = (
+        len(_looping_lanes(ctx, port_id))
+        - 1
+        - _outward_loop_inner_lanes(
+            ctx, port_id, {edge.line_id}, is_top, lanes_only=True
+        )
+    )
     edge_x = tgt_sec.bbox_x + (tgt_sec.bbox_w if outward > 0 else 0.0)
     descent_x = edge_x + outward * (
         max(ctx.curve_radius + ctx.offset_step, SECTION_ROUTE_CLEARANCE)
@@ -4982,17 +4992,33 @@ def _looping_lanes(ctx: _RoutingCtx, port_id: str) -> dict[str, float]:
 
 
 def _outward_loop_inner_lanes(
-    ctx: _RoutingCtx, port_id: str, lines: AbstractSet[str], from_above: bool
-) -> int:
+    ctx: _RoutingCtx,
+    port_id: str,
+    lines: AbstractSet[str],
+    from_above: bool,
+    lanes_only: bool = False,
+) -> float:
     """Looping lanes of other lines at *port_id* nested inside the loop that
     lands *lines* there from above (or below): the loop descends one lane
-    outside each of them, every loop into the port sharing one base."""
+    outside each of them, every loop into the port sharing one base.  A line
+    holds one lane in a gap, so its leg leaving through the gap the other way
+    rides its loop's lane, and the loop steps a counter-running clearance past
+    that lane (counted in lanes unless *lanes_only*)."""
     sign = 1.0 if from_above else -1.0
     edge = min(_get_offset(ctx, port_id, lid) * sign for lid in lines)
+    past = cotravelling_lane_clearance(
+        same_line=False, counter_running=True, curve_radius=ctx.curve_radius
+    )
     return sum(
-        edge - off * sign > COORD_TOLERANCE_FINE
+        past / ctx.offset_step
+        if not lanes_only
+        and any(
+            lid in g.lines
+            for g in (gap_counter_runners(ctx.graph, port_id, lid) or (0, []))[1]
+        )
+        else 1.0
         for lid, off in _looping_lanes(ctx, port_id).items()
-        if lid not in lines
+        if lid not in lines and edge - off * sign > COORD_TOLERANCE_FINE
     )
 
 

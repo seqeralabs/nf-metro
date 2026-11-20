@@ -469,8 +469,19 @@ def _layout_gap_bundle(
                 unseated.append((down, chans))
         bundles, pins = unseated, seated
     step = ctx.offset_step
-    # Stable left-to-right order: by current bundle centre.
-    bundles.sort(key=lambda b: sum(c.x for c in b[1]) / len(b[1]))
+
+    # Left to right by current bundle centre, except that a leg leaving a
+    # junction standing inside the gap takes the side away from it: its turn
+    # needs the runway from the junction.
+    def order_key(bundle: tuple[bool, list[_VChannel]]) -> tuple[int, float]:
+        chans = bundle[1]
+        for ch in chans:
+            src = ctx.graph.stations[ch.route.edge.source]
+            if src.id in ctx.graph.junctions and gap_left < src.x < gap_right:
+                return (1 if 2 * src.x < gap_left + gap_right else -1, src.x)
+        return (0, sum(c.x for c in chans) / len(chans))
+
+    bundles.sort(key=order_key)
     # Distinct-line count per bundle drives the bundle width and the
     # per-line slotting: multiple segments sharing one line_id (a fan
     # whose line feeds several targets) overlay at a single x rather
