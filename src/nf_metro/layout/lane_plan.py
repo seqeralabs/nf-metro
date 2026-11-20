@@ -187,6 +187,7 @@ Validation observes (:func:`observing`).
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -693,6 +694,7 @@ class _Tracks:
         for port_id in sorted(graph.ports):
             if graph.ports[port_id].is_entry and not self.perpendicular(port_id):
                 self._record_interleaves(port_id)
+                self._record_corridor_joins(port_id)
         flat = {
             key: lane
             for key, lane in lanes.items()
@@ -1104,6 +1106,30 @@ class _Tracks:
                             node,
                         )
                     )
+
+    def _record_corridor_joins(self, entry_id: str) -> None:
+        """Sources off *entry_id*'s level, ahead along its travel axis, join one
+        corridor toward it from their side: a later joiner's line lying past an
+        earlier one's from that side, across the entry's travel, crosses it (a
+        bundle keeps its travel order round its turns)."""
+        graph, port, lanes = self.graph, self.graph.stations[entry_id], self.lanes
+        ux, uy = (abs(v) for v in direction_vector(port_travel(graph.ports[entry_id])))
+        joins = []
+        for e in graph.edges_to(entry_id):
+            src = graph.stations[approach_source(graph, e.source, e.line_id)]
+            dx, dy = port.x - src.x, port.y - src.y
+            t, d = _sign(dx * ux + dy * uy), _sign(dx * uy + dy * ux)
+            if t and d and (entry_id, e.line_id) in lanes:
+                joins.append(((t, d), t * (src.x * ux + src.y * uy), src.id, e.line_id))
+        sec, side = graph.ports[entry_id].section_id, self.senses[entry_id] * (ux or -1)
+        for (td, ahead, _b, lid), (td2, behind, a, m) in itertools.product(
+            joins, joins
+        ):
+            past = (
+                (lanes[(entry_id, lid)] - lanes[(entry_id, m)]) * side * td[0] * td[1]
+            )
+            if td == td2 and behind < ahead and past > 0:
+                self.forced.append(ForcedCrossing(sec, None, (lid, m), entry_id, a))
 
     def _feeding_bundles(self, entry_id: str) -> list[list[str]]:
         """Each feeding exit's bundle of *entry_id*'s lines, two or more, in
@@ -3133,7 +3159,8 @@ def recorded_crossing_pairs(
 ) -> frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]]:
     """Each ``(edge, edge)`` pair a recorded crossing at an entry exchanges,
     both ways round: between two feeding bundles, the passing line's connector
-    from any other source against each crossed line's from the bundle's exit;
+    from any other source against each crossed line's from the bundle's exit
+    and that connector's same-line mates leaving its node with it;
     within one bundle, its connectors of the lines it exchanges."""
     plan = recorded_lane_plan(graph)
     if plan is None:
@@ -3165,7 +3192,10 @@ def recorded_crossing_pairs(
                 continue
             for other, other_source in keys:
                 if other[2] in crossed and other_source == crossing.across:
-                    pairs.update(((key, other), (other, key)))
+                    for e in graph.edges_from(other[0]):
+                        if e.line_id == other[2]:
+                            mate = (e.source, e.target, e.line_id)
+                            pairs.update(((key, mate), (mate, key)))
     return frozenset(pairs)
 
 

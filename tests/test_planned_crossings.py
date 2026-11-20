@@ -199,3 +199,55 @@ def test_a_crossing_through_a_forked_exit_pairs_the_connectors_it_carries(
         assert {key[2] for key in crossed} == set(crossed_lines)
         assert crossed <= edges
         assert all(key[0] != crossing.across for key in crossed)
+
+
+RL_RETURN = (
+    Path(__file__).parent
+    / "fixtures"
+    / "curve_invariant_repros"
+    / "rl_return_row_convergence.mmd"
+)
+
+
+def test_a_later_corridor_joiner_past_the_earlier_records_its_crossing() -> None:
+    """``snvvcf`` (from ``small_variants``) and ``svvcf`` (from
+    ``__junction_19``) both drop from the top row into the return corridor
+    running east to ``annotation``'s RIGHT entry, ``svvcf`` joining later.
+    The entry holds ``svvcf`` on its travel's right of ``snvvcf``, and a
+    bundle keeps its travel order round its turns, so ``svvcf`` lies on the
+    corridor's right while joining it from the left: it crosses ``snvvcf``.
+    The record states that crossing and no other."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(RL_RETURN.read_text(), source_dir=str(RL_RETURN.parent))
+    plan = recorded_lane_plan(graph)
+    assert plan is not None
+    assert plan.tracks.forced == (
+        ForcedCrossing(
+            "annotation",
+            None,
+            ("svvcf", "snvvcf"),
+            "annotation__entry_right_14",
+            "small_variants__exit_right_2",
+        ),
+    )
+
+
+def test_a_corridor_crossing_pairs_the_crossed_lines_stroke() -> None:
+    """``svvcf`` crosses ``snvvcf`` where ``snvvcf``'s branches out of
+    ``__junction_17`` still share one stroke, so the recorded pairs hold the
+    passing connector against each of those branches."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = prepare_graph(RL_RETURN.read_text(), source_dir=str(RL_RETURN.parent))
+    passing = ("__junction_19", "annotation__entry_right_14", "svvcf")
+    crossed = {other for key, other in recorded_crossing_pairs(graph) if key == passing}
+    assert crossed == {
+        ("__junction_17", target, "snvvcf")
+        for target in (
+            "annotation__entry_right_14",
+            "cnv_calling__entry_right_10",
+            "jointcalling__entry_left_13",
+            "phasing__entry_left_12",
+        )
+    }

@@ -58,7 +58,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     point_to_polyline_distance,
 )
-from nf_metro.layout.lane_plan import entry_crossing_lines
+from nf_metro.layout.lane_plan import entry_crossing_lines, recorded_crossing_pairs
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.route_plan import FanRouteEmitter
 from nf_metro.layout.route_topology import (
@@ -3934,12 +3934,14 @@ def check_no_dogleg_crosses_exempt_trunk(
     if not exempt:
         return []
     violations: list[DoglegCrossesExemptTrunk] = []
+    k = {id(r): (r.edge.source, r.edge.target, r.line_id) for r in routes}
+    forced = recorded_crossing_pairs(graph) if graph is not None else frozenset()
     for rp in routes:
         if not rp.is_inter_section or rp.normalize_exempt:
             continue
         for rank, seg in iter_horizontal_trunks(rp):
             for erp, exempt_rank, eseg in exempt:
-                if erp.line_id == rp.line_id:
+                if erp.line_id == rp.line_id or (k[id(rp)], k[id(erp)]) in forced:
                     continue
                 if abs(seg.y - eseg.y) >= 2 * OFFSET_STEP:
                     continue
