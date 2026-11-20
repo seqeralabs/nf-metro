@@ -77,6 +77,28 @@ def test_a_gap_records_the_legs_landing_in_it_and_their_way(
     assert _legs(_laid_out(text))[gap] == legs
 
 
+RL_RETURN = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "curve_invariant_repros"
+    / "rl_return_row_convergence.mmd"
+).read_text()
+
+
+def test_a_connector_from_beyond_the_gaps_other_column_lands_no_leg() -> None:
+    recorded = {
+        (entry, source)
+        for legs in _legs(_laid_out(RL_RETURN)).values()
+        for entry, source, _lines, _down in legs
+    }
+    assert ("cnv_calling__entry_right_10", "small_variants__exit_right_2") not in (
+        recorded
+    )
+    assert ("annotation__entry_right_14", "structural_variants__exit_right_5") not in (
+        recorded
+    )
+
+
 def test_a_level_or_off_column_connector_lands_no_leg() -> None:
     recorded = {
         (entry, source)
