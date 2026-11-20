@@ -182,7 +182,7 @@ there arriving from upstream and the other is born there leaving
 downstream.
 
 **Readers.**  Offsets runs write the record's lanes (:func:`planned_offsets`);
-routing reads the approaches and far sides (:func:`recorded_lane_plan`).
+routing reads the approaches, far sides and fork lanes (:func:`recorded_lane_plan`).
 Validation observes (:func:`observing`).
 """
 

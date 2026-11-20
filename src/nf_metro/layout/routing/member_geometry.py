@@ -29,6 +29,7 @@ from nf_metro.layout.geometry import (
     section_row_span,
     spans_share_corridor,
 )
+from nf_metro.layout.lane_plan import recorded_lane_plan
 from nf_metro.layout.route_plan import (
     ConvergenceDisposition,
     ConvergencePlan,
@@ -2241,6 +2242,23 @@ def _allocate_bundle_around_claims(
     if not crowded:
         return
 
+    plan = recorded_lane_plan(ctx.graph)
+    lanes = plan.tracks.lanes if plan is not None else {}
+    # The side of a crowding claim the planned lanes at the fork both leave
+    # seat the item's column on, carried round the item's turn into the gap.
+    side: dict[object, float] = {}
+    for item, claim, _ in crowded:
+        route, pts = item.candidate.route, item.candidate.route.points
+        keys = [(route.edge.source, lid) for lid in (route.line_id, *claim.line_ids)]
+        if (
+            route.edge.source in claim.source_junction_ids
+            and item.channel.idx == 1
+            and all(key in lanes for key in keys)
+        ):
+            turn = (pts[1][0] - pts[0][0]) * (pts[2][1] - pts[1][1])
+            mine, *theirs = (lanes[key] for key in keys)
+            sides = {math.copysign(1.0, (v - mine) * turn) for v in theirs if v != mine}
+            side[(item.key, claim)] = sides.pop() if len(sides) == 1 else 0.0
     bounds_by_key = {item.key: _channel_bounds(item, ctx) for item in items}
     deltas = {0.0}
     deltas.update(
@@ -2284,6 +2302,8 @@ def _allocate_bundle_around_claims(
                     if abs(coordinate - claim.coordinate) > COORD_TOLERANCE:
                         return False
                     continue
+                if (coordinate - claim.coordinate) * side.get((item.key, claim), 0) < 0:
+                    return False
                 required = _claim_clearance(item, claim, ctx)
                 if (
                     required > 0.0
