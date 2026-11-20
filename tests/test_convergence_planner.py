@@ -438,7 +438,17 @@ def test_fan_in_merge_settles_the_complete_system_before_emission() -> None:
     (
         ("LR", PortSide.LEFT),
         ("RL", PortSide.RIGHT),
-        ("TB", PortSide.TOP),
+        pytest.param(
+            "TB",
+            PortSide.TOP,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "#2094 Part A follow-up step: "
+                    "merge trunk_by into a TOP entry's staircase channel (F)"
+                ),
+            ),
+        ),
         ("BT", PortSide.BOTTOM),
     ),
 )

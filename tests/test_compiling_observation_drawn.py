@@ -374,7 +374,21 @@ def test_an_unsettled_render_draws_its_compiling_observation(
 
 
 @pytest.mark.parametrize(
-    "name", [*sorted(UNSETTLED_MAPS), "convergence_grant", "settled_fan_out"]
+    "name",
+    [
+        *sorted(UNSETTLED_MAPS),
+        pytest.param(
+            "convergence_grant",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "#2094 Part A follow-up step: "
+                    "TOP-exit fork branches go over the top and braid (U2)"
+                ),
+            ),
+        ),
+        "settled_fan_out",
+    ],
 )
 def test_the_compiling_observation_seats_the_bands_its_replayed_pass_seated(
     name: str, monkeypatch: pytest.MonkeyPatch

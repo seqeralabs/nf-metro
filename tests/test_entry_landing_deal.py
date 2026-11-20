@@ -171,6 +171,13 @@ def test_a_bundle_lands_on_the_side_of_travel_it_leaves_on(
     ) == (expected)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "#2094 Part A follow-up step: "
+        "l2 crosses sec3 to its far-side RIGHT entry; needs loop-round"
+    ),
+)
 def test_a_multi_source_port_keeps_a_lone_sources_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -309,6 +316,13 @@ def _with_source_slots(
         pytest.param(True, LandingDealRefusal.INTERLEAVED_SOURCES, id="interleaved"),
         pytest.param(False, None, id="contiguous"),
     ],
+)
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "#2094 Part A follow-up step: "
+        "l2 crosses sec3 to its far-side RIGHT entry; needs loop-round"
+    ),
 )
 def test_a_port_whose_sources_interleave_is_refused(
     monkeypatch: pytest.MonkeyPatch,

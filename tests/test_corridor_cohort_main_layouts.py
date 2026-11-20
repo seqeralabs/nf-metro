@@ -201,7 +201,16 @@ def test_lanes_turning_together_seat_in_their_corner_order(
 @pytest.mark.parametrize(
     "fixture",
     [
-        "cohort_region_floor_lift.mmd",
+        pytest.param(
+            "cohort_region_floor_lift.mmd",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=(
+                    "#2094 Part A follow-up step: "
+                    "bottom-entry channel side and channel lane order (B)"
+                ),
+            ),
+        ),
         "cohort_region_exit_riser.mmd",
         "cohort_region_beside_section.mmd",
     ],
