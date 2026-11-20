@@ -1027,7 +1027,6 @@ RECORD_USES = {
     },
     "layout/routing/inter_section_handlers.py": {
         "Approach",
-        "ApproachKind",
         "SideRule",
         "approach_source",
         "port_travel",

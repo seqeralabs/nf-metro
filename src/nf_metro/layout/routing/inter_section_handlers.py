@@ -51,7 +51,6 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.lane_plan import approach_source, recorded_lane_plan
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
 from nf_metro.layout.port_order_plan import (
-    ApproachKind,
     SideRule,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
@@ -1658,12 +1657,7 @@ def _left_entry_over_top_geometry(
     A connector the lane plan's approach record sends below its band has no
     such corridor."""
     assert f.tgt_row is not None
-    approach = _approach_record(f.graph, f.edge)
-    if (
-        approach is not None
-        and approach.kind is ApproachKind.BYPASS
-        and _recorded_side(f.graph, f.edge) == "below"
-    ):
+    if _recorded_side(f.graph, f.edge) == "below":
         return None
     graph, src, tgt, ctx = f.graph, f.src, f.tgt, f.ctx
     _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
