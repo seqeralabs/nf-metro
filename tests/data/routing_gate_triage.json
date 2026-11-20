@@ -1787,10 +1787,6 @@
     "note": "The final-solve settlement trace is recorded only when the caller passes a settlement trace, which the engine does for a plan-observed render. The sweep's observation probes do not carry one into this call. Exercised by tests/test_corridor_cohort_integration.py::test_final_solve_trace_is_emitted_from_the_integration_call_site. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
   },
-  "corridor_cohorts.py::if _q(equality.delta) == 0:::#1": {
-    "note": "Only a zero-delta equality makes two lanes one for the corner-order yield; a non-zero delta (a scalar held off its bundle's run) never shares a problem with corner orders in the swept corpus. Exercised by tests/test_corridor_cohorts.py::test_lanes_an_offset_equality_ties_do_not_stand_as_one_for_the_yield. needs-review because the arm is reachable, not because it is unreachable.",
-    "status": "needs-review"
-  },
   "corridor_cohorts.py::while frontier - reached:::#1": {
     "note": "The yield walks the corner orders above a directed separation's upper lane, so it runs only when one problem holds corner orders and a footprint order together. No render in the sweep's roots builds one; tests/fixtures/regressions/cohort_corner_turn_order.mmd does, outside them. Exercised by tests/test_corridor_cohorts.py::test_corner_orders_seat_over_the_footprint_order_they_contradict and tests/test_corridor_cohorts.py::test_a_footprint_order_a_chain_of_corner_orders_contradicts_gives_way. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
