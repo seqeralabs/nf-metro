@@ -5368,12 +5368,14 @@ def _entry_wrap_riser_x(
     graph = ctx.graph
     src_sec = resolve_section(graph, src)
     tgt_sec = resolve_section(graph, tgt)
-    if src_sec is None or tgt_sec is None:
-        return None
     if (
-        src_sec.grid_row <= tgt_sec.grid_row
-        if side is PortSide.TOP
-        else src_sec.grid_row >= tgt_sec.grid_row
+        src_sec is None
+        or tgt_sec is None
+        or (
+            src_sec.grid_row <= tgt_sec.grid_row
+            if side is PortSide.TOP
+            else src_sec.grid_row >= tgt_sec.grid_row
+        )
     ):
         return None
 
