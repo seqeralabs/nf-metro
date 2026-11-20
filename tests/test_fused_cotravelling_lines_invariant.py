@@ -81,9 +81,6 @@ REPORTED = {
 }
 
 FUSED_WITHOUT_THE_PASS = {
-    CURVE_REPROS / "rl_return_row_convergence.mmd": frozenset(
-        {("bam", "other", "Y"), ("bam", "snvvcf", "Y")}
-    ),
     REGRESSIONS / "entry_trunk_row_bow.mmd": frozenset({("l1", "l2", "Y")}),
 }
 
@@ -92,6 +89,9 @@ FUSED_WITHOUT_THE_PASS = {
 # a pair that stops being correct by construction and starts depending on the
 # repair again is a regression, and only a positive lock catches it.
 SEATED_WITHOUT_THE_PASS = {
+    CURVE_REPROS / "rl_return_row_convergence.mmd": frozenset(
+        {("bam", "other", "Y"), ("bam", "snvvcf", "Y")}
+    ),
     EXAMPLE_TOPOLOGIES / "packed_multiline_serpentine_grid.mmd": frozenset(
         {("l1", "l2", "X")}
     ),
