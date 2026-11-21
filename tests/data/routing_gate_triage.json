@@ -1986,5 +1986,9 @@
   "inter_section_handlers.py::if not _gap_above_band_fits(graph, f.tgt_row):::#1": {
     "note": "In _left_entry_gap_above_is_clear: a LEFT entry fed from a higher row always has a section above its row, so the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable.",
     "status": "needs-review"
+  },
+  "common.py::if ssec is None:::#1": {
+    "note": "In over_top_headroom_rows: the edge into a RIGHT entry leaves an exit port or a junction, and resolve_section finds the section of either (a junction through the exit feeding it), so the unresolved arm cannot be taken.",
+    "status": "defensive"
   }
 }

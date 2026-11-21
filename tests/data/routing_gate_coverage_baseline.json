@@ -68,6 +68,7 @@
   "common.py::if self.outgoing_direction not in (Direction.U, Direction.D):::#1",
   "common.py::if shared_hi - shared_lo < min_common_approach - COORD_TOLERANCE:::#1",
   "common.py::if src_row is not None:::#1",
+  "common.py::if ssec is None:::#1",
   "common.py::if st is not None and st.is_port:::#1",
   "common.py::if station is None:::#1",
   "common.py::if t < -0.01 or t > 1.01:::#1",
