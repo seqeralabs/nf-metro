@@ -3,9 +3,9 @@
 :func:`compute_station_offsets` writes the layout's lane plan record
 (:mod:`nf_metro.layout.lane_plan`) for every station line, each lane in offset
 steps along its section's lane frame and each perpendicular port's offsets
-across its travel as its drawing reads them.  The record is sealed at the
-layout's first run at or after stage 5.1; a run before that, or one inside
-validation, writes the record its current placement plans.
+across its travel as its drawing reads them.  The record is decided at the
+close of stage 6.12; a run before that raises
+:class:`~nf_metro.layout.lane_plan.LanePlanNotSealed`.
 
 The module also keeps the same-band entry classifiers the invariants and
 routing read: :func:`same_row_bypass_entry`, :func:`_convergence_feeders` and

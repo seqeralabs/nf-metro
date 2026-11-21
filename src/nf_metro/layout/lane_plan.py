@@ -1,13 +1,14 @@
 """The lane plan record: every planned lane decision, sealed once per layout.
 
-A :class:`LanePlan` is decided at the first offsets run of a layout whose
-placement has positioned the junctions (stage 5.1), outside validation, from
-structure and that placement alone, and kept on the graph for the rest of the
-layout.  A run before that writes the record its placement plans, keeping
-none.  A new layout (each :func:`~nf_metro.layout.engine._layout_once`: the
-spread loop's attempts, the row-pitch and strike-clearance relays, the
-off-track and geometric-bypass relayouts) starts without one and seals its
-own; a record is never carried from one layout's placement to another's.
+A :class:`LanePlan` is decided once per layout, at the close of stage 6.12
+(:data:`LANE_PLAN_STAGE`), the last stage that moves stations within a row,
+from structure and that placement alone, and kept on the graph for the rest of
+the layout.  Nothing reads it before then: :func:`lane_plan_of` raises
+:class:`LanePlanNotSealed`.  A new layout (each
+:func:`~nf_metro.layout.engine._layout_once`: the spread loop's attempts, the
+row-pitch and strike-clearance relays, the off-track and geometric-bypass
+relayouts) starts without one and decides its own; a record is never carried
+from one layout's placement to another's.
 
 The record holds:
 
@@ -62,11 +63,14 @@ before it, unless that passes a pinned line a feeding bundle carries it
 ahead of: then the nearest free lane below the line before it, when no
 feeding bundle carries a line it then passes ahead of it.  Two feeding
 bundles carrying lines in opposite orders cross at the entry whatever its
-order: a forced crossing.  The entry's order is those lanes read across its
-travel.  A perpendicular port every line of which crosses a straight seam,
-past no section box, to a facing flow-side port centred on it takes each
-line's offset from the port on the flow-side port's lane, across the seam's
-travel, where those are the port's own offsets shifted by one constant.
+order: a forced crossing.  A pinned line whose lane lies across a line of a
+feeding bundle that does not carry it from the side the entry's order puts it
+crosses that bundle at the entry: a forced crossing.  The entry's order is
+those lanes read across its travel.  A perpendicular port every line of which
+crosses a straight seam, past no section box, to a facing flow-side port
+centred on it takes each line's offset from the port on the flow-side
+port's lane, across the seam's travel, where those are the port's own offsets
+shifted by one constant.
 
 **Perpendicular ports.**  A perpendicular port's lines are offsets from the
 port across its travel.  Where they all turn into (an entry) or out of (an
@@ -133,8 +137,12 @@ exit's order where both reach one entry.
 into a part from an earlier part of its run keeps that lane, a run whose lines
 are one node's whole bundle keeps that node's lanes, and a line riding a
 seam-pinned entry of the run its entry lane, unless a carrier's slot differs
-(pins).  The other lines take lanes in run order: one past the highest
-lane of an earlier line they coexist with; with none, the lane of an earlier
+(pins).  A line none of those fixes that leaves the run by an exit whose
+connector runs straight across a straight seam to an entry where a fan plan's
+carrier slot fixes it takes the exit lane landing on that slot (a *fan seam*),
+where its exits agree on one such lane and no fixed line holds it.  The other
+lines take lanes in run order: one past the highest lane of an earlier line
+they coexist with; with none, the lane of an earlier
 line they hand over to at a shared station (on a side, the lowest or highest
 such lane, else the latest-ordered), else the run's floor (the lowest section
 slot among the run's lines; in a pinned run, the line's own slot).  A pinned
@@ -176,14 +184,12 @@ downstream.
 
 **Readers.**  Offsets runs write the record's lanes (:func:`planned_offsets`);
 routing reads the approaches, far sides and fork lanes (:func:`recorded_lane_plan`).
-Validation observes (:func:`observing`).
+Validation reads lanes and routes only from the stage-6.12 checkpoint on.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from heapq import heapify, heappop, heappush
@@ -220,6 +226,7 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import _section_lane_frame
 from nf_metro.layout.routing.orientation import direction_vector
 from nf_metro.parser.model import (
+    LineSpread,
     MetroGraph,
     Port,
     PortSide,
@@ -247,8 +254,11 @@ class ConsumerTurn:
 @dataclass(frozen=True, slots=True)
 class ForcedCrossing:
     """Lines whose bundles a section, a run or an entry cannot all keep in
-    order: the bundles' orders form a cycle, broken by the merge's tie-break,
-    or two bundles into one entry carry the lines in opposite orders."""
+    order: the bundles' orders form a cycle, broken by the merge's tie-break;
+    two bundles into one entry carry the lines in opposite orders; or a line
+    whose lane a straight seam pins at an entry lies across lines of a feeding
+    bundle that does not carry it from the side the entry's order puts it,
+    passing those lines there."""
 
     section_id: str
     run: str | None
@@ -319,9 +329,12 @@ class TrackPlan(_Sealed):
     """Per port of a rail-laid section, its lowest plus its highest lane (or
     offset, for a perpendicular port): twice the middle of its bundle, which
     lies on the port, the middle of the fan out to the rails."""
+    fan_seams: Mapping[tuple[str, str], int] = field(default_factory=dict)
+    """Each ``(node, line)`` whose lane a fan seam fixes, and that lane."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "lanes", _frozen(self.lanes))
+        object.__setattr__(self, "fan_seams", _frozen(self.fan_seams))
         object.__setattr__(self, "perpendicular", _frozen_nested(self.perpendicular))
         object.__setattr__(self, "rail_origins", _frozen(self.rail_origins))
 
@@ -581,6 +594,7 @@ class _Tracks:
         self.forced: list[ForcedCrossing] = []
         self.descendants: dict[str, set[str]] = {}
         self.fan_slots: dict[tuple[str, str], int] = {}
+        self.fan_seams: dict[tuple[str, str], int] = {}
         for plan in graph.fan_plans:
             if plan.owns_geometry:
                 for carrier in plan.offset_carriers:
@@ -620,7 +634,11 @@ class _Tracks:
             if key[0] not in graph.ports or not self.perpendicular(key[0])
         }
         return TrackPlan(
-            flat, across, tuple(self.forced), _rail_origins(graph, flat, across)
+            flat,
+            across,
+            tuple(self.forced),
+            _rail_origins(graph, flat, across),
+            self.fan_seams,
         )
 
     # ---- perpendicular ports
@@ -905,11 +923,44 @@ class _Tracks:
                 ForcedCrossing(entry.section_id, None, crossing, entry_id)
             )
         lanes = _fill_round_pins(ascending, fixed, bundles)
+        if order is not None:
+            self._record_pinned_crossings(entry_id, ascending, pins, lanes)
         self.seam_lanes[entry_id] = lanes
         for lid, (_lane, exit_id) in pins.items():
             self.seam_sources[(entry_id, lid)] = exit_id
         by_lane = sorted(lines, key=lambda lid: (lanes[lid], lid))
         return tuple(by_lane if self.senses[entry_id] > 0 else reversed(by_lane))
+
+    def _record_pinned_crossings(
+        self,
+        entry_id: str,
+        ascending: Sequence[str],
+        pins: Mapping[str, object],
+        lanes: Mapping[str, int],
+    ) -> None:
+        """A pinned line whose lane at *entry_id* lies across lines of a
+        feeding bundle that does not carry it from the side *ascending* puts it
+        crosses those lines there."""
+        rank = {lid: i for i, lid in enumerate(ascending)}
+        section_id = self.graph.ports[entry_id].section_id
+        feeders = sorted(self._feeders(entry_id).items())
+        for passing in sorted(pins):
+            for source, carried in feeders:
+                if passing in carried:
+                    continue
+                crossed = tuple(
+                    m
+                    for m in carried
+                    if m in rank
+                    and m in lanes
+                    and (rank[m] - rank[passing]) * (lanes[m] - lanes[passing]) < 0
+                )
+                if crossed:
+                    self.forced.append(
+                        ForcedCrossing(
+                            section_id, None, (passing, *crossed), entry_id, source
+                        )
+                    )
 
     def _feeders(self, entry_id: str) -> dict[str, list[str]]:
         """Each node feeding *entry_id*, with the lines it feeds there."""
@@ -1006,9 +1057,9 @@ class _Tracks:
                 del pins[lid]
         return pins
 
-    def _straight_lane(self, entry_id: str, exit_id: str, line_id: str) -> int | None:
-        """The entry lane on *exit_id*'s coordinate for *line_id*, when the
-        exit faces the entry across a level seam on one lane coordinate."""
+    def _straight_seam(self, entry_id: str, exit_id: str) -> bool:
+        """Whether *exit_id* faces the entry across a straight seam: a level
+        seam on one lane coordinate, the two grid cells level in one band."""
         graph, builder = self.graph, self.builder
         exit_port = graph.ports.get(exit_id)
         entry = graph.ports[entry_id]
@@ -1017,31 +1068,63 @@ class _Tracks:
             or exit_port.is_entry
             or self.perpendicular(exit_id)
             or EXIT_SIDE_DIRECTION[exit_port.side] is not port_travel(entry)
+            or self.frames(exit_port.section_id).secondary.name
+            != self.frames(entry.section_id).secondary.name
         ):
-            return None
-        frame, exit_frame = (
-            self.frames(entry.section_id),
-            self.frames(exit_port.section_id),
-        )
-        if exit_frame.secondary.name != frame.secondary.name:
-            return None
+            return False
         here = self.lateral(entry_id, entry.section_id)
         there = self.lateral(exit_id, exit_port.section_id)
-        if (
+        return not (
             abs(there - here) > SAME_Y_TOLERANCE
             or builder.cell_centre(entry_id) is None
             or builder.cell_centre(exit_id) is None
             or abs(builder.cell_lateral(exit_id, entry_id, port_travel(entry)))
             > SAME_Y_TOLERANCE
             or builder.approach(entry_id, exit_id).kind is not ApproachKind.LEVEL
-        ):
+        )
+
+    def _seam_lane(self, from_id: str, to_id: str, lane: int) -> int | None:
+        """The lane on *to_id*'s lane grid on the coordinate of *from_id*'s
+        *lane*, the two ports' sections laying lanes along one axis."""
+        graph = self.graph
+        a, b = graph.ports[from_id].section_id, graph.ports[to_id].section_id
+        drawn = self.lateral(from_id, a) + self.frames(a).secondary_sign * lane * (
+            self.step
+        )
+        here = self.lateral(to_id, b)
+        return _on_grid((drawn - here) / (self.frames(b).secondary_sign * self.step))
+
+    def _straight_lane(self, entry_id: str, exit_id: str, line_id: str) -> int | None:
+        """The entry lane on *exit_id*'s coordinate for *line_id*, when the
+        exit faces the entry across a straight seam."""
+        if not self._straight_seam(entry_id, exit_id):
             return None
-        builder.order_of(exit_id)
+        self.builder.order_of(exit_id)
         lane = self.lanes.get((exit_id, line_id))
         if lane is None:
             return None
-        drawn = there + exit_frame.secondary_sign * lane * self.step
-        return _on_grid((drawn - here) / (frame.secondary_sign * self.step))
+        return self._seam_lane(exit_id, entry_id, lane)
+
+    def _fan_seam_lanes(self, exit_id: str, line_id: str) -> set[int]:
+        """The lanes at *exit_id* landing *line_id* on the slot a fan plan's
+        carrier fixes at an entry its connector reaches straight across a
+        straight seam."""
+        graph = self.graph
+        if exit_id not in graph.ports:
+            return set()
+        found: set[int] = set()
+        for edge in graph.edges_from(exit_id):
+            if (
+                edge.line_id != line_id
+                or edge.target not in graph.ports
+                or (slot := self.fan_slots.get((edge.target, line_id))) is None
+                or not self._straight_seam(edge.target, exit_id)
+            ):
+                continue
+            lane = self._seam_lane(edge.target, exit_id, slot)
+            if lane is not None:
+                found.add(lane)
+        return found
 
     def _pin_fits_bundles(
         self, pins: Mapping[str, tuple[int, str]], bundles: list[tuple[str, list[str]]]
@@ -1716,6 +1799,9 @@ class _Tracks:
             for lid, lane in self.seam_lanes.get(n, {}).items():
                 if fixed.get(lid, lane) == lane:
                     fixed[lid] = pins[lid] = lane
+        fan_seamed = self._fan_seam_pins(members, fixed)
+        for lid, lane in fan_seamed.items():
+            fixed[lid] = pins[lid] = lane
         conflict = partial(
             self._conflict,
             spans=self._spans(sec.id, members, run.present),
@@ -1761,6 +1847,26 @@ class _Tracks:
                 self.seam_lanes[n] = {lid: lanes[lid] for lid in self.seam_lanes[n]}
             for lid in graph.station_lines(n):
                 self.lanes[(n, lid)] = lanes[lid]
+                if lid in fan_seamed:
+                    self.fan_seams[(n, lid)] = lanes[lid]
+
+    def _fan_seam_pins(
+        self, members: Sequence[str], fixed: Mapping[str, int]
+    ) -> dict[str, int]:
+        """Each line *fixed* lacks that a fan seam fixes on the run of
+        *members*, with its lane."""
+        found: dict[str, set[int]] = {}
+        for n in members:
+            for lid in self.graph.station_lines(n):
+                if lid not in fixed:
+                    found.setdefault(lid, set()).update(self._fan_seam_lanes(n, lid))
+        held = set(fixed.values())
+        out: dict[str, int] = {}
+        for lid, lanes in sorted(found.items()):
+            if len(lanes) == 1 and (lane := min(lanes)) not in held:
+                out[lid] = lane
+                held.add(lane)
+        return out
 
     def _passing(
         self, section_id: str, members: set[str]
@@ -2896,56 +3002,69 @@ def run_port(graph: MetroGraph, node: str, leaving: bool) -> str | None:
     return node
 
 
+LANE_PLAN_STAGE = "6.12"
+"""The section-layout stage at whose close each layout decides its record."""
+
+
+class LanePlanNotSealed(RuntimeError):
+    """The lane plan is read before its layout decides it."""
+
+
 def start_layout(graph: MetroGraph) -> None:
-    """Forget the previous layout's record: this layout seals its own."""
+    """Forget the previous layout's record: this layout decides its own."""
     graph._lane_plan = None
 
 
-# The stage after which junctions stand where routing will find them.
-JUNCTIONS_POSITIONED = "5.1"
-
-_OBSERVED: ContextVar[dict[int, tuple[MetroGraph, LanePlan]] | None] = ContextVar(
-    "lane_plan_observed", default=None
-)
-"""Inside :func:`observing`, each graph's provisional record by graph id."""
-
-
-@contextmanager
-def observing() -> Iterator[None]:
-    """Offsets runs inside read the record their placement plans, kept for
-    the scope, and never seal one."""
-    token = _OBSERVED.set({})
-    try:
-        yield
-    finally:
-        _OBSERVED.reset(token)
+def seal_lane_plan(graph: MetroGraph) -> None:
+    """Decide the layout's record from its placement: at the close of
+    :data:`LANE_PLAN_STAGE`, or once a sectionless layout is placed."""
+    if graph.sections and graph._stages_completed[-1:] != [LANE_PLAN_STAGE]:
+        raise RuntimeError(
+            f"the lane plan is decided at the close of stage {LANE_PLAN_STAGE}, "
+            f"not after {graph._stages_completed[-1:]}"
+        )
+    if graph.line_spread is not LineSpread.RAILS:
+        graph._lane_plan = build_lane_plan(graph)
 
 
 def lane_plan_of(graph: MetroGraph) -> LanePlan:
-    """The layout's sealed record; else, sealing it at the first run at or
-    after 5.1 outside :func:`observing`, the record the current placement
-    plans."""
-    plan = recorded_lane_plan(graph)
-    if plan is not None:
-        return plan
-    plan = build_lane_plan(graph)
-    observed = _OBSERVED.get()
-    if observed is not None:
-        observed[id(graph)] = (graph, plan)
-    elif JUNCTIONS_POSITIONED in graph._stages_completed:
-        graph._lane_plan = plan
-    return plan
+    """The layout's decided record; reading it before the decision raises
+    :class:`LanePlanNotSealed`."""
+    if graph._lane_plan is None:
+        raise LanePlanNotSealed(
+            f"the lane plan is read before the close of stage {LANE_PLAN_STAGE}"
+        )
+    return graph._lane_plan
 
 
 def recorded_lane_plan(graph: MetroGraph) -> LanePlan | None:
-    """The record the layout's last offsets run read, without planning one:
-    the sealed record, or inside :func:`observing` the scope's provisional
-    one; ``None`` before either exists."""
-    if graph._lane_plan is not None:
-        return graph._lane_plan
-    observed = _OBSERVED.get()
-    held = observed.get(id(graph)) if observed is not None else None
-    return held[1] if held is not None and held[0] is graph else None
+    """The layout's decided record; ``None`` before the decision or in a
+    rail-laid layout."""
+    return graph._lane_plan
+
+
+def fan_seam_lane(graph: MetroGraph, node: str, line_id: str) -> int | None:
+    """The lane a fan seam fixes for *line_id* at *node* in the decided
+    record; ``None`` when none does."""
+    plan = recorded_lane_plan(graph)
+    return None if plan is None else plan.tracks.fan_seams.get((node, line_id))
+
+
+def entry_crossed_pairs(graph: MetroGraph, port_id: str) -> frozenset[frozenset[str]]:
+    """Each pair of lines a recorded crossing between feeding bundles
+    exchanges at entry *port_id*: its passing line with each line it
+    crosses."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return frozenset()
+    return frozenset(
+        frozenset((crossing.lines[0], crossed))
+        for crossing in plan.tracks.forced
+        if crossing.port == port_id
+        and crossing.across is not None
+        and crossing.turn is None
+        for crossed in crossing.lines[1:]
+    )
 
 
 def entry_crossing_lines(graph: MetroGraph, port_id: str) -> frozenset[str]:

@@ -1,9 +1,10 @@
 """The lane plan record: sealed once per layout, total, deterministic, unread.
 
 :mod:`nf_metro.layout.lane_plan` decides every port's line order, every same-
-band entry approach, the far-side approaches and every in-section lane at the
-first offsets run of a layout at or after stage 5.1. These tests hold the
-record's contract: one record per layout, replayed for the rest of it; total
+band entry approach, the far-side approaches and every in-section lane once per
+layout, at the close of stage 6.12. These tests hold the record's contract: one
+record per layout, read only after it is decided and replayed for the rest of
+it; total
 on every curated map; independent of the hash seed; pinned per curated map;
 read only by its named consumers; a rotated or reflected placement plans the
 rotated or reflected record; no seam changes a bundle's order, outside the
@@ -42,7 +43,7 @@ from nf_metro.layout.geometry import (
     packed_section_visual_rank,
     perpendicular_port_sides,
 )
-from nf_metro.layout.lane_plan import JUNCTIONS_POSITIONED, LanePlan
+from nf_metro.layout.lane_plan import LANE_PLAN_STAGE, LanePlan
 from nf_metro.layout.port_order_plan import (
     Approach,
     ApproachKind,
@@ -818,8 +819,8 @@ def _screen_side(graph: MetroGraph, entry_id: str, side: int) -> str:
 
 @contextmanager
 def _layouts(kinds: list[str], builds: list[int]) -> Iterator[None]:
-    """Record each layout's kind and, per record sealed (built once the
-    junctions are positioned), its layout's index."""
+    """Record each layout's kind and, per record decided, its layout's
+    index."""
     real_layout = engine_module._layout_once
     real_build = lane_plan_module.build_lane_plan
     real_sinks = engine_module._line_crossed_file_icon_sinks
@@ -846,8 +847,7 @@ def _layouts(kinds: list[str], builds: list[int]) -> Iterator[None]:
         return found
 
     def build(graph: MetroGraph) -> LanePlan:
-        if JUNCTIONS_POSITIONED in graph._stages_completed:
-            builds.append(len(kinds) - 1)
+        builds.append(len(kinds) - 1)
         return real_build(graph)
 
     with pytest.MonkeyPatch.context() as mp:
@@ -891,12 +891,12 @@ def test_a_layout_replays_its_record() -> None:
     assert graph._lane_plan is sealed
 
 
-def test_the_record_is_sealed_before_the_first_lane_after_5_1() -> None:
+def test_every_lane_read_follows_the_decision() -> None:
     seen: list[tuple[bool, bool]] = []
     real = offsets_module.planned_offsets
 
     def spy(graph: MetroGraph, plan: LanePlan, step: float) -> dict:
-        after = "5.1" in graph._stages_completed
+        after = LANE_PLAN_STAGE in graph._stages_completed
         seen.append((after, graph._lane_plan is plan))
         return real(graph, plan, step)
 
@@ -908,9 +908,8 @@ def test_the_record_is_sealed_before_the_first_lane_after_5_1() -> None:
         )
         engine_module.compute_layout(graph)
 
-    assert any(after for after, _sealed in seen)
-    for after, sealed in seen:
-        assert sealed == after
+    assert seen
+    assert all(after and sealed for after, sealed in seen)
 
 
 @pytest.mark.parametrize(
@@ -1018,8 +1017,8 @@ def _src_modules() -> Iterator[tuple[str, ast.Module]]:
 # lifetime hooks, its reader, the dispatch, exit-turn and invariant consumers,
 # and the graph field's type.
 RECORD_USES = {
-    "layout/engine.py": {"start_layout"},
-    "layout/phases/guards.py": {"observing"},
+    "layout/engine.py": {"seal_lane_plan", "start_layout"},
+    "layout/phases/guards.py": {"LANE_PLAN_STAGE", "fan_seam_lane"},
     "layout/routing/offsets.py": {
         "Approach",
         "approach_source",
@@ -1040,7 +1039,11 @@ RECORD_USES = {
     "layout/routing/member_geometry.py": {"recorded_lane_plan"},
     "layout/routing/exit_turns.py": {"gap_counter_runners"},
     "layout/routing/common.py": {"entry_crossing_lines"},
-    "layout/routing/invariants.py": {"entry_crossing_lines", "recorded_crossing_pairs"},
+    "layout/routing/invariants.py": {
+        "entry_crossed_pairs",
+        "entry_crossing_lines",
+        "recorded_crossing_pairs",
+    },
     "layout/routing/corridor_cohort_integration.py": {"recorded_crossing_pairs"},
     "parser/model.py": {"LanePlan"},
 }

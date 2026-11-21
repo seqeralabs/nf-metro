@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Iterator
-from typing import NamedTuple
 
 from nf_metro.layout.constants import (
     FONT_HEIGHT,
@@ -45,7 +44,6 @@ from nf_metro.layout.phases.single_section import (
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.parser.model import (
     MetroGraph,
-    PartialTrunkDescent,
     PortSide,
     RowGridInfo,
     Section,
@@ -640,169 +638,6 @@ def _top_align_packed_row_bboxes(graph: MetroGraph) -> None:
         level_group_anchor_edges(graph, group, "y", 1.0)
 
 
-class _Handover(NamedTuple):
-    """One partial-to-carrier through-line hand-over and its offset step."""
-
-    partial_port: str
-    carrier_port: str
-    line_id: str
-    partial_y: float
-    carrier_y: float
-    step: float
-
-
-def _partial_handovers(
-    graph: MetroGraph,
-    partial: Section,
-    carrier_ports: set[str],
-    offsets: dict[tuple[str, str], float],
-) -> list[_Handover]:
-    """Direct port-to-port through-line hand-overs from *partial* to a carrier.
-
-    A hand-over qualifies when it runs port to port to a carrier one grid column
-    away with no junction between them, no cell-mate forcing a bypass, and no
-    loop round the far section into a port facing away from it -- the cases a
-    level connector can be drawn for.  Each carries the offset step
-    (destination lane minus source lane) at the current frame.  *carrier_ports*
-    is the union of every carrier section's port IDs.
-    """
-    from nf_metro.layout.routing.context import (
-        HopEnd,
-        _hop_needs_bypass,
-        _resolve_section_colrow,
-    )
-    from nf_metro.layout.routing.offsets import loops_round_entry_section
-
-    junction_ids = graph.junction_ids
-    handovers: list[_Handover] = []
-    for pid in partial.port_ids:
-        p_port = graph.ports.get(pid)
-        p_station = graph.stations.get(pid)
-        if (
-            p_port is None
-            or p_station is None
-            or p_port.side not in (PortSide.LEFT, PortSide.RIGHT)
-        ):
-            continue
-        p_col, p_row = _resolve_section_colrow(graph, p_station)
-        if p_col is None:
-            continue
-        for edge in (*graph.edges_from(pid), *graph.edges_to(pid)):
-            if edge.source in junction_ids or edge.target in junction_ids:
-                continue
-            other = edge.target if edge.source == pid else edge.source
-            if other not in carrier_ports:
-                continue
-            c_port = graph.ports.get(other)
-            c_station = graph.stations.get(other)
-            if (
-                c_port is None
-                or c_station is None
-                or c_port.side not in (PortSide.LEFT, PortSide.RIGHT)
-            ):
-                continue
-            c_col, c_row = _resolve_section_colrow(graph, c_station)
-            if c_col is None or abs(p_col - c_col) != 1:
-                continue
-            if _hop_needs_bypass(
-                graph,
-                HopEnd(p_station, p_col, p_row),
-                HopEnd(c_station, c_col, c_row),
-            ).needed:
-                continue
-            if loops_round_entry_section(
-                graph, graph.stations[edge.source], graph.stations[edge.target]
-            ):
-                continue
-            lid = edge.line_id
-            step = offsets.get((other, lid), 0.0) - offsets.get((pid, lid), 0.0)
-            handovers.append(
-                _Handover(pid, other, lid, p_station.y, c_station.y, round(step, 3))
-            )
-    return handovers
-
-
-def _descent_step_is_stable(
-    graph: MetroGraph, partial: Section, handovers: list[_Handover], step: float
-) -> bool:
-    """Whether *step* survives when the hand-over is levelled and re-derived.
-
-    Mid-Stage-4.8 a carrier's exit port has not yet settled onto the level its
-    exiting lines live at, so its per-line offsets -- and hence the raw step --
-    can be a transient of the partial and carrier ports sitting at different Ys.
-    Placing the partial section so its port lands level with the carrier port
-    and re-running :func:`compute_station_offsets` reproduces the offset regime
-    the settled hand-over yields: a real lane kink survives as the same step, a
-    spurious one collapses.  A rigid section shift can only level every hand-over
-    at once when they share one carrier-minus-partial gap; when they do not, the
-    step is treated as unstable so the descent is suppressed (a wrong suppress
-    degrades to the flat-less hand-over, a wrong keep corrupts the exit port).
-    """
-    from nf_metro.layout.routing.offsets import compute_station_offsets
-
-    deltas = {round(h.carrier_y - h.partial_y, 3) for h in handovers}
-    if len(deltas) != 1:
-        return False
-    (delta,) = deltas
-    shift_section(graph, partial, dy=delta)
-    try:
-        levelled = compute_station_offsets(graph)
-    finally:
-        shift_section(graph, partial, dy=-delta)
-    return all(
-        round(
-            levelled.get((h.carrier_port, h.line_id), 0.0)
-            - levelled.get((h.partial_port, h.line_id), 0.0),
-            3,
-        )
-        == step
-        for h in handovers
-    )
-
-
-def _partial_trunk_descent(
-    graph: MetroGraph,
-    partial: Section,
-    carrier_ports: set[str],
-    offsets: dict[tuple[str, str], float],
-) -> PartialTrunkDescent | None:
-    """Extra downward offset seating a partial's trunk on its handover lane.
-
-    A partial row-mate that hands a through-line straight to a carrier one grid
-    column away -- port to port, with no junction between them and no cell-mate
-    obstructing a level run -- draws that connector flat only when its own trunk
-    sits at the line's assigned lane on the shared destination port, one lane
-    deeper than the carrier trunk.  The step is the destination lane minus the
-    source lane; both ports settle on the carrier trunk Y under the base pass,
-    so that difference is the whole vertical gap the connector would otherwise
-    jog through.
-
-    Returns a :class:`PartialTrunkDescent` (its two endpoint ports and that step)
-    when every qualifying handover agrees on one positive value that is stable
-    under :func:`_descent_step_is_stable`, else ``None`` (the partial stays on the
-    carrier trunk).
-    """
-    handovers = _partial_handovers(graph, partial, carrier_ports, offsets)
-    steps = {h.step for h in handovers}
-    if len(steps) != 1:
-        return None
-    (step,) = steps
-    if step <= 0:
-        return None
-    if not _descent_step_is_stable(graph, partial, handovers, step):
-        return None
-    rep = handovers[0]
-    return PartialTrunkDescent(rep.partial_port, rep.carrier_port, step)
-
-
-def _descent_of(
-    partial_descents: dict[str, PartialTrunkDescent], section_id: str
-) -> float:
-    """The descent recorded for *section_id*, or ``0`` when it is not a partial."""
-    record = partial_descents.get(section_id)
-    return record.descent if record is not None else 0.0
-
-
 def _carriers_share_one_trunk(group: list[Section], carriers: set[str]) -> bool:
     """Whether the group's carriers form one unbroken run of the full bundle.
 
@@ -816,14 +651,9 @@ def _carriers_share_one_trunk(group: list[Section], carriers: set[str]) -> bool:
 
 def _row_trunk_alignment(
     graph: MetroGraph, group: list[Section]
-) -> tuple[float, dict[str, float], dict[str, PartialTrunkDescent]] | None:
-    """A row group's trunk Y, each member's current trunk Y, and partial descents.
-
-    The third element maps a partial row-mate to its
-    :class:`PartialTrunkDescent` (:func:`_partial_trunk_descent`); carriers and
-    unaffected partials are absent (treated as ``0``).  ``None`` where the group
-    has no single trunk to align to.
-    """
+) -> tuple[float, dict[str, float]] | None:
+    """A row group's trunk Y and each member's current trunk Y; ``None`` where
+    the group has no single trunk to align to."""
     # Realigning a row needs one trunk that runs along it: the union of the
     # sections' through-lines -- the lines crossing them horizontally within the
     # row -- must be carried whole by at least one section.  Lines forking to
@@ -842,7 +672,6 @@ def _row_trunk_alignment(
         return None
 
     partial = [s for s in group if through[s.id] and s.id not in carriers]
-    partial_descents: dict[str, PartialTrunkDescent] = {}
     if not partial:
         target_y = max(trunks.values())
     else:
@@ -872,21 +701,6 @@ def _row_trunk_alignment(
         if any(not carriers & set().union(*through[s.id].values()) for s in partial):
             return None
         target_y = max(carrier_ys)
-        # A partial that hands a line straight to an adjacent carrier seats one
-        # lane deeper so that connector runs level at the line's own lane rather
-        # than jogging into it at the shared port.
-        from nf_metro.layout.routing.offsets import compute_station_offsets
-
-        offsets = compute_station_offsets(graph)
-        carrier_ports = {
-            pid for cid in carriers for pid in graph.sections[cid].port_ids
-        }
-        partial_descents = {
-            s.id: d
-            for s in partial
-            if (d := _partial_trunk_descent(graph, s, carrier_ports, offsets))
-            is not None
-        }
 
     # The trunk must already hand over between sections at target_y.  A
     # carrier's LEFT/RIGHT ports are where it does, so a target none of them
@@ -900,7 +714,7 @@ def _row_trunk_alignment(
         and port.side in (PortSide.LEFT, PortSide.RIGHT)
     ):
         return None
-    return target_y, trunks, partial_descents
+    return target_y, trunks
 
 
 def _facing_port_pairs(
@@ -1031,14 +845,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
     preserved (heights grow downward).  Row-spanning sections
     (grid_row_span > 1) are skipped to avoid disturbing cross-row
     vertical relationships.
-
-    A partial row-mate handing a line straight to an adjacent carrier is seated
-    one handover lane deeper (:func:`_partial_trunk_descent`).  That descent is a
-    sub-grid offset the Stage 6.4 grid snap would collapse onto the carrier slot,
-    so it is recorded in ``graph._partial_trunk_descents`` (reassigned in full
-    each call, empty when nothing descends) for Stage 6.4 to re-add post-snap.
     """
-    descents: dict[str, PartialTrunkDescent] = {}
     row_sections: dict[int, list[Section]] = defaultdict(list)
     for section in graph.sections.values():
         if (
@@ -1088,15 +895,13 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                 for stretch in _row_trunk_alignment_stretches(graph, group):
                     _align_stretch_trunk_ys(graph, stretch)
                 continue
-            target_y, trunks, partial_descents = alignment
-            descents.update(partial_descents)
+            target_y, trunks = alignment
             shifted: set[str] = set()
             for section in group:
                 ty = trunks.get(section.id)
                 if ty is None:
                     continue
-                sec_target = target_y + _descent_of(partial_descents, section.id)
-                delta = sec_target - ty
+                delta = target_y - ty
                 if delta < SAME_COORD_TOLERANCE:
                     continue
                 for sid in section.station_ids:
@@ -1114,12 +919,10 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
             # 2+ distinct internal Ys is centred (fan-in) unless one neighbour
             # is the section trunk (a full-bundle station on the trunk), in which
             # case the port rides that trunk while the others peel off and snaps
-            # to it.  A partial seated a lane deeper snaps to its own target, not
-            # the carrier trunk, so its handover port lands flat.
+            # to it.
             for section in group:
                 if section.id not in shifted:
                     continue
-                sec_target = target_y + _descent_of(partial_descents, section.id)
                 bundle = _section_bundle_lines(graph, section)
                 port_set = section.port_ids
                 internal_ids = set(section.station_ids) - port_set
@@ -1130,7 +933,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         p is None
                         or port_st is None
                         or p.side not in (PortSide.LEFT, PortSide.RIGHT)
-                        or abs(port_st.y - sec_target) < SAME_COORD_TOLERANCE
+                        or abs(port_st.y - target_y) < SAME_COORD_TOLERANCE
                     ):
                         continue
                     connected_ys: set[float] = set()
@@ -1147,7 +950,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                         st = graph.stations.get(other_id)
                         if st and not st.is_port:
                             connected_ys.add(round(st.y, 1))
-                            if abs(st.y - sec_target) < SAME_COORD_TOLERANCE:
+                            if abs(st.y - target_y) < SAME_COORD_TOLERANCE:
                                 target_aligned = True
                                 # A bypass-V helper carries the full bundle but
                                 # is a routing artefact, not the trunk (matching
@@ -1159,9 +962,7 @@ def _align_row_trunk_ys(graph: MetroGraph) -> None:
                                 ):
                                     trunk_at_target = True
                     if target_aligned and (len(connected_ys) < 2 or trunk_at_target):
-                        _set_port_y(graph, pid, sec_target)
-
-    graph._partial_trunk_descents = descents
+                        _set_port_y(graph, pid, target_y)
 
 
 def _align_stretch_trunk_ys(graph: MetroGraph, stretch: list[Section]) -> None:
@@ -1367,7 +1168,7 @@ def _perp_port_lead_edge_reserve(
     Balancing outermost port against outermost port keeps this independent of
     which end is the entry, so a reversed flow needs no special case.  The
     rotation -- a horizontal flow's TOP/BOTTOM pair clearing its left and right
-    edges -- is Stage 3.5's job, since X sizing has no per-section predictor to
+    edges -- is Stage 6.12a's job, since X sizing has no per-section predictor to
     fold a port term into.
 
     A section with fewer than two perpendicular ports has no pair to balance and

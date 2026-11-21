@@ -197,7 +197,6 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     _guard_off_track_not_hub,
     _guard_off_track_output_clears_non_producer,
     _guard_partial_branch_offset_gaps,
-    _guard_partial_trunk_descent_seated,
     _guard_perp_entry_boundary_consistent,
     _guard_perp_entry_feed_not_collinear,
     _guard_perp_exit_over_leadin_no_overdip,
@@ -1448,7 +1447,7 @@ def _layout_once(
         build_fan_plan_execution,
         install_fan_plan_execution,
     )
-    from nf_metro.layout.lane_plan import start_layout
+    from nf_metro.layout.lane_plan import seal_lane_plan, start_layout
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
@@ -1475,6 +1474,7 @@ def _layout_once(
             x_offset=x_offset,
             y_offset=y_offset,
         )
+        seal_lane_plan(graph)
         return
 
     _compute_section_layout(
@@ -1613,11 +1613,10 @@ def _compute_section_layout(
        stay local.
     2. **Globalise** (Stage 2.1).  Single-stage coord-regime
        transition: translate stations and bboxes to canvas coordinates.
-    3. **Pass A - port positioning** (Stages 3.1 to 3.6).  Place ports
+    3. **Pass A - port positioning** (Stages 3.1 to 3.4).  Place ports
        on bbox edges, align entry ports, shift LR/RL perp-entry
        stations, align fold-section exit ports (re-flushing the rows the
-       exit move pushes down), reserve the perpendicular-port edge inset
-       on X, level a grid column's shared-runway edges.
+       exit move pushes down).
     4. **Pass B - downstream alignment & trunk-Y consolidation**
        (Stages 4.1 to 4.10).  Pull ports toward downstream content,
        snap to grid-group stations, space from termini, recompute
@@ -1629,7 +1628,9 @@ def _compute_section_layout(
     6. **Pass C - vertical settling & finishing** (Stages 6.1 to
        6.18a).  Fan content upward, snap to grid, re-anchor off-track,
        recenter full-bundle columns and restore their invariants,
-       balance content around trunk, loop-side X recenter, bbox shrink +
+       balance content around trunk, loop-side X recenter, decide the
+       lane plan, reserve the perpendicular-port edge inset on X, level a
+       grid column's shared-runway edges, align TB bbox bottoms, bbox shrink +
        row tighten / push, captioned-icon pad, fit bbox tops to content,
        re-snap the canvas grid, re-align vertical-flow entry ports and
        junctions with their settled feeders, settle semantic fans, seat
@@ -1812,24 +1813,6 @@ def _compute_section_layout(
     _align_exit_ports(graph)
     _snap(graph, "3.4")
 
-    # Stage 3.5: Hold each horizontal-flow section's left and right edges clear
-    # of the perpendicular (TOP/BOTTOM) ports Stages 3.2 to 3.4 just seated
-    # along X, the rotation of the inset the Y-axis sizing keeps for a vertical
-    # flow's LEFT/RIGHT ports.  Runs here because those stages are the last to
-    # move a perpendicular port relative to its own box; a grow can widen a
-    # section into its column neighbour, so re-enforce the inter-column gaps.
-    if _reserve_perp_port_edge_inset(graph):
-        reenforce_column_gaps(graph)
-    _snap(graph, "3.5")
-
-    # Stage 3.6: Level the anchored edges of the boxes in a grid column that
-    # start their content at one X, the X mirror of the row top-align at Stage
-    # 5.3.  Runs once every X-axis box mover has settled (Stage 1.1 sizing, the
-    # Stage 3.3 runway grow, the Stage 3.5 perp inset), so the levelled edge is
-    # not re-broken by a later widen.
-    _level_column_anchor_edges(graph)
-    _snap(graph, "3.6")
-
     if validate:
         _guard_ports_on_boundaries(graph, "after top-align")
 
@@ -1986,9 +1969,13 @@ def _place_pass_c_content(
     y_spacing: float,
     section_y_padding: float,
 ) -> None:
-    """Stage 5.1 through Stage 6.12: position junctions, lift off-track
-    inputs, settle vertical content, and recenter fans / loop-side
-    stations within each section."""
+    """Stage 5.1 through Stage 6.12c: position junctions, lift off-track
+    inputs, settle vertical content, recenter fans / loop-side stations
+    within each section, decide the lane plan, and size the boxes its lanes
+    reach."""
+    from nf_metro.layout.lane_plan import seal_lane_plan
+    from nf_metro.layout.section_placement import reenforce_column_gaps
+
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
@@ -2111,15 +2098,6 @@ def _place_pass_c_content(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.4")
 
-    # Stage 6.5: Grow TB-section bbox bottoms so they align with the
-    # downstream LR section's bbox bottom.  Without this the TB
-    # section's bbox ends right at the inter-section exit port Y,
-    # making the line look pinned to the section edge.
-    _align_tb_section_bbox_bottoms(graph, section_y_padding)
-    _snap(graph, "6.5")
-    if validate:
-        _run_pass_c_guards(graph, "after Stage 6.5")
-
     # Stage 6.6: Re-anchor off-track inputs to their consumer's final
     # (snapped) Y.  Stage 5.2's lift placed them relative to pre-snap
     # consumer Ys; snapping the consumer to the grid can shift it by
@@ -2230,8 +2208,37 @@ def _place_pass_c_content(
     # corner Xs derived from the actual routing geometry.
     _run_placement_per_row(graph, validate, "6.12", _recenter_loop_side_stations)
     _snap(graph, "6.12")
+    # Every mover of stations within a row has run: decide the lane plan.  The
+    # box sizers below read its lanes and move no station relative to another.
+    seal_lane_plan(graph)
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.12")
+
+    # Stage 6.12a: Hold each horizontal-flow section's left and right edges
+    # clear of its perpendicular (TOP/BOTTOM) ports' outermost lanes, the
+    # rotation of the inset the Y-axis sizing keeps for a vertical flow's
+    # LEFT/RIGHT ports.  A grow can widen a section into its column neighbour,
+    # so re-enforce the inter-column gaps.
+    if _reserve_perp_port_edge_inset(graph):
+        reenforce_column_gaps(graph)
+    _snap(graph, "6.12a")
+
+    # Stage 6.12b: Level the anchored edges of the boxes in a grid column that
+    # start their content at one X, the X mirror of the row top-align at Stage
+    # 5.3.  Runs once every X-axis box mover has settled (Stage 1.1 sizing, the
+    # Stage 3.3 runway grow, the Stage 6.12a perp inset), so the levelled edge
+    # is not re-broken by a later widen.
+    _level_column_anchor_edges(graph)
+    _snap(graph, "6.12b")
+
+    # Stage 6.12c: Grow TB-section bbox bottoms so they align with the
+    # downstream LR section's bbox bottom.  Without this the TB section's bbox
+    # ends right at the inter-section exit port Y, making the line look pinned
+    # to the section edge.
+    _align_tb_section_bbox_bottoms(graph, section_y_padding)
+    _snap(graph, "6.12c")
+    if validate:
+        _run_pass_c_guards(graph, "after Stage 6.12c")
 
 
 def _stack_rows(

@@ -76,11 +76,12 @@ NON_STAGE_PHASES: tuple[str, ...] = (
 CANONICAL_STAGE_ORDER: tuple[str, ...] = (
     "1.1", "1.2", "1.3", "1.4", "1.5",
     "2.1",
-    "3.1", "3.2", "3.3", "3.4", "3.5", "3.6",
+    "3.1", "3.2", "3.3", "3.4",
     "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8", "4.9", "4.10",
     "5.1", "5.2", "5.3", "5.4", "5.5",
-    "6.1", "6.2", "6.3", "6.4", "6.5", "6.6", "6.7", "6.8", "6.9", "6.10",
-    "6.11", "6.12", "6.13", "6.14", "6.15a", "6.15", "6.16", "6.17", "6.18", "6.18a",
+    "6.1", "6.2", "6.3", "6.4", "6.6", "6.7", "6.8", "6.9", "6.10",
+    "6.11", "6.12", "6.12a", "6.12b", "6.12c",
+    "6.13", "6.14", "6.15a", "6.15", "6.16", "6.17", "6.18", "6.18a",
 )  # fmt: skip
 
 
@@ -168,19 +169,6 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "drags them onto a rowspan neighbour's fractional row-grid origin"
         ),
         run_condition_attr="center_ports",
-    ),
-    "_partial_trunk_descents": PhaseFieldSpec(
-        name="_partial_trunk_descents",
-        writer_stage="4.8",
-        reader_stages=("6.4",),
-        enforcement=FieldEnforcement.REQUIRE_WRITER,
-        why=(
-            "per-section handover descents Stage 4.8's _align_row_trunk_ys seats "
-            "on a partial row-mate so its direct connector to the row carrier runs "
-            "flat; each record carries its two endpoint ports so Stage 6.4's grid "
-            "snap re-seats the partial from the carrier port's post-snap Y, right "
-            "whether the snap collapsed the sub-grid offset or preserved it"
-        ),
     ),
     "_consumers_grid_snapped": PhaseFieldSpec(
         name="_consumers_grid_snapped",
@@ -310,16 +298,16 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
     ),
     "_lane_plan": PhaseFieldSpec(
         name="_lane_plan",
-        writer_stage="5.1",
+        writer_stage="6.12",
         reader_stages=(STATION_OFFSET_LAYOUT, POST_LAYOUT),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
             "the layout's lane plan record, cleared when each positioning pass "
-            "starts and sealed at its first station-offset computation at or "
-            "after 5.1; every station-offset computation and routing's record "
-            "consumers read it through lane_plan_of, which builds an unsealed "
-            "record before the seal, and 'Lane plan record' in "
-            "layout/CONTRACT.md states its lifetime"
+            "starts and decided once at the close of Stage 6.12; every "
+            "station-offset computation reads it through lane_plan_of, which "
+            "raises before the decision, and routing's record consumers through "
+            "recorded_lane_plan; 'Lane plan record' in layout/CONTRACT.md "
+            "states its lifetime"
         ),
     ),
     "_rail_y": PhaseFieldSpec(

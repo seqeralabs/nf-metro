@@ -78,6 +78,7 @@ from nf_metro.layout.labels import (
     place_labels,
     segment_strikes_label,
 )
+from nf_metro.layout.lane_plan import build_lane_plan
 from nf_metro.layout.pass_metrics import font_scale_context
 from nf_metro.layout.phases._common import (
     _is_side_entered_vertical_section,
@@ -5527,6 +5528,7 @@ def _fit_top_section(*, content_ys, ports=(), bypass_ys=(), grid_row=0):
         sid = f"{BYPASS_V_PREFIX}{i}"
         graph.stations[sid] = Station(id=sid, label="", section_id="s", y=y)
         section.station_ids.append(sid)
+    graph._lane_plan = build_lane_plan(graph)
     return graph, section
 
 

@@ -462,7 +462,7 @@ def _shrink_and_tighten_rows(
       row-mate (another section whose ``grid_row`` equals this
       section's starting row, accounting for the other section's
       ``grid_row_span``); trimming below a row-mate would undo
-      intentional bottom alignment from Stage 6.5 or TB-rowspan
+      intentional bottom alignment from Stage 6.12c or TB-rowspan
       neighbours.  The check is keyed on this section's STARTING row
       rather than its full row-span -- a rowspan>1 LR sidebar whose
       content fits in one row is not pinned to neighbours in the
@@ -677,7 +677,7 @@ def _shrink_bboxes_to_content_bottom(
     """
 
     def _shares_bottom_with_row_mate(section: Section) -> bool:
-        # A bottom edge shared with a row-mate is deliberate -- Stage 6.5
+        # A bottom edge shared with a row-mate is deliberate -- Stage 6.12c
         # bottom-aligns row-mates, a TB fold's bbox is grown by
         # ``section_y_gap`` so it reaches its target's bottom, and a rowspan
         # section meets the bottom of the row it spans into -- so the shrink
