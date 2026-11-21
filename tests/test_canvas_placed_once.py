@@ -1,9 +1,8 @@
 """The canvas is placed once, after every routing decision, as one move.
 
 No routing or lane-plan decision reads where the canvas edge is, so a laid-out
-map moved together with its canvas origin routes the same way and renders the
-same picture: the render settles it once and translates the settled geometry
-onto the canvas, rather than settling a moved copy again.
+map settles the same wherever it is laid out: the render settles it once and
+translates the settled geometry onto the canvas.
 """
 
 from __future__ import annotations
@@ -18,13 +17,16 @@ from pathlib import Path
 
 import pytest
 
+import nf_metro.layout.routing.common as routing_common
 import nf_metro.render.svg as svg
-from nf_metro.api import RenderConfig, prepare_graph, render_graph
+from nf_metro.api import prepare_graph
 from nf_metro.layout.phases.canvas import translate_graph
 from nf_metro.layout.phases.guards import (
     LayoutInvariantError,
     assert_junctions_on_their_anchors,
 )
+from nf_metro.layout.routing.common import over_top_headroom_rows
+from nf_metro.layout.routing.inter_section_handlers import _gap_above_band_fits
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
@@ -97,9 +99,8 @@ SLIDING_MAPS = (
     "tests/fixtures/topologies/novel_transcripts_repro.mmd",
 )
 
-# Stress maps whose routing once read the canvas edge: a left-margin descent
-# capped by its room from x = 0, a band above a topmost or empty row measured
-# from y = 0, a gap channel centred on a span reaching the origin.
+# Stress maps on which a left-margin descent, a band above a topmost or empty
+# row, or a gap channel beside an absent column would read the canvas edge.
 STRESS_MAPS: tuple[tuple[str, dict[str, object]], ...] = (
     ("f8400385.mmd", {}),
     ("f8400846.mmd", {}),
@@ -133,23 +134,6 @@ PACKED_CELL_OPTIONS: dict[str, object] = {
     "compact_offsets": False,
 }
 
-_NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:e[-+]?\d+)?")
-
-
-def _same_picture(first: str, second: str) -> bool:
-    """Whether two SVG documents draw the same picture.
-
-    Text outside the numbers matches exactly.  The numbers are printed at full
-    precision, and a coordinate routed 256px further along rounds its last
-    binary digit differently, so they match to within a millionth of a pixel.
-    """
-    if _NUMBER.split(first) != _NUMBER.split(second):
-        return False
-    return all(
-        a == b or abs(float(a) - float(b)) <= 1e-6
-        for a, b in zip(_NUMBER.findall(first), _NUMBER.findall(second), strict=True)
-    )
-
 
 def _laid_out(path: Path, options: dict[str, object]) -> MetroGraph:
     return prepare_graph(
@@ -157,22 +141,48 @@ def _laid_out(path: Path, options: dict[str, object]) -> MetroGraph:
     )
 
 
-def _render(graph: MetroGraph) -> str:
-    with warnings.catch_warnings():
+def _settled(
+    graph: MetroGraph,
+) -> tuple[MetroGraph, svg._SettledRenderGeometry]:
+    """The render's one settle of *graph*, before the canvas move."""
+    settles: list[tuple[MetroGraph, svg._SettledRenderGeometry]] = []
+    settle = svg._settle_render_geometry
+
+    def keep(
+        copied: MetroGraph, *args: object, **kwargs: object
+    ) -> svg._SettledRenderGeometry:
+        settled = settle(copied, *args, **kwargs)  # type: ignore[arg-type]
+        settles.append(copy.deepcopy((copied, settled)))
+        return settled
+
+    with warnings.catch_warnings(), pytest.MonkeyPatch.context() as patch:
         warnings.simplefilter("ignore")
-        return render_graph(graph, resolve_theme(None, graph), RenderConfig())
+        patch.setattr(svg, "_settle_render_geometry", keep)
+        build_render_plan(graph, resolve_theme(None, graph))
+    (only,) = settles
+    return only
 
 
-def _moved_with_its_canvas(graph: MetroGraph) -> MetroGraph:
+def _settled_numbers(
+    path: Path, options: dict[str, object]
+) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
+    """Every settled number of *path* as settled, then moved by :data:`MOVE`,
+    and as settled when the laid-out map is moved first."""
+    graph = _laid_out(path, options)
     moved = copy.deepcopy(graph)
     translate_graph(moved, *MOVE)
-    moved.canvas_origin = MOVE
-    return moved
+    laid_out, at_layout = _settled(graph)
+    before = dict(_numbers(at_layout))
+    after = dict(_numbers(svg._move_onto_the_canvas(laid_out, at_layout, MOVE)))
+    return before, after, dict(_numbers(_settled(moved)[1]))
 
 
-def _assert_moved_map_renders_the_same(path: Path, options: dict[str, object]):
-    graph = _laid_out(path, options)
-    assert _same_picture(_render(_moved_with_its_canvas(graph)), _render(graph))
+def _assert_moving_commutes_with_settling(
+    path: Path, options: dict[str, object]
+) -> None:
+    _before, after, expected = _settled_numbers(path, options)
+    assert after.keys() == expected.keys()
+    assert [key for key in expected if abs(after[key] - expected[key]) > 1e-6] == []
 
 
 # A label beside a station on its section's vertical midpoint picks its side by
@@ -201,10 +211,10 @@ _LABEL_MIDPOINT_TIES = frozenset(
         for name in SLIDING_MAPS
     ],
 )
-def test_a_sliding_map_moved_with_its_canvas_renders_the_same_picture(
+def test_a_sliding_map_settles_the_same_wherever_it_is_laid_out(
     name: str,
 ) -> None:
-    _assert_moved_map_renders_the_same(ROOT / name, {})
+    _assert_moving_commutes_with_settling(ROOT / name, {})
 
 
 @pytest.mark.parametrize(
@@ -215,13 +225,13 @@ def test_a_sliding_map_moved_with_its_canvas_renders_the_same_picture(
     ],
     ids=lambda value: value if isinstance(value, str) else "",
 )
-def test_a_stress_map_moved_with_its_canvas_renders_the_same_picture(
+def test_a_stress_map_settles_the_same_wherever_it_is_laid_out(
     name: str, options: dict[str, object]
 ) -> None:
     path = CANVAS_DATA / name
     if not path.exists():
         path = ROOT / "examples" / "topologies" / name
-    _assert_moved_map_renders_the_same(path, options)
+    _assert_moving_commutes_with_settling(path, options)
 
 
 def test_the_render_settles_once_and_draws_that_settle_moved(
@@ -253,7 +263,6 @@ def test_the_render_settles_once_and_draws_that_settle_moved(
         for route, settled in zip(drawn, settles[0], strict=True)
         for (x, y), (sx, sy) in zip(route, settled, strict=True)
     )
-    assert plan.graph.canvas_origin == (0.0, 0.0)
 
 
 def test_a_junction_off_its_anchor_is_refused_not_moved() -> None:
@@ -267,7 +276,7 @@ def test_a_junction_off_its_anchor_is_refused_not_moved() -> None:
         assert_junctions_on_their_anchors(graph)
     assert (junction.x, junction.y) == laid_out
     with pytest.raises(LayoutInvariantError, match=jid):
-        _render(graph)
+        build_render_plan(graph, resolve_theme(None, graph))
 
 
 def _numbers(value: object, where: str = "") -> Iterator[tuple[str, float]]:
@@ -314,30 +323,9 @@ def test_the_canvas_move_carries_every_settled_record() -> None:
     """
     moved_fields: set[str] = set()
     for path in RECORD_MAPS:
-        graph = _laid_out(path, {})
-        theme = resolve_theme(None, graph)
-
-        def settle(
-            move: tuple[float, float],
-        ) -> tuple[MetroGraph, svg._SettledRenderGeometry]:
-            copied = svg._copy_graph_for_render(graph)
-            translate_graph(copied, *move)
-            return copied, svg._settle_render_geometry(
-                copied,
-                theme,
-                svg.graph_offset_step(graph, theme.line_width),
-                svg.SECTION_Y_GAP,
-            )
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            laid_out, at_layout = settle((0.0, 0.0))
-            _, settled_moved = settle(MOVE)
-        before = dict(_numbers(at_layout))
-        expected = dict(_numbers(settled_moved))
-        got = dict(_numbers(svg._move_onto_the_canvas(laid_out, at_layout, MOVE)))
-        assert got.keys() == expected.keys()
-        assert [key for key in expected if abs(got[key] - expected[key]) > 1e-6] == []
+        before, after, expected = _settled_numbers(path, {})
+        assert after.keys() == expected.keys()
+        assert [key for key in expected if abs(after[key] - expected[key]) > 1e-6] == []
         moved_fields |= {
             re.sub(r"\[[^]]*\]", "", key)
             for key, value in expected.items()
@@ -386,3 +374,63 @@ def test_a_wrap_into_the_topmost_row_stays_below_the_map_top(name: str) -> None:
     top = min(s.bbox_y for s in boxes)
     highest = min(y for route in plan.routes for _x, y in route.points)
     assert highest >= top, f"{name} runs a line {top - highest:.1f}px over the map"
+
+
+# Each loops a line over the top of its own row into a RIGHT entry fed from
+# earlier in that row through a junction, and sends another line to a RIGHT
+# entry in the row: f8402603 from the same exit, f8403686 and w2_01522 into the
+# same entry.
+JOINED_OVER_TOP = (
+    ("f8402603.mmd", "sec1__entry_right_3", ("l2", "l3")),
+    ("f8403686.mmd", "sec2__entry_right_4", ("l0",)),
+    ("w2_01522.mmd", "z3__entry_right_5", ("m1",)),
+)
+
+
+@pytest.mark.parametrize(("name", "entry", "lines"), JOINED_OVER_TOP)
+def test_a_line_joins_the_over_top_corridor_of_its_row(
+    name: str, entry: str, lines: tuple[str, ...]
+) -> None:
+    """The band an over-the-top loop climbs into is a corridor for its row.
+
+    A line to a RIGHT entry of that row rides it rather than leaving the bundle
+    to go round below the map.
+    """
+    graph = _laid_out(CANVAS_DATA / name, {})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        plan = build_render_plan(graph, resolve_theme(None, graph))
+    top = min(s.bbox_y for s in plan.graph.sections.values() if s.bbox_w > 0)
+    row = plan.graph.sections[plan.graph.ports[entry].section_id]
+    for line in lines:
+        (route,) = [
+            route
+            for route in plan.routes
+            if route.edge.target == entry and route.line_id == line
+        ]
+        ys = [y for _x, y in route.points]
+        assert min(ys) < top, f"{line} into {entry} does not go over the top"
+        assert max(ys) <= max(ys[0], row.bbox_y + row.bbox_h), (
+            f"{line} goes round below"
+        )
+
+
+@pytest.mark.parametrize(
+    ("path", "rows"),
+    [
+        (CANVAS_DATA / "f8402603.mmd", {0}),
+        (ROOT / "examples/topologies/fan_over_top_reach_order.mmd", {0}),
+        (ROOT / "examples/topologies/left_exit_wrap_under_own_section.mmd", set()),
+        (ROOT / "examples/topologies/bypass_left_entry_from_right.mmd", set()),
+    ],
+)
+def test_headroom_is_a_corridor_only_above_an_over_top_loop(
+    path: Path, rows: set[int]
+) -> None:
+    """With no section above a row the band over it is canvas headroom, which
+    is a corridor only where a loop climbs over the row into a RIGHT entry."""
+    graph = _laid_out(path, {})
+    topmost = min(s.grid_row for s in graph.sections.values())
+    assert not routing_common.section_lies_before(graph, "y", topmost)
+    assert over_top_headroom_rows(graph) == rows
+    assert _gap_above_band_fits(graph, topmost) is (topmost in rows)

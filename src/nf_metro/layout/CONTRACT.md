@@ -2262,7 +2262,7 @@ They are design evidence, not part of this specification.
   translation this stage can express is 2px and a 1px deficit is below the
   resolution the ledger works at.
   A merge feeding a TOP or BOTTOM entry port is seated on the vertical lead-in
-  that port receives (`_position_merge_junction`). This puts its feeders in the
+  that port receives (`_merge_junction_position`). This puts its feeders in the
   row corridor they claim and the merged trunk in the column the port's own
   crossing gives that line. Three conditions govern that column.
   **The drop lands where its siblings land.** The junction-to-port hop is seated

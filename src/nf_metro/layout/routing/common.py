@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import AbstractSet, NamedTuple
+from typing import AbstractSet, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
@@ -507,7 +507,7 @@ def header_corridor_y(
     return row_top_edge(graph, row, default=default, col=col) - clearance - base_radius
 
 
-def section_lies_before(graph: MetroGraph, axis: str, index: int) -> bool:
+def section_lies_before(graph: MetroGraph, axis: Literal["x", "y"], index: int) -> bool:
     """True if a section lies wholly before grid *index* along *axis*: above row
     *index* for ``"y"``, left of column *index* for ``"x"``.
 
@@ -556,8 +556,7 @@ def over_top_headroom_rows(graph: MetroGraph) -> frozenset[int]:
         if psec is None:
             continue
         for edge in graph.edges_to(port.id):
-            src_port = graph.ports.get(edge.source)
-            ssec = graph.sections.get(src_port.section_id) if src_port else None
+            ssec = resolve_section(graph, graph.stations.get(edge.source))
             if ssec is None:
                 continue
             if ssec.grid_row == psec.grid_row and section_precedes(graph, ssec, psec):

@@ -6257,9 +6257,8 @@ def _left_entry_descent_x(
     sits on the bundle's right, ``-delta`` when on its left) to keep the
     concentric-corner handedness local to each handler.
 
-    A channel descending the map's left margin spends the bump toward the canvas
-    edge, which is headroom (:func:`section_lies_before`): the render places the
-    canvas around the channel wherever it lands.
+    The bump is never capped on the map's left margin, which is headroom
+    (:func:`section_lies_before`).
     """
     return _left_descent_x(
         ctx.curve_radius, ctx.offset_step, anchor_x, n_outer, signed_delta

@@ -88,6 +88,7 @@ from nf_metro.layout.route_plan import (
     SettlementStageTrace,
     grid_span_for_sections,
     register_settlement_stage,
+    translate_point,
 )
 from nf_metro.layout.route_reservations import (
     CanvasRect,
@@ -385,35 +386,26 @@ def _canvas_placement(
 ) -> tuple[float, float]:
     """The one move that puts the settled map on its canvas.
 
-    The canvas is a first-quadrant frame whose top-left corner starts at
-    ``graph.canvas_origin``: it grows past the rightmost and bottommost ink by a
-    margin, while its left and top edges are pinned there.  A run outside the
-    section-box envelope on one of those two sides -- an inter-row return band
-    wrapping left of the first box, a bundle rising over the top of one -- has
-    only whatever room the box placement happened to leave, so the canvas grows
-    on that side by the shortfall, seating the run on the line the layout seats
-    a first section against (:data:`CANVAS_ORIGIN_MARGIN`).  The move brings the
-    grown corner to ``(0, 0)``.
+    The canvas is a first-quadrant frame: its left and top edges are pinned at
+    zero while the far edges grow past the ink.  A run outside the section-box
+    envelope on a near side -- an inter-row return band wrapping left of the
+    first box, a bundle rising over the top of one -- is seated on the line the
+    layout seats a first section against (:data:`CANVAS_ORIGIN_MARGIN`).
 
     A shortfall under :data:`SAME_COORD_TOLERANCE` is nothing a viewer can
-    resolve, so the canvas does not grow for one.
+    resolve, so the map does not move for one.
     """
-    origin_x, origin_y = graph.canvas_origin
     boxes = [section for section in graph.sections.values() if section.bbox_w > 0]
-    shortfall = 0.0, 0.0
-    if boxes:
-        ink_x, ink_y = _drawn_ink_origin(graph, route_polylines, debug)
-        shortfall = (
-            _outboard_shortfall(
-                min(s.bbox_x for s in boxes) - origin_x, ink_x - origin_x, margins[0]
-            ),
-            _outboard_shortfall(
-                min(s.bbox_y for s in boxes) - origin_y, ink_y - origin_y, margins[1]
-            ),
-        )
-        if max(shortfall) <= SAME_COORD_TOLERANCE:
-            shortfall = 0.0, 0.0
-    return shortfall[0] - origin_x, shortfall[1] - origin_y
+    if not boxes:
+        return 0.0, 0.0
+    ink_x, ink_y = _drawn_ink_origin(graph, route_polylines, debug)
+    shortfall = (
+        _outboard_shortfall(min(s.bbox_x for s in boxes), ink_x, margins[0]),
+        _outboard_shortfall(min(s.bbox_y for s in boxes), ink_y, margins[1]),
+    )
+    if max(shortfall) <= SAME_COORD_TOLERANCE:
+        return 0.0, 0.0
+    return shortfall
 
 
 def _position_legend(
@@ -2121,15 +2113,12 @@ def _settle_render_geometry(
     (``_assert_group_band_room_drawn``) covers the box this reservation grows: it
     rejects a band drawn past the room reserved for it.
 
-    Junction coordinates are a function of the ports they join rather than
-    independent data.  Layout leaves every junction on that derivation, and the
-    first route reads them as laid out once
-    :func:`assert_junctions_on_their_anchors` has confirmed it: a junction at a
-    stale Y sits off the bundle it belongs to and the connector into it
-    degenerates into a sub-radius dogleg.  A re-route after a section moved
-    re-derives them first.  A graph-wide rail layout anchors its junctions on
-    per-line rail Ys instead, by a rule the port-derived placement does not
-    reproduce, so it is exempt.
+    Junction coordinates are a function of the ports they join, and layout
+    leaves every junction on that derivation;
+    :func:`assert_junctions_on_their_anchors` enforces it, since a junction at a
+    stale Y sits off its bundle and the connector into it degenerates into a
+    sub-radius dogleg.  A graph-wide rail layout anchors its junctions on
+    per-line rail Ys instead, so it is exempt.
     """
 
     # Non-empty exactly while a label pass has carried ports off the box edges
@@ -2624,19 +2613,17 @@ def _move_onto_the_canvas(
 
     Routes, the polylines drawn from them, labels, the published plan and the
     settlement move with the graph, so every record describes the geometry a
-    layout at the moved position would have published.  Afterwards the canvas
-    origin is ``(0, 0)``.
+    layout at the moved position would have published.
     """
     dx, dy = move
-    graph.canvas_origin = 0.0, 0.0
     if not dx and not dy:
         return settled
     translate_graph(graph, dx, dy)
     for route in settled.routes:
-        route.points = [(x + dx, y + dy) for x, y in route.points]
+        route.points = [translate_point(point, move) for point in route.points]
     return settled._replace(
         route_polylines=[
-            [(x + dx, y + dy) for x, y in polyline]
+            [translate_point(point, move) for point in polyline]
             for polyline in settled.route_polylines
         ],
         labels=[
@@ -2648,10 +2635,12 @@ def _move_onto_the_canvas(
                     None
                     if label.obstacle_bbox is None
                     else (
-                        label.obstacle_bbox[0] + dx,
-                        label.obstacle_bbox[1] + dy,
-                        label.obstacle_bbox[2] + dx,
-                        label.obstacle_bbox[3] + dy,
+                        *translate_point(
+                            (label.obstacle_bbox[0], label.obstacle_bbox[1]), move
+                        ),
+                        *translate_point(
+                            (label.obstacle_bbox[2], label.obstacle_bbox[3]), move
+                        ),
                     )
                 ),
             )
@@ -2676,8 +2665,7 @@ def _settle_once_on_the_canvas(
     Where a run lands is only known once it is routed, so the canvas is placed
     after every routing decision, as one uniform move of the settled geometry
     (:func:`_canvas_placement`).  No routing decision reads where the canvas
-    edge is, so the moved result is the map laid out at its final position and
-    nothing is settled twice.
+    edge is, so the moved result is the map laid out at its final position.
 
     The settled-geometry guards read the moved result, the geometry a viewer
     sees.

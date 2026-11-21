@@ -102,7 +102,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
     _shared_anchor_runway_runs,
 )
-from nf_metro.layout.phases.junctions import reanchor_junctions
+from nf_metro.layout.phases.junctions import derived_junction_positions
 from nf_metro.layout.phases.off_track import (
     _dead_end_producer_anchor,
     _is_single_trunk_section,
@@ -6348,26 +6348,17 @@ def assert_junctions_on_their_anchors(graph: MetroGraph) -> None:
     """Refuse a graph whose junctions are not where their ports derive them.
 
     A junction's coordinates are a function of the ports it joins
-    (:func:`~nf_metro.layout.phases.junctions.reanchor_junctions`), and layout
-    leaves every junction on that derivation, so the router reads the junctions
-    as laid out.  One off its anchor is an engine defect rather than a layout an
-    author can ask for, so it is refused under every strictness, never moved.
+    (:func:`~nf_metro.layout.phases.junctions.derived_junction_positions`), and
+    layout leaves every junction on that derivation, so the router reads the
+    junctions as laid out.  One off its anchor is an engine defect rather than a
+    layout an author can ask for, so it is refused under every strictness.
     """
-    laid_out = {
-        jid: (station.x, station.y)
-        for jid in graph.junctions
-        if (station := graph.stations.get(jid)) is not None
-    }
-    reanchor_junctions(graph)
-    moved: list[str] = []
-    for jid, (x, y) in laid_out.items():
-        station = graph.stations[jid]
-        if max(abs(station.x - x), abs(station.y - y)) > COORD_TOLERANCE_FINE:
-            moved.append(
-                f"{jid!r} at ({x:.2f}, {y:.2f}), derived "
-                f"({station.x:.2f}, {station.y:.2f})"
-            )
-        station.x, station.y = x, y
+    moved = [
+        f"{jid!r} at ({station.x:.2f}, {station.y:.2f}), derived ({x:.2f}, {y:.2f})"
+        for jid, (x, y) in derived_junction_positions(graph).items()
+        if max(abs((station := graph.stations[jid]).x - x), abs(station.y - y))
+        > COORD_TOLERANCE_FINE
+    ]
     if moved:
         raise LayoutInvariantError(
             "layout left junctions off the anchors their ports derive: "
