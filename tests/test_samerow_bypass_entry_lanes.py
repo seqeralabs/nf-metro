@@ -25,6 +25,7 @@ import pytest
 
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import SAME_Y_TOLERANCE
+from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
@@ -33,11 +34,7 @@ from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.layout.routing.invariants import (
     check_convergence_shallow_feeder_concentric,
 )
-from nf_metro.layout.routing.offsets import (
-    _OffsetCtx,
-    _plan_level_approach_carries,
-    same_row_bypass_entry,
-)
+from nf_metro.layout.routing.offsets import same_row_bypass_entry
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
@@ -248,7 +245,7 @@ def test_bypass_approach_side_matches_the_drawn_route(
 ) -> None:
     """A bypass line counts as coming down exactly when its route descends in."""
     graph, routes = _drawn_routes(fixture)
-    entry = same_row_bypass_entry(graph, port_id, compute_station_offsets(graph))
+    entry = same_row_bypass_entry(graph, port_id)
     assert entry is not None
     port_y = graph.stations[port_id].y
     drawn_from_above = {
@@ -281,54 +278,6 @@ def test_concentric_guard_reads_the_side_a_bypass_arrives_from() -> None:
     assert check_convergence_shallow_feeder_concentric(graph, above) == []
     (message,) = check_convergence_shallow_feeder_concentric(graph, below)
     assert OVER_TOP_PORT in message
-
-
-LEVEL_PAIR_MMD = """\
-%%metro line: a | A | #4a90d9
-%%metro line: b | B | #e63946
-graph LR
-    subgraph up [Up]
-        u1[U1]
-        u2[U2]
-        u1 -->|a,b| u2
-    end
-    subgraph down [Down]
-        d1[D1]
-    end
-    u2 -->|a,b| d1
-"""
-
-
-def _level_pair_ctx() -> tuple[_OffsetCtx, str, list[str]]:
-    graph = prepare_graph(LEVEL_PAIR_MMD)
-    (port_id,) = graph.sections["down"].entry_ports
-    approach = ["up__exit_right_0", "u2", "u1"]
-    offsets = {(sid, "a"): 4.0 for sid in approach}
-    offsets.update({(sid, "b"): 8.0 for sid in approach})
-    return _OffsetCtx(graph=graph, offsets=offsets), port_id, approach
-
-
-def test_level_approach_carries_see_the_lanes_earlier_moves_vacate() -> None:
-    """Moving ``a`` up first frees its lane for ``b``; the plan leaves ctx alone."""
-    ctx, port_id, approach = _level_pair_ctx()
-    before = dict(ctx.offsets)
-    writes, refused = _plan_level_approach_carries(
-        ctx, port_id, [("a", 0.0), ("b", 4.0)]
-    )
-    assert refused == frozenset()
-    assert writes == {
-        **{(sid, "a"): 0.0 for sid in approach},
-        **{(sid, "b"): 4.0 for sid in approach},
-    }
-    assert ctx.offsets == before
-
-
-def test_level_approach_carry_is_refused_whole_where_a_lane_is_held() -> None:
-    ctx, port_id, _approach = _level_pair_ctx()
-    ctx.offsets[("u1", "a")] = 0.0
-    writes, refused = _plan_level_approach_carries(ctx, port_id, [("b", 0.0)])
-    assert refused == frozenset({"b"})
-    assert writes == {}
 
 
 LEVEL_RETURN_MMD = """\
@@ -392,23 +341,55 @@ def _inline_routes(text: str):  # noqa: ANN202
     }
 
 
-def test_feeder_past_the_port_drawn_level_is_not_a_u_turn() -> None:
-    """A feeder lying past the port whose route runs straight at it arrives flat.
+LEVEL_RETURN_HOP_MMD = LEVEL_RETURN_MMD.replace(
+    "%%metro grid: sec0 | 2,0", "%%metro grid: sec0 | 3,0\n%%metro grid: sec3 | 2,0"
+).replace(
+    "    subgraph sec2",
+    "    subgraph sec3 [Mid 3]\n        s3n0[mid]\n    end\n    subgraph sec2",
+)
 
-    Only a route that loops round the section turns its line over; one the
-    dispatch draws with no vertical leg keeps its lane, so re-slotting it as a
-    loop would hand it a lane its own short leg then has to step across.
+
+@pytest.mark.parametrize(
+    "text", (LEVEL_RETURN_MMD, LEVEL_RETURN_HOP_MMD), ids=("adjacent", "hop")
+)
+def test_a_feeder_past_the_far_side_port_loops_round_its_section(text: str) -> None:
+    """A junction east of ``sec2``, fed by ``sec0``'s LEFT exit, feeds
+    ``sec2``'s far-side LEFT entry, with or without a section between them.
+
+    The junction's branches leave westward like the exit feeding them, so
+    ``l0`` loops round below ``sec2``, rises outside its left edge and turns
+    east into the port, and the lane plan records it as a loop.  No branch out
+    of the junction crosses any section.
     """
-    graph, routes = _inline_routes(LEVEL_RETURN_MMD)
+    graph = prepare_graph(text)
+    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
     (port_id,) = graph.sections["sec2"].entry_ports
-    entry = same_row_bypass_entry(graph, port_id, compute_station_offsets(graph))
-    assert entry is None or not entry.u_turn
-    (leg,) = [
-        points
-        for (source, target, line_id), points in routes.items()
-        if source.startswith("__junction") and target == port_id and line_id == "l0"
+    entry = same_row_bypass_entry(graph, port_id)
+    assert entry is not None and entry.u_turn == {"l0"}
+    branches = {
+        (route.edge.target, route.line_id): points
+        for route, points in zip(plan.routes, plan.route_polylines)
+        if route.edge.source.startswith("__junction")
+    }
+    interiors = [
+        (
+            box.bbox_x + _TOL,
+            box.bbox_y + _TOL,
+            box.bbox_x + box.bbox_w - _TOL,
+            box.bbox_y + box.bbox_h - _TOL,
+        )
+        for box in plan.graph.sections.values()
     ]
-    assert all(abs(b[1] - a[1]) <= abs(b[0] - a[0]) for a, b in _segments(leg)), leg
+    crossing = [
+        key
+        for key, points in branches.items()
+        for a, b in _segments(points)
+        for interior in interiors
+        if segment_intersects_bbox(*a, *b, interior)
+    ]
+    assert not crossing, crossing
+    (*_, (rise_x, _rise_y), (port_x, _port_y)) = branches[(port_id, "l0")]
+    assert rise_x < port_x - _TOL
 
 
 def test_partial_section_is_not_levelled_against_a_u_turn_hand_over() -> None:

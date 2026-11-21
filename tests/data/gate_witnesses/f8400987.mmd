@@ -1,0 +1,80 @@
+%%metro title: Fuzz 8400987
+%%metro line: l0 | Summarise_Classify | #e6194b
+%%metro line: l1 | Index_Summarise | #3cb44b
+%%metro line: l2 | Bin_Qc | #4363d8
+%%metro line: l3 | Assemble | #f58231
+%%metro line: l4 | Bam | #911eb4
+%%metro line: l5 | Merge | #46f0f0
+
+graph LR
+    subgraph sec0 [Quant 0]
+        %%metro exit: top | l0, l1, l2, l4
+        s0n0[qc]
+        s0n1[BIN_EXPORT_EXPORT]
+        s0n2[pca_annotate_pca]
+        s0n3[markdup]
+        s0n4[assemble_index]
+        s0n1 -->|l0,l1| s0n2
+        s0n0 -->|l1| s0n1
+        s0n2 -->|l1,l2| s0n3
+        s0n3 -->|l1| s0n4
+        s0n0 -->|l2,l4| s0n2
+        s0n2 -->|l2,l4| s0n4
+    end
+    subgraph sec1 [Filter_Dedup_Vcf 1]
+        s1n0[classify]
+        s1n1[qc]
+        s1n2[quant]
+        s1n0 -->|l0,l3,l4| s1n1
+        s1n1 -->|l0,l3,l4| s1n2
+        s1n0 -->|l1| s1n2
+    end
+    subgraph sec2 [Trim 2]
+        %%metro exit: bottom | l0, l1, l2, l3, l4
+        s2n0[report]
+        s2n1[align_stats]
+        s2n2[stats_trim]
+        s2n3[filter]
+        s2n0 -->|l0,l2,l3| s2n1
+        s2n1 -->|l0,l3| s2n2
+        s2n2 -->|l0,l1,l3| s2n3
+        s2n1 -->|l2| s2n3
+        s2n0 -->|l4| s2n3
+    end
+    subgraph sec3 [Index_Pca 3]
+        s3n0[classify]
+        s3n1[call_normalize_classify]
+        s3n0 -->|l0,l1,l3,l4,l5| s3n1
+    end
+    subgraph sec4 [Pca_Annotate_Filter 4]
+        %%metro entry: bottom | l0, l1, l2, l3, l4, l5
+        s4n0[assemble_bin]
+        s4n1[gather]
+        s4n2[markdup]
+        s4n3[align]
+        s4n4[export_gather]
+        s4n0 -->|l0,l2| s4n2
+        s4n2 -->|l0,l3| s4n3
+        s4n3 -->|l0,l1,l3,l4| s4n4
+        s4n2 -->|l2,l5| s4n4
+        s4n0 -->|l3,l5| s4n1
+        s4n1 -->|l3,l5| s4n2
+        s4n1 -->|l4| s4n3
+    end
+    s0n2 -->|l0| s1n0
+    s1n2 -->|l0,l2,l3| s2n0
+    s2n3 -->|l0,l1,l2,l3,l4| s3n0
+    s3n1 -->|l0,l3,l5| s4n0
+    s0n4 -->|l1,l4| s1n0
+    s1n2 -->|l1| s2n2
+    s3n1 -->|l1| s4n3
+    s0n4 -->|l2| s1n2
+    s3n0 -->|l2| s4n0
+    s0n3 -->|l2| s1n2
+    s2n0 -->|l2| s4n2
+    s1n2 -->|l3| s3n0
+    s3n0 -->|l3| s4n3
+    s1n2 -->|l4| s2n3
+    s3n1 -->|l4| s4n1
+    s1n1 -->|l4| s2n0
+    s2n3 -->|l4| s4n1

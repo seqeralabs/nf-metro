@@ -30,13 +30,14 @@ SEMANTIC_VALID_LAYOUT_BROKEN = [
 ]
 
 DEFERRED_ROUTE_GUARD_FAILURES = [
+    # seed_15's render aborts on two lines sharing one channel (#2041).
     (
         "hash_seed_determinism/seed_15.mmd",
-        "bundle 's8__exit_left_8'->'s10__entry_right_19' corner (623.0,616.0)",
+        "collinear overlay",
     ),
     (
         "hash_seed_determinism/seed_77.mmd",
-        "destination-tail bundle into port 's16__entry_right_18'",
+        "[peel-off bundle braids into port] peel-off bundle into port",
     ),
 ]
 

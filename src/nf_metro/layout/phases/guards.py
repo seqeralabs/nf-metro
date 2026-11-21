@@ -59,6 +59,7 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     segment_intersects_bbox,
 )
+from nf_metro.layout.lane_plan import LANE_PLAN_STAGE, fan_seam_lane
 from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.phases._common import (
@@ -797,7 +798,7 @@ def _column_run_anchor_shortfalls(graph: MetroGraph) -> Iterator[_ShortAnchorEdg
     Within a contiguous run of rows in one grid column whose members' content
     nearest an X edge stands at one X (:func:`...bbox._shared_anchor_runway_runs`)
     that edge is common, so a box short of it is a member the seating or the
-    Stage 3.6 levelling left behind.  A neighbour whose own row band the reach
+    Stage 6.12b levelling left behind.  A neighbour whose own row band the reach
     would eat into is the one legitimate shortfall
     (:func:`...bbox._column_neighbour_anchor_limit`) and is not yielded.
     """
@@ -1355,31 +1356,6 @@ def _guard_flow_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
     )
 
 
-def _guard_partial_trunk_descent_seated(graph: MetroGraph, phase: str) -> None:
-    """A recorded partial-trunk descent seats its handover port below the carrier.
-
-    Stage 4.8 seats a partial row-mate ``descent`` below its carrier and records
-    the two endpoint ports; Stage 6.4 re-seats it from the carrier's post-snap Y.
-    The handover port must then sit exactly ``descent`` below the carrier port --
-    a double-applied restore lands it ``2 * descent`` below and jogs the
-    connector it exists to flatten.
-    """
-    for sec_id, record in graph._partial_trunk_descents.items():
-        partial_st = graph.stations.get(record.partial_port)
-        carrier_st = graph.stations.get(record.carrier_port)
-        if partial_st is None or carrier_st is None:
-            continue
-        expected = carrier_st.y + record.descent
-        if abs(partial_st.y - expected) > SAME_COORD_TOLERANCE:
-            raise PhaseInvariantError(
-                f"{phase}: partial section {sec_id!r} handover port "
-                f"{record.partial_port!r} at y={partial_st.y:.1f} must sit "
-                f"descent={record.descent:.1f} below carrier port "
-                f"{record.carrier_port!r} at y={carrier_st.y:.1f} "
-                f"(expected y={expected:.1f}); the handover connector will jog"
-            )
-
-
 def _guard_wrap_exit_anchored_to_carrier(graph: MetroGraph, phase: str) -> None:
     """A wrapping flow-aligned exit anchoring to a shared carrier row sits on it.
 
@@ -1588,12 +1564,21 @@ def _guard_corridor_fed_solo_rides_trunk(
     A section whose line forks internally checks only the entry port: its fan
     branches straddle the trunk and may each hold a lane aligning them with a
     downstream multi-line section, so they are not required to ride offset 0.
+
+    Where the lane plan fixes the line's lane by a fan seam (the lane that
+    lands it on a fan carrier's slot), the entry and consumer ride that lane
+    instead of offset 0.
     """
     if offsets is None:
         offsets = routing.compute_station_offsets(graph)
+    step = graph_offset_step(graph)
+
+    def planned(node: str, line_id: str) -> float:
+        return (fan_seam_lane(graph, node, line_id) or 0) * step
+
     for sec_id, pid, line_id in iter_corridor_fed_solo_entries(graph, SAME_Y_TOLERANCE):
         port_off = offsets.get((pid, line_id), 0.0)
-        if abs(port_off) > COORD_TOLERANCE:
+        if abs(port_off - planned(pid, line_id)) > COORD_TOLERANCE:
             raise PhaseInvariantError(
                 f"{phase}: section {sec_id!r} entry port {pid!r} sits at offset "
                 f"{port_off:.1f} for sole line {line_id!r}; a corridor-fed "
@@ -1606,7 +1591,7 @@ def _guard_corridor_fed_solo_rides_trunk(
             if st is None or st.is_port or line_id not in graph.station_lines(sid):
                 continue
             st_off = offsets.get((sid, line_id), 0.0)
-            if abs(st_off) > COORD_TOLERANCE:
+            if abs(st_off - planned(sid, line_id)) > COORD_TOLERANCE:
                 raise PhaseInvariantError(
                     f"{phase}: section {sec_id!r} station {sid!r} sits at offset "
                     f"{st_off:.1f} for sole line {line_id!r}; the lone consumer "
@@ -4888,8 +4873,8 @@ def _guard_entry_port_fed_only_by_ports(graph: MetroGraph, phase: str) -> None:
     ``_resolve_sections`` rewrites each inter-section edge into a chain
     ``source -> exit_port -> entry_port -> target``, so an entry port's
     incoming edges come from exit ports or fan-out junctions, all carrying
-    ``is_port=True``.  ``_section_line_feeders`` relies on this to read the
-    feeder section straight off the source's ``section_id``; a non-port
+    ``is_port=True``.  A feeder lookup relies on this to read the feeder
+    section straight off the source's ``section_id``; a non-port
     source would mean an internal station feeds an entry port directly,
     which would mis-attribute the reconvergence feeder ordering.
     """
@@ -4997,12 +4982,12 @@ _PASS_C_BISECTION_ORDER: tuple[str, ...] = (
     "after Stage 6.2",
     "after Stage 6.3",
     "after Stage 6.4",
-    "after Stage 6.5",
     "after Stage 6.6",
     "after Stage 6.9",
     "after Stage 6.10",
     "after Stage 6.11",
     "after Stage 6.12",
+    "after Stage 6.12c",
     "after Stage 6.13",
     "after Stage 6.14",
     "after Stage 6.15",
@@ -5012,6 +4997,13 @@ _PASS_C_BISECTION_ORDER: tuple[str, ...] = (
 valid mid-pipeline.  Update when adding or removing a Pass C
 checkpoint in ``_compute_section_layout``.
 """
+
+
+_LANE_PLAN_CHECKPOINT = f"after Stage {LANE_PLAN_STAGE}"
+"""The first Pass C checkpoint at which the layout's lane plan is decided:
+every guard reading lanes or routes is due from here on."""
+
+_LANE_PLAN_INPUTS = frozenset({"offsets", "routes"})
 
 
 def _bisection_should_run(guard_name: str, phase: str) -> bool:
@@ -5037,7 +5029,7 @@ def _run_pass_c_guards(
     *,
     offsets: dict[tuple[str, str], float] | None = None,
     routes: list[RoutedPath] | None = None,
-) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
+) -> tuple[dict[tuple[str, str], float] | None, list[RoutedPath] | None]:
     """Run the per-checkpoint bisection guard set at a Pass C sub-phase boundary.
 
     The Pass C tidy-up pipeline is a sequence of ~20 mutating passes
@@ -5549,7 +5541,7 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         "A",
         needs=frozenset({"offsets"}),
         bisection_safe=True,
-        first_valid_stage="after Stage 6.4",
+        first_valid_stage=_LANE_PLAN_CHECKPOINT,
     ),
     GuardSpec(
         _guard_no_coincident_station_coords,
@@ -5653,18 +5645,6 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     ),
     GuardSpec(_guard_entry_port_fed_only_by_ports, "B"),
     GuardSpec(_guard_flow_exit_anchored_to_carrier, "B"),
-    GuardSpec(
-        _guard_partial_trunk_descent_seated,
-        "B",
-        issue_pin=("#1844",),
-        narrow_reason=(
-            "Scoped to sections Stage 4.8 recorded a partial-trunk descent for: "
-            "only those hand a through-line straight to an adjacent carrier and "
-            "carry the two endpoint ports to check the descent seating against.  "
-            "Every other section hands over on the shared trunk with no descent "
-            "to double-count."
-        ),
-    ),
     GuardSpec(_guard_wrap_exit_anchored_to_carrier, "B"),
     GuardSpec(_guard_fold_lr_exit_follows_target, "B"),
     GuardSpec(
@@ -6231,7 +6211,7 @@ def run_validate_guards(
     routes: list[RoutedPath] | None = None,
     section_y_gap: float | None = None,
     section_y_padding: float | None = None,
-) -> tuple[dict[tuple[str, str], float], list[RoutedPath] | None]:
+) -> tuple[dict[tuple[str, str], float] | None, list[RoutedPath] | None]:
     """Dispatch :data:`GUARD_REGISTRY` for one ``validate=True`` checkpoint.
 
     At a Pass C checkpoint (``include_final=False``) only the bisection-safe
@@ -6239,26 +6219,32 @@ def run_validate_guards(
     ``after final`` boundary (``include_final=True``) the bisection-safe specs
     run first (none gated, since ``after final`` is past every threshold)
     followed by the final-only specs, reproducing the historical call order.
-    A spec needing ``routes`` is skipped when routing failed.  Returns the
-    shared ``(offsets, routes)``.
+    Offsets and routes read the layout's lane plan, so they are computed only
+    when a spec due at *phase* needs them, and every such spec's
+    ``first_valid_stage`` falls at or after the plan's decision.  A spec
+    needing ``routes`` is skipped when routing failed.  Returns the shared
+    ``(offsets, routes)``.
     """
-    offsets, routes = _ensure_pass_c_inputs(
-        graph,
-        offsets,
-        routes,
-        validate_final_geometry=include_final,
-    )
+    due = [
+        spec
+        for spec in GUARD_REGISTRY
+        if (spec.bisection_safe or include_final)
+        and (not spec.bisection_safe or _bisection_should_run(spec.name, phase))
+    ]
+    if any(spec.needs & _LANE_PLAN_INPUTS for spec in due):
+        offsets, routes = _ensure_pass_c_inputs(
+            graph,
+            offsets,
+            routes,
+            validate_final_geometry=include_final,
+        )
     available: dict[str, object] = {
         "offsets": offsets,
         "routes": routes,
         "section_y_gap": section_y_gap,
         "section_y_padding": section_y_padding,
     }
-    for spec in GUARD_REGISTRY:
-        if not spec.bisection_safe and not include_final:
-            continue
-        if spec.bisection_safe and not _bisection_should_run(spec.name, phase):
-            continue
+    for spec in due:
         if "routes" in spec.needs and routes is None:
             continue
         spec.fn(graph, phase, **{name: available[name] for name in spec.needs})
@@ -6284,6 +6270,11 @@ _RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
     for spec in (*GUARD_REGISTRY, *INLINE_GUARD_REGISTRY)
     if spec.tier == "A" and spec.name not in _RENDER_CHOKEPOINT_AUTHORING_GUARDS
 )
+
+
+# The Tier-A guard whose violation aborts the default render instead of warning:
+# a route reaching its own section's port across that section is no drawing.
+_RENDER_ABORTING_GUARD = "_guard_inter_section_route_clears_own_section_interior"
 
 
 def deferred_final_route_guard_specs() -> tuple[GuardSpec, ...]:
@@ -6328,12 +6319,14 @@ def assert_render_layout_invariants(
     settlement, ``include_deferred_final`` also runs every route-dependent
     registry guard. Each guard raises ``PhaseInvariantError`` on its first
     violation rather than returning a list, so each runs in isolation and its
-    message is captured; the aggregate is one message. Without *strict* the
-    aggregate is a :class:`UserWarning`; with *strict* it raises
-    :class:`LayoutInvariantError`.
+    message is captured; the aggregate is one message. It raises
+    :class:`LayoutInvariantError` under *strict* or where
+    ``_RENDER_ABORTING_GUARD`` fired on a non-permissive graph; else it is a
+    :class:`UserWarning`.
     """
     available: dict[str, Any] = {"offsets": offsets, "routes": routes}
     messages: list[str] = []
+    aborting = False
     for spec in render_layout_invariant_specs(
         include_deferred_final=include_deferred_final
     ):
@@ -6341,6 +6334,7 @@ def assert_render_layout_invariants(
             spec.fn(graph, "render", **{name: available[name] for name in spec.needs})
         except PhaseInvariantError as exc:
             messages.append(f"[{spec.name}] {exc}")
+            aborting = aborting or spec.name == _RENDER_ABORTING_GUARD
     if not messages:
         return
 
@@ -6352,7 +6346,7 @@ def assert_render_layout_invariants(
         "(or the directive combination) that produced this geometry.\n  "
         f"{detail}"
     )
-    if strict:
+    if strict or (aborting and not graph.permissive):
         raise LayoutInvariantError(msg)
     warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
 

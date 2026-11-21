@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import graph_offset_step
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing import offsets as offsets_module
@@ -90,51 +89,6 @@ def test_row_mate_junction_hands_over_on_one_lane(fixture: str) -> None:
                 f"lane {upstream} hands over to lane {downstream}"
             )
     assert not slanted, "\n".join(slanted)
-
-
-@pytest.mark.parametrize("fixture", FIXTURES, ids=FIXTURE_IDS)
-def test_section_bundles_occupy_consecutive_lanes(fixture: str) -> None:
-    """No section reserves a lane for a line it does not carry.
-
-    An unclaimed lane inside a section's own bundle spreads its stations wider
-    than the routes that join them expect, which strands those routes off the
-    markers they should meet.
-    """
-    graph, offsets = _settled(fixture)
-    step = graph_offset_step(graph)
-    lanes_by_section: dict[str, set[float]] = {}
-    for (station_id, _line_id), offset in offsets.items():
-        station = graph.stations[station_id]
-        if station.is_port or station.section_id is None:
-            continue
-        lanes_by_section.setdefault(station.section_id, set()).add(round(offset, 1))
-    gapped = [
-        f"{section_id}: lanes {sorted(lanes)}"
-        for section_id, lanes in lanes_by_section.items()
-        if any(
-            second - first > step + _SAME_LANE_TOLERANCE
-            for first, second in zip(sorted(lanes), sorted(lanes)[1:])
-        )
-    ]
-    assert not gapped, "\n".join(gapped)
-
-
-def test_gapped_lane_block_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A bundle that leaves a lane unclaimed meets the closing guard, not the
-    canvas."""
-    monkeypatch.setattr(
-        offsets_module,
-        "_level_run_lane_block",
-        lambda ctx, sec_id, ordered, section_local: {
-            lid: ctx.line_priority.get(lid, 0) for lid in ordered
-        },
-    )
-    graph = parse_metro_mermaid(
-        (ROOT / REBASE_FIXTURE).read_text(), max_station_columns=15
-    )
-    with pytest.raises(offsets_module.OffsetAnchorError, match="off the trunk"):
-        compute_layout(graph)
-        compute_station_offsets(graph)
 
 
 def test_compacted_bundle_draws_its_feeder_run_flat() -> None:

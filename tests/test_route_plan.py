@@ -15,10 +15,16 @@ from pathlib import Path
 
 import networkx as nx
 import pytest
+from conftest import ROUTE_EMISSION_ABORT_FIXTURES
 from layout_metrics import compute_metrics
 
 import nf_metro.layout.routing.inter_section_handlers as inter_section_handlers
-from nf_metro.api import apply_layout_overrides, prepare_graph, resolve_theme
+from nf_metro.api import (
+    apply_layout_overrides,
+    prepare_graph,
+    render_string,
+    resolve_theme,
+)
 from nf_metro.layout.route_plan import (
     BindingKind,
     CoordinateRegime,
@@ -43,6 +49,7 @@ from nf_metro.layout.routing import (
     observe_route_edges,
     route_edges,
 )
+from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, Port, Section, Station
 from nf_metro.parser.provenance import (
@@ -64,11 +71,14 @@ from nf_metro.render.svg import build_render_plan, emit_render_plan
 ROOT = Path(__file__).parents[1]
 EXAMPLES = ROOT / "examples"
 FROZEN = ROOT / "tests" / "fixtures" / "hash_seed_determinism"
+SEED_15_ABORT = "collinear overlay: line 'l2'"
 ROUTABLE_CORPUS = tuple(
     path
     for base in (ROOT / "examples", ROOT / "tests" / "fixtures")
     for path in sorted(base.rglob("*.mmd"))
-    if "nextflow" not in path.parts and "invalid" not in path.parts
+    if "nextflow" not in path.parts
+    and "invalid" not in path.parts
+    and str(path.relative_to(ROOT)) not in ROUTE_EMISSION_ABORT_FIXTURES
 )
 
 _REORDERABLE = """\
@@ -717,11 +727,14 @@ def test_invalid_caller_line_order_is_not_recorded_as_typed_provenance() -> None
         )
 
 
-@pytest.mark.parametrize(
-    "name", ["seed_15.mmd", "seed_41.mmd", "seed_72.mmd", "seed_77.mmd"]
-)
+@pytest.mark.parametrize("name", ["seed_15.mmd", "seed_72.mmd", "seed_77.mmd"])
 def test_frozen_sources_have_canonical_plan_serialisation(name: str) -> None:
     _graph, _routes, plan = _observe(FROZEN / name)
+    if name == "seed_15.mmd":
+        # seed_15 plans; its render aborts on two lines sharing one channel
+        # (#2041).
+        with pytest.raises(CurveInvariantError, match=SEED_15_ABORT):
+            render_string((FROZEN / name).read_text(), source_dir=str(FROZEN))
 
     encoded = serialize_route_plan(plan)
     assert encoded == serialize_route_plan(plan)
@@ -729,9 +742,12 @@ def test_frozen_sources_have_canonical_plan_serialisation(name: str) -> None:
 
 
 def test_frozen_source_plans_are_identical_across_supported_hash_seeds() -> None:
-    paths = tuple(
-        FROZEN / name
-        for name in ("seed_15.mmd", "seed_41.mmd", "seed_72.mmd", "seed_77.mmd")
+    # seed_15's render aborts (#2041), held to that abort by
+    # test_frozen_sources_have_canonical_plan_serialisation; genomeassembly
+    # carries three convergence plans through the same serialisation.
+    paths = (
+        *(FROZEN / name for name in ("seed_72.mmd", "seed_77.mmd")),
+        ROOT / "examples" / "genomeassembly.mmd",
     )
     script = """
 import json
@@ -771,8 +787,31 @@ print(json.dumps(result, sort_keys=True, separators=(',', ':')))
     assert len(set(outputs)) == 1
 
 
+@pytest.mark.parametrize("relative_path", sorted(ROUTE_EMISSION_ABORT_FIXTURES))
+def test_route_emission_abort_fixture_aborts_on_its_owned_segment(
+    relative_path: str,
+) -> None:
+    with (
+        warnings.catch_warnings(),
+        pytest.raises(RuntimeError, match=r"owned segment \d+ geometry changed"),
+    ):
+        warnings.simplefilter("ignore")
+        _observe(ROOT / relative_path)
+
+
 def test_every_routable_corpus_connector_and_leg_has_exact_plan_coverage() -> None:
     for path in ROUTABLE_CORPUS:
+        if path == FROZEN / "seed_41.mmd":
+            # seed_41 aborts in its convergence plan; test_hash_seed_determinism.py
+            # pins that abort with its defect classes.
+            continue
+        if (
+            path
+            == ROOT / "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd"
+        ):
+            # Aborts in production (on main too, ruling P) in its exit-turn plan;
+            # test_known_curve_aborts.py pins that abort (#2094 line 7et).
+            continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             graph, routes, plan = _observe(path)

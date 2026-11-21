@@ -38,6 +38,7 @@ from conftest import (
     Diff,
     compute_corpus_layout,
     content_corpus,
+    corpus_params,
     diff_station_coords,
     restore_graph_state,
     snapshot_graph_state,
@@ -139,7 +140,7 @@ _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
 
 
 @pytest.mark.parametrize(
-    "fid,path,is_nextflow", CORPUS, ids=[fid for fid, _, _ in CORPUS]
+    "fid,path,is_nextflow", corpus_params(CORPUS), ids=[fid for fid, _, _ in CORPUS]
 )
 def test_compensation_pass_is_end_of_layout_noop(fid, path, is_nextflow, monkeypatch):
     """Every compensation pass is a no-op when replayed after full settling

@@ -1,0 +1,23 @@
+%%metro title: A region floor lifts the lane seated above it
+%%metro line: red | Red | #e6194b
+%%metro line: green | Green | #3cb44b
+
+graph LR
+    subgraph feed [Feed]
+        source[source]
+    end
+    subgraph chain [Chain]
+        a[a]
+        b[b]
+        c[c]
+        a -->|red| b
+        b -->|red| c
+    end
+    subgraph sink [Sink]
+        %%metro direction: BT
+        land[land]
+        top[top]
+        land -->|green| top
+    end
+    c -->|red| land
+    source -->|green| land

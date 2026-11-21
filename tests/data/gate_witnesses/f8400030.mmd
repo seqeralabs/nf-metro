@@ -1,0 +1,78 @@
+%%metro title: Fuzz 8400030
+%%metro style: nfcore
+%%metro line: l0 | Sort | #e6194b
+%%metro line: l1 | Assemble | #3cb44b
+%%metro line: l2 | Count | #4363d8
+%%metro line: l3 | Assemble | #f58231
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 0,1
+%%metro grid: sec2 | 2,0
+%%metro grid: sec3 | 1,0
+%%metro grid: sec4 | 1,1
+
+graph LR
+    subgraph sec0 [Fastqc_Quant 0]
+        s0n0[dedup_filter]
+        s0n1[stats]
+        s0n2[quant]
+        s0n3[gather]
+        s0n4[gather_dedup]
+        s0n3 -->|l0,l3| s0n4
+        s0n0 -->|l1| s0n1
+        s0n0 -->|l1| s0n3
+        s0n0 -->|l3| s0n2
+        s0n2 -->|l3| s0n3
+    end
+    subgraph sec1 [Merge_Quant_Fastqc 1]
+        %%metro exit: bottom | l0, l1, l3
+        s1n0[index]
+        s1n1[merge_bam_cluster]
+        s1n2[vcf_markdup]
+        s1n3[pca]
+        s1n4[fastqc_bin]
+        s1n1 -->|l0| s1n2
+        s1n2 -->|l0,l1| s1n3
+        s1n3 -->|l0,l1,l2,l3| s1n4
+        s1n0 -->|l1| s1n2
+        s1n0 -->|l2,l3| s1n1
+        s1n1 -->|l2,l3| s1n3
+    end
+    subgraph sec2 [Vcf 2]
+        %%metro direction: RL
+        %%metro exit: top | l1, l3
+        s2n0[assemble]
+        s2n1[filter]
+        s2n2[BAM_DEDUP]
+        s2n3[cluster_stats]
+        s2n0 -->|l1,l3| s2n1
+        s2n1 -->|l1| s2n2
+        s2n2 -->|l1| s2n3
+        s2n1 -->|l3| s2n3
+    end
+    subgraph sec3 [Count 3]
+        s3n0[polish]
+        s3n1[filter]
+        s3n2[annotate]
+        s3n0 -->|l0,l1| s3n1
+        s3n1 -->|l1| s3n2
+    end
+    subgraph sec4 [Quant_Gather 4]
+        %%metro entry: bottom | l0, l1, l3
+        s4n0[PCA_PCA_FASTQC]
+        s4n1[merge_count]
+        s4n2[pca_summarise]
+        s4n0 -->|l0,l3| s4n1
+        s4n1 -->|l0,l1,l3| s4n2
+    end
+    s0n4 -->|l0| s1n1
+    s1n4 -->|l0| s4n0
+    s1n3 -->|l0| s3n0
+    s3n1 -->|l0| s4n1
+    s0n1 -->|l1| s1n0
+    s1n4 -->|l1,l3| s2n0
+    s2n3 -->|l1,l3| s3n0
+    s3n2 -->|l1| s4n1
+    s0n3 -->|l1| s1n2
+    s0n4 -->|l2,l3| s1n0
+    s2n3 -->|l3| s4n0
+    s3n0 -->|l3| s4n1

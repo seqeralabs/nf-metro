@@ -125,14 +125,6 @@ Ports first appear on bbox edges, then get aligned with their incoming / outgoin
 - **Stage 3.3**: For LR / RL sections with perpendicular (TOP / BOTTOM) entry, shift internal stations' X so the entry port has runway before stations begin.
 - **Stage 3.4**: Align LEFT and RIGHT exit ports on row-spanning fold sections with the target section's Y. Pushing a target down drops its bbox top below its row-mates'.
   The move therefore finishes by top-aligning the rows it disturbed, meaning the contiguous column groups that share their bbox tops.
-- **Stage 3.5**: Grow an LR or RL section's left and right bbox edges so its perpendicular TOP and BOTTOM ports keep the designed inset from them.
-  This is the X-axis rotation of the clearance the Y sizing keeps for a TB or BT section's LEFT and RIGHT ports.
-  A grow can widen a section into its column neighbor, which is why the stage re-enforces the inter-column gaps.
-- **Stage 3.6**: Level the bbox left edges of column mates that start their content at one X, growing the narrower boxes leftward.
-  This mirrors the row top-align at Stage 5.3 on the X axis, restricted to boxes whose left band is the same runway.
-  A grid row's sections share a trunk Y, and their tops therefore always frame the same thing.
-  A grid column's sections do not share a trunk X. Leveling boxes whose content starts at different X therefore buys an aligned edge at the price of an empty band.
-  Stations and the right edge stay put, while LEFT ports ride the edge out to the column line.
   A box stops short where a left neighbor in its own row band needs the inter-column corridor.
 
 Pass A leaves ports on bbox edges with first-approximation alignment.
@@ -177,10 +169,21 @@ The remaining geometric details follow: loop-side X recenter, bbox shrink and gr
 
 - **Stages 6.1 to 6.3**: Fan free content and source inputs upward into empty top bands, then collapse two-branch symmetric fans onto half-grid offsets, gated on `center_ports`.
 - **Stage 6.4**: Snap every station and port Y to the row's grid pitch, removing fractional drift from earlier passes.
-- **Stages 6.5 to 6.6**: Grow TB-section bbox bottoms to match downstream LR and RL targets, then re-anchor off-track inputs to their consumers' post-snap Y.
+- **Stage 6.6**: Re-anchor off-track inputs to their consumers' post-snap Y.
 - **Stages 6.7 to 6.9**: Re-center full-bundle columns around the row's final trunk Y, then restore the off-track-above-consumer and row top-align invariants that the recenter breaks.
   All are gated on `center_ports`.
 - **Stages 6.10 to 6.12**: Pin single-station downstream columns to their unique upstream Y, auto-balance content around the trunk, then re-center loop-side stations on their loop midpoint in an X-axis pass.
+  Stage 6.12 is the last stage that moves a station within its row, so the lane plan is decided at its close.
+- **Stage 6.12a**: Grow an LR or RL section's left and right bbox edges so its perpendicular TOP and BOTTOM ports keep the designed inset from them.
+  It reaches each port's outermost lane in the lane plan, so it runs after the plan is decided.
+  This is the X-axis rotation of the clearance the Y sizing keeps for a TB or BT section's LEFT and RIGHT ports.
+  A grow can widen a section into its column neighbor, which is why the stage re-enforces the inter-column gaps.
+- **Stage 6.12b**: Level the bbox left edges of column mates that start their content at one X, growing the narrower boxes leftward.
+  This mirrors the row top-align at Stage 5.3 on the X axis, restricted to boxes whose left band is the same runway.
+  A grid row's sections share a trunk Y, and their tops therefore always frame the same thing.
+  A grid column's sections do not share a trunk X. Leveling boxes whose content starts at different X therefore buys an aligned edge at the price of an empty band.
+  Stations and the right edge stay put, while LEFT ports ride the edge out to the column line.
+- **Stage 6.12c**: Grow TB-section bbox bottoms to match downstream LR and RL targets, reading each target station's pill span from the lane plan.
 - **Stages 6.13 to 6.14**: Shrink bbox bottoms to content and close vertical slack between rows in one two-phase helper, then shift sparse loop-side stations onto half-pitch Ys to clear bundle pass-throughs.
   The same helper pushes lower rows down internally when a shift grew a bbox.
 - **Stage 6.15a**: Fit bbox tops to content, symmetric with the bottom shrink in Stage 6.13.
@@ -227,13 +230,14 @@ The Stage and Pass labels line up cleanly:
 ## Post-layout routing boundary
 
 The numbered stages settle station, port, junction and section coordinates.
-The routing pipeline then computes per-line station offsets, applies the exact slots owned by semantic fan plans, and builds complete exit-turn and convergence plans before building one atomic emission decision per route system.
+The routing pipeline then reads per-line station offsets from the lane plan, applies the exact slots owned by semantic fan plans, and builds complete exit-turn and convergence plans before building one atomic emission decision per route system.
 It then emits systems once, in canonical scaffold order.
 Whole-graph rail mode takes its documented short circuit instead.
 
-`compute_station_offsets` first produces the ordinary offset map.
+`compute_station_offsets` first produces the offset map: the layout's lane plan, decided at the close of stage 6.12 and read through the record's draw accessors, so every lane routing draws is a planned one.
+Nothing reads the plan before it is decided, validation included: a checkpoint guard that reads offsets or routes is first due at `after Stage 6.12`, so a validated layout draws the production layout.
 Immediately before emission, `_route_edges` applies planned fan carriers and builds the exit-turn plan once, then builds convergence plans from the same semantic scaffold and settled routing context.
-The exit-turn planner compacts each supported group onto its active lanes, commits the offsets it owns across the source seam, and assigns source-side turn axes from that same order.
+The exit-turn planner reads each supported group's source lanes from the record at the exit port and assigns source-side turn axes in that order; it writes no offset.
 The convergence planner freezes target trunks, ordered feeder joins, continuations and endpoint ownership.
 The route-system executor freezes one planned disposition for the complete system, and each planned inter-section family's stable ID.
 Ordinary and observed routing share this boundary.

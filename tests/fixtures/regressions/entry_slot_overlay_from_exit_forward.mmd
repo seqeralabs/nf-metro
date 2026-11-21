@@ -1,0 +1,15 @@
+%%metro title: Entry Slot Overlay From Exit Forward
+%%metro line: l0 | Dedup | #e6194b
+%%metro line: l1 | Fastqc_Call_Bam | #3cb44b
+%%metro line: l2 | Annotate_Trim | #4363d8
+graph LR
+    subgraph sec2 [Gather 2]
+        s2n3 -->|l0| s2n4
+    end
+    subgraph sec3 [Markdup 3]
+        s3n0[stats_trim_fastqc]
+        s3n2[normalize]
+    end
+    s2n4 -->|l0,l2| s3n0
+    s1n2 -->|l1| s2n4
+    s0n2 -->|l1| s3n2

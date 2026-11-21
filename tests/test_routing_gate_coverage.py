@@ -167,7 +167,6 @@ OBSERVER_GATES = [
     "core.py::if observe_plan:::#2",
     "core.py::if observer is not None:::#1",
     "core.py::if observer is not None:::#2",
-    "core.py::if observer is not None:::#3",
     "inter_section_handlers.py::if observer is not None and route is not None:::#1",
 ]
 
@@ -226,7 +225,6 @@ PHANTOM_MULTILINE_GATES = [
     "common.py::for edge in graph.edges:::#1",  # exit through unevaluated annotation
     "context.py::if (::#1",  # multi-line ``and``/``or`` conditions
     "context.py::if (::#2",
-    "context.py::if (::#3",
 ]
 
 
@@ -270,10 +268,9 @@ def test_genuine_dead_arm_not_masked_as_covered(gates):
 # operand lines.  Each carries an un-exercised short-circuit arm the collapsed
 # opening-line view masked behind a single phantom verdict.
 EXPANDED_OPERAND_GATES = [
-    "reversal.py::or (sec_id, succ_id) in horizontal_succ_pairs::#1",
     "inter_section_handlers.py::and src_sec is not None::#1",
     "normalize.py::go is not None::#1",
-    "intra_handlers.py::and line not in graph.station_lines(sid)::#1",
+    "inter_section_handlers.py::and tgt_sec is not None::#1",
 ]
 
 
@@ -303,14 +300,16 @@ def test_reversal_fallthrough_gap_not_masked_by_collapsed_gate(gates):
 
     A reversed non-TB section whose cross-section successor is neither on the
     same grid row nor a horizontal LEFT/RIGHT port pair correctly does *not*
-    propagate reversal, but no corpus topology exercises that path.  It must show
-    as the un-exercised final operand of the ``or`` chain, not collapse onto the
-    opening ``if (`` where a single verdict would mask it.
+    propagate reversal.  That fall-through must show as the final operand of the
+    ``or`` chain, with its own arm back to the loop, not collapse onto the
+    opening ``if (`` where a single verdict would mask whether it is reached.
     """
     operand = _gate(
         gates, "reversal.py::or (sec_id, succ_id) in horizontal_succ_pairs::#1"
     )
-    assert operand is not None and not operand.fully_covered
+    assert operand is not None
+    fallthrough = [arm for arm in operand.arms if arm.dst_line < operand.src_line]
+    assert fallthrough and all(arm.covered for arm in fallthrough)
     collapsed = [
         g.key
         for g in gates

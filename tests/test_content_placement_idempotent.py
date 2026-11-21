@@ -29,6 +29,7 @@ from conftest import (
     Diff,
     compute_corpus_layout,
     content_corpus,
+    corpus_params,
     diff_station_coords,
     restore_graph_state,
     snapshot_graph_state,
@@ -60,7 +61,7 @@ def _make_idempotence_probe(original, diffs: list[Diff]):
 
 
 @pytest.mark.parametrize(
-    "fid,path,is_nextflow", CORPUS, ids=[fid for fid, _, _ in CORPUS]
+    "fid,path,is_nextflow", corpus_params(CORPUS), ids=[fid for fid, _, _ in CORPUS]
 )
 def test_placement_phase_is_idempotent(fid, path, is_nextflow, monkeypatch):
     """Every content-placement phase is idempotent on ``fid``.

@@ -1,0 +1,34 @@
+%%metro title: Fuzz 8401872
+%%metro line: l0 | Normalize | #e6194b
+%%metro line: l1 | Quant_Gather | #3cb44b
+%%metro line: l2 | Dedup | #4363d8
+%%metro line: l3 | Qc | #f58231
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+
+graph LR
+    subgraph sec0 [Trim 0]
+        s0n0[vcf]
+        s0n1[filter]
+        s0n0 -->|l0,l1,l3| s0n1
+    end
+    subgraph sec1 [Trim_Bam 1]
+        %%metro entry: right | l1, l2, l3
+        s1n0[qc]
+        s1n1[report]
+        s1n0 -->|l2| s1n1
+    end
+    subgraph sec2 [Markdup_Polish_Vcf 2]
+        s2n0[bam]
+        s2n1[quant_sort]
+        s2n2[merge_merge]
+        s2n0 -->|l2| s2n2
+        s2n0 -->|l2| s2n1
+        s2n1 -->|l2| s2n2
+    end
+    s0n1 -->|l0| s2n2
+    s0n1 -->|l1,l3| s1n1
+    s0n0 -->|l1| s2n1
+    s0n1 -->|l2| s1n0
+    s1n1 -->|l2,l3| s2n0

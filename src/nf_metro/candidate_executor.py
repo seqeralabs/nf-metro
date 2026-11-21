@@ -36,7 +36,7 @@ from nf_metro.layout.route_plan import (
     serialize_route_plan,
 )
 from nf_metro.layout.routing import compute_station_offsets, observe_route_edges
-from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
+from nf_metro.options import LAYOUT_OPTIONS, value_violation
 from nf_metro.parser import ERROR, validate_graph
 from nf_metro.parser.commitments import (
     CommitmentConflictError,
@@ -94,7 +94,6 @@ __all__ = [
 LayoutOptionScalar = str | int | float | bool
 _CACHE_FIELDS = {
     "_route_topology_query",
-    "_linear_entry_pill_lines_cache",
     "_station_lines_cache",
     "_edges_from_cache",
     "_edges_to_cache",
@@ -1347,31 +1346,6 @@ def _run_one(
             reap(terminate=True)
 
 
-def _validate_option_value(option: LayoutOption, value: object) -> bool:
-    if option.kind == "bool":
-        return isinstance(value, bool)
-    if option.kind == "int":
-        valid = isinstance(value, int) and not isinstance(value, bool)
-    elif option.kind == "float":
-        valid = (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(float(value))
-        )
-    elif option.kind == "choice":
-        return isinstance(value, str) and value in option.choices
-    else:
-        return isinstance(value, str)
-    if not valid:
-        return False
-    number = float(cast(int | float, value))
-    if option.sign == "positive" and number <= 0:
-        return False
-    if option.sign == "nonneg" and number < 0:
-        return False
-    return option.max_val is None or number <= option.max_val
-
-
 def _layout_options(
     values: LayoutOptionValues,
 ) -> tuple[tuple[str, LayoutOptionScalar], ...]:
@@ -1389,7 +1363,7 @@ def _layout_options(
         option = registry.get(item.name)
         if option is None:
             raise ValueError(f"unknown caller layout option {item.name!r}")
-        if not _validate_option_value(option, item.value):
+        if value_violation(option, item.value):
             raise ValueError(
                 f"invalid caller layout option {item.name!r}: {item.value!r}"
             )

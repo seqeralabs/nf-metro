@@ -157,8 +157,8 @@ domain grouping, not an axis swap, and likewise stays.
 | after Stage 1.1 | `_guard_section_bboxes_positive` |
 | after Stage 2.1 | finite coords, stations-in-sections, bboxes-positive |
 | after Stage 3.1 | ports-on-boundaries |
-| after exit-port align + row re-flush and the X-axis perp-port inset (Stages 3.4 to 3.5) | ports-on-boundaries |
-| after each Pass C sub-stage (bisection) | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
+| after exit-port align + row re-flush (Stage 3.4) | ports-on-boundaries |
+| after each Pass C sub-stage (bisection), including `after Stage 6.12c` once the box sizers that read the lane plan (the X-axis perp-port inset at 6.12a, the column-edge levelling at 6.12b, the TB bottom stretch at 6.12c) have run | finite coords, bboxes-positive, ports-on-boundaries, station-x-column-drift, plus three phase-gated guards (see below) |
 | after final | bisection set (all unconditional) + off-track-above-anchor, row-trunk-cy-consistent, inter-section-routes-in-row-band |
 
 Bisection checkpoints fire after every Pass C sub-stage (see the
@@ -171,7 +171,7 @@ bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
 | Guard | First valid checkpoint | Transient because |
 |---|---|---|
 | `_guard_stations_in_sections` | after Stage 5.3 | Stage 5.2's off-track lift moves stations above the section bbox; Stage 5.3 grows the bbox to enclose them. |
-| `_guard_no_station_overlap` | after Stage 6.4 | Pre-snap fan placement can sit a fraction of a pitch off the row grid; Stage 6.4's snap pulls every station onto the grid while keeping same-column stations on distinct slots, after which markers must be collision-free. |
+| `_guard_no_station_overlap` | after Stage 6.12 | It reads station offsets, which read the lane plan decided at the close of Stage 6.12. Pre-snap fan placement can also sit a fraction of a pitch off the row grid until Stage 6.4's snap pulls every station onto the grid on distinct same-column slots. |
 | `_guard_no_line_crosses_non_consumer` | after Stage 6.14 | A sparse loop-side station sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
 
 Three further guards are excluded from the bisection set entirely
@@ -280,11 +280,6 @@ pass:
   read by the Stage 6.4 grid snap, which must skip these source/trunk stations
   so they stay on the symfan's local frame instead of snapping to a rowspan
   neighbour's fractional row-grid origin.
-- `graph._partial_trunk_descents` - `{section_id: PartialTrunkDescent}` (the two
-  endpoint ports and the descent) written by Stage 4.8 (`_align_row_trunk_ys`),
-  reassigned in full each pass (empty when nothing descends); read by the Stage
-  6.4 grid snap, which re-seats each partial from the carrier port's post-snap Y,
-  and by the `_guard_partial_trunk_descent_seated` postcondition.
 - `graph._consumers_grid_snapped` - set right after the Stage 6.4 snap; the
   Stage 6.6 off-track reanchor carries its own always-on guard on it.
 
@@ -322,12 +317,9 @@ runtime check either:
 - `graph._fold_compressed_sections` - recorded at parse time for sections a
   lowered fold threshold relocated; read by the fold-exit-side guard and the
   render fold-abort chokepoint. A resolve-time flow reversal is recorded as a
-  `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; routing's
-  exit-port offset reads that typed reason instead of a second section set.
-- `graph._linear_entry_pill_lines_cache` - accepted linear-entry cohorts
-  projected by each station-offset computation. Marker bbox, label, and render
-  consumers use the cohort with the offset map produced by that computation;
-  the empty default means no entry frame owns marker geometry.
+  `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; the
+  explicit-grid direction guard accepts a non-LR direction only with that
+  typed reason, instead of a second section set.
 - `graph._rail_y` - the per-section `{line_id: rail_y}` map produced by the
   opt-in rail-mode layout; read by the rail router, label placement, and rail
   guards, empty when rail mode is off.
@@ -570,80 +562,6 @@ in pipeline order.
 - **Lifecycle:** invariant - the fold/TB exit-port no-kink Y holds at
   the end (re-asserted by Stage 5.5).
 
-### Stage 3.5: reserve the perpendicular-port edge inset on X
-- **Purpose**: Grow a horizontal-flow (LR/RL) section's left and right
-  bbox edges so each TOP/BOTTOM port keeps `PERP_PORT_EDGE_INSET` from
-  them, the X-axis rotation of the inset the Y sizing keeps for a
-  vertical flow's LEFT/RIGHT ports. X sizing measures real stations
-  only, so a port seated past the trailing station (Stage 3.4) or
-  dragged onto a drop column lands inside the padding band with nothing
-  to push the edge out. Each such port owes its facing edges the inset on
-  its own; the two edges are not levelled against each other, because an
-  edge already held further out by content or a routing band is not the
-  port's doing.
-- **Helper**: `_reserve_perp_port_edge_inset` (`phases/bbox.py`),
-  followed by `reenforce_column_gaps` (`section_placement.py`) when any
-  box grew.
-- **Precondition**: Perpendicular port X settled (Stages 3.2 to 3.4 are
-  the last to move one relative to its own box).
-- **Postcondition**: No LR/RL TOP/BOTTOM port's outermost drawn lane sits
-  within `PERP_PORT_EDGE_INSET` of its section's left or right edge
-  (`port_bundle_edge_reach`, as on the Y axis); adjacent columns still keep
-  `MIN_INTER_SECTION_GAP`.
-- **Invariants preserved**: Station coords; every port's own edge
-  anchoring (LEFT/RIGHT ports move with the edge they are pinned to).
-- **Validate guard after**: `_guard_ports_on_boundaries`.
-- **Related tests**:
-  `test_perp_port_edge_clearance_1494.py::test_horizontal_perp_ports_keep_the_designed_inset`.
-- **Lifecycle:** invariant - the inset holds at the final boundary.
-
-### Stage 3.6: level a grid column's shared-runway X edges
-- **Purpose**: Give column mates that start their content at one X a
-  common bbox edge on that side, so the runway between that edge and the
-  shared content column is the same width in each. The X half of the same
-  levelling primitive the row top-align uses (Stages 5.3 / 6.9), narrowed:
-  a grid row's sections share a trunk Y, so their tops are always
-  comparable, whereas a grid column's sections share no trunk X, and
-  levelling boxes whose content starts at different X moves an edge
-  without moving anything a viewer reads. Both X edges are levelled,
-  because unlike the box top - which carries the header badge, and so is
-  privileged by text a rotation does not carry with it - neither X edge is
-  the one a column must agree on.
-- **Helper**: `_level_column_anchor_edges` (`phases/bbox.py`), grouping
-  via `_column_contiguous_row_groups` (`phases/_common.py`) then
-  `_shared_anchor_runway_runs` (`phases/bbox.py`), levelling each run
-  through `level_group_anchor_edges` (`phases/bbox.py`, shared with the
-  row top-align).
-- **Precondition**: Every X-axis box mover has run - Stage 1.1 sizing,
-  the Stage 1.3 column seating, the Stage 3.3 perp-entry runway grow, the
-  Stage 3.5 perp inset - so the levelled edge is not re-broken by a later
-  widen.
-- **Postcondition**: For each X side, within each maximal run of adjacent
-  grid rows in one column whose sections' content stations nearest that
-  side share an X, every section shares the run's outermost edge on that
-  side, except one held short by a neighbour overlapping its own row band
-  (which keeps `MIN_INTER_SECTION_GAP` of inter-column corridor). Members
-  of a packed cell are out of scope: they sit side-by-side along X inside
-  one cell, so no common vertical edge exists. Two kinds of section break a
-  run: a rail-flagged one, because `_retrofit_section_rails_phase`
-  re-derives its interior from its bbox, so growing its edge would slide
-  its stations rather than widen a runway in front of them; and one whose
-  exit port rides the edge under test, because that port's coordinate is
-  where the inter-section route leaves and the clearances downstream of it
-  are measured from there.
-- **Invariants preserved**: Station coords (only `bbox_x` / `bbox_w`
-  move); the opposite edge of the pair being levelled; every port's own
-  edge anchoring (LEFT/RIGHT ports move with the edge they are pinned
-  to). Because a run's members share a content X on the side being
-  levelled, growing each to the run's outermost edge on that side can only
-  raise a narrower runway to the widest already present in the run, so the
-  spread of runway widths within a grid column never grows.
-- **Validate guard after**: `_guard_ports_on_boundaries`.
-- **Related tests**: `test_grid_column_anchor_edge.py`.
-- **Lifecycle:** invariant - the levelled edge holds at the final
-  boundary for the sections the stage moved
-  (`_guard_column_run_shares_its_anchored_edge`).
-
 ### Stage 4.1: align ports to downstream
 - **Purpose**: For non-fold LR/RL sections, pull exit-entry port
   pairs toward the downstream section's internal stations so lines
@@ -749,24 +667,7 @@ in pipeline order.
   already share, so a partial member follows the trunk without
   redefining it and anything deeper than that Y stays put. In both
   cases the target is a Y at which some carrier's LEFT/RIGHT port
-  already sits. A partial that hands a through-line straight to a carrier
-  one grid column away -- port to port, no junction between them and no
-  cell-mate forcing a bypass -- is seated an extra `s` below that shared
-  target, where `s = off(port_on_carrier, lid) - off(port_on_partial, lid)`
-  is the line's lane on the destination port minus its lane on the source
-  port (`compute_station_offsets`); this descent makes the connector run
-  level at the line's own lane instead of jogging into it. The descent
-  fires only when every qualifying handover agrees on one positive `s` that
-  is *stable*: re-derived on a frame where the partial section is shifted so
-  its handover port lands level with the carrier port, `s` must survive
-  unchanged. A carrier's exit port mid-pass has not yet settled onto the
-  level its exiting lines live at, so a raw `s` can be a transient that the
-  levelled re-derivation collapses to zero; seating a descent on that phantom
-  step corrupts the exit geometry, so a step that does not survive is
-  suppressed. The descent is recorded in `graph._partial_trunk_descents`
-  (reassigned in full each pass) with its two endpoint ports, because it is a
-  sub-grid offset the Stage 6.4 grid snap can round onto the carrier slot --
-  Stage 6.4 re-seats it. When no one section carries the whole row trunk (no
+  already sits. When no one section carries the whole row trunk (no
   carrier consensus), the run instead levels each sub-run of `bbox_x`-adjacent
   sections carrying identical through-lines whose facing ports split their
   shared lane, and only where one member's own through-line arrives and leaves
@@ -1029,24 +930,15 @@ in pipeline order.
   its unbranched trunk to the branch midpoint. This keeps the complete
   centreline straight. A restored station joins
   `graph.half_grid_station_ids` if it sits half a pitch from the branch
-  grid. Finally it re-seats each `graph._partial_trunk_descents` entry:
-  the whole partial section -- every internal station, every LR/RL port
-  and its bbox -- is shifted so its handover port lands `descent` below
-  the carrier port's post-snap Y. Working from that carrier reference
-  lands it right whether the snap collapsed the Stage 4.8 handover descent
-  onto the carrier slot (shared row grid) or left it in place (explicit-grid
-  solo section), and finds zero gap on a re-run, so a preserved descent is
-  never double-counted.
+  grid.
 - **Helper**: `_snap_all_y_to_grid`, with
   `_restore_convergence_midpoints` / `_restore_divergence_midpoints`
   and `_centreline_trunk_followers` (`phases/fan_bundles.py`) for the
-  midpoint restores, and `_restore_partial_trunk_descents` for the
-  handover descents.
+  midpoint restores.
 - **Precondition**: All semantic Y shifts done. If Stage 6.3 ran,
   `graph.half_grid_station_ids` is populated.
 - **Postcondition**: Every station and port Y is a grid slot of the
-  per-section / per-row pitch (except marked half-grid stations and
-  partial row-mates re-seated a handover lane below their carrier). A
+  per-section / per-row pitch (except marked half-grid stations). A
   symmetric diamond's fork hub, join and trunk run share one Y.
 - **Invariants preserved**: X coordinates (tested by
   `test_grid_snap_does_not_mutate_x`). Half-grid station Ys.
@@ -1057,23 +949,6 @@ in pipeline order.
 - **Lifecycle:** invariant - every (non-half-grid) station/port Y is a
   grid slot at the final boundary (re-asserted canvas-wide by Stage
   6.15).
-
-### Stage 6.5: align TB-section bbox bottoms
-- **Purpose**: Extend TB-section bbox bottom to match the downstream
-  LR/RL section's *settled content* bottom so the line doesn't look
-  pinned to the TB bbox edge, and the straight inter-section run clears
-  both section bottoms by the same distance. The target's settled
-  content bottom (`_predict_section_content_bottom`) is used rather than
-  its live `bbox_h`, which the later bbox-shrink phase may collapse.
-- **Helper**: `_align_tb_section_bbox_bottoms` (`phases/ports.py`).
-- **Precondition**: All station/port Ys final (post-snap).
-- **Postcondition**: For each TB section feeding an LR/RL target,
-  `tb.bbox_y + tb.bbox_h >= target settled content bottom`. After the
-  bbox-shrink phase the two edges are level for a straight run (guarded
-  by `_guard_fold_lr_exit_sections_share_bbox_bottom`, #1162).
-- **Invariants preserved**: All station and port Ys. Other bboxes.
-- **Lifecycle:** invariant - TB-section bbox bottoms align with their
-  downstream LR/RL target at the final boundary.
 
 ### Stage 6.6: reanchor off-track to consumer (engine.py)
 - **Purpose**: Re-pin each off-track station `n*step` clear of its anchor
@@ -1300,6 +1175,108 @@ in pipeline order.
   `test_loop_column_stations_share_x`.
 - **Lifecycle:** invariant - loop-side stations sit at the visual centre
   of their loop run at the final boundary.
+- **Closes with**: the lane plan decision (`seal_lane_plan`, see "Lane plan
+  record"): this is the last stage that moves a station within its row.
+
+### Stage 6.12a: reserve the perpendicular-port edge inset on X
+- **Purpose**: Grow a horizontal-flow (LR/RL) section's left and right
+  bbox edges so each TOP/BOTTOM port keeps `PERP_PORT_EDGE_INSET` from
+  them, the X-axis rotation of the inset the Y sizing keeps for a
+  vertical flow's LEFT/RIGHT ports. X sizing measures real stations
+  only, so a port seated past the trailing station (Stage 3.4) or
+  dragged onto a drop column lands inside the padding band with nothing
+  to push the edge out. Each such port owes its facing edges the inset on
+  its own; the two edges are not levelled against each other, because an
+  edge already held further out by content or a routing band is not the
+  port's doing.
+- **Helper**: `_reserve_perp_port_edge_inset` (`phases/bbox.py`),
+  followed by `reenforce_column_gaps` (`section_placement.py`) when any
+  box grew.
+- **Precondition**: Perpendicular port X settled (Stages 3.2 to 3.4 are
+  the last to move one relative to its own box) and the lane plan decided
+  (the inset reaches each port's outermost lane in the record).
+- **Postcondition**: No LR/RL TOP/BOTTOM port's outermost drawn lane sits
+  within `PERP_PORT_EDGE_INSET` of its section's left or right edge
+  (`port_bundle_edge_reach`, as on the Y axis); adjacent columns still keep
+  `MIN_INTER_SECTION_GAP`.
+- **Invariants preserved**: Station coords; every port's own edge
+  anchoring (LEFT/RIGHT ports move with the edge they are pinned to); the
+  lane plan record (a column re-enforce translates whole columns, which
+  moves no record input relative to another).
+- **Validate guard after**: `_guard_ports_on_boundaries`, at the
+  `after Stage 6.12c` checkpoint.
+- **Related tests**:
+  `test_perp_port_edge_clearance_1494.py::test_horizontal_perp_ports_keep_the_designed_inset`.
+- **Lifecycle:** invariant - the inset holds at the final boundary.
+
+### Stage 6.12b: level a grid column's shared-runway X edges
+- **Purpose**: Give column mates that start their content at one X a
+  common bbox edge on that side, so the runway between that edge and the
+  shared content column is the same width in each. The X half of the same
+  levelling primitive the row top-align uses (Stages 5.3 / 6.9), narrowed:
+  a grid row's sections share a trunk Y, so their tops are always
+  comparable, whereas a grid column's sections share no trunk X, and
+  levelling boxes whose content starts at different X moves an edge
+  without moving anything a viewer reads. Both X edges are levelled,
+  because unlike the box top - which carries the header badge, and so is
+  privileged by text a rotation does not carry with it - neither X edge is
+  the one a column must agree on.
+- **Helper**: `_level_column_anchor_edges` (`phases/bbox.py`), grouping
+  via `_column_contiguous_row_groups` (`phases/_common.py`) then
+  `_shared_anchor_runway_runs` (`phases/bbox.py`), levelling each run
+  through `level_group_anchor_edges` (`phases/bbox.py`, shared with the
+  row top-align).
+- **Precondition**: Every X-axis box mover has run - Stage 1.1 sizing,
+  the Stage 1.3 column seating, the Stage 3.3 perp-entry runway grow, the
+  Stage 6.12a perp inset - so the levelled edge is not re-broken by a later
+  widen.
+- **Postcondition**: For each X side, within each maximal run of adjacent
+  grid rows in one column whose sections' content stations nearest that
+  side share an X, every section shares the run's outermost edge on that
+  side, except one held short by a neighbour overlapping its own row band
+  (which keeps `MIN_INTER_SECTION_GAP` of inter-column corridor). Members
+  of a packed cell are out of scope: they sit side-by-side along X inside
+  one cell, so no common vertical edge exists. Two kinds of section break a
+  run: a rail-flagged one, because `_retrofit_section_rails_phase`
+  re-derives its interior from its bbox, so growing its edge would slide
+  its stations rather than widen a runway in front of them; and one whose
+  exit port rides the edge under test, because that port's coordinate is
+  where the inter-section route leaves and the clearances downstream of it
+  are measured from there.
+- **Invariants preserved**: Station coords (only `bbox_x` / `bbox_w`
+  move); the opposite edge of the pair being levelled; every port's own
+  edge anchoring (LEFT/RIGHT ports move with the edge they are pinned
+  to). Because a run's members share a content X on the side being
+  levelled, growing each to the run's outermost edge on that side can only
+  raise a narrower runway to the widest already present in the run, so the
+  spread of runway widths within a grid column never grows.
+- **Validate guard after**: `_guard_ports_on_boundaries`, at the
+  `after Stage 6.12c` checkpoint.
+- **Related tests**: `test_grid_column_anchor_edge.py`.
+- **Lifecycle:** invariant - the levelled edge holds at the final
+  boundary for the sections the stage moved
+  (`_guard_column_run_shares_its_anchored_edge`).
+
+### Stage 6.12c: align TB-section bbox bottoms
+- **Purpose**: Extend TB-section bbox bottom to match the downstream
+  LR/RL section's *settled content* bottom so the line doesn't look
+  pinned to the TB bbox edge, and the straight inter-section run clears
+  both section bottoms by the same distance. The target's settled
+  content bottom (`_predict_section_content_bottom`) is used rather than
+  its live `bbox_h`, which the later bbox-shrink phase may collapse.
+- **Helper**: `_align_tb_section_bbox_bottoms` (`phases/ports.py`).
+- **Precondition**: All station/port Ys final (post-snap) and the lane
+  plan decided (each target station's pill span below its anchor lane is
+  read from the record).
+- **Postcondition**: For each TB section feeding an LR/RL target,
+  `tb.bbox_y + tb.bbox_h >= target settled content bottom`. After the
+  bbox-shrink phase the two edges are level for a straight run (guarded
+  by `_guard_fold_lr_exit_sections_share_bbox_bottom`, #1162).
+- **Invariants preserved**: All station and port Ys. Other bboxes.
+- **Validate guard after**: `_guard_ports_on_boundaries` (with the rest of
+  the Pass C checkpoint set at `after Stage 6.12c`).
+- **Lifecycle:** invariant - TB-section bbox bottoms align with their
+  downstream LR/RL target at the final boundary.
 
 ### Stage 6.13: shrink and tighten rows
 - **Purpose**: Shrink each section's bbox bottom to
@@ -1567,101 +1544,93 @@ in pipeline order.
   `_guard_section_top_padding`.
 - **Lifecycle:** invariant - no geometry or bbox phase follows this refit.
 
-## Post-layout offset boundary: late per-line offset phases
+## Post-layout offset boundary: the lane plan drawn
 
-`compute_station_offsets` (`layout/routing/offsets.py`) assigns one lane per
-`(station, line)` in numbered phases; its docstring lists every phase in order.
-The two below are recorded here because they move lanes a whole section at a
-time, after each base, station, port, junction and rail-boundary phase has
-settled, and because the planned-fan offsets that follow them own the lanes a
-fan plan states.
+`compute_station_offsets` (`layout/routing/offsets.py`) writes no lane of its
+own: every `(station, line)` offset it returns is the layout's lane plan read
+through the record's draw accessors (`planned_offsets` in
+`layout/lane_plan.py`). Rail-mode layouts return no offsets.
 
-### Phase 14b: entry-arrival lane slotting
+### Lane plan record (decided at the close of 6.12)
 
-- **Purpose**: An inter-section run arrives on the lane its upstream carrier
-  draws. Where the receiving section reserves a different slot for that line,
-  the run between the entry port and the first station spends the difference as
-  a sub-radius diagonal - and a port draws no marker, so that step lands in open
-  space just inside the section box. Exchange the arriving line's slot for the
-  one already holding the approach lane.
-- **Helpers**: `_slot_entry_arrivals_on_their_approach_lane` walks each
-  lane-stacked section's flow-side entry ports; `_slot_one_entry_arrival`
-  decides one line; `_exchange_pair_beyond_exit` carries an exchange that
-  reaches an exit port out along the pair's shared chain.
-- **Precondition**: Non-compact mode, and a section whose lanes run along Y.
-  The port, reconciliation and rail-boundary phases (5 through 14) have settled
-  the upstream lane the exchange reads.
-- **Postcondition**: Where the exchange is provably a permutation of lanes
-  already in use at the first station and provably crossing-free - the approach
-  lane held by exactly one other line, and that line originating at the station,
-  so the two meet only under the station's own marker - the arriving line holds
-  its approach lane, the displaced line holds the slot the arrival vacated, and
-  the swap propagates along the section's horizontal runs. Outside the section
-  the exchange continues until the pair stops travelling together, so the
-  bundle's lead-in order at the divergence junction and its peel order at the
-  destination agree. Every station keeps one lane per line it carries.
-- **Invariants preserved**: Station, port and junction coordinates; the number
-  of lanes each station spreads; the order of every line outside the exchanged
-  pair. The approach lane is read as a stored lane offset, which names the same
-  lane at the consumer only while the feeder's trunk is level with it, so a
-  stepped seam is declined rather than converted through screen coordinates.
-- **Related tests**:
-  `test_entry_arrival_permutes_lanes_rather_than_sharing_one`.
-- **Lifecycle:** invariant - the arriving line holds its approach lane in the
-  published offset map: phase 14c can only relabel a whole section's levels
-  rigidly, which preserves the exchange.
-
-### Phase 14c: section free-lane closure
-
-- **Purpose**: A station whose bundle skips a lane level draws a marker tall
-  enough to span it. That reservation earns its space when a section-mate rides
-  the level; a level *no* line of the section rides reserves nothing, so every
-  lane above it drops one step.
-- **Helpers**: `_close_section_dead_lanes`, admitting a section's shift only
-  when `_dead_lane_squeeze_keeps_runs` confirms it.
-- **Precondition**: Non-compact mode; phase 14b has run, being the last phase
-  that can vacate a level. Rail-laid sections are skipped: their geometry is
-  drawn from absolute rail coordinates, so their lane levels are not a bundle to
-  tighten.
-- **Postcondition**: No section reserves a lane level none of its lines ride,
-  except where closing one would tilt a run. The drop is a rigid,
-  order-preserving relabelling applied to every station and port of the section
-  at once, and it is applied only when no edge carrying a shifted line ends with
-  a larger lane difference across it - so a run that was level inside the
-  section or across one of its seams stays level, and a hop that already stepped
-  never steps further. A squeeze that fails that test is declined whole and the
-  section keeps its dead level: the level costs a taller marker, a tilted run
-  costs a kink. No fixture in the corpus needs that escape, which is why
-  `tests/test_section_lane_reservations.py` can assert the unconditional form
-  over every laid-out `.mmd`.
-- **Invariants preserved**: Bundle order, one lane per line at every station,
-  compact-mode and rail-section offsets, and the lanes a fan plan states: the
-  planned-fan offsets run after this and have the last word on them.
-- **Related tests**: `tests/test_section_lane_reservations.py`.
-- **Lifecycle:** invariant - the published offset map holds no lane level
-  reserved for a line its section never carries, save one a declined squeeze
-  left behind.
+- **Purpose**: Decide the layout's lanes once, from structure and placement:
+  every port's line order and same-band entry approach, the far-side
+  approaches, the track plan (every in-section `(node, line)`'s lane, from
+  which each exit's order is read, and every perpendicular port's offsets), and
+  each rail-section port's origin (the middle of its own lanes).
+- **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called by the engine
+  at the close of Stage 6.12 (`LANE_PLAN_STAGE`) and once a sectionless layout
+  is placed, builds the record with `build_lane_plan` and keeps it on the
+  graph.  `lane_plan_of` returns it and raises `LanePlanNotSealed` before the
+  decision; `recorded_lane_plan` returns it or `None`.  `build_lane_plan`
+  decides the track plan section by section, upstream first, asking the
+  `PortOrderBuilder` (`layout/port_order_plan.py`) for entry orders and feeding
+  it exit orders and the orders straight seams pin at entries.  Born lines
+  leaving a divergence fan read `fanout_divergence_peel_order`
+  (`layout/fan_ordering.py`) in their section flow's frame.  `start_layout`,
+  called at the top of `_layout_once`, clears the previous layout's record.
+- **Precondition**: Station coordinates, section boxes, grid cells and cell
+  packs as they stand at the close of Stage 6.12, the last stage that moves a
+  station within its row, and the fan plans (`graph.fan_plans`) installed at
+  the top of `_layout_once`.  No stage before it reads a lane: the box sizers
+  that need lanes (Stages 6.12a to 6.12c) run after it, and validation's
+  checkpoint guards that read offsets or routes are first due at
+  `after Stage 6.12` (their `first_valid_stage`).
+- **Postcondition**: `graph._lane_plan` holds a `LanePlan` until the next
+  layout starts: every port has a `PortOrder` (its lines travel-left to
+  travel-right, or undecided with the missing input named), every same-band
+  `(entry, upstream source)` pair an `Approach`, every in-section
+  `(node, line)` and fed junction a lane, every perpendicular port each line's
+  offset across its travel, every entry a straight seam pins its track lanes,
+  every lane a fan seam fixes its `fan_seams` entry, every entry two feeding
+  bundles cross, or a seam-pinned line crosses a feeding bundle at, a forced
+  crossing, (among the perpendicular offsets) the offsets that keep a
+  perpendicular port's straight-seam lines straight, and every rail-section
+  port whose lanes are off-centre its origin.  The record and its mappings are
+  read-only and shared, never copied, by a deep copy of the graph.  Every
+  offsets run of the layout, and routing and rendering after it, read the
+  decided record rather than rebuilding it, and a layout validated with
+  `validate=True` decides the same record at the same stage as without.
+  Rail-mode layouts hold no record.  Stages 6.13 to 6.17 still move positions
+  the record read on a few maps (#2171); a layout's record is not rebuilt for
+  them.
+- **Invariants preserved**: The record reads no lane offset, route or draft.
+  `compute_station_offsets` returns exactly
+  `planned_offsets(graph, record, step)`; the record holds every station
+  line, and one it lacks fails closed.
+- **Readers**: `compute_station_offsets`; routing's approach-side consumers
+  (the same-row bypass entry, the left-entry over-top and far-left U-turn
+  wraps, the row-level bottom-row climb), the perpendicular-entry crossing
+  (`_planned_entry_crossing` in `routing/perp.py`), the seam turn facts of
+  `_InterFacts`, and the invariants `check_exit_inherits_entry_bundle_order`,
+  `check_merge_port_approach_side` and
+  `check_convergence_shallow_feeder_concentric` (which exempts the pairs a
+  recorded crossing exchanges at the entry), and the
+  `_guard_corridor_fed_solo_rides_trunk` guard (a fan seam's lane).
+  `RECORD_USES` in
+  `tests/test_lane_plan.py` names each one.
+- **Related tests**: `tests/test_lane_plan.py`,
+  `tests/test_lane_plan_switch.py`, `tests/test_port_order_plan.py`.
 
 ## Post-layout routing boundary: exit-turn planning
 
 - **Purpose**: Decide source-lane order and turn axes for every complete
   inter-section exit group before route emission.
-- **Helpers**: `compute_station_offsets` produces the base offset map.
+- **Helpers**: `compute_station_offsets` produces the planned offset map.
   `_route_edges` prepares exit-turn execution immediately before emission. A
   turn that needs a shared gap seat enters member-geometry allocation as a
   movable claim. The allocated axis and signed corner offsets are then supplied
-  to `build_exit_turn_execution`, which publishes the complete group and
-  commits its owned compact offsets to the routing context.
+  to `build_exit_turn_execution`, which publishes the complete group.
 - **Precondition**: Layout coordinates and topology resolution are settled and
-  remain immutable. The mutable per-line offset map has completed all local,
-  port, junction, and rail-boundary phases.
-- **Postcondition**: Each supported exit group has compact active lanes, one
-  assignment per outbound member, and any needed ordered turn axes, lane
-  transitions, references, and runway demands. Gap-allocated axes are fixed in
+  remain immutable. The offset map is the lane plan's.
+- **Postcondition**: Each supported exit group has one assignment per outbound
+  member, its source lanes read from the record at the exit port, and any
+  needed ordered turn axes with their nest order, lane transitions,
+  references, and runway demands. Gap-allocated axes are fixed in
   the plan before emission. Any unsupported member records a declined child
   verdict; the route system must obtain complete ownership elsewhere or fail.
-- **Invariants preserved**: Station, port, junction, and section coordinates.
-  The planner may commit per-line station offsets at its owned seam. Downstream
+- **Invariants preserved**: Station, port, junction, and section coordinates,
+  and every station offset: the planner computes no lane.  Downstream
   passes may change unowned route geometry but cannot move, remove, or replace
   a planner-owned source-turn segment or lane transition. The general gap pass
   validates a gap-allocated plan's exact axis and derives its expected radius
@@ -1727,8 +1696,13 @@ fan plan states.
 - **Related tests**: `tests/test_member_geometry.py`,
   `tests/test_route_system_emission.py`, and `tests/test_route_plan.py`.
 - **Lifecycle:** invariant - `validate_member_geometry_emission` checks that
-  the final planned paths retain the owned segment ranks and exact coordinates
-  of every frozen gap channel after normalization.
+  the final planned paths retain the owned segment ranks, the exact points of
+  every owned segment, and the exact coordinates of every frozen gap channel
+  after normalization. Fan-traverse coincidence and bundling anchor a
+  route-system-owned segment as they anchor a convergence-owned one, so
+  neither moves a coordinate the plan decided. Bypass nesting anchors only a
+  convergence-owned leg: a member-plan-owned leg it lifts fails this check
+  and aborts the render.
 
 ## Post-layout routing boundary: convergence planning
 
@@ -1749,7 +1723,31 @@ fan plan states.
   Two runs count as one bundle only on local evidence: one route system, one
   travel direction, an overlapping span, a shared carrier junction or entry
   port, and either one named inter-row gap or a separation already inside
-  `BUNDLE_TO_BUNDLE_CLEARANCE`.
+  `BUNDLE_TO_BUNDLE_CLEARANCE`. On a pass that compiles corridor cohorts the
+  compile states the same conflicts as relations on each trunk's scalar
+  request: a bundle-pitch equality to the nearest bundled member run, a
+  one-pitch separation from every same-direction distinct-line member run along
+  the trunk once one of them crowds it, and a forbidden interval around a
+  distinct line's turn-off leg across the trunk. A member run that is a lane of
+  the compile is related to the scalar as a variable, and every immutable
+  context claim drawn on the trunk's own run stands for the scalar rather than
+  an obstacle at its pre-grant coordinate, so the trunk and the members it is
+  coupled to solve in one component; a run no compile moves, or one outside
+  the `(region, orientation)` lane of the trunk's own context claims (for a
+  trunk with none, outside the one lane all its coupled runs share), stands
+  in the trunk's problem as a fixed obstacle at its compile-time coordinate,
+  even where its own component moves it. Where either side could give way the
+  members keep their coordinate and the scalar takes the grant. Where those relations
+  cover the conflict, the grant already sits where
+  `_pack_cotravelling_corridor_runs` and `_separate_distinct_cotravelling_trunks`
+  would seat it, so their re-seat is a no-op. The passes themselves do not know
+  about grants: where a relation does not cover a conflict they still move the
+  trunk, and `_assert_grants_survive_settlement` then fails the render closed
+  rather than drawing a trunk off its published grant. The relations tie a
+  trunk only to member runs; trunk-to-trunk packing and separation, which the
+  passes perform by counting already-seated trunks as neighbours, has no typed
+  relation, so a compiled round where it would move a granted trunk fails
+  closed.
 - **Precondition**: The semantic route scaffold, exit-turn decisions, station
   offsets, layout coordinates, topology resolution, merge
   classification, and stable member family IDs are settled. Final global
@@ -2117,9 +2115,61 @@ They are design evidence, not part of this specification.
   strict plan that may not publish another requirement, settle that plan once
   for drawn positive-side containment, then re-route while consuming it. The
   final decision-freeze check compares the strict plan with that consuming
-  re-route. There is no retry or fixpoint search. A requirement surviving the
-  first strict observation, or any deficit surviving final settlement, is an
-  invariant failure.
+  re-route. After either sequence the render takes one aperture observation:
+  a replay of the last routing pass against the ledger the last settlement
+  consumed, with its translations, that may publish clearance requirements.
+  The replay reads exactly that pass's inputs (station coordinates, section
+  boxes, bypass-label obstacles, station offsets and the reserved bands it
+  seated corridors in), not the boxes the label pass after it grows: that
+  pass seated its corridors against the inputs it read, and a box the ledger
+  never saw can leave a corridor with no band that fits. The bands are the ones a
+  settlement re-route measured from the ledger it consumed, and none where
+  settlement moved nothing and nothing was re-routed; the replay without the
+  grant reads the same ones. It is the only pass that runs the corridor-cohort
+  compiler, because only a ledger already settled to its minimum widths
+  compiles without a spurious shortfall. Each claimed lane is solved inside
+  the band the corridor hold draws it in (`CorridorLaneRegion`: the claim's
+  reserved band, else the live gap band, widened to the lane's input
+  coordinate); a band the solve's hard relations cannot meet is released,
+  never reported as a shortfall. The plan it accepts is stored on that
+  observation's `RoutePlan` as `accepted_corridor_cohort_plan`, from which the
+  observation reads the convergences a grant moved, and
+  `prepare_route_system_planning` refuses to compile on a pass seated against a
+  plan that carries one. The observation is drawn in two cases. A convergence
+  corridor grant that moved a trunk is drawn by this observation alone, so it
+  is adopted with its own plan once `_assert_grant_moves_only_its_convergences`
+  proves it differs on the granted convergences alone from the same
+  observation routed without the grant; a grant observation that also
+  publishes a requirement is an invariant failure. Otherwise the observation
+  is the last routing pass replayed and seated by the accepted plan, whether
+  or not envelope settlement re-routed before it (a translation, or a
+  live-derived band the ledger changes at zero translation). It is drawn
+  whenever it accepted a plan and published no requirement, and the published
+  plan is the ledger the last settlement consumed, projected through its
+  translations, carrying the accepted record. An observation that accepted no
+  plan has no record to publish, and one that published a requirement is
+  settled below, so neither is drawn. A drawn observation can replay
+  inputs from before the group-caption band was reserved, so the publish step
+  reserves the band again after placing labels; the reservation only grows a
+  box. An observation that is not drawn has its geometry (station
+  coordinates, section boxes, and bypass-label obstacles) discarded by
+  `_restoring_route_observation_geometry`; routing alone, it leaves the ports
+  the label pass before it carried as they were. A
+  `CORRIDOR_COHORT_APERTURE` requirement it publishes is settled once against
+  the observed plan, the grant is proven from that settlement's own
+  translations to pay every measured deficit (`_assert_aperture_grant_closes`:
+  the translation at the requirement's boundary carries every positive-side
+  box, no negative-side box, and at least the deficit, which the quantised
+  allocation may exceed), and a re-route consuming the observed plan draws the
+  result, which is adopted and published. That re-route starts every non-port
+  station at the x the last routing pass read
+  (`_RouteObservationInputs.restore_station_x`), translated by the grant:
+  routing's centring is the only writer of non-port x since that pass, and it
+  is not idempotent, so a re-route from the drawn output would centre a station
+  a second time. There is no retry or fixpoint search. A requirement surviving
+  the first strict observation, any deficit surviving final settlement, or an
+  aperture deficit its grant does not pay is an invariant failure; a render
+  settles at most one aperture batch.
   `attach_reroute_ledger_delta` compares each corridor's description together
   with the width it asks for, since a boundary whose corridor survives at a
   different `minimum_width` is one the translations were sized wrongly for.
@@ -2153,6 +2203,11 @@ They are design evidence, not part of this specification.
   be split, and never moving a track a plan owns.
   Plan-owned trunks take the same distinct-line pitch during global convergence
   settlement, before member geometry and convergence geometry freeze.
+  Settlement packs a horizontal trunk lying on a member track one pitch to the
+  track's far (greater-coordinate) side. Where the trunk on the near side
+  crosses fewer legs, the member track takes that step itself at member
+  geometry instead, before it freezes, so the trunk keeps its trial lane and
+  settlement finds it already one pitch from the track.
   `check_no_fused_cotravelling_lines` is the final postcondition on every track,
   including a pair where both coordinates are immutable. Such a violation names
   its route system and exact owning plans, which identifies the construction
@@ -2335,11 +2390,14 @@ every other stage. The stage decides it, so no caller can disagree with it.
 The render path (`_settle_render_geometry` and the publish step in
 `render/svg.py`) records `DISCOVERY` for the first route observation and
 `GENERAL_SETTLEMENT` for each re-observation a carried port, a header-collision
-reconcile, or an envelope-settlement translation forces. `COHORT_INTENT`,
-`APERTURE_SETTLEMENT`, `FINAL_SOLVE` and `TYPED_MATERIALIZATION` are positions
-the vocabulary reserves between them and the closing pair; no render records
-one, which `tests/test_corridor_cohort_integration.py` asserts alongside the
-frozen order.
+reconcile, or an envelope-settlement translation forces. The aperture
+observation and the re-route drawing an aperture grant are `GENERAL_SETTLEMENT`
+re-observations too, and the aperture observation keeps its record when its
+geometry is discarded, so every route observation has exactly one record.
+`COHORT_INTENT`, `APERTURE_SETTLEMENT`, `FINAL_SOLVE` and
+`TYPED_MATERIALIZATION` are positions the vocabulary reserves between them and
+the closing pair; no render records one, which
+`tests/test_corridor_cohort_integration.py` asserts alongside the frozen order.
 
 `COHORT_FINAL` sits *after* both closing acts, not between them: the final
 canvas geometry is published first (`_FinalPublishedGeometry` - canvas width and

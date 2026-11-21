@@ -1,0 +1,44 @@
+%%metro title: Fuzz 8403750
+%%metro line: l0 | Filter | #e6194b
+%%metro line: l1 | Cluster | #3cb44b
+%%metro line: l2 | Merge_Stats | #4363d8
+%%metro line: l3 | Annotate | #f58231
+%%metro line: l4 | Count | #911eb4
+%%metro line: l5 | Classify | #46f0f0
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+
+graph LR
+    subgraph sec0 [Dedup_Call 0]
+        s0n0[qc]
+        s0n1[bam]
+        s0n2[assemble]
+        s0n3[count]
+        s0n4[classify_bin]
+        s0n0 -->|l0,l2,l3,l4,l5| s0n1
+        s0n1 -->|l0,l2,l3,l4| s0n2
+        s0n2 -->|l0,l2,l3| s0n3
+        s0n3 -->|l0,l2,l3| s0n4
+        s0n2 -->|l4| s0n4
+    end
+    subgraph sec1 [Markdup_Report 1]
+        %%metro direction: BT
+        s1n0[report]
+        s1n1[count]
+        s1n0 -->|l1,l2,l3,l4,l5| s1n1
+    end
+    subgraph sec2 [Sort_Filter_Normalize 2]
+        s2n0[export]
+        s2n1[qc]
+        s2n2[markdup_count_sort]
+        s2n0 -->|l0,l1,l3| s2n1
+        s2n1 -->|l0,l1,l3| s2n2
+    end
+    s0n4 -->|l0,l2| s2n0
+    s1n1 -->|l1,l2,l3| s2n0
+    s1n1 -->|l1| s2n2
+    s0n1 -->|l2,l5| s1n0
+    s0n4 -->|l3,l4| s1n0
+    s0n2 -->|l3| s1n1
+    s0n1 -->|l4,l5| s2n2

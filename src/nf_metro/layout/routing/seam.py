@@ -25,20 +25,14 @@ idioms reverse:
 * a fold turn into a RIGHT entry across rows or through a junction (a LEFT exit
   wrapping rightward into the next row).
 
-Two kinds of reversal are out of scope for this seam-local, coordinate-free
-primitive, and the oracle test pins them as documented residuals:
-
-* **Propagated / conditional reversal** -- section-absolute reversal that the
-  legacy machinery smears *along a row* (``_propagate_reversal_along_rows``) and
-  the conditional TB LEFT/RIGHT-exit case (``_is_tb_lr_exit_nonreversed``). The
-  same seam geometry preserves or reverses depending on whether an upstream
-  section was itself reversed, so it cannot be a function of one seam; the
-  transposition already rides in the delivered bundle order.
-* **Near-vertical junction RIGHT entry** -- a multi-line fan-out junction that
-  overhangs a RIGHT entry's outward edge and drops near-vertically into it
-  (``is_near_vertical_junction_right_entry``). Whether the drop transposes turns
-  on the junction's pixel overhang, not on sides or grid rows/columns, so it is
-  deferred rather than reproduced coordinate-free here.
+Propagated and conditional reversal are out of scope for this seam-local,
+coordinate-free primitive, and the oracle test pins them as documented
+residuals: section-absolute reversal that the legacy machinery smears *along a
+row* (``_propagate_reversal_along_rows``) and the conditional TB
+LEFT/RIGHT-exit case (``_is_tb_lr_exit_nonreversed``). The same seam geometry
+preserves or reverses depending on whether an upstream section was itself
+reversed, so it cannot be a function of one seam; the transposition already
+rides in the delivered bundle order.
 """
 
 from __future__ import annotations

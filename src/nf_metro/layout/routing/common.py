@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import AbstractSet, NamedTuple
 
 from nf_metro.layout.constants import (
@@ -112,24 +113,13 @@ EXIT_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
 }
 """The direction a line travels leaving an exit port on each side."""
 
-
-def offsets_hold(
-    offsets: Mapping[tuple[str, str], float],
-    expected: Iterable[tuple[str, str, float]],
-    tolerance: float,
-    *,
-    missing: float | None = None,
-) -> bool:
-    """Whether *offsets* holds every ``(station, line, offset)`` in *expected*.
-
-    A slot absent from *offsets* reads as *missing*, or fails when that is
-    ``None``.
-    """
-    for station_id, line_id, offset in expected:
-        actual = offsets.get((station_id, line_id), missing)
-        if actual is None or abs(actual - offset) > tolerance:
-            return False
-    return True
+ENTRY_SIDE_DIRECTION: Mapping[PortSide, Direction] = {
+    PortSide.LEFT: Direction.R,
+    PortSide.RIGHT: Direction.L,
+    PortSide.TOP: Direction.D,
+    PortSide.BOTTOM: Direction.U,
+}
+"""The direction a line travels entering an entry port on each side."""
 
 
 def right_normal_axis_sign(direction: Direction) -> int:
@@ -163,6 +153,32 @@ def segment_direction(
     if abs(dx) <= COORD_TOLERANCE and abs(dy) > COORD_TOLERANCE:
         return Direction.D if dy > 0 else Direction.U
     return None
+
+
+def tolerant_sign(delta: float) -> int:
+    """The sign of *delta*, ``0`` within ``COORD_TOLERANCE``."""
+    if abs(delta) <= COORD_TOLERANCE:
+        return 0
+    return 1 if delta > 0 else -1
+
+
+def leg_direction_sequence(
+    points: Sequence[tuple[float, float]],
+) -> tuple[tuple[int, int], ...]:
+    """The screen-axis signs of each leg of *points*, runs of one sign merged.
+
+    A coordinate change within ``COORD_TOLERANCE`` counts as none, so a leg
+    reads ``(0, 1)`` straight down or ``(1, 1)`` on a down-right diagonal; a
+    collapsed leg adds nothing.  Two routes with the same sequence turn the
+    same way at every bend, so concentric turns keep their lateral order.
+    """
+
+    sequence: list[tuple[int, int]] = []
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        leg = (tolerant_sign(x1 - x0), tolerant_sign(y1 - y0))
+        if leg != (0, 0) and (not sequence or sequence[-1] != leg):
+            sequence.append(leg)
+    return tuple(sequence)
 
 
 def is_orthogonal_turn(
@@ -853,6 +869,9 @@ class RoutedPath:
     Set by wrap / around-section / TOP-entry handlers whose vertical
     channels follow a special concentric loop (all corners share one
     radius) that the standard L-shape re-stacking would break."""
+    seats_in_gap: bool = False
+    """The gap allocation seats this exempt route's declared channel with the
+    gap's other channels."""
     gap_slots: list[GapSlot] = field(default_factory=list)
     """Symbolic gap-relative slots for this route's vertical channel runs.
 
@@ -1195,6 +1214,9 @@ class PortPeeloffBundle(NamedTuple):
     trunk_sign: int
     vertical_sign: int
     port_lead_sign: int
+    crossed: frozenset[str] = frozenset()
+    """Lines a recorded forced crossing exchanges at the port
+    (:func:`~nf_metro.layout.lane_plan.entry_crossing_lines`)."""
 
 
 class OpposingEntryConfluence(NamedTuple):
@@ -2016,6 +2038,8 @@ def iter_port_peeloff_bundles(
             )
         ].append((rp, tail))
 
+    from nf_metro.layout.lane_plan import entry_crossing_lines
+
     for shape, entries in by_shape.items():
         port_id, trunk_sign, vertical_sign, port_lead_sign = shape
         # One representative tail per distinct line (a line feeding several
@@ -2040,19 +2064,29 @@ def iter_port_peeloff_bundles(
             trunk_sign,
             vertical_sign,
             port_lead_sign,
+            entry_crossing_lines(graph, port_id) & per_line.keys(),
         )
 
 
 def peeloff_trunk_line_order(bundle: PortPeeloffBundle) -> list[str]:
-    """Top-to-bottom trunk order implied by the destination port's line slots."""
-    port_order = sorted(bundle.per_line, key=lambda lid: bundle.per_line[lid].port_y)
-    if bundle.trunk_sign == bundle.port_lead_sign:
-        return port_order
-    return list(reversed(port_order))
+    """Top-to-bottom trunk order implied by the destination port's line slots;
+    lines a recorded crossing exchanges at the port keep their trunk order
+    among the slots they hold."""
+    per_line = bundle.per_line
+    port_order = sorted(per_line, key=lambda lid: per_line[lid].port_y)
+    if bundle.trunk_sign != bundle.port_lead_sign:
+        port_order.reverse()
+    kept = iter(sorted(bundle.crossed, key=lambda lid: per_line[lid].trunk_y))
+    return [next(kept) if lid in bundle.crossed else lid for lid in port_order]
+
+
+NO_LANDING_ORDERS: Mapping[str, Sequence[str]] = MappingProxyType({})
 
 
 def peeloff_target_slots(
-    bundle: PortPeeloffBundle, step: float
+    bundle: PortPeeloffBundle,
+    step: float,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> dict[str, PeeloffSlot]:
     """Map each line of *bundle* to the slot its trunk depth earns.
 
@@ -2069,6 +2103,12 @@ def peeloff_target_slots(
     separation stages own, so a fused band keeps its realised channels.  Port Y
     is the destination port's own line stack rather than this bundle's to
     choose, and stays as realised throughout.
+
+    A port whose landing the plan decided (*landing_orders*, its lines in
+    ascending port Y, :mod:`~nf_metro.layout.routing.landing_deal`) is dealt
+    in that order instead: each line takes the port Y of its rank there and
+    the peel-X of the matching trunk rank, so the risers rise in the order
+    the plan lands them.
     """
     per_line = bundle.per_line
     n = len(per_line)
@@ -2081,13 +2121,21 @@ def peeloff_target_slots(
         else realised_xs
     )
     y_slots = sorted(t.port_y for t in per_line.values())
-    ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
     x_follows_trunk = x_follows_trunk_direction(bundle.vertical_sign, bundle.trunk_sign)
     y_follows_trunk = bundle.port_lead_sign == bundle.trunk_sign
+    order = landing_orders.get(bundle.port_id)
+    if order is not None and set(order) != set(per_line):
+        order = None
+    if order is not None:
+        ranked = list(order if y_follows_trunk else reversed(order))
+    else:
+        ranked = sorted(per_line, key=lambda lid: per_line[lid].trunk_y)
     return {
         lid: PeeloffSlot(
             x_slots[i if x_follows_trunk else n - 1 - i],
-            y_slots[i if y_follows_trunk else n - 1 - i],
+            per_line[lid].port_y
+            if bundle.crossed
+            else y_slots[i if y_follows_trunk else n - 1 - i],
             i if x_follows_trunk else n - 1 - i,
         )
         for i, lid in enumerate(ranked)

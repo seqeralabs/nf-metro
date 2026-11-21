@@ -1,0 +1,14 @@
+%%metro title: Cohort Pinned Lane Forced Crossing
+%%metro line: l0 | Bin_Filter_Qc | #e6194b
+%%metro line: l1 | Markdup_Fastqc_Bin | #3cb44b
+graph LR
+    subgraph sec1 [Index 1]
+        %%metro direction: TB
+        s1n0[NORMALIZE]
+    end
+        s1n0 -->|l1| s2n2
+    subgraph sec2 [Classify 2]
+        s2n2[bin]
+    end
+    s1n0 -->|l0| s2n2
+    s0n1 -->|l0| s2n2

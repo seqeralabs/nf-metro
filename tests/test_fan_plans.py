@@ -71,7 +71,6 @@ from nf_metro.layout.routing.common import (
     iter_vertical_segments,
 )
 from nf_metro.layout.routing.invariants import check_gap_channels_materialized
-from nf_metro.layout.routing.offsets import _apply_planned_fan_offsets
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 from nf_metro.parser.route_topology import (
@@ -1753,46 +1752,6 @@ def test_solo_trunk_branch_offsets_are_frozen_in_the_plan() -> None:
         "da2": {"alpha": 0},
         "dst_a__entry_left_6": {"alpha": 0},
     }
-
-
-def test_runtime_applies_only_frozen_fan_offset_assignments() -> None:
-    path = ROOT / "examples" / "topologies" / "junction_entry_align.mmd"
-    graph = parse_metro_mermaid(path.read_text())
-    compute_layout(graph, validate=True)
-    sentinel = 999.0
-    initial = {
-        (station_id, line_id): sentinel
-        for station_id in graph.stations
-        for line_id in graph.station_lines(station_id)
-    }
-    expected = {
-        (carrier.station_id, assignment.line_id): assignment.slot * 4.0
-        for plan in graph.fan_plans
-        if plan.owns_geometry
-        for carrier in plan.offset_carriers
-        for assignment in carrier.assignments
-    }
-
-    before_mutation = SimpleNamespace(
-        graph=graph,
-        offsets=initial.copy(),
-        offset_step=4.0,
-    )
-    _apply_planned_fan_offsets(before_mutation)
-    assert {
-        key: value
-        for key, value in before_mutation.offsets.items()
-        if value != sentinel
-    } == expected
-
-    graph.junction_ids.add("da1")
-    after_mutation = SimpleNamespace(
-        graph=graph,
-        offsets=initial.copy(),
-        offset_step=4.0,
-    )
-    _apply_planned_fan_offsets(after_mutation)
-    assert after_mutation.offsets == before_mutation.offsets
 
 
 def test_partial_offset_carrier_retains_absolute_slots() -> None:

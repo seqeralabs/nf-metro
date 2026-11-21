@@ -31,13 +31,15 @@ def test_stacked_split_entry_does_not_cross_and_recross() -> None:
     assert not check_stacked_split_no_line_recrossing(graph, routes, offsets)
 
 
-def test_recrossing_invariant_detects_unreversed_consumer_tracks(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "nf_metro.layout.section_placement._reflect_stacked_split_consumer_tracks",
-        lambda graph, section_subgraphs: None,
-    )
+def test_recrossing_invariant_detects_unreversed_consumer_tracks() -> None:
+    """Putting the consumer tracks back in their unreversed order, under lanes
+    the layout sealed for the reflected ones, draws each line across the other
+    twice."""
     graph = parse_metro_mermaid(FIXTURE.read_text())
     compute_layout(graph, validate=False)
+    final_a = graph.stations["final_a"]
+    final_b = graph.stations["final_b"]
+    final_a.y, final_b.y = final_b.y, final_a.y
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
 

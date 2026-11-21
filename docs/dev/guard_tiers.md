@@ -49,6 +49,15 @@ It requires exact contact between a feeder and its trunk.
 Its Tier-A counterpart allows a small tolerance, because an alternate routing handler can produce a valid map without exact contact.
 Every other guard and check is reachable from `compute_layout` or rendering.
 
+The corridor-cohort shadow oracle in `tests/cohort_shadow_oracle.py` is a Tier C harness rather than a registered check.
+It draws the compiling observation under production's conditions, publishes every compiled cohort plan at its compile site with the observation's own plan as the ledger, then requires the render invariants to pass and the drawn routes to match the plan on every owned segment point and corner.
+Its ratchet, `tests/data/cohort_shadow_ratchet.txt`, holds the repository maps it fails.
+
+The lane plan staleness oracle in `tests/test_lane_plan_staleness.py` is another Tier C harness.
+It rebuilds the lane plan after every stage that follows the plan's decision at the close of stage 6.12.
+The box sizers at stages 6.12a to 6.12c must leave it unchanged on every curated map.
+Its shrink-only list, `tests/data/lane_plan_stale_rows.json`, holds the maps where row stacking (stages 6.13 to 6.17) later moves a position the plan read, each owned by #2171.
+
 ## Registries
 
 The classification is data rather than prose:

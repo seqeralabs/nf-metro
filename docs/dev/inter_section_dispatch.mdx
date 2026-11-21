@@ -28,6 +28,9 @@ The runtime curve guard is a backstop rather than the mechanism that keeps the r
 - **Entry side**: `entry_side` is the target entry port's side, one of LEFT, RIGHT, TOP, or BOTTOM, or `None` when the target is a junction.
   `merge_ep` is the resolved entry-port station when the target is a merge junction.
 - **Spatial queries**: section coordinates and horizontal and vertical crossing checks are resolved through the snapshot, which keeps every predicate and route builder on the same endpoint facts.
+- **Planned lanes**: `same_y` and `same_x` compare the lanes the lane plan draws the bundle on at each end, so a seam turns only where its drawn lanes step.
+  The rules that choose a side read the lane plan's approach record rather than re-deciding it: a LEFT entry the record approaches from below closes the row-top corridor, a far-left U-turn the record sends over the top takes the gap above the target row (otherwise it dips), and an approach the record marks far-side closes the row-level bottom-row climb.
+  Whether a junction fans out is `graph.is_fanout_junction`, the fact the record reads.
 
 ## The rules
 
@@ -46,11 +49,11 @@ Planned template construction resolves its frozen family through the same table'
 | 4   | `SAME_Y_STRAIGHT`                     | `same-Y straight`                       | Endpoints share Y, need no bypass, and neither entry is approached from its far side. | `_route_straight_connector` emits a horizontal run.                                                          |
 | 5   | `TB_BOTTOM_EXIT_AROUND_STACK`         | `TB bottom exit around stack`           | A TB bottom-exit drop crosses sections stacked between source and target.             | `_route_around_stack` diverts through a clear gap.                                                           |
 | 6   | `TB_BOTTOM_EXIT`                      | `TB bottom exit`                        | The source is a TB/BT bottom exit.                                                    | `_route_tb_bottom_exit` emits the ordinary drop or jog.                                                      |
-| 7   | `TOP_ENTRY_L_SHAPE`                   | `TOP entry L-shape`                     | The target entry side is TOP.                                                         | `_route_top_entry_l_shape` supplies the required horizontal lead-in.                                         |
-| 8   | `BOTTOM_ENTRY_L_SHAPE`                | `BOTTOM entry L-shape`                  | The target entry side is BOTTOM.                                                      | `_route_bottom_entry_l_shape` supplies the mirrored lead-in.                                                 |
+| 7   | `TOP_ENTRY_L_SHAPE`                   | `TOP entry L-shape`                     | The target entry side is TOP.                                                         | `_route_entry_l_shape` (with `PortSide.TOP`) supplies the required horizontal lead-in.                       |
+| 8   | `BOTTOM_ENTRY_L_SHAPE`                | `BOTTOM entry L-shape`                  | The target entry side is BOTTOM.                                                      | `_route_entry_l_shape` (with `PortSide.BOTTOM`) supplies the mirrored lead-in.                               |
 | 9   | `SAME_X_VERTICAL_DROP`                | `same-X vertical drop`                  | Endpoints share X and are not stacked same-side exceptions.                           | `_route_straight_connector` emits a vertical run.                                                            |
 | 10  | `BOTTOM_EXIT_JUNCTION_RIGHT_LANDINGS` | `bottom-exit junction right landings`   | A fan plan owns the junction's right-side landings.                                   | `_route_bottom_exit_junction_right_landings` emits the fan landing template.                                 |
-| 11  | `BOTTOM_EXIT_JUNCTION_VIA_GAP`        | `bottom-exit junction via gap`          | The plain junction route crosses a section and a gap detour is available.             | `_route_bottom_exit_junction_via_gap_leaf` emits the detour.                                                 |
+| 11  | `BOTTOM_EXIT_JUNCTION_VIA_GAP`        | `bottom-exit junction via gap`          | The plain junction route crosses a section and a gap detour is available.             | `_route_bottom_exit_junction_via_gap_leaf` emits the detour, landing on the entry's planned lanes.           |
 | 12  | `BOTTOM_EXIT_JUNCTION`                | `bottom-exit junction`                  | The source is a bottom-exit junction using the plain shape.                           | `_route_bottom_exit_junction` emits the drop-then-turn route.                                                |
 | 13  | `MERGE_TRUNK_AROUND_BELOW`            | `merge trunk around below`              | A primary merge trunk has no target-side channel.                                     | `_route_merge_trunk_around_below` loops under the target.                                                    |
 | 14  | `MERGE_TRUNK`                         | `merge trunk`                           | Merge classification names this feeder as the primary trunk.                          | `_route_merge_trunk` emits the U-shaped trunk.                                                               |
@@ -77,6 +80,8 @@ Planned template construction resolves its frozen family through the same table'
 | 35  | `RIGHT_ENTRY_CROSS_ROW_WRAP`          | `RIGHT entry cross-row wrap`            | A source above and right of a RIGHT entry, merged or not, travels left unobstructed.  | `_route_right_entry_cross_row` uses the target-side band or around-below route.                              |
 | -   | `STANDARD_L_SHAPE`                    | _fall-through_                          | No rule matches.                                                                      | `_route_l_shape` emits the standard construction.                                                            |
 
+A fan-out junction fed by a LEFT exit counts as a LEFT exit for rules 19, 28 and 35 (`_InterFacts.is_left_fed`): its branches leave on that exit's side.
+Rules 10-12 never claim a merge's trunk edge: the convergence plan plans that edge as the merge trunk, so rules 13-14 route it.
 The promoted bottom-exit, bypass, and merge-entry leaves each have a stable family ID.
 Classification, source-turn planning, and production emission therefore all name the same geometry.
 

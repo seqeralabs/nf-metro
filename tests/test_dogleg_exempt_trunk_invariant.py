@@ -267,8 +267,9 @@ def test_natural_blocked_riser_records_metadata_backed_corner_radii() -> None:
     ``upper`` and the exempt ``lower`` share a source junction and turn in the
     same inter-row channel, so each has to reach its shared turn on a resolved
     radius its concentric-corner metadata accounts for -- 10px inside a -4px
-    offset for ``upper``, 14px on the reference for the exempt run -- and each
-    turn belongs to a member-geometry plan.  The fixture then routes clear of
+    offset for ``upper``; the exempt run turns down alone past it, a
+    single-line corner on the base radius -- and each turn belongs to a
+    member-geometry plan.  The fixture then routes clear of
     the dogleg check.  It clears it because the two trunks never bring their
     axes into contact, not through the same-source corner exemption:
     ``test_checker_allows_resolved_same_source_corner_arcs`` is what covers
@@ -293,11 +294,11 @@ def test_natural_blocked_riser_records_metadata_backed_corner_radii() -> None:
     )
 
     assert resolve_curve_radii(upper.points, upper.curve_radii)[2] == 10.0
-    assert resolve_curve_radii(exempt.points, exempt.curve_radii)[2] == 14.0
+    assert resolve_curve_radii(exempt.points, exempt.curve_radii)[2] == 10.0
     assert upper.concentric_corner_offsets_by_segment[3] == (0.0, -4.0)
     assert upper.concentric_corner_bases_by_segment[3] == (10.0, 10.0)
     assert exempt.concentric_corner_offsets_by_segment[3] == (0.0, 0.0)
-    assert exempt.concentric_corner_bases_by_segment[3] == (14.0, 14.0)
+    assert exempt.concentric_corner_bases_by_segment[3] == (10.0, 10.0)
     assert upper.member_geometry_plan_id is not None
     assert exempt.member_geometry_plan_id is not None
     assert not check_no_dogleg_crosses_exempt_trunk(graph, routes, offsets)

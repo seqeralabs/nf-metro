@@ -6,7 +6,6 @@ from collections import Counter
 
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
-    SAME_COORD_TOLERANCE,
 )
 from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.phase_state import require_phase_field
@@ -118,7 +117,6 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
 
     _restore_convergence_midpoints(graph, convergence_sources)
     _restore_divergence_midpoints(graph, divergence_targets, trunk_followers)
-    _restore_partial_trunk_descents(graph)
     _register_half_grid_entry_fan_ports(graph, entry_fan_ports)
 
 
@@ -312,43 +310,6 @@ def _snap_group_to_grid(
             if pid in convergence_sources:
                 continue
             _set_port_y(graph, pid, _slot_snap(port_st.y, origin_r, pitch, half))
-
-
-def _restore_partial_trunk_descents(graph: MetroGraph) -> None:
-    """Re-seat each partial row-mate a handover lane below its carrier.
-
-    Stage 4.8 seats a partial row-mate one lane deeper than the row carrier so a
-    direct port-to-port connector runs flat.  When carrier and partial share a
-    row grid the group snap rounds that sub-grid offset onto the carrier's slot;
-    on an explicit-grid solo section it leaves it in place.  Either way the target
-    is the same: the partial's handover port sits ``descent`` below the carrier
-    port's post-snap Y.  Shifting the whole section by the gap to that target --
-    every internal station, every LR/RL port, the bbox growing downward -- lands
-    it right in both cases and is idempotent (a re-run finds zero gap), so a snap
-    that did not collapse the descent is not double-counted.
-    """
-    require_phase_field(graph, "_partial_trunk_descents")
-    for sec_id, record in graph._partial_trunk_descents.items():
-        section = graph.sections.get(sec_id)
-        partial_st = graph.stations.get(record.partial_port)
-        carrier_st = graph.stations.get(record.carrier_port)
-        if section is None or partial_st is None or carrier_st is None:
-            continue
-        delta = (carrier_st.y + record.descent) - partial_st.y
-        if delta < SAME_COORD_TOLERANCE:
-            continue
-        port_ids = section.port_ids
-        for pid in port_ids:
-            port_st = graph.stations.get(pid)
-            if port_st is not None:
-                _set_port_y(graph, pid, port_st.y + delta)
-        for sid in section.station_ids:
-            if sid in port_ids:
-                continue
-            st = graph.stations.get(sid)
-            if st is not None:
-                st.y += delta
-        section.bbox_h += delta
 
 
 def _restore_convergence_midpoints(

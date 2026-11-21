@@ -50,7 +50,7 @@ Post-emission normalization therefore cannot recreate the former compatibility r
 | `_route_inter_section` | Inter-section planning only   | Builds the already-classified family template. A planned family that declines is an error, not a fall-through. |
 | `_route_tb_section`    | Local TB/BT members           | Handles local section geometry after no inter-section family applies.                                          |
 | `_route_entry_runway`  | Local entry runways           | Builds compressed local runway geometry.                                                                       |
-| `_route_intra_section` | Other local members           | Final local-edge emitter.                                                                                      |
+| `_route_diagonal`      | Other local members           | Final local-edge emitter, after the `_INTRA_SECTION_SHAPES` tuple.                                             |
 
 ## Settlement
 

@@ -1,0 +1,51 @@
+%%metro title: Fuzz 8500704
+%%metro style: seqera
+%%metro line: l0 | Bin_Qc | #e6194b
+%%metro line: l1 | Index | #3cb44b
+%%metro line: l2 | Align_Filter | #4363d8
+%%metro line: l3 | Gather | #f58231
+
+graph LR
+    subgraph sec0 [Stats_Pca_Vcf 0]
+        s0n0[summarise]
+        s0n1[assemble]
+        s0n2[stats]
+        s0n3[cluster_call]
+        s0n0 -->|l0| s0n1
+        s0n0 -->|l0| s0n1
+        s0n0 -->|l2| s0n1
+        s0n0 -->|l3| s0n1
+        s0n1 -->|l0| s0n2
+        s0n1 -->|l2| s0n2
+        s0n2 -->|l0| s0n3
+        s0n2 -->|l2| s0n3
+        s0n1 -->|l3| s0n3
+        s0n0 -->|l3| s0n2
+    end
+    subgraph sec1 [Dedup_Align 1]
+        %%metro exit: right | l1, l2, l3
+        s1n0[call]
+        s1n1[dedup_quant]
+        s1n0 -->|l0| s1n1
+        s1n0 -->|l1| s1n1
+        s1n0 -->|l2| s1n1
+        s1n0 -->|l3| s1n1
+    end
+    subgraph sec2 [Qc_Normalize 2]
+        s2n0[call_bam]
+        s2n1[bam_cluster]
+        s2n0 -->|l1| s2n1
+        s2n0 -->|l2| s2n1
+        s2n0 -->|l3| s2n1
+    end
+    s0n3 -->|l0| s1n0
+    s0n3 -->|l2| s1n0
+    s0n3 -->|l3| s1n0
+    s0n1 -->|l0| s2n1
+    s1n1 -->|l1| s2n0
+    s1n1 -->|l2| s2n0
+    s1n1 -->|l3| s2n0
+    s1n1 -->|l3| s2n0
+    s1n0 -->|l1| s2n0
+    s0n0 -->|l2| s2n0
+    s0n2 -->|l3| s1n1
