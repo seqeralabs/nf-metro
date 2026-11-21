@@ -50,8 +50,9 @@ from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     max_grid_row_with_content,
     merge_junction_ids,
+    over_top_headroom_rows,
     resolve_section,
-    section_lies_before,
+    section_precedes,
 )
 from nf_metro.layout.seam_topology import (
     entry_fan_receives_stacked_reversed_bundle,
@@ -682,22 +683,7 @@ def _reserve_over_top_headroom(graph: MetroGraph) -> None:
     lower row down -- so the loop runs between the title and the header badge.
     """
     headroom = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
-    target_rows: set[int] = set()
-    for port in graph.ports.values():
-        if not (port.is_entry and port.side == PortSide.RIGHT):
-            continue
-        psec = graph.sections.get(port.section_id)
-        if psec is None:
-            continue
-        for edge in graph.edges_to(port.id):
-            src_port = graph.ports.get(edge.source)
-            ssec = graph.sections.get(src_port.section_id) if src_port else None
-            if ssec is None:
-                continue
-            if ssec.grid_row == psec.grid_row and _section_precedes(graph, ssec, psec):
-                if not section_lies_before(graph, "y", psec.grid_row):
-                    target_rows.add(psec.grid_row)
-                break
+    target_rows = over_top_headroom_rows(graph)
     if not target_rows:
         return
     min_target = min(target_rows)
@@ -779,13 +765,13 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
         # leg up into that box.  A RIGHT entry's descent seats against the
         # target column itself, never a row-absent neighbour, so it keeps the
         # plain-drop reading.
-        if port.side == PortSide.LEFT and _section_precedes(graph, src_sec, tgt_sec):
+        if port.side == PortSide.LEFT and section_precedes(graph, src_sec, tgt_sec):
             if not (
                 _left_entry_descent_hugs_absent_neighbour(graph, tgt_sec)
                 and _bypass_has_intervening_section(graph, src_sec, tgt_sec)
             ):
                 continue
-        elif port.side == PortSide.RIGHT and _section_precedes(graph, tgt_sec, src_sec):
+        elif port.side == PortSide.RIGHT and section_precedes(graph, tgt_sec, src_sec):
             continue
         src_row, tgt_row = src_sec.grid_row, tgt_sec.grid_row
         if abs(src_row - tgt_row) == 1:
@@ -965,7 +951,7 @@ def _over_top_wrap_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], int]
     ):
         if src_sec.grid_row != tgt_sec.grid_row:
             continue
-        src_left = _section_precedes(graph, src_sec, tgt_sec)
+        src_left = section_precedes(graph, src_sec, tgt_sec)
         if port.side is PortSide.RIGHT and not src_left:
             continue
         if port.side is PortSide.LEFT and src_left:
@@ -975,23 +961,6 @@ def _over_top_wrap_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], int]
             continue
         per_gap[(row - 1, row)][edge.target].add(edge.line_id)
     return _widest_lines_per_gap(per_gap)
-
-
-def _section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
-    """Whether section *a* sits to the left of *b* along the flow axis.
-
-    Grid column orders sections in different cells; two sections packed into one
-    cell (:attr:`MetroGraph.cell_packs`) share a column, so their directive order
-    (earlier = left) breaks the tie.
-    """
-    if a.grid_col != b.grid_col:
-        return a.grid_col < b.grid_col
-    members = packed_section_visual_order(
-        graph.sections, graph.cell_packs.get((a.grid_col, a.grid_row), ())
-    )
-    if a.id in members and b.id in members:
-        return members.index(a.id) < members.index(b.id)
-    return False
 
 
 def _bypass_has_intervening_section(

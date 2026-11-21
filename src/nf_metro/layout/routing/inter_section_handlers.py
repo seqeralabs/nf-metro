@@ -103,6 +103,7 @@ from nf_metro.layout.routing.common import (
     max_grid_row_with_content,
     merge_trunk_force_cross_row,
     needs_perp_approach_fan,
+    over_top_headroom_rows,
     packed_cell_neighbor_edges,
     reserved_row_band_between,
     resolve_section,
@@ -7800,12 +7801,13 @@ def _gap_above_band_fits(graph: MetroGraph, tgt_row: int) -> bool:
     it clears both the upper row's bottom edge and the target row's header badge
     (:func:`_inter_row_band_fits`); otherwise a centred run grazes one of them.
     Above the topmost row it is canvas headroom (:func:`section_lies_before`),
-    and a run there climbs over the whole map: a detour, never a corridor.
-    Every caller has a route that stays between or below the sections, so the
-    band above the topmost row is never taken.
+    and a run there climbs over the whole map.  That is a corridor only where
+    placement reserved one for an over-the-top loop
+    (:func:`over_top_headroom_rows`); anywhere else it is a detour, and every
+    caller has a route that stays between or below the sections instead.
     """
     if not section_lies_before(graph, "y", tgt_row):
-        return False
+        return tgt_row in over_top_headroom_rows(graph)
     gap_top, gap_bottom = gap_above_row(graph, tgt_row)
     return _inter_row_band_fits(gap_top, gap_bottom)
 

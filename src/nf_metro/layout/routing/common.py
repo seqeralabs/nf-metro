@@ -32,6 +32,7 @@ from nf_metro.layout.geometry import (
     cotravelling_lanes_fuse,
     lanes_run_along_x,
     lanes_run_along_y,
+    packed_section_visual_order,
     section_column_span,
     section_row_span,
     spans_share_corridor,
@@ -519,6 +520,51 @@ def section_lies_before(graph: MetroGraph, axis: str, index: int) -> bool:
     """
     span = section_row_span if axis == "y" else section_column_span
     return any(span(s)[1] < index for s in graph.sections.values())
+
+
+def section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
+    """Whether section *a* sits to the left of *b* along the flow axis.
+
+    Grid column orders sections in different cells; two sections packed into one
+    cell (:attr:`MetroGraph.cell_packs`) share a column, so their directive order
+    (earlier = left) breaks the tie.
+    """
+    if a.grid_col != b.grid_col:
+        return a.grid_col < b.grid_col
+    members = packed_section_visual_order(
+        graph.sections, graph.cell_packs.get((a.grid_col, a.grid_row), ())
+    )
+    if a.id in members and b.id in members:
+        return members.index(a.id) < members.index(b.id)
+    return False
+
+
+def over_top_headroom_rows(graph: MetroGraph) -> frozenset[int]:
+    """Topmost rows whose sections a loop reaches over the top of the map.
+
+    A RIGHT-entry section fed by a same-row, lower-column source is reached by
+    a loop over the section's top (``_route_right_entry_over_top``).  With no
+    section above that row the loop climbs into canvas headroom, so placement
+    reserves a band there (``_reserve_over_top_headroom``) and the band is a
+    corridor; above any other topmost row there is no such band.
+    """
+    rows: set[int] = set()
+    for port in graph.ports.values():
+        if not (port.is_entry and port.side == PortSide.RIGHT):
+            continue
+        psec = graph.sections.get(port.section_id)
+        if psec is None:
+            continue
+        for edge in graph.edges_to(port.id):
+            src_port = graph.ports.get(edge.source)
+            ssec = graph.sections.get(src_port.section_id) if src_port else None
+            if ssec is None:
+                continue
+            if ssec.grid_row == psec.grid_row and section_precedes(graph, ssec, psec):
+                if not section_lies_before(graph, "y", psec.grid_row):
+                    rows.add(psec.grid_row)
+                break
+    return frozenset(rows)
 
 
 def flanked_cross_row_riser_neighbour_col(
