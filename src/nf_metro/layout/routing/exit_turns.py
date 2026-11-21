@@ -117,6 +117,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
     bypass_line_draws_a_chained_trunk,
     cellmate_gap_drop_column,
     classify_inter_section_family,
+    draws_over_top_loop,
     left_exit_around_below_geometry,
     packed_cell_handoff_carrier,
     perp_exit_farside_entry_wrap_geometry,
@@ -862,9 +863,9 @@ def _right_entry_wrap_turn_requirement(
     """
     facts = _build_inter_facts(edge, src, tgt, ctx)
     loop = (
-        _right_entry_wrap_geometry(facts).wrap
-        if facts.cross_row and facts.src_col is not None and facts.tgt_col is not None
-        else _right_entry_over_top_geometry(ctx, edge, src, tgt)
+        _right_entry_over_top_geometry(ctx, edge, src, tgt)
+        if draws_over_top_loop(facts)
+        else _right_entry_wrap_geometry(facts).wrap
     )
     return _SourceTurnRequirement.from_seam(loop.seam)
 

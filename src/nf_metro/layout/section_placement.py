@@ -18,7 +18,6 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
     MERGE_GAP_MIN,
     MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
@@ -50,7 +49,6 @@ from nf_metro.layout.routing.common import (
     inter_row_wrap_band,
     max_grid_row_with_content,
     merge_junction_ids,
-    over_top_headroom_rows,
     resolve_section,
     section_precedes,
 )
@@ -623,7 +621,6 @@ def place_sections(
     components = _weakly_connected_components(graph, section_edges)
     if len(components) <= 1 or graph.layout_provenance.has_authored_grids():
         _place_section_group(graph, section_edges, section_x_gap, section_y_gap, None)
-        _reserve_over_top_headroom(graph)
         return
 
     # Deterministic stacking order: top-most original row first, then the
@@ -668,28 +665,6 @@ def place_sections(
         for s in comp_secs:
             s.grid_row += row_shift
         next_grid_row = max(s.grid_row + s.grid_row_span - 1 for s in comp_secs) + 1
-    _reserve_over_top_headroom(graph)
-
-
-def _reserve_over_top_headroom(graph: MetroGraph) -> None:
-    """Shift rows down to clear the canvas title for an over-the-top loop.
-
-    A RIGHT-entry section fed by a same-row, lower-column source is reached by
-    a loop over the section's top (see ``_route_right_entry_over_top``), whether
-    the entry is a vertical-flow section's cross-axis port or a reversed (RL)
-    section's leading port.  When no section sits above that section's row, the
-    loop's horizontal would climb into the canvas-top title band.  Reserve a
-    header-clearance band above the topmost such row -- pushing it and every
-    lower row down -- so the loop runs between the title and the header badge.
-    """
-    headroom = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
-    target_rows = over_top_headroom_rows(graph)
-    if not target_rows:
-        return
-    min_target = min(target_rows)
-    for section in graph.sections.values():
-        if section.grid_row >= min_target:
-            section.offset_y += headroom
 
 
 def _rows_overlap(a: Section, b: Section) -> bool:

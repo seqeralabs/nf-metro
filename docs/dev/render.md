@@ -91,6 +91,7 @@ That ink is typically an inter-row return band wrapping around the first box of 
 The canvas grows on that side by the shortfall, and `_move_onto_the_canvas` moves the settled geometry so the grown corner is the origin: one uniform translation of the graph (`translate_graph` in `layout/phases/canvas.py`, which owns the full set of absolute coordinates a graph carries), the routes and labels, the published plan (`RoutePlan.translated`) and the settlement (`EnvelopeSettlement.translated`).
 Each record that names a canvas coordinate moves it by the same amount, so the published records are the ones a layout at the moved position publishes.
 Nothing is routed after the move, because no routing decision reads where the canvas edge is: a margin with no section beyond it is headroom the canvas grows to fit (`section_lies_before`).
+A run takes the headroom above the topmost row only to ride an over-the-top loop it shares an end with (`draws_over_top_loop`).
 A map that draws nothing outside its box envelope never moves.
 
 The room such a run is owed is `CANVAS_ORIGIN_MARGIN` rather than `CANVAS_PADDING`.

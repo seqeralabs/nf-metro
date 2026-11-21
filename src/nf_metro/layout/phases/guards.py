@@ -3153,9 +3153,9 @@ def _guard_topmost_row_top_entry_hugs_section(
         tgt_port = graph.ports.get(r.edge.target)
         if tgt_port is not None and tgt_port.side == PortSide.RIGHT:
             # An over-the-top loop into a RIGHT entry port must climb above the
-            # section's header badge to approach from the right; the row was
-            # pushed down (_reserve_over_top_headroom) to keep that climb below
-            # the title, so the hug limit does not apply.
+            # section's header badge to approach from the right; the canvas
+            # grows to fit that climb below the title (_canvas_placement), so
+            # the hug limit does not apply.
             continue
         band_top = routing_common.row_top_edge(
             graph, sec_b.grid_row, default=sec_b.bbox_y

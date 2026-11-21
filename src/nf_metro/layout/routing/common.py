@@ -539,33 +539,6 @@ def section_precedes(graph: MetroGraph, a: Section, b: Section) -> bool:
     return False
 
 
-def over_top_headroom_rows(graph: MetroGraph) -> frozenset[int]:
-    """Topmost rows whose sections a loop reaches over the top of the map.
-
-    A RIGHT-entry section fed by a same-row, lower-column source is reached by
-    a loop over the section's top (``_route_right_entry_over_top``).  With no
-    section above that row the loop climbs into canvas headroom, so placement
-    reserves a band there (``_reserve_over_top_headroom``) and the band is a
-    corridor; above any other topmost row there is no such band.
-    """
-    rows: set[int] = set()
-    for port in graph.ports.values():
-        if not (port.is_entry and port.side == PortSide.RIGHT):
-            continue
-        psec = graph.sections.get(port.section_id)
-        if psec is None:
-            continue
-        for edge in graph.edges_to(port.id):
-            ssec = resolve_section(graph, graph.stations.get(edge.source))
-            if ssec is None:
-                continue
-            if ssec.grid_row == psec.grid_row and section_precedes(graph, ssec, psec):
-                if not section_lies_before(graph, "y", psec.grid_row):
-                    rows.add(psec.grid_row)
-                break
-    return frozenset(rows)
-
-
 def flanked_cross_row_riser_neighbour_col(
     src_col: int,
     src_row: int,
