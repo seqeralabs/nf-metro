@@ -59,8 +59,8 @@ from nf_metro.layout.phases.canvas import translate_graph
 from nf_metro.layout.phases.guards import (
     FoldThresholdError,
     LayoutInvariantError,
-    _guard_canvas_margin_settled,
     assert_canvas_corridors_hold_their_claims,
+    assert_junctions_on_their_anchors,
     assert_render_header_clearance,
     assert_render_layout_invariants,
     assert_reservations_are_settled,
@@ -103,6 +103,8 @@ from nf_metro.layout.route_reservations import (
     gap_corridor_clearance_band,
     project_reservation_coordinate,
     realise_route_reservations,
+    translate_route_plan,
+    uniform_coordinate_translations,
 )
 from nf_metro.layout.routing import (
     RoutedPath,
@@ -320,16 +322,6 @@ def _compute_canvas_bounds(
     return max_x, max_y
 
 
-_CANVAS_MARGIN_MOVES = 3
-"""Times a render may move the map to clear the left and top canvas margins.
-
-The first move is measured against runs held against the canvas edge, and
-releasing them can uncover a few more pixels of demand, so the measurement is
-taken again on the moved geometry.  Each move strictly increases the room those
-runs have, so the demand cannot grow indefinitely; the cap bounds the re-routing
-a pathological map can provoke rather than expressing a geometric limit."""
-
-
 def _outboard_shortfall(envelope: float, ink: float, margin: float) -> float:
     """Room owed to *ink* drawn outboard of *envelope*, towards a zero edge.
 
@@ -367,7 +359,7 @@ def _content_origin(
 
     The section boxes frame the content, and a run drawn outside that envelope
     carries the frame out with it -- to exactly where
-    :func:`_canvas_margin_shift` seats it, since the two read the same ink.  A
+    :func:`_canvas_placement` seats it, since the two read the same ink.  A
     decoration placed against this boundary therefore sits flush with the
     content whichever of the two defines the edge.
 
@@ -386,36 +378,44 @@ def _content_origin(
     )
 
 
-def _canvas_margin_shift(
+def _canvas_placement(
     graph: MetroGraph,
     route_polylines: Sequence[Sequence[tuple[float, float]]],
     debug: bool,
     *,
     margins: tuple[float, float],
 ) -> tuple[float, float]:
-    """How far to move the map so ink outside the box envelope clears *margins*.
+    """The one move that puts the settled map on its canvas.
 
-    The canvas is a first-quadrant frame: it grows past the rightmost and
-    bottommost ink by a margin, while its left and top edges are pinned at
-    zero.  A run outside the section-box envelope on one of those two sides --
-    an inter-row return band wrapping left of the first box, a bundle rising
-    over the top of one -- therefore has only whatever room the box placement
-    happened to leave, and a wide enough bundle is drawn through it and off the
-    canvas.  Moving the whole map away from the edge by the shortfall seats that
-    run on the line the layout seats a first section against
-    (:data:`CANVAS_ORIGIN_MARGIN`), and the far margins absorb the move by
-    growing the canvas.
+    The canvas is a first-quadrant frame whose top-left corner starts at
+    ``graph.canvas_origin``: it grows past the rightmost and bottommost ink by a
+    margin, while its left and top edges are pinned there.  A run outside the
+    section-box envelope on one of those two sides -- an inter-row return band
+    wrapping left of the first box, a bundle rising over the top of one -- has
+    only whatever room the box placement happened to leave, so the canvas grows
+    on that side by the shortfall, seating the run on the line the layout seats
+    a first section against (:data:`CANVAS_ORIGIN_MARGIN`).  The move brings the
+    grown corner to ``(0, 0)``.
 
-    Zero on both axes for a map that draws nothing outside its box envelope.
+    A shortfall under :data:`SAME_COORD_TOLERANCE` is nothing a viewer can
+    resolve, so the canvas does not grow for one.
     """
+    origin_x, origin_y = graph.canvas_origin
     boxes = [section for section in graph.sections.values() if section.bbox_w > 0]
-    if not boxes:
-        return 0.0, 0.0
-    ink_x, ink_y = _drawn_ink_origin(graph, route_polylines, debug)
-    return (
-        _outboard_shortfall(min(s.bbox_x for s in boxes), ink_x, margins[0]),
-        _outboard_shortfall(min(s.bbox_y for s in boxes), ink_y, margins[1]),
-    )
+    shortfall = 0.0, 0.0
+    if boxes:
+        ink_x, ink_y = _drawn_ink_origin(graph, route_polylines, debug)
+        shortfall = (
+            _outboard_shortfall(
+                min(s.bbox_x for s in boxes) - origin_x, ink_x - origin_x, margins[0]
+            ),
+            _outboard_shortfall(
+                min(s.bbox_y for s in boxes) - origin_y, ink_y - origin_y, margins[1]
+            ),
+        )
+        if max(shortfall) <= SAME_COORD_TOLERANCE:
+            shortfall = 0.0, 0.0
+    return shortfall[0] - origin_x, shortfall[1] - origin_y
 
 
 def _position_legend(
@@ -2124,11 +2124,12 @@ def _settle_render_geometry(
     rejects a band drawn past the room reserved for it.
 
     Junction coordinates are a function of the ports they join rather than
-    independent data, so they are re-derived from the incoming section geometry
-    before anything is routed.  That keeps routing self-consistent no matter
-    which stage last moved a section: a junction left at a stale Y sits off the
-    bundle it belongs to and the connector into it degenerates into a
-    sub-radius dogleg.  A graph-wide rail layout anchors its junctions on
+    independent data.  Layout leaves every junction on that derivation, and the
+    first route reads them as laid out once
+    :func:`assert_junctions_on_their_anchors` has confirmed it: a junction at a
+    stale Y sits off the bundle it belongs to and the connector into it
+    degenerates into a sub-radius dogleg.  A re-route after a section moved
+    re-derives them first.  A graph-wide rail layout anchors its junctions on
     per-line rail Ys instead, by a rule the port-derived placement does not
     reproduce, so it is exempt.
     """
@@ -2304,7 +2305,7 @@ def _settle_render_geometry(
             _assert_curves(station_offsets, routes, route_plan)
         return station_offsets, routes, route_plan, labels
 
-    reanchor_junctions(graph)
+    assert_junctions_on_their_anchors(graph)
     station_offsets = compute_station_offsets(graph, offset_step=offset_step)
     routes, route_plan = _route(
         station_offsets,
@@ -2618,7 +2619,60 @@ def _assert_settled_geometry_is_drawable(
     assert_render_header_clearance(graph, strict=effective_strict)
 
 
-def _settle_clear_of_the_canvas_margins(
+def _move_onto_the_canvas(
+    graph: MetroGraph, settled: _SettledRenderGeometry, move: tuple[float, float]
+) -> _SettledRenderGeometry:
+    """Translate *graph* and everything settled on it by *move*, as one body.
+
+    Routes, the polylines drawn from them, labels and the published plan move
+    with the graph, and the settlement's translations gain the move so a frozen
+    claim projected through them lands on the moved geometry.  Afterwards the
+    canvas origin is ``(0, 0)``.
+    """
+    dx, dy = move
+    graph.canvas_origin = 0.0, 0.0
+    if not dx and not dy:
+        return settled
+    translate_graph(graph, dx, dy)
+    for route in settled.routes:
+        route.points = [(x + dx, y + dy) for x, y in route.points]
+    translations = uniform_coordinate_translations(dx, dy)
+    settlement = replace(
+        settled.settlement,
+        coordinate_translations=(
+            *settled.settlement.coordinate_translations,
+            *translations,
+        ),
+    )
+    return settled._replace(
+        route_polylines=[
+            [(x + dx, y + dy) for x, y in polyline]
+            for polyline in settled.route_polylines
+        ],
+        labels=[
+            replace(
+                label,
+                x=label.x + dx,
+                y=label.y + dy,
+                obstacle_bbox=(
+                    None
+                    if label.obstacle_bbox is None
+                    else (
+                        label.obstacle_bbox[0] + dx,
+                        label.obstacle_bbox[1] + dy,
+                        label.obstacle_bbox[2] + dx,
+                        label.obstacle_bbox[3] + dy,
+                    )
+                ),
+            )
+            for label in settled.labels
+        ],
+        route_plan=translate_route_plan(settled.route_plan, graph, translations),
+        settlement=settlement,
+    )
+
+
+def _settle_once_on_the_canvas(
     source_graph: MetroGraph,
     theme: Theme,
     offset_step: float,
@@ -2627,40 +2681,24 @@ def _settle_clear_of_the_canvas_margins(
     margins: tuple[float, float],
     debug: bool = False,
 ) -> tuple[MetroGraph, _SettledRenderGeometry]:
-    """Settle a copy of *source_graph*, moved clear of the left and top edges.
+    """Settle a copy of *source_graph* once, then place it on its canvas.
 
-    Where a run lands is only known once it is routed, so a map that routes
-    outside its box envelope is re-derived on a copy moved away from the edge by
-    :func:`_canvas_margin_shift`.  The move is rigid, so the re-route answers it
-    differently only where a run was being held against the canvas edge, and
-    releasing such a run can uncover a little more demand than the first
-    measurement saw -- hence a re-measurement rather than a single move.
+    Where a run lands is only known once it is routed, so the canvas is placed
+    after every routing decision, as one uniform move of the settled geometry
+    (:func:`_canvas_placement`).  No routing decision reads where the canvas
+    edge is, so the moved result is the map laid out at its final position and
+    nothing is settled twice.
 
-    The settled-geometry guards read the final pass, the only one describing
-    geometry a viewer sees.
-
-    A shortfall under :data:`SAME_COORD_TOLERANCE` is nothing a viewer can
-    resolve, and moving for one would spend a re-route on a sub-pixel residue,
-    so the measurement settles there rather than at exact zero.
+    The settled-geometry guards read the moved result, the geometry a viewer
+    sees.
     """
     graph = _copy_graph_for_render(source_graph)
     settled = _settle_render_geometry(graph, theme, offset_step, section_y_gap)
-    moved = 0.0, 0.0
-    for moves in range(_CANVAS_MARGIN_MOVES + 1):
-        shift = _canvas_margin_shift(
-            graph, settled.route_polylines, debug, margins=margins
-        )
-        if max(shift) <= SAME_COORD_TOLERANCE:
-            break
-        if moves == _CANVAS_MARGIN_MOVES:
-            _guard_canvas_margin_settled(
-                graph, "render", shift=shift, margins=margins, moves=moves
-            )
-            break
-        moved = moved[0] + shift[0], moved[1] + shift[1]
-        graph = _copy_graph_for_render(source_graph)
-        translate_graph(graph, *moved)
-        settled = _settle_render_geometry(graph, theme, offset_step, section_y_gap)
+    settled = _move_onto_the_canvas(
+        graph,
+        settled,
+        _canvas_placement(graph, settled.route_polylines, debug, margins=margins),
+    )
     _assert_settled_geometry_is_drawable(graph, settled)
     return graph, settled
 
@@ -2686,7 +2724,7 @@ def _settled_render_graph(source_graph: MetroGraph, theme: Theme) -> MetroGraph:
         font_scale_context(source_graph.font_scale),
         stroke_scale_context(source_graph.stroke_scale),
     ):
-        graph, _settled = _settle_clear_of_the_canvas_margins(
+        graph, _settled = _settle_once_on_the_canvas(
             source_graph,
             scaled_theme,
             graph_offset_step(source_graph, scaled_theme.line_width),
@@ -2732,7 +2770,7 @@ def _build_render_plan_scaled(
         if source_graph.section_y_gap is not None
         else SECTION_Y_GAP
     )
-    graph, settled = _settle_clear_of_the_canvas_margins(
+    graph, settled = _settle_once_on_the_canvas(
         source_graph,
         theme,
         offset_step,

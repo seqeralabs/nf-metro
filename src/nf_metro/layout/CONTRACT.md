@@ -2065,14 +2065,14 @@ They are design evidence, not part of this specification.
 - **Out of scope**: Canvas-side corridors, whose far boundary is the canvas
   edge rather than a grid neighbour; closing one grows a margin, which no row
   or column offset owns. The render owns that margin instead:
-  `_settle_clear_of_the_canvas_margins` (`render/svg.py`) measures the ink that
-  lands outside the section-box envelope on the two sides whose edge is pinned
-  at zero, moves the whole map away from the edge by the shortfall
-  (`translate_graph`), and re-derives the geometry on the moved copy; the far
-  margins grow the canvas by the same amount, so the map keeps a first-quadrant
-  frame and the zero edge a canvas measurement reads stays the zero edge. The
-  move is rigid and post-routing, which is why it is not one of settlement's
-  per-boundary allocations. Canvas corridors are gated separately, by
+  `_canvas_placement` (`render/svg.py`) measures the ink that lands outside the
+  section-box envelope on the two sides whose edge is pinned at the canvas
+  origin, and `_move_onto_the_canvas` moves the settled map, routes and plan
+  included, by the shortfall (`translate_graph`); the far margins grow the
+  canvas by the same amount, so the map keeps a first-quadrant frame and the
+  zero edge a canvas measurement reads stays the zero edge. The move is one
+  uniform translation after every routing decision, which is why it is not one
+  of settlement's per-boundary allocations. Canvas corridors are gated separately, by
   `assert_canvas_corridors_hold_their_claims`, which runs once the render has
   sized its canvas -- the first point at which the number a canvas claim is
   measured against exists, and the reason the settlement guard could never

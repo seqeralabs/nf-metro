@@ -197,11 +197,6 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 They therefore carry no `needs` or `bisection_safe` dispatch data, only their tier and any `issue_pin` and `narrow_reason`.
 Their costs are not measured separately, because each is a single structural pass.
 
-`_guard_canvas_margin_settled` is the one inline guard whose tier does not describe its gating.
-The render's canvas-margin move loop calls it on every render, not only under `validate=True`.
-Its input is the shortfall a move left behind, which exists nowhere else.
-It cannot join the dispatched Tier-A set the render chokepoint runs.
-
 | guard                                         | tier | role                                                                        |
 | --------------------------------------------- | ---- | --------------------------------------------------------------------------- |
 | `_guard_stations_within_bbox`                 | A    | Always-on postcondition: every station center lies within its section bbox. |
@@ -211,7 +206,6 @@ It cannot join the dispatched Tier-A set the render chokepoint runs.
 | `_guard_independent_components_disjoint`      | A    | Independently-stacked components do not overlap.                            |
 | `_guard_no_same_row_backward_feed`            | A    | A same-row inter-section edge does not run against source flow.             |
 | `_guard_anchors_frozen_during_placement`      | B    | Content placement leaves resolved anchors fixed.                            |
-| `_guard_canvas_margin_settled`                | B    | No left/top canvas margin outlives the render moves that own it (`#1769`).  |
 | `_guard_bypass_v_flat_visible`                | B    | Every bypass V keeps a visible horizontal run through its X.                |
 | `_guard_centered_line_spread_balanced`        | B    | A `centered` section's weave balances about its trunk.                      |
 | `_guard_file_icon_no_name_label`              | B    | A file-icon station gets no separate node-name label.                       |

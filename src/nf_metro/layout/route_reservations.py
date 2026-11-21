@@ -514,16 +514,36 @@ class ReservationCoordinateTranslation:
     amount: float
     fully_owned_member_ids: tuple[EmissionMemberId, ...] = ()
     crossing_member_ids: tuple[EmissionMemberId, ...] = ()
+    uniform: bool = False
+    """The whole map moved: every coordinate travels, and *coordinate* and the
+    member sets are unused.  Such a move stretches no member across a band, so
+    unlike a settlement translation it may go either way."""
 
     def __post_init__(self) -> None:
         if self.axis is DemandAxis.BOTH:
             raise ValueError("reservation translation requires one canvas axis")
         if not math.isfinite(self.coordinate) or not math.isfinite(self.amount):
             raise ValueError("reservation translation must be finite")
-        if self.amount <= COORD_TOLERANCE:
+        if self.uniform:
+            if not self.amount:
+                raise ValueError("a uniform translation must move the map")
+            if self.fully_owned_member_ids or self.crossing_member_ids:
+                raise ValueError("a uniform translation names no members")
+        elif self.amount <= COORD_TOLERANCE:
             raise ValueError("reservation translation must be positive")
         if set(self.fully_owned_member_ids).intersection(self.crossing_member_ids):
             raise ValueError("reservation translation member ownership overlaps")
+
+
+def uniform_coordinate_translations(
+    dx: float, dy: float
+) -> tuple[ReservationCoordinateTranslation, ...]:
+    """The move of the whole map by ``(dx, dy)``, one translation per moved axis."""
+    return tuple(
+        ReservationCoordinateTranslation(axis, 0.0, amount, uniform=True)
+        for axis, amount in ((DemandAxis.X, dx), (DemandAxis.Y, dy))
+        if amount
+    )
 
 
 def project_reservation_coordinate(
@@ -537,7 +557,7 @@ def project_reservation_coordinate(
     for translation in translations:
         if translation.axis is not axis:
             continue
-        if member_id in translation.fully_owned_member_ids:
+        if translation.uniform or member_id in translation.fully_owned_member_ids:
             projected += translation.amount
         elif (
             member_id in translation.crossing_member_ids
@@ -4153,6 +4173,52 @@ def adopt_route_reservation_ledger(
         projected,
         graph,
         coordinate_translations=coordinate_translations,
+    )
+
+
+def translate_route_plan(
+    plan: RoutePlan,
+    graph: MetroGraph,
+    translations: tuple[ReservationCoordinateTranslation, ...],
+) -> RoutePlan:
+    """Carry a published plan along with a uniform move of the whole map.
+
+    *graph* has already moved.  The exit-turn and convergence frames are
+    projected through *translations*, and each realised reservation appends
+    them to the projection it was measured with and is measured again, so the
+    ledger describes the moved geometry the same way it described the
+    geometry it was published on.
+    """
+    held_translations = {
+        item.reservation_id: item.coordinate_translations
+        for item in plan.realised_reservations
+    }
+    realised = tuple(
+        item
+        for reservation in plan.reservations
+        if reservation.id in held_translations
+        and (
+            item := _realise_one(
+                graph,
+                reservation,
+                None,
+                None,
+                (*held_translations[reservation.id], *translations),
+            )
+        )
+        is not None
+    )
+    return replace(
+        plan,
+        exit_turn_plans=tuple(
+            _project_exit_turn_plan(item, translations) for item in plan.exit_turn_plans
+        ),
+        convergence_plans=tuple(
+            _project_convergence_plan(item, translations)
+            for item in plan.convergence_plans
+        ),
+        realised_reservations=realised,
+        reservation_diagnostics=_diagnostics(plan.reservations, realised),
     )
 
 

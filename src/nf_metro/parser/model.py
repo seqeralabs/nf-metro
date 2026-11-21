@@ -576,6 +576,11 @@ class MetroGraph:
     bypass_label_obstacles: dict[str, tuple[float, float, float, float]] = field(
         default_factory=dict
     )
+    # Where the canvas's top-left corner sits in the coordinates the map is laid
+    # out in.  The render grows the canvas around everything drawn and moves the
+    # map so this corner becomes (0, 0), so a map moved together with its origin
+    # renders the same picture.
+    canvas_origin: tuple[float, float] = (0.0, 0.0)
     # %%metro legend_combo entries: (line_ids, label) pairs.
     legend_combos: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
     # Shape-checked %%metro legend_combo payloads as (line_ids, label) pairs,

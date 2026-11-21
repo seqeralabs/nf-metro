@@ -32,6 +32,8 @@ from nf_metro.layout.geometry import (
     cotravelling_lanes_fuse,
     lanes_run_along_x,
     lanes_run_along_y,
+    section_column_span,
+    section_row_span,
     spans_share_corridor,
 )
 from nf_metro.layout.route_topology import (
@@ -366,6 +368,29 @@ def row_top_edge(
     return min((s.bbox_y for s in secs), default=default)
 
 
+def gap_above_row(graph: MetroGraph, row: int) -> tuple[float, float]:
+    """``(top, bottom)`` of the inter-row band ABOVE grid *row*.
+
+    The band runs from the bottom edge of the row above down to *row*'s top
+    edge, computed over all columns so a traverse in it stays clear of every
+    section in the span.  For a source exactly one row up this is the band just
+    below the source row; for a source further up it is the wider band the
+    intervening rows leave abutting *row*.  An empty row directly above leaves
+    the band to the lowest section lying wholly above *row*.  With no section
+    above at all the band is canvas headroom (:func:`section_lies_before`) and
+    has only its bottom, so both ends report *row*'s top edge.
+    """
+    bottom = row_top_edge(graph, row)
+    above = [
+        s.bbox_y + s.bbox_h
+        for s in graph.sections.values()
+        if s.bbox_h > 0 and section_row_span(s)[1] < row
+    ]
+    if not above:
+        return bottom, bottom
+    return row_bottom_edge(graph, row - 1, default=max(above)), bottom
+
+
 def lowest_section_bottom_crossing_span(
     graph: MetroGraph,
     span_lo: float,
@@ -475,21 +500,25 @@ def header_corridor_y(
         )
     clearance = (
         INTER_ROW_HEADER_CLEARANCE
-        if section_exists_above_row(graph, row)
+        if section_lies_before(graph, "y", row)
         else EDGE_TO_BUNDLE_CLEARANCE
     )
     return row_top_edge(graph, row, default=default, col=col) - clearance - base_radius
 
 
-def section_exists_above_row(graph: MetroGraph, row: int) -> bool:
-    """True if any section lies entirely above grid *row* (its bottom row is
-    a higher row than *row*).
+def section_lies_before(graph: MetroGraph, axis: str, index: int) -> bool:
+    """True if a section lies wholly before grid *index* along *axis*: above row
+    *index* for ``"y"``, left of column *index* for ``"x"``.
 
-    Distinguishes a row with a genuine inter-row gap above it (a section
-    contributes a header badge there) from the topmost row, which has only
-    the canvas-top padding above.
+    Distinguishes a row or column with a genuine gap before it (a section
+    bounds it, and above a row contributes a header badge) from the outermost
+    one, which has only the canvas margin before it.  That margin is headroom
+    rather than a gap: the render places the canvas once, around everything
+    drawn, so a run there always fits and only whether it crosses another
+    section can rule it out.
     """
-    return any(s.grid_row + s.grid_row_span - 1 < row for s in graph.sections.values())
+    span = section_row_span if axis == "y" else section_column_span
+    return any(span(s)[1] < index for s in graph.sections.values())
 
 
 def flanked_cross_row_riser_neighbour_col(
@@ -2850,8 +2879,7 @@ def bypass_bottom_y(
             # Target is in the bottommost row: route in the gap ABOVE it
             # rather than below the whole canvas (which would overshoot
             # and loop back up to the entry port).
-            upper_bottom = row_bottom_edge(graph, tgt_row - 1, default=0.0)
-            lower_top = row_top_edge(graph, tgt_row, default=upper_bottom)
+            upper_bottom, lower_top = gap_above_row(graph, tgt_row)
             return held_in_reserved_band(
                 _center_inter_row_channel(
                     upper_bottom,

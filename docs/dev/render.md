@@ -85,14 +85,15 @@ Its `viewBox` always starts at `0 0` so overlays can share it without an outer t
 Width and height come from `_compute_canvas_bounds` plus a margin: `CANVAS_PADDING` on the right and the watermark band at the bottom.
 The far edges therefore grow to hold whatever the render draws.
 
-The near edges cannot grow.
-The map moves instead.
-`_settle_clear_of_the_canvas_margins` measures the ink that lands outside the section-box envelope on the left or top.
+The near edges are pinned at the canvas origin, so the map moves instead.
+`_settle_once_on_the_canvas` settles the laid-out graph once, then `_canvas_placement` measures the ink that lands outside the section-box envelope on the left or top.
 That ink is typically an inter-row return band wrapping around the first box of a row, or a bundle rising over the top of one.
-It then moves the whole laid-out graph away from the edge by the shortfall, using `translate_graph` in `layout/phases/canvas.py`.
-That function owns the full set of absolute coordinates a graph carries.
-Routing is re-derived on the moved copy, because where a run lands is only known once it is routed.
+The canvas grows on that side by the shortfall, and `_move_onto_the_canvas` moves the settled geometry so the grown corner is the origin: one uniform translation of the graph (`translate_graph` in `layout/phases/canvas.py`, which owns the full set of absolute coordinates a graph carries), the routes, labels and published plan.
+Nothing is routed again, because no routing decision reads where the canvas edge is: a margin with no section beyond it is headroom the canvas grows to fit (`section_lies_before`).
 A map that draws nothing outside its box envelope never moves.
+
+`MetroGraph.canvas_origin` records where the canvas corner sits in layout coordinates, `(0, 0)` as laid out.
+A caller that moves a laid-out map moves its origin with it, and renders the same picture.
 
 The room such a run is owed is `CANVAS_ORIGIN_MARGIN` rather than `CANVAS_PADDING`.
 The near sides already have something placed against them, namely the first section's box edge and the header badge above its top.

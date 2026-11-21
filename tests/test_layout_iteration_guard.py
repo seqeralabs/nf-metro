@@ -47,7 +47,7 @@ import layout_iteration_guard as guard
 import pytest
 
 ALLOWLIST_PATH = Path(__file__).parent / "data" / "layout_iteration_allowlist.json"
-ROUTING_CEILING = 69
+ROUTING_CEILING = 67
 PLACEMENT_CEILING = 26
 PINNED_LATER_CEILING = 22
 PINNED_NESTED_CEILING = 1
@@ -201,7 +201,7 @@ def test_registry_is_derived_from_the_source(live):
     assert "solve_corridor_cohorts" in reg.solver
     assert {
         "_settle_render_geometry",
-        "_settle_clear_of_the_canvas_margins",
+        "_settle_once_on_the_canvas",
         "render_svg",
     } <= reg.render_runners
 
@@ -302,7 +302,7 @@ def _with_call_before_return(
         ("render/svg.py:_settle_render_geometry", "_route"),
         ("render/svg.py:_settle_render_geometry", "observe_route_edges_centred"),
         (
-            "render/svg.py:_settle_clear_of_the_canvas_margins",
+            "render/svg.py:_settle_once_on_the_canvas",
             "_settle_render_geometry",
         ),
     ],

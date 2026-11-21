@@ -4,20 +4,6 @@
     "entries": [
       {
         "rule": "rerun",
-        "site": "render/svg.py:_settle_clear_of_the_canvas_margins",
-        "callee": "_settle_render_geometry#2",
-        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
-        "replacement": "settle once and move the settled geometry, routes included, clear of the canvas margins; never re-settle a moved copy"
-      },
-      {
-        "rule": "retry-loop",
-        "site": "render/svg.py:_settle_clear_of_the_canvas_margins",
-        "callee": "_settle_render_geometry",
-        "removed_by": "59 (#2141: render-side router re-runs, after the merge)",
-        "replacement": "settle once and move the settled geometry, routes included, clear of the canvas margins; never re-settle a moved copy"
-      },
-      {
-        "rule": "rerun",
         "site": "render/svg.py:_settle_render_geometry",
         "callee": "_reconcile_carried_ports#1",
         "removed_by": "59 (#2141: render-side router re-runs, after the merge)",

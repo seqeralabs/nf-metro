@@ -102,6 +102,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
     _shared_anchor_runway_runs,
 )
+from nf_metro.layout.phases.junctions import reanchor_junctions
 from nf_metro.layout.phases.off_track import (
     _dead_end_producer_anchor,
     _is_single_trunk_section,
@@ -3147,7 +3148,7 @@ def _guard_topmost_row_top_entry_hugs_section(
             continue
         if sec_a.grid_row_span != 1 or sec_b.grid_row_span != 1:
             continue
-        if routing_common.section_exists_above_row(graph, sec_b.grid_row):
+        if routing_common.section_lies_before(graph, "y", sec_b.grid_row):
             continue
         tgt_port = graph.ports.get(r.edge.target)
         if tgt_port is not None and tgt_port.side == PortSide.RIGHT:
@@ -5477,39 +5478,6 @@ def _guard_planned_fan_frame_realised(
                     )
 
 
-def _guard_canvas_margin_settled(
-    graph: MetroGraph,
-    phase: str,
-    *,
-    shift: tuple[float, float],
-    margins: tuple[float, float],
-    moves: int,
-) -> None:
-    """Guard that no left or top canvas margin outlives the moves that own it.
-
-    A canvas margin is not a boundary any row or column offset can widen, so
-    the render answers a short one by moving the whole map away from the edge
-    (issue #1769).  Each move gives the runs concerned strictly more room than
-    the measurement that asked for it, so a *shift* surviving *moves* of them
-    is a demand moving does not answer: engine drift rather than something an
-    author can express.  Drawing it pinched is what ``permissive`` asks for.
-    """
-    dx, dy = shift
-    sides = ", ".join(
-        f"{name} by {amount:.1f}px inside a {margin:.0f}px margin"
-        for name, amount, margin in (("left", dx, margins[0]), ("top", dy, margins[1]))
-        if amount
-    )
-    msg = (
-        f"{phase}: the canvas margin still falls short after {moves} moves: "
-        f"content outside the section-box envelope is drawn {sides}.  Moving "
-        "the map clear of the edge is not converging on this arrangement."
-    )
-    if graph.strict and not graph.permissive:
-        raise LayoutInvariantError(msg)
-    warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
-
-
 # The single ordered source of truth for the ``validate=True`` guard
 # sequence.  The runner iterates this list in order, so its order *is* the
 # guard call order; the bisection-safe prefix is what ``_run_pass_c_guards``
@@ -6128,21 +6096,6 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_symmetric_diamond_branches_half_pitch, "B"),
     GuardSpec(_guard_tall_anchor_stack_well_formed, "B"),
     GuardSpec(_guard_tb_top_entry_drop_hugs_top, "B"),
-    # Called from the render's canvas-margin move loop rather than by either
-    # guard runner: its input is the shortfall a move left behind, which exists
-    # nowhere else.  Tier B keeps it out of the chokepoint's dispatched Tier-A
-    # set, which its signature could not join; the loop calls it on every
-    # render regardless.
-    GuardSpec(
-        _guard_canvas_margin_settled,
-        "B",
-        issue_pin=("#1769",),
-        narrow_reason=(
-            "Restricted to the shortfall the canvas-margin moves leave behind: "
-            "the moves own this margin outright, so a map they answer has no "
-            "margin left to assert and one they cannot is the whole failure."
-        ),
-    ),
 )
 
 
@@ -6389,6 +6342,37 @@ def assert_render_header_clearance(graph: MetroGraph, *, strict: bool = False) -
     if strict:
         raise LayoutInvariantError(msg)
     warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
+
+
+def assert_junctions_on_their_anchors(graph: MetroGraph) -> None:
+    """Refuse a graph whose junctions are not where their ports derive them.
+
+    A junction's coordinates are a function of the ports it joins
+    (:func:`~nf_metro.layout.phases.junctions.reanchor_junctions`), and layout
+    leaves every junction on that derivation, so the router reads the junctions
+    as laid out.  One off its anchor is an engine defect rather than a layout an
+    author can ask for, so it is refused under every strictness, never moved.
+    """
+    laid_out = {
+        jid: (station.x, station.y)
+        for jid in graph.junctions
+        if (station := graph.stations.get(jid)) is not None
+    }
+    reanchor_junctions(graph)
+    moved: list[str] = []
+    for jid, (x, y) in laid_out.items():
+        station = graph.stations[jid]
+        if max(abs(station.x - x), abs(station.y - y)) > COORD_TOLERANCE_FINE:
+            moved.append(
+                f"{jid!r} at ({x:.2f}, {y:.2f}), derived "
+                f"({station.x:.2f}, {station.y:.2f})"
+            )
+        station.x, station.y = x, y
+    if moved:
+        raise LayoutInvariantError(
+            "layout left junctions off the anchors their ports derive: "
+            + "; ".join(moved)
+        )
 
 
 def _corridor_deficit_detail(

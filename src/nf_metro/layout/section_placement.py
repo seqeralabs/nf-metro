@@ -51,7 +51,7 @@ from nf_metro.layout.routing.common import (
     max_grid_row_with_content,
     merge_junction_ids,
     resolve_section,
-    section_exists_above_row,
+    section_lies_before,
 )
 from nf_metro.layout.seam_topology import (
     entry_fan_receives_stacked_reversed_bundle,
@@ -695,7 +695,7 @@ def _reserve_over_top_headroom(graph: MetroGraph) -> None:
             if ssec is None:
                 continue
             if ssec.grid_row == psec.grid_row and _section_precedes(graph, ssec, psec):
-                if not section_exists_above_row(graph, psec.grid_row):
+                if not section_lies_before(graph, "y", psec.grid_row):
                     target_rows.add(psec.grid_row)
                 break
     if not target_rows:

@@ -1,0 +1,48 @@
+%%metro title: Fuzz 8400846
+%%metro style: nfcore
+%%metro line: l0 | Trim | #e6194b
+%%metro line: l1 | Dedup | #3cb44b
+%%metro line: l2 | Qc | #4363d8
+%%metro line: l3 | Merge | #f58231
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 1,1
+%%metro grid: sec3 | 0,1
+
+graph LR
+    subgraph sec0 [Count 0]
+        %%metro direction: BT
+        s0n0[normalize]
+        s0n1[summarise]
+        s0n2[quant]
+        s0n0 -->|l0| s0n1
+        s0n1 -->|l0| s0n2
+    end
+    subgraph sec1 [Merge_Qc 1]
+        s1n0[cluster_align]
+        s1n2[bin]
+        s1n0 -->|l0| s1n2
+    end
+    subgraph sec2 [Filter 2]
+        %%metro direction: RL
+        %%metro entry: right | l0, l1, l2
+        s2n0[filter_summarise]
+        s2n1[count]
+        s2n2[normalize_bin_gather]
+        s2n0 -->|l0,l1,l2,l3| s2n1
+        s2n1 -->|l0,l1,l2,l3| s2n2
+    end
+    subgraph sec3 [Cluster_Trim 3]
+        s3n0[stats_bin]
+        s3n1[cluster_normalize]
+        s3n2[vcf]
+        s3n0 -->|l0,l1,l2| s3n1
+        s3n1 -->|l0,l1,l3| s3n2
+    end
+    s0n2 -->|l0| s1n0
+    s1n2 -->|l0| s2n0
+    s2n2 -->|l0,l1,l2| s3n0
+    s0n2 -->|l1| s2n0
+    s1n0 -->|l2| s2n0
+    s2n1 -->|l2,l3| s3n1
+    s2n2 -->|l3| s3n1
