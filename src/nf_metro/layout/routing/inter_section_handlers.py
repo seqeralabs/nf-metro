@@ -7794,16 +7794,18 @@ def gap_above_channel_y(
 
 
 def _gap_above_band_fits(graph: MetroGraph, tgt_row: int) -> bool:
-    """Whether the band above *tgt_row* holds a traverse.
+    """Whether a route may traverse the band above *tgt_row*.
 
     Below another row the band is the inter-row gap, which holds one only when
     it clears both the upper row's bottom edge and the target row's header badge
     (:func:`_inter_row_band_fits`); otherwise a centred run grazes one of them.
-    Above the topmost row it is canvas headroom, which always does
-    (:func:`section_lies_before`).
+    Above the topmost row it is canvas headroom (:func:`section_lies_before`),
+    and a run there climbs over the whole map: a detour, never a corridor.
+    Every caller has a route that stays between or below the sections, so the
+    band above the topmost row is never taken.
     """
     if not section_lies_before(graph, "y", tgt_row):
-        return True
+        return False
     gap_top, gap_bottom = gap_above_row(graph, tgt_row)
     return _inter_row_band_fits(gap_top, gap_bottom)
 

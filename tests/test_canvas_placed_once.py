@@ -290,3 +290,26 @@ def test_a_uniform_translation_moves_every_member_either_way() -> None:
         ReservationCoordinateTranslation(
             DemandAxis.X, 0.0, 3.0, fully_owned_member_ids=("a",), uniform=True
         )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "examples/topologies/bypass_left_entry_from_right.mmd",
+        "examples/topologies/left_exit_wrap_under_own_section.mmd",
+    ],
+)
+def test_a_wrap_into_the_topmost_row_stays_below_the_map_top(name: str) -> None:
+    """The band above the topmost row is headroom over the whole map, a detour.
+
+    Each of these wraps has a route that stays between or below the sections,
+    so no run is drawn above the topmost section box.
+    """
+    graph = _laid_out(ROOT / name, {})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        plan = build_render_plan(graph, resolve_theme(None, graph))
+    boxes = [s for s in plan.graph.sections.values() if s.bbox_w > 0]
+    top = min(s.bbox_y for s in boxes)
+    highest = min(y for route in plan.routes for _x, y in route.points)
+    assert highest >= top, f"{name} runs a line {top - highest:.1f}px over the map"
