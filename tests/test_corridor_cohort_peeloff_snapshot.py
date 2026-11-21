@@ -185,11 +185,16 @@ def _render(path: Path) -> None:
 def test_compiled_peeloff_riser_agrees_with_the_drawn_riser(
     monkeypatch: pytest.MonkeyPatch, relative_path: str, expected: dict[EdgeKey, float]
 ) -> None:
-    """The cohort-final compile accepts each peel-off riser where it is drawn."""
+    """The cohort-final compile accepts each peel-off riser where it is drawn.
+
+    The compile runs before the canvas is placed, so its coordinates land in the
+    drawing moved by the one move that places it."""
     plans: list[cci.CorridorCohortPlan] = []
     drawn: dict[EdgeKey, float] = {}
+    moves: list[tuple[float, float]] = []
     compile_plan = member_geometry.compile_corridor_cohort_plan
     drawable = svg._assert_settled_geometry_is_drawable
+    place = svg._move_onto_the_canvas
 
     def capture_plan(*args: Any, **kwargs: Any) -> cci.CorridorCohortPlan:
         plan = compile_plan(*args, **kwargs)
@@ -206,13 +211,19 @@ def test_compiled_peeloff_riser_agrees_with_the_drawn_riser(
             }
         )
 
+    def capture_move(graph: Any, settled: Any, move: tuple[float, float]) -> Any:
+        moves.append(move)
+        return place(graph, settled, move)
+
     monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", capture_plan)
     monkeypatch.setattr(svg, "_assert_settled_geometry_is_drawable", capture_drawn)
+    monkeypatch.setattr(svg, "_move_onto_the_canvas", capture_move)
     _render(ROOT / relative_path)
 
     assert plans
+    (move,) = moves
     risers = {
-        allocation.edge_key: allocation.coordinate
+        allocation.edge_key: allocation.coordinate + move[allocation.axis]
         for allocation in plans[-1].allocations
         if allocation.axis == 0
         and allocation.edge_key in expected

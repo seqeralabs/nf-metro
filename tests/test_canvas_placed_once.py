@@ -9,8 +9,11 @@ onto the canvas, rather than settling a moved copy again.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import re
 import warnings
+from collections.abc import Iterator
+from enum import Enum
 from pathlib import Path
 
 import pytest
@@ -21,12 +24,6 @@ from nf_metro.layout.phases.canvas import translate_graph
 from nf_metro.layout.phases.guards import (
     LayoutInvariantError,
     assert_junctions_on_their_anchors,
-)
-from nf_metro.layout.route_plan import DemandAxis
-from nf_metro.layout.route_reservations import (
-    ReservationCoordinateTranslation,
-    project_reservation_coordinate,
-    uniform_coordinate_translations,
 )
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
@@ -273,23 +270,99 @@ def test_a_junction_off_its_anchor_is_refused_not_moved() -> None:
         _render(graph)
 
 
-def test_a_uniform_translation_moves_every_member_either_way() -> None:
-    (left,) = uniform_coordinate_translations(-12.5, 0.0)
-    assert left.axis is DemandAxis.X
-    for member in ("a", "b"):
-        assert (
-            project_reservation_coordinate(40.0, DemandAxis.X, member, (left,)) == 27.5
-        )
-        assert (
-            project_reservation_coordinate(40.0, DemandAxis.Y, member, (left,)) == 40.0
-        )
-    assert uniform_coordinate_translations(0.0, 0.0) == ()
-    with pytest.raises(ValueError, match="positive"):
-        ReservationCoordinateTranslation(DemandAxis.X, 10.0, -12.5)
-    with pytest.raises(ValueError, match="names no members"):
-        ReservationCoordinateTranslation(
-            DemandAxis.X, 0.0, 3.0, fully_owned_member_ids=("a",), uniform=True
-        )
+def _numbers(value: object, where: str = "") -> Iterator[tuple[str, float]]:
+    """Every number *value* holds, keyed by where it sits in it."""
+    if isinstance(value, bool) or value is None or isinstance(value, str | Enum):
+        return
+    if isinstance(value, int | float):
+        yield where, float(value)
+    elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for item in dataclasses.fields(value):
+            yield from _numbers(getattr(value, item.name), f"{where}.{item.name}")
+    elif isinstance(value, tuple) and hasattr(value, "_fields"):
+        for name in value._fields:
+            yield from _numbers(getattr(value, name), f"{where}.{name}")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _numbers(item, f"{where}[{key!r}]")
+    elif isinstance(value, list | tuple):
+        for index, item in enumerate(value):
+            yield from _numbers(item, f"{where}[{index}]")
+    elif isinstance(value, set | frozenset):
+        for index, item in enumerate(sorted(value, key=repr)):
+            yield from _numbers(item, f"{where}{{{index}}}")
+
+
+# Between them these maps hold every kind of record that names a canvas
+# coordinate: member geometry, accepted cohort owners and their control
+# recipes, convergence trunks, landings and continuations, exit-turn axes and
+# lane transitions, corridor claims, realised reservations and settlement
+# translations.
+RECORD_MAPS = (
+    ROOT / "examples/topologies/merge_trunk_over_low_section.mmd",
+    ROOT / "examples/diagonal_labels.mmd",
+    CANVAS_DATA / "f8400149.mmd",
+)
+
+
+def test_the_canvas_move_carries_every_settled_record() -> None:
+    """Moving a settled map is settling it where it is moved, in every record.
+
+    The plan and the settlement name canvas coordinates as well as the
+    drawing, and a record the move leaves behind describes the routes in
+    another frame than the one they are drawn in.
+    """
+    moved_fields: set[str] = set()
+    for path in RECORD_MAPS:
+        graph = _laid_out(path, {})
+        theme = resolve_theme(None, graph)
+
+        def settle(
+            move: tuple[float, float],
+        ) -> tuple[MetroGraph, svg._SettledRenderGeometry]:
+            copied = svg._copy_graph_for_render(graph)
+            translate_graph(copied, *move)
+            return copied, svg._settle_render_geometry(
+                copied,
+                theme,
+                svg.graph_offset_step(graph, theme.line_width),
+                svg.SECTION_Y_GAP,
+            )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            laid_out, at_layout = settle((0.0, 0.0))
+            _, settled_moved = settle(MOVE)
+        before = dict(_numbers(at_layout))
+        expected = dict(_numbers(settled_moved))
+        got = dict(_numbers(svg._move_onto_the_canvas(laid_out, at_layout, MOVE)))
+        assert got.keys() == expected.keys()
+        assert [key for key in expected if abs(got[key] - expected[key]) > 1e-6] == []
+        moved_fields |= {
+            re.sub(r"\[[^]]*\]", "", key)
+            for key, value in expected.items()
+            if value != before[key]
+        }
+    assert {
+        ".route_plan.member_geometry_plans.points",
+        ".route_plan.member_geometry_plans.gap_channels.start",
+        ".route_plan.accepted_corridor_cohort_plan.owners.accepted_coordinate",
+        ".route_plan.accepted_corridor_cohort_plan.owners.recipe.fixed_points.coordinate",
+        ".route_plan.accepted_corridor_cohort_plan.owners.recipe.directed_runways"
+        ".anchor_coordinate",
+        ".route_plan.convergence_plans.trunk_axis.coordinate",
+        ".route_plan.convergence_plans.landings.cross_run_start_coordinate",
+        ".route_plan.convergence_plans.outgoing_continuations.start_point",
+        ".route_plan.convergence_plans.endpoint_ownership.endpoint",
+        ".route_plan.exit_turn_plans.axes.coordinate",
+        ".route_plan.exit_turn_plans.lane_transitions.source_point",
+        ".route_plan.exit_turn_plans.assignments.launch_coordinate",
+        ".route_plan.reservations.claims.allocation_coordinate",
+        ".route_plan.realised_reservations.coordinate",
+        ".route_plan.realised_reservations.coordinate_translations.coordinate",
+        ".settlement.translations.coordinate",
+        ".settlement.coordinate_translations.coordinate",
+    } <= moved_fields
 
 
 @pytest.mark.parametrize(

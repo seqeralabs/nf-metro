@@ -1,4 +1,4 @@
-"""Render coherence under a rigid downward translation of a grid row.
+"""Junctions under a rigid downward translation of a grid row.
 
 Translating a row (its sections, their stations and their ports) by a small
 amount is layout-neutral: nothing inside the row moves relative to anything
@@ -14,9 +14,13 @@ degenerates into a dogleg too short to carry a curve radius.
 the exit port, so a few pixels of stranding is enough to turn a straight
 connector into a sub-radius Z.
 
+Layout's row translation carries the junctions with their anchors, and the
+render routes the junctions as laid out: a graph that reaches it with one
+stranded is an engine defect the render refuses rather than repairs.
+
 A graph-wide rail layout is the one place where the port-derived placement is
 not the authority: it seats junctions on per-line rail Ys instead, so the
-re-derivation must leave those alone.
+derivation must leave those alone.
 """
 
 from __future__ import annotations
@@ -27,7 +31,11 @@ import pytest
 
 from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.phases.bbox import _shift_rows_from
-from nf_metro.layout.phases.guards import _guard_fanout_junction_shares_exit_port_y
+from nf_metro.layout.phases.guards import (
+    LayoutInvariantError,
+    _guard_fanout_junction_shares_exit_port_y,
+    assert_junctions_on_their_anchors,
+)
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import _settled_render_graph, build_render_plan
 
@@ -63,8 +71,8 @@ def _translate_rows_stranding_junctions(
     """Move sections at or below *from_row* down by *amount*, junctions aside.
 
     Deliberately narrower than :func:`_shift_rows_from`: omitting the junction
-    re-derivation is what puts the render path in front of a graph whose
-    junctions were left behind by whatever moved the sections.
+    re-derivation puts the render path in front of a graph whose junctions were
+    left behind by whatever moved the sections.
     """
     for section in graph.sections.values():
         if section.grid_row < from_row:
@@ -79,18 +87,24 @@ def _translate_rows_stranding_junctions(
                 port.y += amount
 
 
-@pytest.mark.parametrize("amount", range(0, 25))
-def test_a_render_reseats_junctions_a_row_translation_stranded(amount: int) -> None:
-    """The render path re-derives junction placement from the ports it is given.
+def test_layout_leaves_every_junction_on_its_anchor() -> None:
+    graph = prepare_graph(FIXTURE.read_text(), source_dir=str(FIXTURE.parent))
+    assert_junctions_on_their_anchors(graph)
+    drawn = _settled_render_graph(graph, resolve_theme(None, graph))
+    _guard_fanout_junction_shares_exit_port_y(drawn, "render")
 
-    A junction left at the Y its exit port had before the translation is off the
-    bundle it belongs to, so the render is held to the port-derived rule on the
-    geometry it drew rather than only to completing without raising.
+
+@pytest.mark.parametrize("amount", range(1, 25))
+def test_a_render_refuses_junctions_a_row_translation_stranded(amount: int) -> None:
+    """The render reads junctions as laid out and refuses a stranded one.
+
+    Re-seating it would repair, at render time, a placement the layout got
+    wrong, so the render stops instead.
     """
     graph = prepare_graph(FIXTURE.read_text(), source_dir=str(FIXTURE.parent))
     _translate_rows_stranding_junctions(graph, 1, amount)
-    drawn = _settled_render_graph(graph, resolve_theme(None, graph))
-    _guard_fanout_junction_shares_exit_port_y(drawn, "render")
+    with pytest.raises(LayoutInvariantError, match="junctions off the anchors"):
+        _settled_render_graph(graph, resolve_theme(None, graph))
 
 
 @pytest.mark.parametrize("amount", [6.0, 17.5, 40.0])
@@ -98,6 +112,7 @@ def test_shift_rows_keeps_junctions_on_their_exit_ports(amount: float) -> None:
     graph = prepare_graph(FIXTURE.read_text(), source_dir=str(FIXTURE.parent))
     _shift_rows_from(graph, 1, amount)
     _guard_fanout_junction_shares_exit_port_y(graph, "row-shift")
+    assert_junctions_on_their_anchors(graph)
 
 
 def test_rail_layout_junctions_keep_their_rail_y() -> None:

@@ -64,7 +64,7 @@ TOPOLOGIES = ROOT / "examples" / "topologies"
 GUIDE = ROOT / "examples" / "guide"
 FROZEN = ROOT / "tests" / "fixtures" / "hash_seed_determinism"
 STAGGERED_ASSEMBLY = ROOT / "examples" / "genomeassembly_staggered.mmd"
-SEED_15_ABORT = "collinear overlay: line 'l2'"
+SEED_15_ABORT = "collinear overlay: line 'l0'"
 
 
 def _observe(path: Path):

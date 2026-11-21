@@ -98,6 +98,7 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.phases.guards import PhaseInvariantError
 from nf_metro.layout.route_plan import (
+    CanvasMove,
     DemandAxis,
     EmissionMemberId,
     RoutePlan,
@@ -333,6 +334,23 @@ class EnvelopeSettlement:
     translations: tuple[SettlementTranslation, ...]
     shortfalls: tuple[SettlementShortfall, ...] = ()
     coordinate_translations: tuple[ReservationCoordinateTranslation, ...] = ()
+
+    def translated(self, move: CanvasMove) -> EnvelopeSettlement:
+        """This settlement as it reads for the whole map moved by *move*."""
+        return replace(
+            self,
+            translations=tuple(
+                replace(
+                    item,
+                    coordinate=item.coordinate
+                    + move[1 if item.axis is SettlementAxis.ROW else 0],
+                )
+                for item in self.translations
+            ),
+            coordinate_translations=tuple(
+                item.translated(move) for item in self.coordinate_translations
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -348,6 +348,20 @@ class RouteMemberGeometryPlan:
         ):
             raise ValueError("member geometry plan channel disagrees with its segment")
 
+    def translated(self, move: CanvasMove) -> RouteMemberGeometryPlan:
+        return dataclasses.replace(
+            self,
+            points=tuple(translate_point(point, move) for point in self.points),
+            gap_channels=tuple(
+                dataclasses.replace(
+                    channel,
+                    start=translate_point(channel.start, move),
+                    end=translate_point(channel.end, move),
+                )
+                for channel in self.gap_channels
+            ),
+        )
+
     @property
     def owned_segment_ranks(self) -> tuple[int, ...]:
         """Physical segments whose coordinates remain immutable after emission."""
@@ -870,6 +884,25 @@ class DemandAxis(str, Enum):
         return 1 if self is DemandAxis.Y else 0
 
 
+CanvasMove: TypeAlias = tuple[float, float]
+"""A uniform move of the whole map, ``(dx, dy)``."""
+
+
+def translate_point(
+    point: tuple[float, float], move: CanvasMove
+) -> tuple[float, float]:
+    return point[0] + move[0], point[1] + move[1]
+
+
+def translate_coordinate(value: float, axis: DemandAxis, move: CanvasMove) -> float:
+    """*value*, a canvas coordinate on *axis*, after *move*."""
+    return value + move[axis.point_index]
+
+
+def _run_axis(direction: Direction) -> DemandAxis:
+    return DemandAxis.X if direction in {Direction.R, Direction.L} else DemandAxis.Y
+
+
 class KeepOutClass(str, Enum):
     """Obstacle classes a symbolic allocation must clear."""
 
@@ -1347,6 +1380,44 @@ class ExitTurnPlan:
             raise ValueError("exit turn has no source axis")
         if planned and self.source_axis is not expected_axis:
             raise ValueError("planned exit turn has inconsistent source orientation")
+
+    def translated(self, move: CanvasMove) -> ExitTurnPlan:
+        return dataclasses.replace(
+            self,
+            lane_transitions=tuple(
+                dataclasses.replace(
+                    item,
+                    source_point=translate_point(item.source_point, move),
+                    target_point=translate_point(item.target_point, move),
+                )
+                for item in self.lane_transitions
+            ),
+            axes=tuple(
+                dataclasses.replace(
+                    axis,
+                    coordinate=translate_coordinate(axis.coordinate, axis.axis, move),
+                    fixed_anchor_coordinate=(
+                        None
+                        if axis.fixed_anchor_coordinate is None
+                        else translate_coordinate(
+                            axis.fixed_anchor_coordinate, axis.axis, move
+                        )
+                    ),
+                )
+                for axis in self.axes
+            ),
+            assignments=tuple(
+                item
+                if item.launch_coordinate is None or item.run_direction is None
+                else dataclasses.replace(
+                    item,
+                    launch_coordinate=translate_coordinate(
+                        item.launch_coordinate, _run_axis(item.run_direction), move
+                    ),
+                )
+                for item in self.assignments
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2295,6 +2366,85 @@ class ConvergencePlan:
     def owns_geometry(self) -> bool:
         return self.disposition is ConvergenceDisposition.PLANNED
 
+    def translated(self, move: CanvasMove) -> ConvergencePlan:
+        trunk = self.trunk_axis
+        if trunk is not None:
+            travel = trunk.axis
+            across = DemandAxis.Y if travel is DemandAxis.X else DemandAxis.X
+
+            def along(value: float | None, axis: DemandAxis) -> float | None:
+                return (
+                    None if value is None else translate_coordinate(value, axis, move)
+                )
+
+            trunk = dataclasses.replace(
+                trunk,
+                coordinate=translate_coordinate(trunk.coordinate, across, move),
+                extent_start=translate_coordinate(trunk.extent_start, travel, move),
+                extent_end=translate_coordinate(trunk.extent_end, travel, move),
+                source_flank_coordinate=translate_coordinate(
+                    trunk.source_flank_coordinate, across, move
+                ),
+                target_flank_coordinate=translate_coordinate(
+                    trunk.target_flank_coordinate, across, move
+                ),
+                source_endpoint_coordinate=along(
+                    trunk.source_endpoint_coordinate, travel
+                ),
+                target_endpoint_coordinate=along(
+                    trunk.target_endpoint_coordinate, travel
+                ),
+            )
+        return dataclasses.replace(
+            self,
+            trunk_axis=trunk,
+            landings=tuple(
+                dataclasses.replace(
+                    item,
+                    join_point=translate_point(item.join_point, move),
+                    opening_turn_coordinate=(
+                        None
+                        if item.opening_turn_coordinate is None
+                        else translate_coordinate(
+                            item.opening_turn_coordinate, DemandAxis.X, move
+                        )
+                    ),
+                    opening_turn_segment=(
+                        None
+                        if item.opening_turn_segment is None
+                        else (
+                            translate_point(item.opening_turn_segment[0], move),
+                            translate_point(item.opening_turn_segment[1], move),
+                        )
+                    ),
+                    cross_run_start_coordinate=(
+                        None
+                        if item.cross_run_start_coordinate is None
+                        else translate_coordinate(
+                            item.cross_run_start_coordinate,
+                            DemandAxis.Y
+                            if item.approach_axis is DemandAxis.X
+                            else DemandAxis.X,
+                            move,
+                        )
+                    ),
+                )
+                for item in self.landings
+            ),
+            outgoing_continuations=tuple(
+                dataclasses.replace(
+                    item,
+                    start_point=translate_point(item.start_point, move),
+                    end_point=translate_point(item.end_point, move),
+                )
+                for item in self.outgoing_continuations
+            ),
+            endpoint_ownership=tuple(
+                dataclasses.replace(item, endpoint=translate_point(item.endpoint, move))
+                for item in self.endpoint_ownership
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class RouteSystem:
@@ -2466,6 +2616,34 @@ class RoutePlan:
 
     Present only on the plan of an observation that ran the compiler; a pass
     that reads it never compiles again."""
+
+    def translated(self, move: CanvasMove) -> RoutePlan:
+        """This plan for the whole map moved by *move*.
+
+        Every canvas coordinate the records hold moves by the same amount and
+        every length, offset and identity stays, so the result is the record
+        the same decisions publish when laid out at the moved position.
+        """
+        accepted = self.accepted_corridor_cohort_plan
+        return dataclasses.replace(
+            self,
+            exit_turn_plans=tuple(
+                item.translated(move) for item in self.exit_turn_plans
+            ),
+            convergence_plans=tuple(
+                item.translated(move) for item in self.convergence_plans
+            ),
+            member_geometry_plans=tuple(
+                item.translated(move) for item in self.member_geometry_plans
+            ),
+            reservations=tuple(item.translated(move) for item in self.reservations),
+            realised_reservations=tuple(
+                item.translated(move) for item in self.realised_reservations
+            ),
+            accepted_corridor_cohort_plan=(
+                None if accepted is None else accepted.translated(move)
+            ),
+        )
 
 
 @dataclass(slots=True)

@@ -103,8 +103,6 @@ from nf_metro.layout.route_reservations import (
     gap_corridor_clearance_band,
     project_reservation_coordinate,
     realise_route_reservations,
-    translate_route_plan,
-    uniform_coordinate_translations,
 )
 from nf_metro.layout.routing import (
     RoutedPath,
@@ -2624,10 +2622,10 @@ def _move_onto_the_canvas(
 ) -> _SettledRenderGeometry:
     """Translate *graph* and everything settled on it by *move*, as one body.
 
-    Routes, the polylines drawn from them, labels and the published plan move
-    with the graph, and the settlement's translations gain the move so a frozen
-    claim projected through them lands on the moved geometry.  Afterwards the
-    canvas origin is ``(0, 0)``.
+    Routes, the polylines drawn from them, labels, the published plan and the
+    settlement move with the graph, so every record describes the geometry a
+    layout at the moved position would have published.  Afterwards the canvas
+    origin is ``(0, 0)``.
     """
     dx, dy = move
     graph.canvas_origin = 0.0, 0.0
@@ -2636,14 +2634,6 @@ def _move_onto_the_canvas(
     translate_graph(graph, dx, dy)
     for route in settled.routes:
         route.points = [(x + dx, y + dy) for x, y in route.points]
-    translations = uniform_coordinate_translations(dx, dy)
-    settlement = replace(
-        settled.settlement,
-        coordinate_translations=(
-            *settled.settlement.coordinate_translations,
-            *translations,
-        ),
-    )
     return settled._replace(
         route_polylines=[
             [(x + dx, y + dy) for x, y in polyline]
@@ -2667,8 +2657,8 @@ def _move_onto_the_canvas(
             )
             for label in settled.labels
         ],
-        route_plan=translate_route_plan(settled.route_plan, graph, translations),
-        settlement=settlement,
+        route_plan=settled.route_plan.translated(move),
+        settlement=settled.settlement.translated(move),
     )
 
 

@@ -88,7 +88,8 @@ The far edges therefore grow to hold whatever the render draws.
 The near edges are pinned at the canvas origin, so the map moves instead.
 `_settle_once_on_the_canvas` settles the laid-out graph once, then `_canvas_placement` measures the ink that lands outside the section-box envelope on the left or top.
 That ink is typically an inter-row return band wrapping around the first box of a row, or a bundle rising over the top of one.
-The canvas grows on that side by the shortfall, and `_move_onto_the_canvas` moves the settled geometry so the grown corner is the origin: one uniform translation of the graph (`translate_graph` in `layout/phases/canvas.py`, which owns the full set of absolute coordinates a graph carries), the routes, labels and published plan.
+The canvas grows on that side by the shortfall, and `_move_onto_the_canvas` moves the settled geometry so the grown corner is the origin: one uniform translation of the graph (`translate_graph` in `layout/phases/canvas.py`, which owns the full set of absolute coordinates a graph carries), the routes and labels, the published plan (`RoutePlan.translated`) and the settlement (`EnvelopeSettlement.translated`).
+Each record that names a canvas coordinate moves it by the same amount, so the published records are the ones a layout at the moved position publishes.
 Nothing is routed again, because no routing decision reads where the canvas edge is: a margin with no section beyond it is headroom the canvas grows to fit (`section_lies_before`).
 A map that draws nothing outside its box envelope never moves.
 

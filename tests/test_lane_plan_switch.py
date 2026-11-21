@@ -98,11 +98,11 @@ class _Drawn:
 
 @lru_cache(maxsize=None)
 def _drawn(path: Path) -> _Drawn:
-    """Lay out and render *path*, keeping the settled geometry the render
-    draws and the graph copy it settled, whose rows and columns the render
-    translates; ``graph`` is ``None`` when the map aborts."""
+    """Lay out and render *path*, keeping the geometry the render draws and
+    the graph copy it draws it on, both placed on the canvas; ``graph`` is
+    ``None`` when the map aborts."""
     settled: list[tuple[MetroGraph, svg._SettledRenderGeometry]] = []
-    real = svg._settle_render_geometry
+    real = svg._settle_once_on_the_canvas
     planners: list[lane_plan_module._Tracks] = []
 
     class Kept(lane_plan_module._Tracks):
@@ -111,15 +111,15 @@ def _drawn(path: Path) -> _Drawn:
             planners.append(self)
 
     def settle(
-        graph: MetroGraph, *args: object, **kwargs: object
-    ) -> svg._SettledRenderGeometry:
-        result = real(graph, *args, **kwargs)  # type: ignore[arg-type]
-        settled.append((graph, result))
+        *args: object, **kwargs: object
+    ) -> tuple[MetroGraph, svg._SettledRenderGeometry]:
+        result = real(*args, **kwargs)  # type: ignore[arg-type]
+        settled.append(result)
         return result
 
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
         warnings.simplefilter("ignore")
-        mp.setattr(svg, "_settle_render_geometry", settle)
+        mp.setattr(svg, "_settle_once_on_the_canvas", settle)
         mp.setattr(lane_plan_module, "_Tracks", Kept)
         try:
             source = prepare_graph(path.read_text(), source_dir=str(path.parent))

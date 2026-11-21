@@ -71,7 +71,7 @@ from nf_metro.render.svg import build_render_plan, emit_render_plan
 ROOT = Path(__file__).parents[1]
 EXAMPLES = ROOT / "examples"
 FROZEN = ROOT / "tests" / "fixtures" / "hash_seed_determinism"
-SEED_15_ABORT = "collinear overlay: line 'l2'"
+SEED_15_ABORT = "collinear overlay: line 'l0'"
 ROUTABLE_CORPUS = tuple(
     path
     for base in (ROOT / "examples", ROOT / "tests" / "fixtures")

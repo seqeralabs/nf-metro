@@ -29,6 +29,7 @@ from nf_metro.layout.geometry import cotravelling_lane_clearance, spans_share_co
 from nf_metro.layout.lane_plan import recorded_crossing_pairs
 from nf_metro.layout.route_plan import (
     BindingKind,
+    CanvasMove,
     EmissionBinding,
     EmissionMember,
     RoutePlan,
@@ -1077,6 +1078,38 @@ class AcceptedCorridorOwnerFrame:
     def coordinate_delta(self) -> float:
         return self.accepted_coordinate - self.source_coordinate
 
+    def translated(self, move: CanvasMove) -> AcceptedCorridorOwnerFrame:
+        across, along = move[self.axis], move[1 - self.axis]
+        recipe = self.recipe
+        if recipe is not None:
+            recipe = replace(
+                recipe,
+                source_coordinate=recipe.source_coordinate + across,
+                fixed_points=tuple(
+                    replace(point, coordinate=point.coordinate + move[point.axis])
+                    for point in recipe.fixed_points
+                ),
+                directed_runways=tuple(
+                    runway
+                    if runway.anchor_coordinate is None
+                    else replace(
+                        runway,
+                        anchor_coordinate=runway.anchor_coordinate + move[runway.axis],
+                    )
+                    for runway in recipe.directed_runways
+                ),
+            )
+        extent = self.longitudinal_extent
+        return replace(
+            self,
+            source_coordinate=self.source_coordinate + across,
+            accepted_coordinate=self.accepted_coordinate + across,
+            longitudinal_extent=(
+                None if extent is None else (extent[0] + along, extent[1] + along)
+            ),
+            recipe=recipe,
+        )
+
 
 def _owner_order(frame: AcceptedCorridorOwnerFrame) -> tuple[str, str]:
     return frame.kind.value, frame.identity
@@ -1136,6 +1169,15 @@ class AcceptedCorridorCohortPlan:
             frame
             for frame in self.owners
             if frame.kind is AcceptedCorridorOwnerKind.CONVERGENCE_TRUNK
+        )
+
+    def translated(self, move: CanvasMove) -> AcceptedCorridorCohortPlan:
+        owners = tuple(frame.translated(move) for frame in self.owners)
+        translations = tuple(
+            item.translated(move) for item in self.coordinate_translations
+        )
+        return AcceptedCorridorCohortPlan(
+            _accepted_plan_id(owners, translations), owners, translations
         )
 
 
