@@ -77,9 +77,9 @@ HeaderMode = Literal["above", "below", "left", "right", "nudge"]
 class _BandBlock(NamedTuple):
     """The badge and wrapped-title measurements a band placement is built from.
 
-    ``circle_r`` sizes the badge position; ``badge_r`` is the radius of the badge
-    actually drawn, 0 for an unnumbered section, and is what offsets the title
-    along the reading axis."""
+    ``circle_r`` sets the header's cross-axis position (badge row and band depth)
+    whether or not a badge is drawn; ``badge_r`` is the along-axis badge radius,
+    0 for an unnumbered section, and is what offsets the title."""
 
     circle_r: float
     badge_r: float
