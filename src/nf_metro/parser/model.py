@@ -405,8 +405,9 @@ class Section:
 
     @property
     def has_badge(self) -> bool:
-        """Whether the section draws a number badge; number 0 means none."""
-        return self.number > 0
+        """Whether the section draws a number badge: it draws a box and its
+        number is positive (0 means none)."""
+        return self.draws_box and self.number > 0
 
     # Hints from %%metro entry/exit directives: list of (side, [line_ids])
     exit_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)

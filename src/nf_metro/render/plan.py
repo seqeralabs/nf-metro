@@ -70,7 +70,7 @@ class FrozenRecord:
             if self.kind == "Section" and name == "draws_box":
                 return not (self.is_implicit or self.is_hidden)
             if self.kind == "Section" and name == "has_badge":
-                return self.number > 0
+                return self.draws_box and self.number > 0
             raise AttributeError(name) from exc
 
 

@@ -2131,3 +2131,24 @@ def test_rendered_section_numbers_raises_no_layout_warnings():
         warnings.simplefilter("always")
         assert rendered_section_numbers(graph) is not None
     assert not caught
+
+
+def test_info_reports_no_number_for_a_hidden_section(tmp_path):
+    """A hidden section draws no box and so no badge; it reports none."""
+    path = tmp_path / "hidden.mmd"
+    path.write_text(
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    subgraph first [First]\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph _middle [Middle]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    subgraph last [Last]\n"
+        "        c[C]\n"
+        "    end\n"
+        "    a -->|main| b\n"
+        "    b -->|main| c\n"
+    )
+    assert _info_section_numbers(path) == {"first": 1, "_middle": None, "last": 2}

@@ -39,7 +39,7 @@ from nf_metro.parser.route_topology import build_route_topology_query
 from nf_metro.themes import resolve_style
 
 if TYPE_CHECKING:
-    from nf_metro.parser.model import MetroGraph
+    from nf_metro.parser.model import MetroGraph, Section
     from nf_metro.parser.route_topology import RouteConnector
 
 __all__ = [
@@ -127,12 +127,13 @@ def station_kind(graph: MetroGraph, station_id: str) -> StationKind:
     return "station"
 
 
-def rendered_section_numbers(graph: MetroGraph) -> dict[str, int] | None:
-    """Section numbers as the render draws them, or ``None`` if layout fails.
+def rendered_section_numbers(graph: MetroGraph) -> dict[str, int | None] | None:
+    """Section badge numbers as the render draws them, or ``None`` if layout
+    fails.
 
     Numbers are assigned late in layout, so this lays out a copy of *graph*
     (the original, and the inferred defaults recorded on it, stay untouched).
-    A section numbered 0 draws no badge."""
+    A section that draws no badge maps to ``None``."""
     from nf_metro.layout.engine import compute_layout
 
     laid_out = copy.deepcopy(graph)
@@ -143,32 +144,35 @@ def rendered_section_numbers(graph: MetroGraph) -> dict[str, int] | None:
             compute_layout(laid_out)
         except Exception:
             return None
-    return {sid: section.number for sid, section in laid_out.sections.items()}
+    return {
+        sid: section.number if section.has_badge else None
+        for sid, section in laid_out.sections.items()
+    }
 
 
 def _badge_number(
-    section_numbers: Mapping[str, int] | None, section_id: str, parsed: int
+    section_numbers: Mapping[str, int | None] | None, section: Section
 ) -> int | None:
-    number = (
-        parsed if section_numbers is None else section_numbers.get(section_id, parsed)
-    )
-    return number if number > 0 else None
+    """The section's badge number: the supplied one if given, else its own."""
+    if section_numbers is not None and section.id in section_numbers:
+        return section_numbers[section.id]
+    return section.number if section.has_badge else None
 
 
 def build_info(
     graph: MetroGraph,
     warnings: list[str] | None = None,
     *,
-    section_numbers: Mapping[str, int] | None = None,
+    section_numbers: Mapping[str, int | None] | None = None,
 ) -> dict[str, Any]:
     """Assemble the structured introspection dict for a parsed graph.
 
     *warnings* are parse-time warning messages captured by the caller (the
     parser emits these via :mod:`warnings`); pass ``None`` for none.
 
-    *section_numbers* overrides the numbers read from *graph* (use
+    *section_numbers* overrides the badge numbers read from *graph* (use
     :func:`rendered_section_numbers` for a graph that has not been laid out).
-    A section with no badge, number 0, reports ``None``.
+    A section that draws no badge reports ``None``.
 
     ``style`` reports the theme name the map resolves to, which is the name
     ``--theme`` accepts: an alias or an unrecognised value is reported as the
@@ -214,7 +218,7 @@ def build_info(
             {
                 "id": sid,
                 "name": sec.name,
-                "number": _badge_number(section_numbers, sid, sec.number),
+                "number": _badge_number(section_numbers, sec),
                 "n_stations": len(sec.station_ids),
                 "direction": sec.direction,
                 "direction_inferred": (
