@@ -1,0 +1,18 @@
+%%metro title: Hidden bypasses on outer lanes (symmetric diamonds)
+%%metro style: dark
+%%metro diamond_style: symmetric
+%%metro line: line1 | Line 1 | #d0006f
+%%metro line: line2 | Line 2 | #f0ab00
+%%metro line: line3 | Line 3 | #00a0f0
+graph LR
+    step1[step1]
+    step2[step2]
+    step3[step3]
+    _skip1
+    _skip3
+    step1 -->|line1,line2,line3| step2
+    step2 -->|line1,line2,line3| step3
+    step1 -->|line1| _skip1
+    _skip1 -->|line1| step3
+    step1 -->|line3| _skip3
+    _skip3 -->|line3| step3

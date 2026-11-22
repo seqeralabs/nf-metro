@@ -38,6 +38,8 @@ FIXTURES = [
     "bypass_hidden_lane_side_symmetric_bt.mmd",
     "bypass_hidden_lane_side_symmetric_tb_seam.mmd",
     "bypass_hidden_lane_side_chain.mmd",
+    "bypass_hidden_lane_side_two_symmetric.mmd",
+    "bypass_hidden_lane_side_symmetric_dead_end.mmd",
 ]
 
 

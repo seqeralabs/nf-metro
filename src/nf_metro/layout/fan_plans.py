@@ -2301,8 +2301,8 @@ def _seat_symmetric_branches_by_line_rail(
     A centered section's exclusive run rides its line's symmetric base rail --
     the line's index above, on, or below the trunk midline -- exactly as the
     flat-graph track assignment seats it.  A ``diamond_style: symmetric`` fan
-    whose branches nest unpartitioned on priority lanes seats each branch on the
-    side the section stacks its lines' lanes instead.
+    whose branches nest on priority lanes seats each branch on the side the
+    section stacks its lines' lanes instead.
     ``symmetric_lane_offsets`` yields the slots ascending; branch-discovery order
     need not agree with line order, so map the ascending slots onto the branches
     sorted by the screen side their lines want.  Any other
@@ -2318,7 +2318,6 @@ def _seat_symmetric_branches_by_line_rail(
             centered
             or (
                 section is not None
-                and not _line_sets_partition(line_sets)
                 and _branches_nest_on_priority_lanes(graph, section, line_sets)
             )
         )

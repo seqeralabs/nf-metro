@@ -306,6 +306,7 @@
     "topologies/bypass_fan_in_outer_slot.mmd",
     "topologies/bypass_gap2_rightward_overflow.mmd",
     "topologies/bypass_hidden_lane_side_chain.mmd",
+    "topologies/bypass_hidden_lane_side_symmetric_dead_end.mmd",
     "topologies/bypass_hidden_lane_side_symmetric_tb_seam.mmd",
     "topologies/bypass_hidden_lane_side_tb_seam.mmd",
     "topologies/bypass_label_rake.mmd",
