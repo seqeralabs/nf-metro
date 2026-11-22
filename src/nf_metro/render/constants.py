@@ -20,10 +20,6 @@ from nf_metro.layout.constants import (
     Y_OFFSET,
 )
 from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
-from nf_metro.layout.constants import LOGO_HEIGHT as LOGO_HEIGHT  # re-export
-from nf_metro.layout.constants import (
-    LOGO_Y_STANDALONE as LOGO_Y_STANDALONE,  # re-export
-)
 from nf_metro.layout.constants import (
     RAIL_KNOB_RADIUS_RATIO as RAIL_KNOB_RADIUS_RATIO,  # re-export
 )
@@ -143,8 +139,8 @@ used to extend the header keep-out band above/below the text baseline."""
 HEADER_WRAP_CLEARANCE: float = 8.0
 """Minimum visible gap a wrapped header's extra lines leave before whatever
 is nearest in their growth direction (the map title, another section's box,
-or the canvas edge).  Matches the buffer ``TITLE_BAND_CLEARANCE`` adds on the
-layout side for the same single-line-header clearance."""
+or the canvas edge).  Matches ``TITLE_BAND_HEADER_GAP``, the gap the layout
+leaves between the canvas-top band and a single-line header."""
 
 TEXT_VCENTER_EM: float = 0.3
 """Baseline drop, in ems below a graphic's centre line, that visually centres
@@ -221,11 +217,11 @@ above the canvas top.
 """
 
 TITLE_ASCENT_RATIO: float = 0.8
-"""Cap-height above the baseline as a fraction of the title's font size.
+"""Cap-height above the baseline as a fraction of the title's font size."""
 
-Companion to the ``0.25`` descender fraction the header-ceiling maths uses, so
-the two bound the title's glyph band from both sides.
-"""
+TITLE_DESCENT_RATIO: float = 0.25
+"""Descender depth below the baseline as a fraction of the title's font size;
+with ``TITLE_ASCENT_RATIO`` it bounds the title's glyph band."""
 
 
 def title_baseline_y(title_font_size: float) -> float:

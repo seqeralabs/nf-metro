@@ -302,7 +302,7 @@ def _prepare_graph_state(
 
     if source_dir:
         graph.source_dir = source_dir
-        for attr in ("logo_path", "logo_path_light", "logo_path_dark"):
+        for attr in MetroGraph.LOGO_PATH_FIELDS:
             raw: str = getattr(graph, attr)
             if not raw:
                 continue
@@ -323,7 +323,7 @@ def _prepare_graph_state(
     if title is not None:
         graph.title = title
 
-    for attr in ("logo_path", "logo_path_light", "logo_path_dark"):
+    for attr in MetroGraph.LOGO_PATH_FIELDS:
         raw = getattr(graph, attr)
         if raw and not logo_is_resolvable(raw):
             # `logo=` (the CLI's --logo) is applied after the source-directory

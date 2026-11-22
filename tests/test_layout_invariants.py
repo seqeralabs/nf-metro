@@ -25,7 +25,11 @@ from pathlib import Path
 
 import pytest
 from conftest import CONTENT_PLACEMENT_PHASES
-from layout_validator import check_route_segment_crossings, check_station_as_elbow
+from layout_validator import (
+    check_route_segment_crossings,
+    check_station_as_elbow,
+    min_drawn_section_bbox_top,
+)
 
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import (
@@ -98,7 +102,6 @@ from nf_metro.layout.phases._common import (
     wrap_exit_carrier_anchor,
 )
 from nf_metro.layout.phases.bbox import (
-    _min_drawn_section_bbox_top,
     _section_band_is_empty,
     _section_content_hug_top,
     _section_fit_top,
@@ -2609,7 +2612,7 @@ def test_titled_map_header_does_not_overlap_title(fixture):
     (``TITLE_BAND_BOTTOM``) rather than level with the title.
     """
     graph = _layout(fixture)
-    top = _min_drawn_section_bbox_top(graph)
+    top = min_drawn_section_bbox_top(graph)
     if top is None:
         pytest.skip("no drawn sections")
     header_top = top - SECTION_HEADER_PROTRUSION
@@ -2633,7 +2636,7 @@ def _untitled_bbox_top(text: str, source_dir: str) -> float | None:
     untitled.source_dir = source_dir
     untitled.title = ""
     compute_layout(untitled)
-    return _min_drawn_section_bbox_top(untitled)
+    return min_drawn_section_bbox_top(untitled)
 
 
 @pytest.mark.parametrize("fixture", _TITLE_TOGGLE_FIXTURES)
@@ -2654,7 +2657,7 @@ def test_title_only_moves_a_map_whose_header_would_overlap(fixture):
     if not titled.title:
         pytest.skip("fixture declares no title")
     compute_layout(titled)
-    titled_top = _min_drawn_section_bbox_top(titled)
+    titled_top = min_drawn_section_bbox_top(titled)
 
     untitled_top = _untitled_bbox_top(text, source_dir)
 
@@ -2697,7 +2700,7 @@ def test_title_band_reserved_only_where_render_draws_it(fixture):
         pytest.skip("fixture's header does not overlap the title band")
 
     bare_graph = prepare_graph(text, bare=True, source_dir=source_dir)
-    bare_top = _min_drawn_section_bbox_top(bare_graph)
+    bare_top = min_drawn_section_bbox_top(bare_graph)
     assert bare_top == pytest.approx(untitled_top, abs=GUARD_TOLERANCE), (
         f"{fixture}: --bare top y={bare_top:.1f} reserves title-band space "
         f"above the untitled baseline {untitled_top:.1f} despite drawing no "
@@ -2705,10 +2708,10 @@ def test_title_band_reserved_only_where_render_draws_it(fixture):
     )
 
     no_logo_text = re.sub(r"^%%metro logo(_scale)?:.*$", "", text, flags=re.M)
-    no_logo_top = _min_drawn_section_bbox_top(
+    no_logo_top = min_drawn_section_bbox_top(
         prepare_graph(no_logo_text, title="Map", legend="bl", source_dir=source_dir)
     )
-    logo_in_legend_top = _min_drawn_section_bbox_top(
+    logo_in_legend_top = min_drawn_section_bbox_top(
         prepare_graph(
             text,
             title="Map",

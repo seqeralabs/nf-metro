@@ -175,15 +175,6 @@ already clear.
 TITLE_BAND_HEADER_GAP: float = 8.0
 """Visible gap left between the canvas-top band and a lifted header badge."""
 
-TITLE_BAND_CLEARANCE: float = TITLE_BAND_OVERLAP_FLOOR + TITLE_BAND_HEADER_GAP
-"""``bbox_y`` a titled map's topmost drawn section is lifted to when it overlaps.
-
-Only a map whose header actually overlaps the title (top above
-``TITLE_BAND_OVERLAP_FLOOR``) is moved, and it lands here -- a small band above
-the floor so the badge sits a visible gap below the title rather than flush
-against it.  Untitled maps keep the tighter ``SECTION_Y_PADDING`` top.
-"""
-
 LOGO_HEIGHT: float = 80.0
 """Height a logo is drawn at before ``logo_scale``; its width follows its aspect."""
 

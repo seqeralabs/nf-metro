@@ -27,6 +27,8 @@ import drawsvg as draw
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
+    LOGO_HEIGHT,
+    LOGO_Y_STANDALONE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
@@ -180,8 +182,6 @@ from nf_metro.render.constants import (
     LEGEND_GAP,
     LEGEND_INSET,
     LEGEND_ROUTE_CLEARANCE,
-    LOGO_HEIGHT,
-    LOGO_Y_STANDALONE,
     MARKER_PILL_LENGTH_RATIO,
     RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
@@ -2425,12 +2425,14 @@ def _build_render_plan_scaled(
     # Standalone logo positioning (only when no legend to embed it in)
     logo_x = 0.0
     logo_y = 0.0
+    standalone_logo_box: tuple[float, float, float, float] | None = None
     if show_logo and not show_legend:
         logo_w *= graph.logo_scale
         logo_h *= graph.logo_scale
         logo_x = padding
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
+        standalone_logo_box = (logo_x, logo_y, logo_w, logo_h)
 
     # Right margin: one padding width in full mode; none in bare mode so the
     # canvas hugs the content.  Bottom margin is always just enough room for
@@ -2438,22 +2440,15 @@ def _build_render_plan_scaled(
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
 
-    # The title is authored text never folded into the content extent, so a
-    # title wider than the map is clipped at the right edge.  Grow the canvas
-    # to its true glyph advance plus a small margin.
+    # Content bounds ignore the title, so a title wider than the map would be
+    # clipped at the right edge: grow the canvas to its true glyph advance.
     if draws_standalone_title:
         title_advance = DEFAULT_TEXT_METRICS.advance(
             graph.title,
             text_style(theme.title_font_size, "bold"),
             TextRole.TITLE,
         )
-        title_x, _ = _title_origin(
-            padding,
-            theme.title_font_size,
-            (logo_x, logo_y, logo_w, logo_h)
-            if show_logo and not logo_in_legend
-            else None,
-        )
+        title_x, _ = _title_origin(padding, theme.title_font_size, standalone_logo_box)
         auto_width = max(
             auto_width, title_x + title_advance + TITLE_CANVAS_SAFETY_MARGIN
         )
@@ -2737,8 +2732,12 @@ def _emit_render_plan(
 
     # Title / Logo (omitted in bare mode; standalone logo only when not in legend)
     if not bare:
-        standalone_logo = show_logo and not logo_in_legend
-        if standalone_logo:
+        standalone_logo_box = (
+            (logo_x, logo_y, logo_w, logo_h)
+            if show_logo and not logo_in_legend
+            else None
+        )
+        if standalone_logo_box is not None:
             if adaptive_logo:
                 _render_adaptive_logo(
                     d,
@@ -2753,9 +2752,7 @@ def _emit_render_plan(
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
         if plan.draws_standalone_title:
             title_x, title_y = _title_origin(
-                padding,
-                theme.title_font_size,
-                (logo_x, logo_y, logo_w, logo_h) if standalone_logo else None,
+                padding, theme.title_font_size, standalone_logo_box
             )
             d.append(
                 draw.Text(

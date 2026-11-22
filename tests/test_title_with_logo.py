@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+from layout_validator import min_drawn_section_bbox_top
 
 from nf_metro.api import (
     RenderConfig,
@@ -25,7 +26,6 @@ from nf_metro.api import (
 )
 from nf_metro.layout import compute_layout
 from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION, TITLE_BAND_BOTTOM
-from nf_metro.layout.phases.bbox import _min_drawn_section_bbox_top
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.constants import TITLE_CANVAS_SAFETY_MARGIN
 from nf_metro.render.plan import RenderPlan
@@ -122,7 +122,7 @@ def _fixture(name: str) -> tuple[str, str]:
 
 
 def _assert_band_clear(plan: RenderPlan, label: str) -> None:
-    top = _min_drawn_section_bbox_top(plan.graph)  # type: ignore[arg-type]
+    top = min_drawn_section_bbox_top(plan.graph)  # type: ignore[arg-type]
     assert top is not None, f"{label}: no drawn section"
     assert plan.logo_y == pytest.approx(STANDALONE_LOGO_TOP), label
     assert plan.logo_h == pytest.approx(LOGO_HEIGHT * plan.graph.logo_scale), label
@@ -155,7 +155,7 @@ def test_title_band_reserved_when_logo_folds_into_legend(name: str) -> None:
     )
     assert plan.logo_in_legend
     assert len(_title_elements(root)) == 1
-    top = _min_drawn_section_bbox_top(plan.graph)  # type: ignore[arg-type]
+    top = min_drawn_section_bbox_top(plan.graph)  # type: ignore[arg-type]
     assert top is not None
     assert top - SECTION_HEADER_PROTRUSION >= TITLE_BAND_BOTTOM - 1e-6
 

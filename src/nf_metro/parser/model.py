@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, NamedTuple, TypedDict
+from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple, TypedDict
 
 from nf_metro.errors import NfMetroError, UnknownInactiveLineError
 from nf_metro.parser.provenance import LayoutProvenance
@@ -605,6 +605,11 @@ class MetroGraph:
     logo_path: str = ""
     logo_path_light: str = ""
     logo_path_dark: str = ""
+    LOGO_PATH_FIELDS: ClassVar[tuple[str, ...]] = (
+        "logo_path",
+        "logo_path_light",
+        "logo_path_dark",
+    )
     source_dir: str = ""
     # Output paths from %%metro output:, exactly as written, each paired with
     # the per-output render overrides declared after its `|` (empty for a bare
@@ -1019,6 +1024,11 @@ class MetroGraph:
         if station:
             return station.section_id
         return None
+
+    @property
+    def has_logo(self) -> bool:
+        """True when any logo variant is configured."""
+        return any(getattr(self, name) for name in self.LOGO_PATH_FIELDS)
 
     @property
     def real_sections(self) -> dict[str, Section]:

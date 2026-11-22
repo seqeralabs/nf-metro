@@ -41,8 +41,7 @@ def resolve_title_band_bottom(
     if not draws_chrome:
         return 0.0
     bottom = TITLE_BAND_BOTTOM if graph.title else 0.0
-    has_logo = bool(graph.logo_path or graph.logo_path_light or graph.logo_path_dark)
-    if has_logo and not legend_drawn:
+    if graph.has_logo and not legend_drawn:
         bottom = max(bottom, standalone_logo_bottom(graph.logo_scale))
     return bottom
 
@@ -57,9 +56,8 @@ def title_band_bottom(graph: MetroGraph) -> float:
 
 
 def title_band_floors(graph: MetroGraph) -> list[tuple[float, float]]:
-    """``(bbox_y, floor)`` for every non-empty section, where ``floor`` is the
-    least ``bbox_y`` keeping what it draws above its box out of the band.
-    Empty when nothing is drawn at the canvas top.
+    """``(bbox_y, floor)`` per non-empty section: the lowest ``bbox_y`` that
+    keeps its ink out of the band.  Empty when nothing is drawn there.
 
     A drawn section's header badge protrudes ``SECTION_HEADER_PROTRUSION``
     above its box, or an over-the-top loop ``OVER_TOP_HEADROOM`` in a row
