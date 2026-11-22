@@ -239,12 +239,14 @@ def _renumber_sections_by_route(graph: MetroGraph) -> None:
     reserved = {
         section.number_override
         for section in graph.sections.values()
-        if section.number_override is not None
+        if section.number_override is not None and section.number_override > 0
     }
     next_number = 1
     for sid in sorted(ordered_ids, key=lambda sid: not graph.sections[sid].draws_box):
         section = graph.sections[sid]
         if section.number_override is not None:
+            # The parser treats a number of 0 as unassigned, so this pass must
+            # run after that assignment.
             section.number = section.number_override
             continue
         while next_number in reserved:
