@@ -173,13 +173,10 @@ class SideRule(Enum):
     left-handed onto the entry traveller's right; from an exit heading across
     it, on the side the exit faces, never through the target section."""
     CORRIDOR = "corridor"
-    """A bypass U-turn's side chosen among the sides whose corridor crosses no
-    other section and no other line into its entry: the side shared with the
-    entry's forced siblings, else the shorter detour, else the side whose
-    corridor runs in free room the layout already has rather than growing the
-    map; read in the entry's travel frame, so a reflection flips it.  A direct
-    turn-round whose two sides are clear and equally long takes the side with
-    free room by the same rule."""
+    """The side the corridor ranking (module docstring, **Approach**) gives a
+    bypass U-turn, or the side with free room a direct turn-round takes when
+    its two clear sides are equally long; read in the entry's travel frame, so
+    a reflection flips it."""
     FORK_NEST = "fork-nest"
     """A fork's branch off an exit heading across the entry's travel, holding the
     outermost lanes of its turn there, passes on the side the exit faces; a
@@ -242,8 +239,7 @@ class _CorridorHop:
     band: _Span
     lines: frozenset[str]
     held: tuple[int, SideRule] | None
-    """The side and rule a bundle or a single clear corridor fixes; ``None``
-    when the hop is free."""
+    """The side and rule a bundle or a single clear corridor fixes."""
 
     def corridor(self, side: int) -> _Corridor:
         return self.right if side == 1 else self.left
@@ -604,7 +600,7 @@ class PortOrderBuilder:
         cell = self.cell_centre(source_id)
         assert here is not None and cell is not None
         reach = _behind(cell, here, travel)
-        below = _sign(_lateral((0.0, 1.0), (0.0, 0.0), travel) or 1.0)
+        below = _sign(_lateral((0.0, 1.0), _ORIGIN, travel) or 1.0)
         self.approaching.add(key)
         if reach < -SAME_Y_TOLERANCE:
             side, rule = self.u_turn_side(entry_id, source_id, below)
@@ -637,7 +633,7 @@ class PortOrderBuilder:
             if section.bbox_w <= 0 or section.bbox_h <= 0 or section.grid_col < 0:
                 continue
             s0, s1 = _section_extent(section, rows)
-            if min(s1, band[1]) - max(s0, band[0]) <= SAME_Y_TOLERANCE:
+            if _overlap((s0, s1), band) <= SAME_Y_TOLERANCE:
                 continue
             along = _behind(self.section_centre(section), here, travel)
             if lo + SAME_Y_TOLERANCE < along < hi - SAME_Y_TOLERANCE:
@@ -648,7 +644,7 @@ class PortOrderBuilder:
         self, entry_id: str, source_id: str, below: int
     ) -> tuple[int, SideRule]:
         """A direct turn-round keeps its turn-round side unless both its sides
-        are clear and equally long, when it takes the side with existing room
+        are clear and equally long, when it takes the side with free room
         (:attr:`SideRule.CORRIDOR`); a bypass U-turn takes its corridor's."""
         graph = self.graph
         source = graph.ports.get(source_id)
@@ -658,7 +654,7 @@ class PortOrderBuilder:
         entry = graph.ports[entry_id]
         if lateral_axis(heading) != lateral_axis(port_travel(entry)):
             travel = ENTRY_SIDE_DIRECTION[entry.side]
-            facing = _lateral(direction_vector(heading), (0.0, 0.0), travel)
+            facing = _lateral(direction_vector(heading), _ORIGIN, travel)
             return _sign(facing), SideRule.TURN_ROUND
         key = (entry_id, source_id)
         if self.corridor_hop(key) is not None:
@@ -689,15 +685,18 @@ class PortOrderBuilder:
         travel = ENTRY_SIDE_DIRECTION[entry.side]
         if lateral_axis(EXIT_SIDE_DIRECTION[source.side]) != lateral_axis(travel):
             return None
-        here, cell = self.cell_centre(entry_id), self.cell_centre(source_id)
-        if (
-            here is None
-            or cell is None
-            or self.shared_band(entry_id, source_id, travel) is None
-            or _behind(cell, here, travel) >= -SAME_Y_TOLERANCE
-        ):
-            return None
-        return travel
+        return travel if self.ahead_on_band(entry_id, source_id, travel) else None
+
+    def ahead_on_band(self, entry_id: str, origin: str, travel: Direction) -> bool:
+        """Whether *origin*'s cell lies ahead of entry *entry_id*'s along
+        *travel* on a grid band the two share."""
+        here, cell = self.cell_centre(entry_id), self.cell_centre(origin)
+        return (
+            here is not None
+            and cell is not None
+            and self.shared_band(entry_id, origin, travel) is not None
+            and _behind(cell, here, travel) < -SAME_Y_TOLERANCE
+        )
 
     def connector(self, entry_id: str, source_id: str) -> list[Edge]:
         """The edges into *entry_id* whose approach record keys from *source_id*."""
@@ -732,25 +731,21 @@ class PortOrderBuilder:
     def side_corridors(
         self, entry_id: str, source_id: str, travel: Direction
     ) -> tuple[_Corridor, _Corridor, _Span, _Span]:
-        """The U-turn's right and left corridors, its span along *travel* and
-        its shared band, from the placed boxes.
+        """The U-turn's right and left corridors (:class:`_Corridor`), its span
+        along *travel* and its shared band, from the placed boxes.
 
         Each corridor leads out of the source just past its exit, traverses
         clear of the band's extreme on its side and descends just outside the
-        entry, at the offsets the wrap leaves use.  The band's extreme is the
+        entry, about where the wrap legs run.  The band's extreme is the
         outermost of the two ends, the target box and every gridded section on
         the band overlapping the span.
 
-        A corridor is clear only if its legs cross no section but the hop's two
-        ends, and no edge into the entry outside the hop's connector leaves a
-        node beyond its traverse: such a feeder could reach the port only by
-        crossing the loop.  A side's room is free only if a section lies beyond
-        the band on that side within the span and no other line of the hop's
-        fork (the connector's source nodes) or of the target section (an edge
-        into or out of its ports) ends beyond that side's traverse.  Whether
-        such a line crosses the loop depends on the lane order at the fork,
-        which the record itself decides, so it contests the room rather than
-        closing the side.
+        Another feeder of the entry starting beyond a side's traverse closes
+        that side: it could reach the port only by crossing the loop.  A line
+        of the hop's fork (the connector's source nodes) or of the target
+        section (an edge into or out of its ports) ending beyond it only
+        contests the side's room: whether it crosses the loop depends on the
+        lane order at the fork, which the record itself decides.
 
         The detour and the room read each box's lateral faces no further than
         the section padding beyond its content (:func:`_face_span`), so the
@@ -794,7 +789,7 @@ class PortOrderBuilder:
                 s0, s1 = _section_extent(section, rows)
                 on_band = (
                     section.grid_col >= 0
-                    and min(s1, band[1]) - max(s0, band[0]) > SAME_Y_TOLERANCE
+                    and _overlap((s0, s1), band) > SAME_Y_TOLERANCE
                 )
             face = _face_span(graph, section, travel)
             if section is not target_box:
@@ -814,7 +809,7 @@ class PortOrderBuilder:
             for e in graph.edges_to(entry_id)
             if (e.source, e.line_id) not in hop
         ]
-        contested = self.contested_ends(connector, target_box, travel)
+        contested = self.contested_ends(connector, target_box, travel) if beyond else []
         right = _Corridor(
             2 * face_high - l_s - l_e,
             not _legs_cross(others, lead, descent, l_s, l_e, right_channel)
@@ -878,13 +873,7 @@ class PortOrderBuilder:
                 or self.corridor_scope(entry_id, origin) is not None
             ):
                 continue
-            here, cell = self.cell_centre(entry_id), self.cell_centre(origin)
-            if (
-                here is None
-                or cell is None
-                or self.shared_band(entry_id, origin, travel) is None
-                or _behind(cell, here, travel) >= -SAME_Y_TOLERANCE
-            ):
+            if not self.ahead_on_band(entry_id, origin, travel):
                 continue
             side, rule = self.u_turn_side(entry_id, origin, 1)
             heading = EXIT_SIDE_DIRECTION[port.side]
@@ -945,13 +934,12 @@ class PortOrderBuilder:
         return [hops[k] for k in sorted(group)]
 
     def decide_corridors(self, group: Sequence[_CorridorHop]) -> None:
-        """Decide every hop of an :meth:`opposite_group` at once.
-
-        A held hop keeps its side; the free hops take the assignment, among
-        those putting no two linked hops on one screen side and each free hop
-        on a clear side, with the shortest total detour, then the most
-        corridors in existing room, then the most turn-round sides.  With no
-        such assignment every hop keeps the turn-round side."""
+        """Decide every hop of an :meth:`opposite_group` at once: a held hop
+        keeps its side, and the free hops take the module docstring's ranking
+        summed over the group (total detour, then corridors in free room, then
+        turn-round sides) among the assignments putting no two linked hops on
+        one screen side and each free hop on a clear side; with none, every hop
+        keeps the turn-round side."""
         best: tuple[tuple[float, int, tuple[int, ...]], tuple[int, ...]] | None = None
         choices = [[hop.held[0]] if hop.held else [1, -1] for hop in group]
         for combo in product(*choices):
@@ -1075,7 +1063,7 @@ class PortOrderBuilder:
             return None
         heading = EXIT_SIDE_DIRECTION[source.side]
         travel = port_travel(self.graph.ports[entry_id])
-        turn = _lateral(direction_vector(travel), (0.0, 0.0), heading)
+        turn = _lateral(direction_vector(travel), _ORIGIN, heading)
         lines = self.exit_order(source_id) if turn else None
         if lines is None:
             return None
@@ -1085,7 +1073,7 @@ class PortOrderBuilder:
             if (source_id, True) in self.upstream_sources(entry_id, lid)
         ]
         inner = min(mine) > 0 if turn > 0 else max(mine) < len(lines) - 1
-        facing = _sign(_lateral(direction_vector(heading), (0.0, 0.0), travel))
+        facing = _sign(_lateral(direction_vector(heading), _ORIGIN, travel))
         return -facing if inner else facing
 
     def hop_obstructed(self, hop_id: str, entry_id: str) -> bool:

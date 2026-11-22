@@ -6189,9 +6189,6 @@ def _left_entry_descent_x(
     pass the per-line stagger as *signed_delta* (``+delta`` when the channel
     sits on the bundle's right, ``-delta`` when on its left) to keep the
     concentric-corner handedness local to each handler.
-
-    The bump is never capped on the map's left margin, which is headroom
-    (:func:`section_lies_before`).
     """
     return _left_descent_x(
         ctx.curve_radius, ctx.offset_step, anchor_x, n_outer, signed_delta
@@ -7637,14 +7634,10 @@ def loops_round_right_entry(f: _InterFacts) -> bool:
 
 
 def draws_over_top_loop(f: _InterFacts) -> bool:
-    """Whether routing draws *f* as a loop over the top of its target section.
-
-    A loop round a RIGHT entry (:func:`loops_round_right_entry`) climbs over
-    the target's top (:func:`_route_right_entry_over_top`) unless the lane
-    plan's approach record sends it round below, where it goes around below
-    the target row (:func:`_route_right_entry_around_below`).  The exit-turn
-    planner reads this one classification, the dispatcher's own, so it cannot
-    disagree with the loop routing draws.
+    """Whether routing draws *f* as a loop over the top of its target section:
+    a loop round a RIGHT entry (:func:`loops_round_right_entry`) the approach
+    record does not send round below.  The exit-turn planner reads this same
+    classification.
     """
     return loops_round_right_entry(f) and _recorded_side(f.graph, f.edge) != "below"
 
@@ -7771,13 +7764,10 @@ def _gap_above_holds_run(graph: MetroGraph, tgt_row: int) -> bool:
 
 
 def _takes_gap_above(f: _InterFacts, fits: Callable[[_InterFacts], bool]) -> bool:
-    """Whether a wrap into *f*'s entry traverses the band above the target row.
-
-    The lane plan's approach record decides: a connector it sends round above
-    takes the band, and one it sends round below never does.  A connector with
-    no recorded side takes the band where the leaf *fits* it, except above the
-    topmost row, whose headroom is no band of its own: there it goes only to
-    join another connector into its entry recorded round above.
+    """Whether a wrap into *f*'s entry traverses the band above the target row:
+    as the approach record says, else where the leaf *fits* it.  Above the
+    topmost row the headroom is no band of its own, so an unrecorded connector
+    takes it only to join another connector into its entry recorded above.
 
     Raises:
         RuntimeError: a connector recorded round above whose leaf does not

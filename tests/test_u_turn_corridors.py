@@ -19,6 +19,7 @@ from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import SAME_Y_TOLERANCE
 from nf_metro.layout.port_order_plan import (
     _CORRIDOR_CLEAR,
+    Approach,
     PortOrderBuilder,
     SideRule,
     _box,
@@ -28,7 +29,7 @@ from nf_metro.layout.port_order_plan import (
     approach_source,
     port_travel,
 )
-from nf_metro.layout.routing.common import right_normal_axis_sign
+from nf_metro.layout.routing.common import RoutedPath, right_normal_axis_sign
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
@@ -44,7 +45,7 @@ class _Laid:
     sealed: MetroGraph
     """The graph as the lane plan read it when it was decided."""
     drawn: MetroGraph
-    routes: tuple[object, ...]
+    routes: tuple[RoutedPath, ...]
 
 
 @lru_cache(maxsize=None)
@@ -95,10 +96,25 @@ def _corridors(graph: MetroGraph, key: _Key) -> tuple[_Corridor, _Corridor]:
     return right, left
 
 
+def _approach(graph: MetroGraph, key: _Key) -> Approach:
+    return graph._lane_plan.port_orders.approaches[key]  # type: ignore[union-attr]
+
+
 def _screen(graph: MetroGraph, key: _Key) -> str:
-    approach = graph._lane_plan.port_orders.approaches[key]  # type: ignore[union-attr]
-    sign = approach.side * right_normal_axis_sign(port_travel(graph.ports[key[0]]))
+    sign = _approach(graph, key).side * right_normal_axis_sign(
+        port_travel(graph.ports[key[0]])
+    )
     return "below" if sign > 0 else "above"
+
+
+def _connector_ys(laid: _Laid, key: _Key) -> list[float]:
+    return [
+        y
+        for route in laid.routes
+        if route.edge.target == key[0]
+        and approach_source(laid.drawn, route.edge.source, route.edge.line_id) == key[1]
+        for _x, y in route.points
+    ]
 
 
 # Every curated U-turn whose two clear corridors are equally long where the lane
@@ -148,19 +164,19 @@ TIES: tuple[tuple[str, _Key, SideRule, str], ...] = (
         "above",
     ),
 )
-TIE_KEYS = frozenset((Path(rel).stem, key) for rel, key, _rule, _screen in TIES)
+TIE_KEYS = frozenset((Path(rel).stem, key) for rel, key, *_ in TIES)
 
 
 @pytest.mark.parametrize(
     ("rel", "key", "rule", "screen"),
     TIES,
-    ids=[f"{Path(rel).stem}-{key[1]}" for rel, key, _rule, _screen in TIES],
+    ids=[f"{Path(rel).stem}-{key[1]}" for rel, key, *_ in TIES],
 )
 def test_a_length_tie_takes_the_side_with_room_else_the_turn_round(
     rel: str, key: _Key, rule: SideRule, screen: str
 ) -> None:
     laid = _laid(ROOT / rel)
-    approach = laid.drawn._lane_plan.port_orders.approaches[key]  # type: ignore[union-attr]
+    approach = _approach(laid.drawn, key)
     assert approach.rule is rule
     assert _screen(laid.drawn, key) == screen
     right, left = _corridors(laid.sealed, key)
@@ -231,14 +247,7 @@ def test_opposite_runs_on_one_band_take_opposite_sides() -> None:
             for s in graph.sections.values()
             if s.bbox_w > 0 and s.grid_row in rows and s.grid_col >= 0
         ]
-        ys = [
-            y
-            for route in laid.routes
-            if route.edge.target == key[0]  # type: ignore[attr-defined]
-            and approach_source(graph, route.edge.source, route.edge.line_id)  # type: ignore[attr-defined]
-            == key[1]
-            for _x, y in route.points  # type: ignore[attr-defined]
-        ]
+        ys = _connector_ys(laid, key)
         assert ys, key
         if screen == "above":
             assert min(ys) < min(s.bbox_y for s in band), key
@@ -260,61 +269,46 @@ def test_a_loop_never_encloses_another_line_into_its_entry() -> None:
     ys = [
         y
         for route in laid.routes
-        if route.edge.target == key[0]  # type: ignore[attr-defined]
-        and route.edge.source == key[1]  # type: ignore[attr-defined]
-        for _x, y in route.points  # type: ignore[attr-defined]
+        if route.edge.target == key[0] and route.edge.source == key[1]
+        for _x, y in route.points
     ]
     assert ys
     assert min(ys) > target.bbox_y
     assert max(ys) > target.bbox_y + target.bbox_h
 
 
-def _connector_ys(laid: _Laid, key: _Key) -> list[float]:
-    return [
-        y
-        for route in laid.routes
-        if route.edge.target == key[0]  # type: ignore[attr-defined]
-        and approach_source(laid.drawn, route.edge.source, route.edge.line_id)  # type: ignore[attr-defined]
-        == key[1]
-        for _x, y in route.points  # type: ignore[attr-defined]
-    ]
-
-
 # Direct turn-rounds whose two clear corridors are equally long and whose only
 # section beyond the band lies on a side another line ends beyond the traverse
-# of: (map, key, the contested side, the contesting edge, its end beyond).
-CONTESTED: tuple[tuple[str, _Key, int, tuple[str, str, str], str], ...] = (
+# of: (map, key, the contested side, the contesting edge).
+CONTESTED: tuple[tuple[str, _Key, int, tuple[str, str, str]], ...] = (
     (
         "f8404976",
         ("sec1__entry_left_3", "sec0__exit_left_0"),
         -1,
         ("sec1__exit_right_1", "sec2__entry_left_4", "l0"),
-        "sec2__entry_left_4",
     ),
     (
         "f8500517",
         ("sec2__entry_right_3", "sec1__exit_right_1"),
         -1,
         ("__junction_6", "__merge_2", "l1"),
-        "__merge_2",
     ),
     (
         "f8500832",
         ("sec1__entry_right_3", "sec0__exit_right_0"),
         -1,
         ("__junction_6", "sec4__entry_right_4", "l0"),
-        "sec4__entry_right_4",
     ),
 )
 
 
 @pytest.mark.parametrize(
-    ("stem", "key", "side", "edge", "end"),
+    ("stem", "key", "side", "edge"),
     CONTESTED,
     ids=[stem for stem, *_rest in CONTESTED],
 )
 def test_room_another_line_ends_beyond_is_not_free(
-    stem: str, key: _Key, side: int, edge: tuple[str, str, str], end: str
+    stem: str, key: _Key, side: int, edge: tuple[str, str, str]
 ) -> None:
     """f8404976's target section sends l0 out round the room above the loop;
     f8500517's and f8500832's fork sends a sibling branch out round the room
@@ -322,22 +316,24 @@ def test_room_another_line_ends_beyond_is_not_free(
     record decides, so the room is not free and the tie takes the turn-round
     side."""
     laid = _laid(CANVAS_DATA / f"{stem}.mmd")
-    approach = laid.drawn._lane_plan.port_orders.approaches[key]  # type: ignore[union-attr]
+    approach = _approach(laid.drawn, key)
     assert (approach.side, approach.rule) == (1, SideRule.TURN_ROUND)
     graph = laid.sealed
-    builder = _builder(graph)
-    travel = builder.same_axis_u_turn(*key)
-    assert travel is not None
-    right, left, _span, _band = builder.side_corridors(*key, travel)
+    right, left = _corridors(graph, key)
     assert right.feasible and left.feasible
     assert abs(right.detour - left.detour) <= SAME_Y_TOLERANCE
     assert not right.room and not left.room
+    builder = _builder(graph)
+    travel = builder.same_axis_u_turn(*key)
+    assert travel is not None
     connector = builder.connector(*key)
     assert edge in {(e.source, e.target, e.line_id) for e in graph.edges}
     assert edge not in {(e.source, e.target, e.line_id) for e in connector}
-    assert end in edge[:2]
     target = graph.section_for_port(graph.ports[key[0]])
-    reach = _lateral(builder.point(end), (0.0, 0.0), travel)
+    reach = max(
+        (_lateral(builder.point(node), (0.0, 0.0), travel) for node in edge[:2]),
+        key=lambda lateral: side * lateral,
+    )
     assert reach in builder.contested_ends(connector, target, travel)
     _a0, _a1, low, high = _box(target, travel)
     face = high if side == 1 else low
@@ -368,7 +364,7 @@ def test_a_direct_turn_round_reads_the_padding_its_target_has() -> None:
     the corridor below is the shorter and the turn-round side holds."""
     laid = _laid(CANVAS_DATA / "f8401369.mmd")
     key = ("sec3__entry_left_3", "sec2__exit_left_0")
-    approach = laid.drawn._lane_plan.port_orders.approaches[key]  # type: ignore[union-attr]
+    approach = _approach(laid.drawn, key)
     assert (approach.side, approach.rule) == (1, SideRule.TURN_ROUND)
     assert _screen(laid.drawn, key) == "below"
     right, left = _corridors(laid.sealed, key)

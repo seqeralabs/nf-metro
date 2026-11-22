@@ -1595,18 +1595,14 @@ through the record's draw accessors (`planned_offsets` in
   the record read on a few maps (#2171); a layout's record is not rebuilt for
   them.
 - **Side-entry U-turn sides**: `PortOrderBuilder.u_turn_side` is the one
-  owner of the side a U-turn into a side entry passes on, decided here.  It
-  reads grid cells and spans, port sides, edges and junction topology, station
-  positions and section boxes as they stand at the close of Stage 6.12, and
-  the line sets and end positions of the edges into each entry, out of the
-  hop's fork and into or out of the target section's ports.  Its detour and
-  room read each box's lateral faces no further than the section padding
-  beyond the section's content, so the bundle sizing of Stages 6.13 and 6.15a
-  does not move them.  Stages 6.14, 6.15a, 6.17 and 6.18
-  and envelope settlement move positions after it and never re-decide the
-  side; routing reads it (the RIGHT- and LEFT-entry gap-above traverses, the
-  far-left U-turn wrap, `draws_over_top_loop` and the exit turn it opens with)
-  with no fallback of its own.
+  owner of the side a U-turn into a side entry passes on, decided here from
+  structure and placement as they stand at the close of Stage 6.12.  It reads
+  each box's lateral faces no further than the section padding beyond the
+  section's content, so the bundle sizing of Stages 6.13 and 6.15a cannot move
+  its inputs.  Stages 6.14, 6.15a, 6.17 and 6.18 and envelope settlement never
+  re-decide the side; routing reads it (the RIGHT- and LEFT-entry gap-above
+  traverses, the far-left U-turn wrap, `draws_over_top_loop` and the exit turn
+  it opens with) with no fallback of its own.
 - **Invariants preserved**: The record reads no lane offset, route or draft.
   `compute_station_offsets` returns exactly
   `planned_offsets(graph, record, step)`; the record holds every station
@@ -2086,11 +2082,11 @@ They are design evidence, not part of this specification.
   canvas by the same amount, so the map keeps a first-quadrant frame and the
   zero edge a canvas measurement reads stays the zero edge. The move is one
   uniform translation after every routing decision, which is why it is not one
-  of settlement's per-boundary allocations. Canvas corridors are gated separately, by
-  `assert_canvas_corridors_hold_their_claims`, which runs once the render has
-  sized its canvas -- the first point at which the number a canvas claim is
-  measured against exists, and the reason the settlement guard could never
-  measure one. A run is filed against a canvas side only when it lies beyond the
+  of settlement's per-boundary allocations. Canvas corridors are gated
+  separately, by `assert_canvas_corridors_hold_their_claims`, which runs once
+  the render has sized its canvas -- the first point at which the number a
+  canvas claim is measured against exists, and the reason the settlement guard
+  could never measure one. A run is filed against a canvas side only when it lies beyond the
   extreme of every placed section, so the margin it is measured within is the one
   it occupies, and its clearance on that side is `CANVAS_EDGE_CLEARANCE`: the
   stroke's half-width plus a direction chevron, which is what is drawn there,
