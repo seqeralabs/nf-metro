@@ -245,8 +245,8 @@ def _renumber_sections_by_route(graph: MetroGraph) -> None:
     for sid in sorted(ordered_ids, key=lambda sid: not graph.sections[sid].draws_box):
         section = graph.sections[sid]
         if section.number_override is not None:
-            # An override of 0 stays 0 (no badge). The parser treats a number of
-            # 0 as unassigned, so this pass must run after that assignment.
+            # The parser treats a number of 0 as unassigned, so this pass must
+            # run after that assignment.
             section.number = section.number_override
             continue
         while next_number in reserved:

@@ -601,3 +601,78 @@ def test_rotated_header_title_offset_follows_the_badge(
     assert placement.mode in reading_start
     offset = abs(placement.label_y - reading_start[placement.mode])
     assert offset == pytest.approx(expected_offset)
+    _, y0, _, y1 = placement.keepout
+    title_width = section_header.estimate_section_label_width("Alignment", 13.0)
+    assert y1 - y0 == pytest.approx(expected_offset + title_width)
+
+
+_BADGE_SPAN = (
+    2.0 * SECTION_NUM_CIRCLE_R_LARGE + section_header.SECTION_LABEL_TEXT_OFFSET
+)
+
+# Routes that push the header of a 200px-wide box into each horizontal tier:
+# a full-width route inside the band above blocks ``above``; a second inside
+# the band below (with a box too short for a side column) blocks ``below``.
+_ROUTE_ABOVE = [(100.0, 90.0), (300.0, 90.0)]
+_ROUTE_BELOW = [(100.0, 122.0), (300.0, 122.0)]
+
+
+@pytest.mark.parametrize(
+    ("number", "badge_span"),
+    [pytest.param(1, _BADGE_SPAN, id="badged"), pytest.param(0, 0.0, id="unnumbered")],
+)
+@pytest.mark.parametrize(
+    ("mode", "routes", "bbox_h"),
+    [
+        pytest.param("above", [], 80.0, id="above"),
+        pytest.param("below", [_ROUTE_ABOVE], 80.0, id="below"),
+        pytest.param("nudge", [_ROUTE_ABOVE, _ROUTE_BELOW], 10.0, id="nudge"),
+    ],
+)
+def test_horizontal_header_title_offset_and_extent_follow_the_badge(
+    mode: str,
+    routes: list[list[tuple[float, float]]],
+    bbox_h: float,
+    number: int,
+    badge_span: float,
+) -> None:
+    """In every horizontal tier the title starts a badge span past the header
+    origin, and the header's extent is the badge span plus the title: an
+    unnumbered section reserves the title width alone."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment", number=number)
+    section.bbox_x, section.bbox_y = 100.0, 100.0
+    section.bbox_w, section.bbox_h = 200.0, bbox_h
+    graph.sections["s"] = section
+
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=routes, title_font_size=13.0
+    )
+
+    assert placement.mode == mode
+    x0, _, x1, _ = placement.keepout
+    title_width = section_header.estimate_section_label_width("Alignment", 13.0)
+    assert placement.label_x - x0 == pytest.approx(badge_span)
+    assert x1 - x0 == pytest.approx(badge_span + title_width)
+
+
+@pytest.mark.parametrize(
+    ("number", "expected_lines"),
+    [pytest.param(1, 3, id="badged"), pytest.param(0, 2, id="unnumbered")],
+)
+def test_wrap_budget_gives_the_whole_box_width_to_an_unnumbered_title(
+    number: int, expected_lines: int
+) -> None:
+    """The badge width comes off the wrap budget only when a badge is drawn, so
+    the same title and box wrap onto fewer lines for an unnumbered section."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment and sorting of reads", number=number)
+    section.bbox_x, section.bbox_y = 100.0, 100.0
+    section.bbox_w, section.bbox_h = 150.0, 80.0
+    graph.sections["s"] = section
+
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=[], title_font_size=13.0
+    )
+
+    assert len(placement.label_lines) == expected_lines
