@@ -77,6 +77,10 @@ history.
 - Nextflow subworkflows with repeated short names get distinct section and
   bypass line IDs, preserving each subworkflow's stations, section box and
   bypass line.
+- A line that skips a station through a hidden helper now opens its bypass on
+  the side its own lane sits, so the bypass no longer crosses the lines staying
+  on the trunk. This holds under both `diamond_style: straight` and
+  `diamond_style: symmetric` (#2170).
 
 ## [2.1.0] — 2026-09-15
 
