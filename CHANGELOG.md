@@ -65,17 +65,26 @@ history.
 
 ### Fixed
 
-- `nf-metro info` now reports the section numbers the render draws, including
-  route renumbering and `%%metro number:` overrides, instead of the numbers
-  assigned at parse time. `--json` `sections[].number` is `null` for a section
-  with no badge: number 0, a hidden section, or the implicit section of a map
-  with no `subgraph` (#2058).
+- Nextflow conversion preserves spur dependencies between subworkflows instead
+  of silently omitting those edges from the emitted map.
+- Nextflow conversion splits a section that runs both before and after another
+  one (top-level processes around a subworkflow become `Main` and `Reporting`;
+  a parent subworkflow's own processes are split around its child), instead of
+  emitting a map that fails with "Sections form a cycle".
 - Section number badges skip sections that draw no badge. A map mixing loose
   stations with subgraphs numbered its visible sections from 2.
 - A perpendicular (top or bottom) entry port fed through merges, or by
   feeders arriving along two different corridors, now gives each line the
   channel that matches its lane in the section, so the lines no longer cross
   or overlap inside the port's own turn.
+- Nextflow subworkflows with repeated short names get distinct section and
+  bypass line IDs, preserving each subworkflow's stations, section box and
+  bypass line.
+- `nf-metro info` now reports the section numbers the render draws, including
+  route renumbering and `%%metro number:` overrides, instead of the numbers
+  assigned at parse time. `--json` `sections[].number` is `null` for a section
+  with no badge: number 0, a hidden section, or the implicit section of a map
+  with no `subgraph` (#2058).
 
 ## [2.1.0] — 2026-09-15
 
