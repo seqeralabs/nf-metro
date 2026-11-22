@@ -85,6 +85,13 @@ history.
   assigned at parse time. `--json` `sections[].number` is `null` for a section
   with no badge: number 0, a hidden section, or the implicit section of a map
   with no `subgraph` (#2058).
+- A line that skips a station through a hidden helper now opens its bypass on
+  the side its own lane sits, so the bypass no longer crosses the lines staying
+  on the trunk. This applies under both `diamond_style: straight` and
+  `diamond_style: symmetric`, in sections where at most one line enters.
+  Under `diamond_style: symmetric`, a fan whose branches nest (one branch
+  carries every line the others do) also seats each branch on its lines' lane
+  side, in sections where at most one line enters (#2170).
 
 ## [2.1.0] — 2026-09-15
 

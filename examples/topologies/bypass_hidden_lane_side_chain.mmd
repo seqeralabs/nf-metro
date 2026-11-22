@@ -1,0 +1,17 @@
+%%metro title: Hidden two-hop bypass opens on its line's lane side
+%%metro style: dark
+%%metro line: line1 | Line 1 | #d0006f
+%%metro line: line2 | Line 2 | #f0ab00
+graph LR
+    step1[step1]
+    step2[step2]
+    step3[step3]
+    step4[step4]
+    _skip_a
+    _skip_b
+    step1 -->|line1,line2| step2
+    step2 -->|line1,line2| step3
+    step3 -->|line1,line2| step4
+    step1 -->|line1| _skip_a
+    _skip_a -->|line1| _skip_b
+    _skip_b -->|line1| step4
