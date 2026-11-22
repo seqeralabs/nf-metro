@@ -7,7 +7,6 @@ from functools import cache
 
 from nf_metro.layout.auto_layout import _transitive_successors
 from nf_metro.layout.phases.bbox import _min_section_bbox_top
-from nf_metro.layout.title_band import title_band_floors, title_band_lift
 from nf_metro.parser.model import MetroGraph
 
 
@@ -292,47 +291,26 @@ def translate_graph(graph: MetroGraph, dx: float, dy: float) -> None:
 
 
 def _canvas_top_shortfall(graph: MetroGraph, section_y_padding: float) -> float:
-    """Downward shift needed so the graph clears both top floors (0 if none).
-
-    Containment: every section must sit ``section_y_padding`` below the canvas
-    top.  Band: when render draws a title or standalone logo at the canvas top
-    (see :func:`~nf_metro.layout.title_band.title_band_bottom`), a section
-    whose header badge or content enters that band is lifted clear by
-    :func:`~nf_metro.layout.title_band.title_band_lift` -- a map already
-    clearing the band is left untouched.
-
-    The band lift waits for the Stage 6.4 per-section grid snap
-    (``graph._consumers_grid_snapped``): that snap rounds half-pitch ties on
-    absolute slot indices, so a lift taken before it would re-break ties and
-    rearrange content instead of translating it.
-    """
-    min_all = _min_section_bbox_top(graph, section_y_padding)
-    band = title_band_lift(graph) if graph._consumers_grid_snapped else 0.0
-    return max(0.0, section_y_padding - min_all, band)
+    """Downward shift so every section sits ``section_y_padding`` below the
+    canvas top (0 if it already does)."""
+    return max(0.0, section_y_padding - _min_section_bbox_top(graph, section_y_padding))
 
 
 def _canvas_top_preserved(
     graph: MetroGraph, section_y_padding: float, shift: float
 ) -> bool:
-    """True if ``shift`` keeps every section within its top floor.
-
-    The containment floor (``section_y_padding``) bounds all sections; the
-    band floors (:func:`~nf_metro.layout.title_band.title_band_floors`) bound
-    them whenever render draws a title or standalone logo at the canvas top.
-    Lets the grid snap reject a candidate that would lift the top above a
-    floor.
-    """
+    """True if ``shift`` keeps every section ``section_y_padding`` below the
+    canvas top.  Lets the grid snap reject a candidate that would lift the top
+    above that floor."""
     min_all = _min_section_bbox_top(graph, section_y_padding)
-    if min_all + shift < section_y_padding - 1e-6:
-        return False
-    return all(top + shift >= floor - 1e-6 for top, floor in title_band_floors(graph))
+    return min_all + shift >= section_y_padding - 1e-6
 
 
 def _shift_graph_into_canvas(graph: MetroGraph, section_y_padding: float) -> None:
     """Shift the whole graph down if the topmost section is above the canvas.
 
     Lifts the graph by ``_canvas_top_shortfall`` so it clears the canvas-top
-    margin and any title/logo band.  No-op when it already does.
+    margin.  No-op when it already does.
     """
     shortfall = _canvas_top_shortfall(graph, section_y_padding)
     if shortfall > 0:

@@ -65,9 +65,10 @@ history.
 - A map with a `%%metro logo:` draws its title again. With the logo in the
   legend the title sits top-left as usual; with a standalone logo
   (`%%metro legend: none`, and every HTML output) the title sits beside the
-  logo. Sections, loose stations and over-the-top loops now clear a
-  standalone logo instead of running under it. `logo_scale` sizes the
-  standalone logo as well as the legend one.
+  logo. The whole map, rail-mode maps included, now moves down clear of a
+  standalone logo instead of running under it, laid out and routed exactly as
+  it would be without one. `logo_scale` sizes the standalone logo as well as
+  the legend one.
 - Section number badges skip sections that draw no badge. A map mixing loose
   stations with subgraphs numbered its visible sections from 2.
 - A perpendicular (top or bottom) entry port fed through merges, or by

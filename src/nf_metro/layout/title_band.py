@@ -1,11 +1,12 @@
-"""Depth of the canvas-top band the map title and a standalone logo occupy.
+"""The canvas-top band the map title and a standalone logo occupy.
 
 Render draws the title, and a logo not folded into the legend, in the canvas-top
 padding.  Layout must keep every section's ink clear of that band, so the
 band's depth is resolved before layout from the same facts render keys its
 drawing on: whether chrome is drawn at all (``--bare``), and whether the legend
 is drawn to take the logo (``%%metro legend: none`` and HTML output both leave
-the logo standalone).
+the logo standalone).  The finished layout is then moved below the band as one
+translation.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from nf_metro.layout.constants import (
     TITLE_BAND_BOTTOM,
     TITLE_BAND_HEADER_GAP,
 )
+from nf_metro.layout.phases.canvas import translate_graph
 from nf_metro.layout.section_placement import over_top_headroom_rows
 from nf_metro.parser.model import MetroGraph
 
@@ -35,8 +37,9 @@ def resolve_title_band_bottom(
     Any configured logo variant reserves its band, including a lone light- or
     dark-only one whose visibility turns on the display mode resolved at render
     time: an unused band costs blank space, a missing one an overlap.  A title
-    drawn beside the logo is centred on it, so at the theme title sizes
-    ``TITLE_BAND_BOTTOM`` is calibrated for it stays within this band.
+    beside a standalone logo is vertically centred on it, so it never reaches
+    below the logo's bottom edge at the theme title sizes
+    ``TITLE_BAND_BOTTOM`` is calibrated for.
     """
     if not draws_chrome:
         return 0.0
@@ -84,9 +87,16 @@ def title_band_floors(graph: MetroGraph) -> list[tuple[float, float]]:
 
 
 def title_band_lift(graph: MetroGraph) -> float:
-    """Downward shift seating every breaching section ``TITLE_BAND_HEADER_GAP``
-    past its floor; 0 when none breaches, so a clear map is never moved."""
-    return max(
+    """Downward shift seating every breaching section at least
+    ``TITLE_BAND_HEADER_GAP`` past its floor; 0 when none breaches, so a clear
+    map is never moved.
+
+    Rounded to a micro-pixel: the floor arithmetic leaves noise in the last
+    bits (16.800000000000011 for a 16.8px shift), which every moved coordinate
+    would carry into comparisons that tie exactly in the unbanded layout (a
+    label nudge, a corner radius) and could tip one.
+    """
+    shift = max(
         (
             floor + TITLE_BAND_HEADER_GAP - top
             for top, floor in title_band_floors(graph)
@@ -94,3 +104,17 @@ def title_band_lift(graph: MetroGraph) -> float:
         ),
         default=0.0,
     )
+    return round(shift, 6)
+
+
+def apply_title_band_lift(graph: MetroGraph) -> None:
+    """Move the settled layout down clear of the band, as one translation.
+
+    Every placement decision has been taken against a canvas top at y=0, as
+    for a map with no band.  The shift is recorded as ``graph.title_band_lift``,
+    the y routing and render measure canvas-top clearances from, so the routes
+    are the unbanded map's translated too.
+    """
+    lift = title_band_lift(graph)
+    translate_graph(graph, 0.0, lift)
+    graph.title_band_lift = lift

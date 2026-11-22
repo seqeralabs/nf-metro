@@ -286,9 +286,7 @@ pass:
   6.4 grid snap, which re-seats each partial from the carrier port's post-snap Y,
   and by the `_guard_partial_trunk_descent_seated` postcondition.
 - `graph._consumers_grid_snapped` - set right after the Stage 6.4 snap; the
-  Stage 6.6 off-track reanchor carries its own always-on guard on it. The
-  canvas fit (`_shift_graph_into_canvas`) reads it to withhold the title-band
-  lift until the grid snap has run, so the lift is a pure translation.
+  Stage 6.6 off-track reanchor carries its own always-on guard on it.
 
 The remaining channels tolerate an unwritten value by design (their read sites
 fall back to live geometry or a `None`/empty default), so they are documented in
@@ -335,7 +333,7 @@ runtime check either:
   guards, empty when rail mode is off.
 - `graph._defer_final_guards` / `graph._after_final_deferred` - pass-control
   flags `compute_layout` uses so the final-geometry guards defer while the
-  pre-bypass passes run, then validate the settled post-bypass geometry once.
+  layout passes run, then validate the settled, band-lifted geometry once.
 - `graph._final_route_guards_deferred` - set in `phases/guards.py` when the
   observed route plan carries boundary clearance requirements or reservations,
   so the routes the final route guards would judge are not settled yet.
@@ -1379,10 +1377,8 @@ in pipeline order.
   or bypass helper); a band holding a port or bypass helper is left intact.
   The upward grow can breach the canvas top margin, so
   `_shift_graph_into_canvas` runs immediately after. That shift keeps every
-  section `section_y_padding` below the canvas top and, when render draws a
-  title or standalone logo there, lifts any section reaching into that band
-  (`layout/title_band.py`: a drawn section's header badge, an implicit holder's
-  box) `TITLE_BAND_HEADER_GAP` clear of it (issues #1273, #2169).
+  section `section_y_padding` below the canvas top; the title/logo band is
+  cleared after layout, not here (see "Post-layout title-band lift").
   Two row-top seating passes run in this stage only under `row_align == "top"`
   and are a no-op under the content default: `_top_align_packed_row_bboxes`
   levels a packed cell's header line with its contiguous row, and
@@ -1441,7 +1437,7 @@ in pipeline order.
   shifted onto integer `y_spacing` multiples; mixed-residue (multi-row)
   layouts and half-grid / convergence stations are left untouched. A
   candidate grid shift is rejected if it would pull the top above the
-  canvas margin or any section into the canvas-top title/logo band.
+  canvas margin.
 - **Invariants preserved**: Relative station/section/port Ys (the whole
   canvas moves by one delta).
 - **Related tests**: `test_auto_y_spacing_fits_content`.
@@ -1569,6 +1565,31 @@ in pipeline order.
   `test_structural_extent_matches_settled_within_tolerance` and
   `_guard_section_top_padding`.
 - **Lifecycle:** invariant - no geometry or bbox phase follows this refit.
+
+## Post-layout title-band lift
+
+Render draws the map title, and a logo not folded into the legend, in the
+canvas-top padding; `prepare_graph` resolves that band's depth before layout
+into `graph.title_band_bottom` (`layout/title_band.py`). No layout pass reads
+it: every pass, including the geometric-bypass settling pass, lays the map out
+against a canvas top at y=0, exactly as for a map with no band.
+
+- **Helper**: `apply_title_band_lift` (`layout/title_band.py`), called by
+  `compute_layout` once the last pass has settled and before the deferred
+  "after final" checkpoint.
+- **Postcondition**: every section clears its floor from `title_band_floors`
+  (a drawn section's header badge, an implicit holder's box, or an over-the-top
+  loop's headroom in a row `over_top_headroom_rows` names), the breaching one
+  seated `TITLE_BAND_HEADER_GAP` below it; `graph.title_band_lift` records
+  the shift (0 when nothing breaches or no band is drawn). Guarded by `_guard_title_band_clearance`.
+- **Invariants preserved**: the whole layout moves by one `translate_graph`
+  delta. Routing (`_gap_above_target_y` and the bottom-row channel in
+  `routing/common.py`) and render (`_canvas_margin_shift`) measure canvas-top
+  clearances from `graph.title_band_lift` rather than y=0, so the routed lines
+  are the unbanded map's translated by the same delta.
+- **Related tests**: `tests/test_title_with_logo.py`
+  (`test_title_band_only_translates_the_bare_layout`,
+  `test_rail_mode_lifts_clear_of_standalone_logo`).
 
 ## Post-layout offset boundary: late per-line offset phases
 

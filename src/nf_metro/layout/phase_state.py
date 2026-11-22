@@ -185,14 +185,12 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
     "_consumers_grid_snapped": PhaseFieldSpec(
         name="_consumers_grid_snapped",
         writer_stage="6.4",
-        reader_stages=("6.6", "6.15a"),
+        reader_stages=("6.6",),
         enforcement=FieldEnforcement.REQUIRE_WRITER,
         why=(
             "readiness flag set right after the Stage 6.4 snap so the off-track "
             "reanchor re-pins against final consumer Ys; _reanchor_off_track_to_"
-            "consumer carries its own always-on guard on this field. The "
-            "canvas fit (_canvas_top_shortfall) also reads it at every stage, "
-            "withholding the title-band lift while it is still False"
+            "consumer carries its own always-on guard on this field"
         ),
     ),
     "_carrier_clearance_shifted": PhaseFieldSpec(
@@ -338,7 +336,7 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         reader_stages=(POST_LAYOUT,),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
-            "pass-control flag compute_layout sets while the pre-bypass passes "
+            "pass-control flag compute_layout sets while the layout passes "
             "run so the final-geometry guards defer on transient state; the "
             "breeze-through and after-final guards read it, tolerating the False "
             "default"
@@ -351,7 +349,7 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         enforcement=FieldEnforcement.FALLBACK,
         why=(
             "flag the after-final checkpoint sets when it is reached but deferred, "
-            "so compute_layout runs the checkpoint once on the settled post-bypass "
+            "so compute_layout runs the checkpoint once on the settled, band-lifted "
             "geometry; read by compute_layout, tolerating the False default"
         ),
     ),

@@ -548,10 +548,15 @@ class MetroGraph:
     # Lowest y the canvas-top title and standalone logo reach (0 when render
     # draws neither). Set by prepare_graph from --bare, the output format,
     # %%metro legend: and the logo before compute_layout runs, so the band
-    # clearance in layout/phases/canvas.py reserves exactly what render draws.
+    # lift in layout/title_band.py reserves exactly what render draws.
     # None for a graph that skipped prepare_graph: read it through
     # layout.title_band.title_band_bottom, which then assumes a default SVG.
     title_band_bottom: float | None = None
+    # How far layout moved the finished map down to clear that band: the map's
+    # own canvas top sits at this y.  Routing and render measure every
+    # canvas-top clearance from it, so the banded map is its unbanded layout
+    # translated, routes included.
+    title_band_lift: float = 0.0
     # When set, every real station with no explicit %%metro process: directive
     # gets its own id as a default process pattern, so a map whose station ids
     # already name their processes lights up live with no per-station mapping.

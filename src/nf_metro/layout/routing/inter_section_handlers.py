@@ -7275,9 +7275,10 @@ def _gap_above_target_y(graph: MetroGraph, tgt_row: int) -> tuple[float, float]:
     intervening rows leave abutting the target, which is what admits the
     with-flow approach when the source-adjacent band is too narrow.  Computed
     over all columns (not column-restricted) so the traverse stays clear of
-    every section in the span.
+    every section in the span.  With no row above, the band starts at the
+    map's own canvas top (``graph.title_band_lift``), not under the title.
     """
-    gap_top = row_bottom_edge(graph, tgt_row - 1)
+    gap_top = row_bottom_edge(graph, tgt_row - 1, default=graph.title_band_lift)
     gap_bottom = row_top_edge(graph, tgt_row, default=gap_top)
     return gap_top, gap_bottom
 

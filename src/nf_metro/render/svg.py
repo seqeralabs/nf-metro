@@ -394,15 +394,21 @@ def _canvas_margin_shift(
     (:data:`CANVAS_ORIGIN_MARGIN`), and the far margins absorb the move by
     growing the canvas.
 
+    The top margin is measured from the map's own canvas top
+    (``graph.title_band_lift``), which sits below any title/logo band.
+
     Zero on both axes for a map that draws nothing outside its box envelope.
     """
     boxes = [section for section in graph.sections.values() if section.bbox_w > 0]
     if not boxes:
         return 0.0, 0.0
     ink_x, ink_y = _drawn_ink_origin(graph, route_polylines, debug)
+    top = graph.title_band_lift
     return (
         _outboard_shortfall(min(s.bbox_x for s in boxes), ink_x, margins[0]),
-        _outboard_shortfall(min(s.bbox_y for s in boxes), ink_y, margins[1]),
+        _outboard_shortfall(
+            min(s.bbox_y for s in boxes) - top, ink_y - top, margins[1]
+        ),
     )
 
 

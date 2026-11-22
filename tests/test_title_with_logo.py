@@ -135,7 +135,7 @@ def _assert_band_clear(plan: RenderPlan, label: str) -> None:
 
 
 def test_title_drawn_when_logo_folds_into_legend() -> None:
-    """(a) A logo in the default (bottom) legend leaves the title drawn."""
+    """A logo in the default (bottom) legend leaves the title drawn."""
     plan, root = _render(
         FLAT_TITLED_MMD, source_dir=str(EXAMPLES), logo=PLACEHOLDER_LOGO
     )
@@ -147,7 +147,7 @@ def test_title_drawn_when_logo_folds_into_legend() -> None:
 
 @pytest.mark.parametrize("name", SECTIONED_FIXTURES)
 def test_title_band_reserved_when_logo_folds_into_legend(name: str) -> None:
-    """(a) With the logo in a legend the title sits top-left, and the topmost
+    """With the logo in a legend the title sits top-left, and the topmost
     header clears it exactly as on a titled map with no logo at all."""
     text, source_dir = _fixture(name)
     plan, root = _render(
@@ -166,7 +166,7 @@ def test_title_band_reserved_when_logo_folds_into_legend(name: str) -> None:
 def test_title_beside_standalone_logo_and_band_reserved(
     name: str, scale: float, output_format: Literal["svg", "html"]
 ) -> None:
-    """(b) A standalone logo puts the title to its right, vertically centred
+    """A standalone logo puts the title to its right, vertically centred
     on it, inside the canvas; the topmost header clears the logo."""
     text, source_dir = _fixture(name)
     plan, root = _render(
@@ -199,7 +199,7 @@ def test_title_beside_standalone_logo_and_band_reserved(
 def test_standalone_logo_band_reserved_without_title(
     name: str, output_format: Literal["svg", "html"]
 ) -> None:
-    """(c) The logo band is reserved on an untitled map too."""
+    """The logo band is reserved on an untitled map too."""
     text, source_dir = _fixture(name)
     plan, root = _render(
         text,
@@ -249,6 +249,7 @@ def test_flat_map_content_clears_standalone_logo(
     [
         "examples/topologies/tb_right_entry_stack.mmd",
         "examples/topologies/tb_bottom_exit_fork_diamond.mmd",
+        "examples/topologies/left_exit_wrap_under_own_section.mmd",
     ],
 )
 def test_over_the_top_loop_runs_below_standalone_logo(name: str, scale: float) -> None:
@@ -277,7 +278,11 @@ def _validated_layout(text: str, source_dir: str, **options: object) -> MetroGra
     return graph
 
 
-def _placed_geometry(graph: MetroGraph) -> dict[str, tuple[float, ...]]:
+def _placed_geometry(
+    graph: MetroGraph, output_format: Literal["svg", "html"]
+) -> dict[str, tuple[float, ...]]:
+    """Every laid-out coordinate, plus the render's routed polylines, keyed so
+    that each tuple holds y values at its odd indices only."""
     geometry: dict[str, tuple[float, ...]] = {}
     for sid, station in graph.stations.items():
         geometry[f"station:{sid}"] = (station.x, station.y)
@@ -287,10 +292,34 @@ def _placed_geometry(graph: MetroGraph) -> dict[str, tuple[float, ...]]:
         geometry[f"section:{sid}"] = (
             section.bbox_x,
             section.bbox_y,
-            section.bbox_w,
-            section.bbox_h,
+            section.bbox_x + section.bbox_w,
+            section.bbox_y + section.bbox_h,
         )
+    plan = render_graph_result(
+        graph, resolve_theme(None, graph), RenderConfig(output_format=output_format)
+    ).plan
+    for index, polyline in enumerate(plan.route_polylines):
+        geometry[f"route:{index}"] = tuple(v for point in polyline for v in point)
     return geometry
+
+
+def _translation_mismatches(
+    bare: dict[str, tuple[float, ...]], banded: dict[str, tuple[float, ...]]
+) -> tuple[float, dict[str, tuple[tuple[float, ...], tuple[float, ...]]]]:
+    """``(dy, mismatches)``: the offset the first station moved by, and every
+    element of *banded* that is not *bare* shifted down by it."""
+    assert banded.keys() == bare.keys()
+    anchor = next(iter(bare))
+    dy = banded[anchor][1] - bare[anchor][1]
+    shifted = {
+        key: tuple(v + dy if i % 2 else v for i, v in enumerate(values))
+        for key, values in bare.items()
+    }
+    return dy, {
+        key: (shifted[key], banded[key])
+        for key in bare
+        if any(abs(a - b) > 0.01 for a, b in zip(shifted[key], banded[key]))
+    }
 
 
 @pytest.mark.parametrize("output_format", ["svg", "html"])
@@ -300,16 +329,21 @@ def _placed_geometry(graph: MetroGraph) -> dict[str, tuple[float, ...]]:
         "examples/riboseq_metro.mmd",
         "examples/sarek_metro.mmd",
         "examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd",
+        "examples/topologies/left_exit_wrap_under_own_section.mmd",
+        "examples/topologies/bt_to_lr.mmd",
+        "examples/topologies/samerow_bypass_over_top_flat_bundle.mmd",
+        "examples/topologies/packed_cell_cellmate_bypass_entry_y.mmd",
     ],
 )
 def test_title_band_only_translates_the_bare_layout(
     name: str, output_format: Literal["svg", "html"]
 ) -> None:
     """Reserving the title/logo band moves the whole map down by one offset:
-    every station, port and section box sits exactly where the ``--bare``
-    layout (which reserves nothing) puts it, shifted by a single ``dy``."""
+    every station, port, section box and routed line sits exactly where the
+    ``--bare`` layout (which reserves nothing) puts it, shifted by a single
+    ``dy``."""
     text, source_dir = _fixture(name)
-    bare = _placed_geometry(_validated_layout(text, source_dir, bare=True))
+    bare = _placed_geometry(_validated_layout(text, source_dir, bare=True), "svg")
     banded = _placed_geometry(
         _validated_layout(
             text,
@@ -319,23 +353,46 @@ def test_title_band_only_translates_the_bare_layout(
             legend="none" if output_format == "svg" else None,
             layout_options={"logo_scale": 1.0},
             output_format=output_format,
-        )
+        ),
+        output_format,
     )
-    assert banded.keys() == bare.keys()
-    # Every geometry tuple carries its y at index 1 and nothing else moves.
-    anchor = next(iter(bare))
-    dy = banded[anchor][1] - bare[anchor][1]
+    dy, moved = _translation_mismatches(bare, banded)
     assert dy >= 0.0
-    shifted = {
-        key: tuple(v + dy if i == 1 else v for i, v in enumerate(values))
-        for key, values in bare.items()
-    }
-    moved = {
-        key: (shifted[key], banded[key])
-        for key in bare
-        if any(abs(a - b) > 0.01 for a, b in zip(shifted[key], banded[key]))
-    }
     assert not moved, (
         f"{name} [{output_format}]: {len(moved)} elements are not the bare "
         f"layout shifted by dy={dy:.2f}; e.g. {sorted(moved.items())[:3]}"
+    )
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.5, 2.0])
+def test_rail_mode_lifts_clear_of_standalone_logo(scale: float) -> None:
+    """A rail-mode map is moved below a standalone logo as one rigid offset of
+    its ``--bare`` layout, routes included."""
+    text, source_dir = _fixture("examples/rail_mode.mmd")
+    bare = _placed_geometry(_validated_layout(text, source_dir, bare=True), "svg")
+    graph = _validated_layout(
+        text,
+        source_dir,
+        logo=PLACEHOLDER_LOGO,
+        legend="none",
+        layout_options={"logo_scale": scale},
+    )
+    banded = _placed_geometry(graph, "svg")
+    dy, moved = _translation_mismatches(bare, banded)
+    assert not moved, (
+        f"rail_mode [logo_scale={scale}]: {len(moved)} elements are not the "
+        f"bare layout shifted by dy={dy:.2f}; e.g. {sorted(moved.items())[:3]}"
+    )
+    plan, _ = _render(
+        text,
+        source_dir=source_dir,
+        logo=PLACEHOLDER_LOGO,
+        legend="none",
+        logo_scale=scale,
+    )
+    _assert_band_clear(plan, f"rail_mode [logo_scale={scale}]")
+    top_ink = min(y for line in plan.route_polylines for _x, y in line)
+    assert top_ink >= plan.logo_y + plan.logo_h, (
+        f"rail_mode [logo_scale={scale}]: route climbs to y={top_ink:.1f}, "
+        f"into the standalone logo band"
     )
