@@ -273,8 +273,7 @@ def test_over_the_top_loop_runs_below_standalone_logo(name: str, scale: float) -
 
 
 # A RIGHT-entry section in the topmost row fed from the row below: the feed
-# runs its traverse above the topmost row, in whatever canvas-top padding the
-# placement left, rather than in a headroom placement reserved for it.
+# runs its traverse above the topmost row, in the canvas-top padding.
 GAP_ABOVE_TOPMOST_ROW_MMD = """\
 %%metro line: l1 | Left exit feeder | #3cb44b
 %%metro line: l2 | Middle | #4363d8
@@ -315,8 +314,8 @@ graph LR
 def test_gap_above_topmost_row_runs_below_standalone_logo(
     title: str | None, scale: float, output_format: Literal["svg", "html"]
 ) -> None:
-    """A feed whose traverse runs above the topmost row, in padding no
-    placement reserved for it, keeps a visible gap below the logo's band."""
+    """A feed whose traverse runs above the topmost row, in the canvas-top
+    padding, keeps a visible gap below the logo's band."""
     plan, _ = _render(
         GAP_ABOVE_TOPMOST_ROW_MMD,
         source_dir=str(EXAMPLES),

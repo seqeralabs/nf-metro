@@ -1738,25 +1738,5 @@
  "tb_handlers.py::if via.is_port or via.section_id != section.id:::#1": {
   "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
   "status": "defensive"
- },
- "context.py::if len(continuing) >= 2 and bool(port_lines - continuing):::#1": {
-  "note": "The packed-cell continuation probe records a junction only when at least two of its port lines continue level into a same-pack entry and at least one does not. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead.",
-  "status": "needs-review"
- },
- "context.py::if not candidates:::#1": {
-  "note": "The packed-cell continuation probe's empty-result arm is the common case; the non-empty arm needs a junction recorded by the two-continuing-lines gate above it. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead.",
-  "status": "needs-review"
- },
- "inter_section_handlers.py::if COORD_TOLERANCE < step < step_runway - COORD_TOLERANCE:::#1": {
-  "note": "The trunk-step deepening fires when the source leg sits less than two curve radii above the traverse's clearance lane. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead.",
-  "status": "needs-review"
- },
- "offsets.py::if flat_continuation:::#1": {
-  "note": "The exit-port anchor re-seats on the level continuation lines of a packed-cell junction recorded by the routing context. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead.",
-  "status": "needs-review"
- },
- "offsets.py::if not flat_continuation:::#1": {
-  "note": "Hub propagation is skipped for an exit port carrying a packed-cell level continuation. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead.",
-  "status": "needs-review"
  }
 }

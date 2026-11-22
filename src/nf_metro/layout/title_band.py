@@ -82,7 +82,7 @@ def outboard_ink_lift(graph: MetroGraph) -> float:
     """Least lift that keeps ink drawn above the section boxes clear of the band.
 
     A run looping over the topmost row is drawn in the canvas-top padding,
-    where no section floor reaches it.  Render seats any such ink at least
+    where no section floor reaches it.  Render seats any such run or station at least
     ``CANVAS_ORIGIN_MARGIN`` below the map's canvas top (``title_band_lift``),
     whichever route drew it, so a lift that puts that line
     ``TITLE_BAND_HEADER_GAP`` below the band clears every one of them without

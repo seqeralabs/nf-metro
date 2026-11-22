@@ -78,6 +78,11 @@ history.
   standalone logo instead of running under it, laid out and routed exactly as
   it would be without one. `logo_scale` sizes the standalone logo as well as
   the legend one.
+- A station sitting exactly midway between two grid rows snaps to the same
+  row wherever its row sits on the canvas, and stations tied together by a
+  line or a fan snap the same way, choosing the row that keeps their
+  connections level. A fan's branches keep their spacing, and lines
+  continuing between two neighbouring sections no longer kink.
 - Section number badges skip sections that draw no badge. A map mixing loose
   stations with subgraphs numbered its visible sections from 2.
 - A perpendicular (top or bottom) entry port fed through merges, or by

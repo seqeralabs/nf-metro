@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
+from collections.abc import Callable
 
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
@@ -209,9 +211,36 @@ def _off_grid_line(y: float, origin: float, pitch: float, tol: float = 1.0) -> b
     return min(residue, pitch - residue) > tol
 
 
-def _slot_snap(y: float, origin: float, pitch: float, half: float) -> float:
-    """Snap ``y`` to ``origin + n*pitch`` unless that shifts it over half a pitch."""
-    snapped = origin + round((y - origin) / pitch) * pitch
+SNAP_TIE_TOLERANCE: float = 1e-6
+"""Distance, in pitches, within which a Y counts as midway between two slots."""
+
+_LEVEL_TOLERANCE: float = 1e-3
+"""Distance, in px, within which a tie's snap counts as levelling a relation."""
+
+_UP = -1
+_DOWN = 1
+
+
+def _is_slot_tie(y: float, origin: float, pitch: float) -> bool:
+    """True when ``y`` sits midway between two ``origin + n*pitch`` slots."""
+    q = (y - origin) / pitch
+    return abs(q - math.floor(q) - 0.5) <= SNAP_TIE_TOLERANCE
+
+
+def _slot_snap(
+    y: float, origin: float, pitch: float, half: float, tie_direction: int
+) -> float:
+    """Snap ``y`` to ``origin + n*pitch`` unless that shifts it over half a pitch.
+
+    A ``y`` midway between two slots takes the one ``tie_direction`` names
+    (:data:`_UP` or :data:`_DOWN`); any other ``y`` takes the nearest slot.
+    """
+    q = (y - origin) / pitch
+    if _is_slot_tie(y, origin, pitch):
+        n = math.floor(q) + (1 if tie_direction == _DOWN else 0)
+    else:
+        n = round(q)
+    snapped = origin + n * pitch
     return snapped if abs(snapped - y) <= half + 1e-6 else y
 
 
@@ -271,15 +300,45 @@ def _snap_group_to_grid(
     if origin_info is None:
         return
     origin_r, per_section_ports = origin_info
-    require_phase_field(graph, "half_grid_station_ids")
-    half_grid_ids = graph.half_grid_station_ids
-    require_phase_field(graph, "symfan_trunk_station_ids")
-    symfan_trunk_ids = graph.symfan_trunk_station_ids
+    candidates = _snap_candidates(graph, per_section_ports, convergence_sources)
+    group_ids = {
+        sid
+        for sec_id in per_section_ports
+        for sid in graph.sections[sec_id].station_ids
+        if sid in graph.stations
+    }
+    tie_directions = _tie_directions(
+        graph, [sid for sid, _is_port in candidates], group_ids, origin_r, pitch
+    )
 
     # Independent snapping can round two same-column stations onto one slot;
     # the later one keeps its pre-snap Y rather than collapsing.
     column_slots: dict[float, set[float]] = {}
 
+    for sid, is_port in candidates:
+        st = graph.stations[sid]
+        target = _slot_snap(st.y, origin_r, pitch, half, tie_directions.get(sid, _UP))
+        if is_port:
+            _set_port_y(graph, sid, target)
+            continue
+        slots = column_slots.setdefault(round(st.x, 3), set())
+        if round(target, 3) in slots:
+            target = st.y
+        slots.add(round(target, 3))
+        st.y = target
+
+
+def _snap_candidates(
+    graph: MetroGraph,
+    per_section_ports: dict[str, set[str]],
+    convergence_sources: dict[str, list[str]],
+) -> list[tuple[str, bool]]:
+    """``(station id, is_port)`` for everything the group snap moves, in snap order."""
+    require_phase_field(graph, "half_grid_station_ids")
+    half_grid_ids = graph.half_grid_station_ids
+    require_phase_field(graph, "symfan_trunk_station_ids")
+    symfan_trunk_ids = graph.symfan_trunk_station_ids
+    candidates: list[tuple[str, bool]] = []
     for sec_id, port_ids in per_section_ports.items():
         section = graph.sections.get(sec_id)
         if section is None:
@@ -288,19 +347,12 @@ def _snap_group_to_grid(
         for sid in section.station_ids:
             if sid in port_ids or sid in half_grid_ids or sid in symfan_trunk_ids:
                 continue
-            st = graph.stations.get(sid)
-            if st is None or sid in convergence_sources:
+            if sid not in graph.stations or sid in convergence_sources:
                 continue
-            target = _slot_snap(st.y, origin_r, pitch, half)
-            slots = column_slots.setdefault(round(st.x, 3), set())
-            if round(target, 3) in slots:
-                target = st.y
-            slots.add(round(target, 3))
-            st.y = target
+            candidates.append((sid, False))
         for pid in port_ids:
             port = graph.ports.get(pid)
-            port_st = graph.stations.get(pid)
-            if port is None or port_st is None:
+            if port is None or pid not in graph.stations:
                 continue
             if port.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
@@ -311,7 +363,166 @@ def _snap_group_to_grid(
                 continue
             if pid in convergence_sources:
                 continue
-            _set_port_y(graph, pid, _slot_snap(port_st.y, origin_r, pitch, half))
+            candidates.append((pid, True))
+    return candidates
+
+
+def _tie_directions(
+    graph: MetroGraph,
+    candidate_ids: list[str],
+    group_ids: set[str],
+    origin: float,
+    pitch: float,
+) -> dict[str, int]:
+    """One snap direction for each connected set of stations tied between slots.
+
+    The grid origin is a residue of ``y % pitch``, so where a row sits on the
+    canvas decides how its slots are numbered; a tie broken by slot number would
+    snap the same row differently once it moved.  Ties are instead resolved
+    from the row's own relative geometry.  Tied stations joined by an edge, or
+    sharing one hub in the same column (a fan's branches), form a component that
+    moves as one, so neither a fan nor a run is split across two slots.  A
+    component takes the direction that levels more of its relations to the
+    group's other stations (see :func:`_tie_relations`); failing that, the
+    direction its feeders sit in, then its consumers; failing that, up.
+    """
+    ys = {sid: graph.stations[sid].y for sid in candidate_ids}
+    tied = sorted(sid for sid, y in ys.items() if _is_slot_tie(y, origin, pitch))
+    if not tied:
+        return {}
+    half = pitch / 2.0
+    feeders: dict[str, set[str]] = {}
+    consumers: dict[str, set[str]] = {}
+    for edge in graph.edges:
+        consumers.setdefault(edge.source, set()).add(edge.target)
+        feeders.setdefault(edge.target, set()).add(edge.source)
+
+    def partner_y(sid: str) -> float:
+        if sid in ys:
+            return _slot_snap(ys[sid], origin, pitch, half, _UP)
+        return graph.stations[sid].y
+
+    directions: dict[str, int] = {}
+    for component in _tie_components(graph, tied, feeders, consumers):
+        feeder_relations = _tie_relations(
+            component, feeders, group_ids, ys, partner_y, pitch
+        )
+        consumer_relations = _tie_relations(
+            component, consumers, group_ids, ys, partner_y, pitch
+        )
+        direction = _component_tie_direction(feeder_relations, consumer_relations, half)
+        for sid in component:
+            directions[sid] = direction
+    return directions
+
+
+def _tie_components(
+    graph: MetroGraph,
+    tied: list[str],
+    feeders: dict[str, set[str]],
+    consumers: dict[str, set[str]],
+) -> list[list[str]]:
+    """Tied stations joined by an edge or by one hub's same-column fan."""
+    tied_set = set(tied)
+    links: dict[str, set[str]] = {sid: set() for sid in tied}
+    for sid in tied:
+        for other in consumers.get(sid, set()) & tied_set:
+            links[sid].add(other)
+            links[other].add(sid)
+    for neighbours in (feeders, consumers):
+        for hub in sorted(neighbours):
+            columns: dict[float, list[str]] = {}
+            for sid in sorted(neighbours[hub] & tied_set):
+                st = graph.stations[sid]
+                if not st.is_port and not st.off_track:
+                    columns.setdefault(round(st.x, 3), []).append(sid)
+            for fan in columns.values():
+                for sid in fan[1:]:
+                    links[fan[0]].add(sid)
+                    links[sid].add(fan[0])
+    components: list[list[str]] = []
+    seen: set[str] = set()
+    for root in tied:
+        if root in seen:
+            continue
+        seen.add(root)
+        component, frontier = [], [root]
+        while frontier:
+            sid = frontier.pop()
+            component.append(sid)
+            for other in sorted(links[sid] - seen):
+                seen.add(other)
+                frontier.append(other)
+        components.append(sorted(component))
+    return components
+
+
+def _tie_relations(
+    component: list[str],
+    neighbours: dict[str, set[str]],
+    group_ids: set[str],
+    ys: dict[str, float],
+    partner_y: Callable[[str], float],
+    pitch: float,
+) -> list[tuple[float, float]]:
+    """``(component y, partner y)`` pairs along one side of a tied component.
+
+    Partners are the snap group's stations outside the component.  A partner
+    shared by several members (the hub of a tied fan) is compared with the
+    members' centre; a member with several partners on this side is compared
+    with their centre.  Partners more than one pitch away say nothing about
+    which neighbouring slot keeps the member level, and are dropped.
+    """
+    members = set(component)
+
+    def partners_of(sid: str) -> list[str]:
+        return sorted(
+            p for p in neighbours.get(sid, set()) if p not in members and p in group_ids
+        )
+
+    members_by_partner: dict[str, list[str]] = {}
+    for sid in component:
+        for partner in partners_of(sid):
+            members_by_partner.setdefault(partner, []).append(sid)
+    shared = {p: ms for p, ms in members_by_partner.items() if len(ms) >= 2}
+
+    relations = [
+        (_centre([ys[sid] for sid in ms]), partner_y(p)) for p, ms in shared.items()
+    ]
+    for sid in component:
+        own = [p for p in partners_of(sid) if p not in shared]
+        if len(own) >= 2:
+            relations.append((ys[sid], _centre([partner_y(p) for p in own])))
+        else:
+            relations.extend((ys[sid], partner_y(p)) for p in own)
+    return [(a, b) for a, b in relations if abs(b - a) <= pitch + 1e-6]
+
+
+def _centre(ys: list[float]) -> float:
+    return (max(ys) + min(ys)) / 2.0
+
+
+def _component_tie_direction(
+    feeder_relations: list[tuple[float, float]],
+    consumer_relations: list[tuple[float, float]],
+    half: float,
+) -> int:
+    """The direction levelling more relations; else toward feeders, consumers, up."""
+
+    def levelled(direction: int) -> int:
+        return sum(
+            abs(own + direction * half - partner) < _LEVEL_TOLERANCE
+            for own, partner in feeder_relations + consumer_relations
+        )
+
+    up, down = levelled(_UP), levelled(_DOWN)
+    if up != down:
+        return _UP if up > down else _DOWN
+    for relations in (feeder_relations, consumer_relations):
+        net = sum(partner - own for own, partner in relations)
+        if abs(net) > _LEVEL_TOLERANCE:
+            return _UP if net < 0 else _DOWN
+    return _UP
 
 
 def _restore_partial_trunk_descents(graph: MetroGraph) -> None:
