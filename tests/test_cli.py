@@ -2152,3 +2152,35 @@ def test_info_reports_no_number_for_a_hidden_section(tmp_path):
         "    b -->|main| c\n"
     )
     assert _info_section_numbers(path) == {"first": 1, "_middle": None, "last": 2}
+
+
+def test_info_falls_back_to_authored_numbers_when_layout_fails(monkeypatch):
+    """With no laid-out numbers, an authored 0 still reports none and the
+    warning says the numbers are not the rendered ones."""
+    import json
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("nf_metro.layout.engine.compute_layout", fail)
+    result = CliRunner().invoke(
+        cli, ["info", str(FIXTURES_DIR / "section_number_zero.mmd"), "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    assert report["warnings"] == [
+        "layout failed, so section numbers are as authored or parsed, not as rendered"
+    ]
+    assert {sec["id"]: sec["number"] for sec in report["sections"]} == {
+        "first": None,
+        "second": 2,
+        "third": None,
+        "fourth": 4,
+    }
+
+
+def test_info_reports_renumbered_sections_of_a_real_map():
+    """Route renumbering swaps two sections' numbers against parse order."""
+    numbers = _info_section_numbers(EXAMPLES_DIR / "differentialabundance.mmd")
+    assert numbers["reporting"] == 5
+    assert numbers["plots"] == 4

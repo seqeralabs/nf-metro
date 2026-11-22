@@ -392,7 +392,7 @@ Parse warnings print as a `Warnings` panel on stderr rather than into the stdout
 
 `style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
 
-Section numbers are the ones the render draws, honouring `%%metro number:` overrides; a section with no badge, whether set to `0` or hidden, reports `null`.
+Section numbers are the ones the render draws, honouring `%%metro number:` overrides; a section with no badge reports `null`: one set to `0`, a hidden one, or the implicit section of a map with no `subgraph`.
 
 <!-- RICH-CODEX {working_dir: .} -->
 

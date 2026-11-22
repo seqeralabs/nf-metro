@@ -1762,7 +1762,8 @@ def info(input_file: Path, as_json: bool, verbose: bool) -> None:
     section_numbers = rendered_section_numbers(graph)
     if section_numbers is None:
         messages.append(
-            "layout failed, so section numbers are as parsed, not as rendered"
+            "layout failed, so section numbers are as authored or parsed, "
+            "not as rendered"
         )
 
     # The JSON and the verbose text report both carry the captured warnings;

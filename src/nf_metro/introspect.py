@@ -131,7 +131,7 @@ def rendered_section_numbers(graph: MetroGraph) -> dict[str, int | None] | None:
     """Section badge numbers as the render draws them, or ``None`` if layout
     fails.
 
-    Numbers are assigned late in layout, so this lays out a copy of *graph*
+    Numbers are assigned in layout (stage 1.4), so this lays out a copy of *graph*
     (the original, and the inferred defaults recorded on it, stay untouched).
     A section that draws no badge maps to ``None``."""
     from nf_metro.layout.engine import compute_layout
@@ -153,10 +153,16 @@ def rendered_section_numbers(graph: MetroGraph) -> dict[str, int | None] | None:
 def _badge_number(
     section_numbers: Mapping[str, int | None] | None, section: Section
 ) -> int | None:
-    """The section's badge number: the supplied one if given, else its own."""
+    """The section's badge number: the supplied one if given, else its authored
+    override or parsed number, with none for a section that draws no box."""
     if section_numbers is not None and section.id in section_numbers:
         return section_numbers[section.id]
-    return section.number if section.has_badge else None
+    if not section.draws_box:
+        return None
+    number = (
+        section.number if section.number_override is None else section.number_override
+    )
+    return number if number > 0 else None
 
 
 def build_info(
