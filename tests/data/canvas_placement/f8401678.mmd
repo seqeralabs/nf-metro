@@ -1,0 +1,55 @@
+%%metro title: Fuzz 8401678
+%%metro line: l0 | Bam | #e6194b
+%%metro line: l1 | Sort | #3cb44b
+%%metro line: l2 | Assemble | #4363d8
+%%metro line: l3 | Annotate | #f58231
+%%metro grid: sec0 | 2,0
+%%metro grid: sec1 | 0,0
+%%metro grid: sec2 | 3,0
+%%metro grid: sec3 | 1,0
+
+graph LR
+    subgraph sec0 [Trim_Annotate 0]
+        %%metro direction: RL
+        s0n0[trim]
+        s0n2[summarise_qc]
+        s0n3[normalize]
+        s0n2 -->|l0,l3| s0n3
+        s0n0 -->|l3| s0n2
+    end
+    subgraph sec1 [Stats_Stats 1]
+        s1n0[bam_align]
+        s1n1[fastqc]
+        s1n2[pca]
+        s1n3[report]
+        s1n4[classify_trim]
+        s1n2 -->|l0| s1n4
+        s1n0 -->|l3| s1n1
+        s1n1 -->|l3| s1n2
+        s1n2 -->|l3| s1n3
+        s1n3 -->|l3| s1n4
+    end
+    subgraph sec2 [Cluster 2]
+        %%metro direction: RL
+        s2n0[stats]
+        s2n1[call]
+        s2n2[call_qc]
+        s2n0 -->|l2| s2n2
+        s2n0 -->|l3| s2n1
+        s2n1 -->|l3| s2n2
+    end
+    subgraph sec3 [Bin 3]
+        %%metro direction: TB
+        %%metro entry: right | l0, l1, l2
+        s3n0[index]
+        s3n1[pca]
+        s3n2[dedup_gather_index]
+        s3n1 -->|l0| s3n2
+        s3n0 -->|l2| s3n2
+    end
+    s0n3 -->|l0| s1n2
+    s1n4 -->|l0,l3| s2n0
+    s2n0 -->|l0| s3n1
+    s2n2 -->|l1| s3n2
+    s2n2 -->|l2| s3n0
+    s0n3 -->|l3| s1n0

@@ -29,7 +29,7 @@ The runtime curve guard is a backstop rather than the mechanism that keeps the r
   `merge_ep` is the resolved entry-port station when the target is a merge junction.
 - **Spatial queries**: section coordinates and horizontal and vertical crossing checks are resolved through the snapshot, which keeps every predicate and route builder on the same endpoint facts.
 - **Planned lanes**: `same_y` and `same_x` compare the lanes the lane plan draws the bundle on at each end, so a seam turns only where its drawn lanes step.
-  The rules that choose a side read the lane plan's approach record rather than re-deciding it: a LEFT entry the record approaches from below closes the row-top corridor, a far-left U-turn the record sends over the top takes the gap above the target row (otherwise it dips), and an approach the record marks far-side closes the row-level bottom-row climb.
+  The rules that choose a side read the lane plan's approach record rather than re-deciding it: a LEFT entry the record approaches from below closes the row-top corridor, a RIGHT or LEFT entry fed from above and a far-left U-turn take the band above the target row where the record sends them round above and never where it sends them round below (a far-left U-turn otherwise dips), a RIGHT entry wrap loops over the target's top unless the record sends it round below,, and an approach the record marks far-side closes the row-level bottom-row climb.
   Whether a junction fans out is `graph.is_fanout_junction`, the fact the record reads.
 
 ## The rules

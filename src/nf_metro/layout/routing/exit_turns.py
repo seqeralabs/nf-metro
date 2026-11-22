@@ -108,6 +108,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
     _perp_exit_geometry,
     _perp_exit_over_geometry,
     _PerpExitGeometry,
+    _right_entry_below_channel_y,
     _right_entry_cross_row_channel_y,
     _right_entry_over_top_geometry,
     _right_entry_wrap_geometry,
@@ -119,6 +120,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
     classify_inter_section_family,
     draws_over_top_loop,
     left_exit_around_below_geometry,
+    loops_round_right_entry,
     packed_cell_handoff_carrier,
     perp_exit_farside_entry_wrap_geometry,
     seated_bypass_descent,
@@ -857,17 +859,18 @@ def _right_entry_wrap_turn_requirement(
 ) -> _SourceTurnRequirement:
     """The turn a RIGHT-entry wrap opens with, by the leaf that draws it.
 
-    Both leaves lead horizontally out of the source and turn into a column of
-    their own: the cross-row wrap into the lead-out gap beside the source, the
-    same-row loop into the channel over the target's top.
+    Every leaf leads horizontally out of the source and turns into a column of
+    its own: the cross-row wrap into the lead-out gap beside the source, the
+    same-row loop into the channel over the target's top or, recorded round
+    below, toward the channel under the target row.
     """
     facts = _build_inter_facts(edge, src, tgt, ctx)
-    loop = (
-        _right_entry_over_top_geometry(ctx, edge, src, tgt)
-        if draws_over_top_loop(facts)
-        else _right_entry_wrap_geometry(facts).wrap
-    )
-    return _SourceTurnRequirement.from_seam(loop.seam)
+    if draws_over_top_loop(facts):
+        over_top = _right_entry_over_top_geometry(ctx, edge, src, tgt)
+        return _SourceTurnRequirement.from_seam(over_top.seam)
+    if loops_round_right_entry(facts):
+        return _right_entry_channel_turn(facts, _right_entry_below_channel_y(facts))
+    return _SourceTurnRequirement.from_seam(_right_entry_wrap_geometry(facts).wrap.seam)
 
 
 def _right_entry_cross_row_turn_requirement(
@@ -884,16 +887,30 @@ def _right_entry_cross_row_turn_requirement(
         return _SourceTurnRequirement.declined(
             "unsupported-subshape:left-exit-right-entry-step"
         )
-    fan_turn = vertical_direction(tgt.y - src.y)
-    channel_y = _right_entry_cross_row_channel_y(facts)
+    return _right_entry_channel_turn(
+        facts,
+        _right_entry_cross_row_channel_y(facts),
+        vertical_direction(tgt.y - src.y),
+    )
+
+
+def _right_entry_channel_turn(
+    facts: _InterFacts, channel_y: float | None, fan_turn: Direction | None = None
+) -> _SourceTurnRequirement:
+    """The turn a RIGHT-entry wrap leading out to its wrap column opens with:
+    toward *channel_y*, or along *fan_turn* where the wrap drops straight in
+    (``None``).  The wrap column is fanned along *fan_turn*, else toward the
+    channel."""
+    src = facts.src
     turn = fan_turn if channel_y is None else vertical_direction(channel_y - src.y)
+    assert turn is not None
     _fan, _size, _delta, axis = _wrap_fan_geometry(
-        ctx,
-        edge,
+        facts.ctx,
+        facts.edge,
         src,
         facts.i,
         facts.n,
-        fan_turn,
+        turn if fan_turn is None else fan_turn,
     )
     return _SourceTurnRequirement(
         horizontal_direction(axis - src.x),

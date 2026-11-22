@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 from conftest import content_corpus
 
-import nf_metro.layout.routing.inter_section_handlers as handlers
 import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph
 from nf_metro.convert import convert_nextflow_dag
@@ -27,13 +26,9 @@ from nf_metro.layout.phases.guards import (
     LayoutInvariantError,
     assert_junctions_on_their_anchors,
 )
-from nf_metro.layout.routing.common import section_lies_before
-from nf_metro.layout.routing.inter_section_handlers import (
-    _gap_above_band_fits,
-    draws_over_top_loop,
-)
+from nf_metro.layout.routing.inter_section_handlers import _gap_above_band_fits
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import Edge, MetroGraph
+from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
 
@@ -378,8 +373,9 @@ def _parsed(path: Path, is_nextflow: bool) -> MetroGraph:
 def test_the_band_above_the_topmost_row_is_never_a_gap(
     path: Path, is_nextflow: bool
 ) -> None:
-    """Above the topmost row lies canvas headroom over the whole map, which a
-    run takes only to ride an over-the-top loop, never as a band of its own."""
+    """Above the topmost row lies canvas headroom over the whole map, never a
+    band of its own: a run with no recorded side takes it only to join a run
+    into its entry that the approach record sends round above."""
     graph = _parsed(path, is_nextflow)
     if not graph.sections:
         pytest.skip("a flat map has no rows")
@@ -392,14 +388,15 @@ def test_the_band_above_the_topmost_row_is_never_a_gap(
     [
         ROOT / "examples/topologies/bypass_left_entry_from_right.mmd",
         ROOT / "examples/topologies/left_exit_wrap_under_own_section.mmd",
+        ROOT / "examples/topologies/bypass_leftward_far_side_entry.mmd",
         CANVAS_DATA / "f8401267.mmd",
         CANVAS_DATA / "f8402283.mmd",
     ],
     ids=lambda path: path.stem,
 )
 def test_a_wrap_into_the_topmost_row_stays_below_the_map_top(path: Path) -> None:
-    """A line into the topmost row that rides no over-the-top loop has a route
-    between or below the sections, so no run is drawn above the topmost box."""
+    """A hop whose approach record sends it below stays below the map top: no
+    run is drawn above the topmost box."""
     plan = _render_plan(path)
     boxes = [s for s in plan.graph.sections.values() if s.bbox_w > 0]
     top = min(s.bbox_y for s in boxes)
@@ -407,10 +404,9 @@ def test_a_wrap_into_the_topmost_row_stays_below_the_map_top(path: Path) -> None
     assert highest >= top, f"{path.stem} runs a line {top - highest:.1f}px over the map"
 
 
-# Each draws an over-the-top loop into a RIGHT entry of its topmost row and
-# sends another line there from a source or into an entry the loop also has:
-# f8402603 from the loop's junction into a second section, the others from
-# another source into the loop's own entry.
+# Each loops a bundle over the top into a side entry of its topmost row and
+# sends another line there: f8402603 from the loop's junction into a second
+# section, the others from another source into the loop's own entry.
 JOINED_OVER_TOP = (
     (CANVAS_DATA / "f8402603.mmd", "sec1__entry_right_3", ("l2", "l3")),
     (CANVAS_DATA / "f8403686.mmd", "sec2__entry_right_4", ("l0",)),
@@ -419,6 +415,21 @@ JOINED_OVER_TOP = (
         ROOT / "examples/topologies/fan_over_top_reach_order.mmd",
         "c__entry_right_3",
         ("l1",),
+    ),
+    (
+        ROOT / "tests/fixtures/regressions/outward_loop_top_right_entry.mmd",
+        "b__entry_right_2",
+        ("m3",),
+    ),
+    (
+        ROOT / "tests/fixtures/regressions/departure_order_perpendicular_seam.mmd",
+        "z4__entry_right_7",
+        ("m3",),
+    ),
+    (
+        ROOT / "tests/fixtures/regressions/outward_loop_top_left_entry.mmd",
+        "b__entry_left_2",
+        ("m3",),
     ),
 )
 
@@ -430,9 +441,9 @@ JOINED_OVER_TOP = (
 def test_a_line_joins_the_over_top_loop_it_shares_an_end_with(
     path: Path, entry: str, lines: tuple[str, ...]
 ) -> None:
-    """A line riding an over-the-top loop it shares its source or entry with
-    goes over the top with it rather than leaving the bundle to go round below
-    the map."""
+    """A line into an entry an over-the-top bundle reaches, or from that
+    bundle's junction, goes over the top with it rather than leaving the
+    bundle to go round below the map."""
     plan = _render_plan(path)
     top = min(s.bbox_y for s in plan.graph.sections.values() if s.bbox_w > 0)
     row = plan.graph.sections[plan.graph.ports[entry].section_id]
@@ -449,55 +460,19 @@ def test_a_line_joins_the_over_top_loop_it_shares_an_end_with(
         )
 
 
-def _hop(edge: Edge) -> tuple[str, str, str]:
-    return edge.source, edge.target, edge.line_id
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        *(path for path, _entry, _lines in JOINED_OVER_TOP),
-        CANVAS_DATA / "f8401267.mmd",
-        CANVAS_DATA / "f8402283.mmd",
-    ],
-    ids=lambda path: path.stem,
-)
-def test_the_over_top_loop_owner_is_what_routing_draws(path: Path) -> None:
-    """:func:`draws_over_top_loop` claims exactly the hops routing draws as an
-    over-the-top loop, and a run over the topmost row shares an end with one."""
-    claimed: set[tuple[str, str, str]] = set()
-    loop_rows: dict[tuple[str, str, str], int | None] = {}
-    drawn: set[tuple[str, str, str]] = set()
-    riders: list[tuple[tuple[str, str, str], int | None]] = []
-    wrap = handlers._route_right_entry_wrap
-    over_top = handlers._route_right_entry_over_top
-    via_gap_above = handlers._route_right_entry_via_gap_above
-
-    def spy_wrap(f):
-        if draws_over_top_loop(f):
-            claimed.add(_hop(f.edge))
-            loop_rows[_hop(f.edge)] = f.tgt_row
-        return wrap(f)
-
-    def spy_over_top(edge, *args, **kwargs):
-        drawn.add(_hop(edge))
-        return over_top(edge, *args, **kwargs)
-
-    def spy_via_gap_above(f):
-        assert f.tgt_row is not None
-        if not section_lies_before(f.graph, "y", f.tgt_row):
-            riders.append((_hop(f.edge), f.tgt_row))
-        return via_gap_above(f)
-
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(handlers, "_route_right_entry_wrap", spy_wrap)
-        patch.setattr(handlers, "_route_right_entry_over_top", spy_over_top)
-        patch.setattr(handlers, "_route_right_entry_via_gap_above", spy_via_gap_above)
-        _render_plan(path)
-
-    assert claimed == drawn
-    for (source, target, line), row in riders:
-        assert any(
-            (loop[0] == source or loop[1] == target) and loop_rows[loop] == row
-            for loop in claimed
-        ), f"{line} {source}->{target} runs over the map without a loop to ride"
+def test_a_line_joins_the_bundle_below_its_entry() -> None:
+    """A bypass U-turn into an entry a BOTTOM exit's loop reaches from below
+    joins that bundle below the target row rather than going over the map."""
+    path = ROOT / "tests/fixtures/regressions/outward_loop_bottom_right_entry.mmd"
+    plan = _render_plan(path)
+    graph = plan.graph
+    top = min(s.bbox_y for s in graph.sections.values() if s.bbox_w > 0)
+    row = graph.sections[graph.ports["b__entry_right_2"].section_id]
+    (route,) = [
+        route
+        for route in plan.routes
+        if route.edge.target == "b__entry_right_2" and route.line_id == "m3"
+    ]
+    ys = [y for _x, y in route.points]
+    assert min(ys) >= top, "m3 goes over the map"
+    assert max(ys) > row.bbox_y + row.bbox_h, "m3 does not go round below"

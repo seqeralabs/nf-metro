@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
@@ -776,22 +776,31 @@ def _has_intervening_sections(
     src_col: int,
     tgt_col: int,
     src_row: int | None = None,
+    axis: Literal["x", "y"] = "x",
 ) -> bool:
-    """Check if any same-row sections exist in columns strictly between src and tgt."""
+    """Check if any same-row sections exist in columns strictly between src and tgt.
+
+    Along ``axis="y"`` the grid is read transposed: *src_col* and *tgt_col* are
+    rows and *src_row* is the column the sections must share.
+    """
     lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
     for s in graph.sections.values():
-        if s.bbox_w > 0 and lo < s.grid_col < hi:
-            if src_row is None or s.grid_row == src_row:
+        along, lane = (
+            (s.grid_col, s.grid_row) if axis == "x" else (s.grid_row, s.grid_col)
+        )
+        if s.bbox_w > 0 and lo < along < hi:
+            if src_row is None or lane == src_row:
                 return True
     return False
 
 
 def _intervening_section_obstructs(
     graph: MetroGraph,
-    src_col: int,
+    src_col: int | None,
     src_row: int | None,
-    tgt_col: int,
+    tgt_col: int | None,
     tgt_row: int | None,
+    axis: Literal["x", "y"] = "x",
 ) -> bool:
     """Whether a multi-column hop is blocked by a section in a column it spans.
 
@@ -799,17 +808,23 @@ def _intervening_section_obstructs(
     whose horizontal leg runs at the target entry Y - the target row, plowed
     through even when the source row is clear. Only meaningful when the columns
     are more than one apart; an adjacent hop has no column between them to
-    intervene.
+    intervene.  Along ``axis="y"`` the same test reads a vertical hop, rows and
+    columns exchanged.
     """
-    if abs(tgt_col - src_col) <= 1:
+    src, tgt, src_lane, tgt_lane = (
+        (src_col, tgt_col, src_row, tgt_row)
+        if axis == "x"
+        else (src_row, tgt_row, src_col, tgt_col)
+    )
+    if src is None or tgt is None or abs(tgt - src) <= 1:
         return False
-    if _has_intervening_sections(graph, src_col, tgt_col, src_row):
+    if _has_intervening_sections(graph, src, tgt, src_lane, axis):
         return True
     return (
-        src_row is not None
-        and tgt_row is not None
-        and tgt_row != src_row
-        and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
+        src_lane is not None
+        and tgt_lane is not None
+        and tgt_lane != src_lane
+        and _has_intervening_sections(graph, src, tgt, tgt_lane, axis)
     )
 
 

@@ -1594,13 +1594,23 @@ through the record's draw accessors (`planned_offsets` in
   Rail-mode layouts hold no record.  Stages 6.13 to 6.17 still move positions
   the record read on a few maps (#2171); a layout's record is not rebuilt for
   them.
+- **Side-entry U-turn sides**: `PortOrderBuilder.u_turn_side` is the one
+  owner of the side a U-turn into a side entry passes on, decided here.  It
+  reads grid cells and spans, port sides, edges and junction topology, station
+  positions and section boxes as they stand at the close of Stage 6.12, and
+  the line sets of each connector's edges.  Stages 6.14, 6.15a, 6.17 and 6.18
+  and envelope settlement move positions after it and never re-decide the
+  side; routing reads it (the RIGHT- and LEFT-entry gap-above traverses, the
+  far-left U-turn wrap, `draws_over_top_loop` and the exit turn it opens with)
+  with no fallback of its own.
 - **Invariants preserved**: The record reads no lane offset, route or draft.
   `compute_station_offsets` returns exactly
   `planned_offsets(graph, record, step)`; the record holds every station
   line, and one it lacks fails closed.
 - **Readers**: `compute_station_offsets`; routing's approach-side consumers
-  (the same-row bypass entry, the left-entry over-top and far-left U-turn
-  wraps, the row-level bottom-row climb), the perpendicular-entry crossing
+  (the same-row bypass entry, the RIGHT- and LEFT-entry gap-above traverses,
+  the far-left U-turn wrap, the RIGHT entry loop, the row-level bottom-row
+  climb), the perpendicular-entry crossing
   (`_planned_entry_crossing` in `routing/perp.py`), the seam turn facts of
   `_InterFacts`, and the invariants `check_exit_inherits_entry_bundle_order`,
   `check_merge_port_approach_side` and
