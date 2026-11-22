@@ -91,7 +91,7 @@ history.
   `diamond_style: symmetric`, in sections where at most one line enters.
   Under `diamond_style: symmetric`, a fan whose branches nest (one branch
   carries every line the others do) also seats each branch on its lines' lane
-  side (#2170).
+  side, in sections where at most one line enters (#2170).
 
 ## [2.1.0] — 2026-09-15
 
