@@ -91,10 +91,12 @@ def title_band_lift(graph: MetroGraph) -> float:
     ``TITLE_BAND_HEADER_GAP`` past its floor; 0 when none breaches, so a clear
     map is never moved.
 
-    Rounded to a micro-pixel: the floor arithmetic leaves noise in the last
-    bits (16.800000000000011 for a 16.8px shift), which every moved coordinate
-    would carry into comparisons that tie exactly in the unbanded layout (a
-    label nudge, a corner radius) and could tip one.
+    Rounded to a micro-pixel, which strips the noise the floor arithmetic
+    leaves in the shift's last bits (16.800000000000011 for a 16.8px shift).
+    That cleans the shift only: adding a shift that is not a power-of-two
+    fraction rounds each moved coordinate, so a comparison that ties exactly
+    in the unbanded layout (a label nudge, a corner radius) can tip either
+    way.
     """
     shift = max(
         (

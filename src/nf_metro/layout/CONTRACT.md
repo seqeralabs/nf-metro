@@ -1584,9 +1584,11 @@ against a canvas top at y=0, exactly as for a map with no band.
   the shift (0 when nothing breaches or no band is drawn). Guarded by `_guard_title_band_clearance`.
 - **Invariants preserved**: the whole layout moves by one `translate_graph`
   delta. Routing (`_gap_above_target_y` and the bottom-row channel in
-  `routing/common.py`) and render (`_canvas_margin_shift`) measure canvas-top
-  clearances from `graph.title_band_lift` rather than y=0, so the routed lines
-  are the unbanded map's translated by the same delta.
+  `routing/common.py`), route reservations (`_canvas_region_measurement`'s
+  TOP canvas edge in `route_reservations.py`) and render
+  (`_canvas_margin_shift`) measure canvas-top clearances from
+  `graph.title_band_lift` rather than y=0, so the routed lines are the
+  unbanded map's translated by the same delta.
 - **Related tests**: `tests/test_title_with_logo.py`
   (`test_title_band_only_translates_the_bare_layout`,
   `test_rail_mode_lifts_clear_of_standalone_logo`).

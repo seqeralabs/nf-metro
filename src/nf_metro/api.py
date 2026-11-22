@@ -372,7 +372,7 @@ def prepare_graph(
     ``bare`` and ``output_format`` mirror the eventual render call (the CLI's
     ``--bare``/``--format`` flags): used here only to resolve
     ``graph.title_band_bottom`` before layout runs, so the title-band
-    clearance in ``layout/phases/canvas.py`` reserves exactly the canvas-top
+    clearance in ``layout/title_band.py`` reserves exactly the canvas-top
     title and standalone logo the render will draw. HTML output always draws
     that band regardless of ``bare``, and its embedded SVG forces the legend
     off, so a configured logo is always standalone there.

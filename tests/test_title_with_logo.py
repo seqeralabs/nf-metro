@@ -1,5 +1,5 @@
 """The map title renders alongside a configured logo, and the canvas-top band
-the logo and title occupy is reserved at layout time.
+the logo and title occupy is reserved after layout.
 
 A logo folded into the legend leaves the title in its usual top-left spot.  A
 standalone logo (``%%metro legend: none``, or any HTML output, whose embedded

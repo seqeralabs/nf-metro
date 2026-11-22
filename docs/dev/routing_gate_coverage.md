@@ -16,7 +16,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **435** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **440** gaps carry a triage verdict.
 
 ## `arranger.py`
 
@@ -130,8 +130,8 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 146 | `if len(continuing) >= 2 and bool(port_lines - continuing):` | `->L147` |  |
-| 148 | `if not candidates:` | `->L150` |  |
+| 146 | `if len(continuing) >= 2 and bool(port_lines - continuing):` | `->L147` | **needs-review** -- The packed-cell continuation probe records a junction only when at least two of its port lines continue level into a same-pack entry and at least one does not. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead. |
+| 148 | `if not candidates:` | `->L150` | **needs-review** -- The packed-cell continuation probe's empty-result arm is the common case; the non-empty arm needs a junction recorded by the two-continuing-lines gate above it. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead. |
 | 306 | `if not mst:` | `->L307` | **defensive** -- mjid ranges over junctions, a subset of junction_ids all present in graph.stations; the missing-station continue never fires. |
 | 309 | `if tgt_col is None:` | `->L310` | **defensive** -- A merge junction always resolves to a grid column (it sits adjacent to its entry-port section); the unresolved-column continue never fires. |
 | 367 | `if m_col is None:` | `->L368` | **defensive** -- Reached only for junctions in trunk_source, which by construction resolved a column, so m_col is never None and the skip arm never fires. |
@@ -547,7 +547,7 @@ Gates with an un-exercised arm:
 | 3058 | `if trunk_shape.around_below:` | `->L3059` |  |
 | 3067 | `if flank_xs:` | `->L3046` |  |
 | 3158 | `if src_row is None or tgt_row is None or src_col is None or tgt_col is None:` | `->L3159` | **defensive** -- _is_row_level_bottom_row_climb's null guard; neither swept caller can pass a None coordinate. _bypass_geometry asserts src_col/tgt_col non-None and only calls it under cross_row, and cross_row is True only when both rows are set: merge_trunk_force_cross_row returns False unless src_row is not None and tgt_row == src_row, and the other disjunct requires both rows non-None. _fan_bypass_band passes non-None src_col/src_row and a checked tgt_col, and any placed target entry-port section resolves a non-negative grid_row. No fixture in the render corpus reaches the None arm. |
-| 3335 | `if COORD_TOLERANCE < step < step_runway - COORD_TOLERANCE:` | `->L3336` |  |
+| 3335 | `if COORD_TOLERANCE < step < step_runway - COORD_TOLERANCE:` | `->L3336` | **needs-review** -- The trunk-step deepening fires when the source leg sits less than two curve radii above the traverse's clearance lane. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead. |
 | 3445 | `if trunk_v_up_pull_away:` | `->L3454` | **needs-review** -- Reachable only via a defective render (merge-junction tangle); see #721. |
 | 3484 | `this_xmin - gap_left >= SECTION_ROUTE_CLEARANCE` | `->L3485`, `->L3504` |  |
 | 3485 | `and gap_right - around_xmax >= SECTION_ROUTE_CLEARANCE` | `->L3487`, `->L3504` |  |
@@ -926,9 +926,9 @@ Gates with an un-exercised arm:
 | 1739 | `if not src_st.is_port:` | `->L1737` |  |
 | 1743 | `if internal_offs:` | `->L1731` | **defensive** -- Exit ports are only created when inter-section edges exist: resolve.py `_create_port_stations` iterates `topology.exit_groups`, which parser/route_topology.py builds from its `exit_members` map, populated one entry per resolved inter-section edge. Every TB LEFT/RIGHT exit port therefore has at least one edge from an internal station, so `internal_offs` is never empty when the loop is entered. The false arm is a defensive guard against an impossible empty-feeder state. |
 | 1773 | `if not src_st.is_port:` | `->L1771` |  |
-| 1886 | `if flat_continuation:` | `->L1887` |  |
+| 1886 | `if flat_continuation:` | `->L1887` | **needs-review** -- The exit-port anchor re-seats on the level continuation lines of a packed-cell junction recorded by the routing context. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead. |
 | 1904 | `if anchor_feeders:` | `->L1907` |  |
-| 1912 | `if not flat_continuation:` | `->L1761` |  |
+| 1912 | `if not flat_continuation:` | `->L1761` | **needs-review** -- Hub propagation is skipped for an exit port carrying a packed-cell level continuation. examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd reaches it only when its sections are seated against the title band during placement; its unbanded (--bare) layout, which a banded render translates as a whole, does not. A reaching topology needs that packed-cell geometry from its own unbanded layout, and no corpus map yet produces it; awaiting a constructed fixture or a reachability argument that settles reachable versus candidate-dead. |
 | 1922 | `if port_off is not None:` | `->L1920` | **defensive** -- _compute_base_offsets runs before junction propagation and creates an offset for every station-line pair. A divergence exit port and its junction carry the same connector lines, so this lookup always succeeds; the missing-offset arm protects an incomplete synthetic context. |
 | 2020 | `if len(drops) == len(lines):` | `->L2004` |  |
 | 2117 | `if port_st is None:` | `->L2118` |  |
