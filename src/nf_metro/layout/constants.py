@@ -181,6 +181,21 @@ LOGO_HEIGHT: float = 80.0
 LOGO_Y_STANDALONE: float = 5.0
 """Top of a standalone logo (one not folded into the legend)."""
 
+CANVAS_ORIGIN_MARGIN: tuple[float, float] = (
+    X_OFFSET - SECTION_X_PADDING,
+    Y_OFFSET - SECTION_Y_PADDING - SECTION_HEADER_PROTRUSION,
+)
+"""Room between the canvas edge and the first drawn element, left and top.
+
+The layout seats the first section against these two lines: its box edge one
+section padding inboard of the first layer, and above its top, one section
+padding inboard of the first track, the header badge that protrudes from it.
+Ink drawn outside the box envelope is settled against the same lines, so one
+boundary reads per side whether a box or a run defines it.  The far sides are
+not framed this way: nothing is placed against them, so they simply grow
+``CANVAS_PADDING`` past whatever they end up holding.
+"""
+
 # ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
@@ -497,11 +512,6 @@ side keeps from its bbox bottom.  Section placement reserves this band
 (``_wrap_bundle_row_minimums``) and routing centres within it
 (``_center_inter_row_channel``); the single definition keeps the two in
 lockstep."""
-
-OVER_TOP_HEADROOM: float = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
-"""Room reserved above a topmost row whose RIGHT-entry section is fed over its
-top by a same-row source: the loop's traverse runs this far above the row's
-box top, clear of the header badge."""
 
 # ---------------------------------------------------------------------------
 # Engine: entry/exit alignment

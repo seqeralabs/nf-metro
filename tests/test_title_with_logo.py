@@ -272,6 +272,70 @@ def test_over_the_top_loop_runs_below_standalone_logo(name: str, scale: float) -
     )
 
 
+# A RIGHT-entry section in the topmost row fed from the row below: the feed
+# runs its traverse above the topmost row, in whatever canvas-top padding the
+# placement left, rather than in a headroom placement reserved for it.
+GAP_ABOVE_TOPMOST_ROW_MMD = """\
+%%metro line: l1 | Left exit feeder | #3cb44b
+%%metro line: l2 | Middle | #4363d8
+%%metro grid: lower | 0,2
+%%metro grid: middle | 1,1
+%%metro grid: sink | 2,1
+
+graph LR
+    subgraph lower [Lower]
+        %%metro exit: left | l1
+        w0[qc]
+        w1[classify]
+        w2[gather]
+        w0 -->|l1| w1
+        w1 -->|l1| w2
+    end
+    subgraph middle [Middle]
+        m0[index]
+        m1[count]
+        m0 -->|l2| m1
+    end
+    subgraph sink [Sink]
+        %%metro direction: RL
+        %%metro entry: right | l1
+        k0[call]
+        k1[report]
+        k0 -->|l1| k1
+    end
+    w2 -->|l1| k0
+"""
+
+
+@pytest.mark.parametrize("output_format", ["svg", "html"])
+@pytest.mark.parametrize("scale", [1.0, 1.5, 2.5])
+@pytest.mark.parametrize(
+    "title", [None, "Map title", "A much longer map title running beside the logo"]
+)
+def test_gap_above_topmost_row_runs_below_standalone_logo(
+    title: str | None, scale: float, output_format: Literal["svg", "html"]
+) -> None:
+    """A feed whose traverse runs above the topmost row, in padding no
+    placement reserved for it, keeps a visible gap below the logo's band."""
+    plan, _ = _render(
+        GAP_ABOVE_TOPMOST_ROW_MMD,
+        source_dir=str(EXAMPLES),
+        output_format=output_format,
+        title=title,
+        logo=PLACEHOLDER_LOGO,
+        legend="none",
+        logo_scale=scale,
+    )
+    label = f"[{output_format}, logo_scale={scale}, title={title!r}]"
+    _assert_band_clear(plan, label)
+    top_ink = min(y for line in plan.route_polylines for _x, y in line)
+    logo_bottom = plan.logo_y + plan.logo_h
+    assert top_ink >= logo_bottom + HEADER_GAP - 1e-6, (
+        f"{label}: route climbs to y={top_ink:.1f}, within {HEADER_GAP}px of "
+        f"the standalone logo bottom {logo_bottom:.1f}"
+    )
+
+
 def _validated_layout(text: str, source_dir: str, **options: object) -> MetroGraph:
     graph = _prepare_graph_state(text, source_dir=source_dir, **options)  # type: ignore[arg-type]
     compute_layout(graph, validate=True)
@@ -333,6 +397,8 @@ def _translation_mismatches(
         "examples/topologies/bt_to_lr.mmd",
         "examples/topologies/samerow_bypass_over_top_flat_bundle.mmd",
         "examples/topologies/packed_cell_cellmate_bypass_entry_y.mmd",
+        "examples/topologies/tb_right_entry_stack.mmd",
+        "gap_above_topmost_row",
     ],
 )
 def test_title_band_only_translates_the_bare_layout(
@@ -342,7 +408,11 @@ def test_title_band_only_translates_the_bare_layout(
     every station, port, section box and routed line sits exactly where the
     ``--bare`` layout (which reserves nothing) puts it, shifted by a single
     ``dy``."""
-    text, source_dir = _fixture(name)
+    text, source_dir = (
+        (GAP_ABOVE_TOPMOST_ROW_MMD, str(EXAMPLES))
+        if name == "gap_above_topmost_row"
+        else _fixture(name)
+    )
     bare = _placed_geometry(_validated_layout(text, source_dir, bare=True), "svg")
     banded = _placed_geometry(
         _validated_layout(

@@ -1578,10 +1578,13 @@ against a canvas top at y=0, exactly as for a map with no band.
   `compute_layout` once the last pass has settled and before the deferred
   "after final" checkpoint.
 - **Postcondition**: every section clears its floor from `title_band_floors`
-  (a drawn section's header badge, an implicit holder's box, or an over-the-top
-  loop's headroom in a row `over_top_headroom_rows` names), the breaching one
-  seated `TITLE_BAND_HEADER_GAP` below it; `graph.title_band_lift` records
-  the shift (0 when nothing breaches or no band is drawn). Guarded by `_guard_title_band_clearance`.
+  (a drawn section's header badge, or an implicit holder's box), the breaching
+  one seated `TITLE_BAND_HEADER_GAP` below it, and the shift is at least
+  `outboard_ink_lift`: render seats ink drawn above the section boxes (a run
+  looping over the topmost row) `CANVAS_ORIGIN_MARGIN` below the lift, so that
+  floor keeps every such run `TITLE_BAND_HEADER_GAP` below the band whichever
+  route drew it. `graph.title_band_lift` records the shift (0 when neither
+  floor binds or no band is drawn). Guarded by `_guard_title_band_clearance`.
 - **Invariants preserved**: the whole layout moves by one `translate_graph`
   delta. Routing (`_gap_above_target_y` and the bottom-row channel in
   `routing/common.py`), route reservations (`_canvas_region_measurement`'s
@@ -1591,7 +1594,8 @@ against a canvas top at y=0, exactly as for a map with no band.
   unbanded map's translated by the same delta.
 - **Related tests**: `tests/test_title_with_logo.py`
   (`test_title_band_only_translates_the_bare_layout`,
-  `test_rail_mode_lifts_clear_of_standalone_logo`).
+  `test_rail_mode_lifts_clear_of_standalone_logo`,
+  `test_gap_above_topmost_row_runs_below_standalone_logo`).
 
 ## Post-layout offset boundary: late per-line offset phases
 

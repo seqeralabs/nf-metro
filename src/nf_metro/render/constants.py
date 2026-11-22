@@ -10,14 +10,12 @@ import html
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
+    CANVAS_ORIGIN_MARGIN as CANVAS_ORIGIN_MARGIN,  # re-export
+)
+from nf_metro.layout.constants import (
     CURVE_RADIUS,
     ICON_CAPTION_GAP,
-    SECTION_HEADER_PROTRUSION,
     SECTION_HEADER_ROUTE_CLEARANCE,
-    SECTION_X_PADDING,
-    SECTION_Y_PADDING,
-    X_OFFSET,
-    Y_OFFSET,
 )
 from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
 from nf_metro.layout.constants import (
@@ -35,20 +33,6 @@ if TYPE_CHECKING:
 CANVAS_PADDING: float = 60.0
 """Default padding around the entire SVG canvas."""
 
-CANVAS_ORIGIN_MARGIN: tuple[float, float] = (
-    X_OFFSET - SECTION_X_PADDING,
-    Y_OFFSET - SECTION_Y_PADDING - SECTION_HEADER_PROTRUSION,
-)
-"""Room between the canvas edge and the first drawn element, left and top.
-
-The layout seats the first section against these two lines: its box edge one
-section padding inboard of the first layer, and above its top, one section
-padding inboard of the first track, the header badge that protrudes from it.
-Ink drawn outside the box envelope is settled against the same lines, so one
-boundary reads per side whether a box or a run defines it.  The far sides are
-not framed this way: nothing is placed against them, so they simply grow
-``CANVAS_PADDING`` past whatever they end up holding.
-"""
 
 LEGEND_GAP: float = 30.0
 """Gap between content area and legend (bottom/right positions)."""
