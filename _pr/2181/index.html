@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="nf-metro-render-run" content="45071708759">
+<title>Render diff - PR #2181</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#f5f5f7, #1e1e2e);
+    --surface: light-dark(#eaeaef, #2a2a3c);
+    --border: light-dark(#c9c9d4, #3a3a4c);
+    --text: light-dark(#1e1e2e, #e0e0e0);
+    --muted: light-dark(#666, #888);
+    --accent: light-dark(#1a8575, #4ec9b0);
+    --added: light-dark(rgba(46,160,67,.25), rgba(46,160,67,.44));
+    --removed: light-dark(rgba(218,54,52,.25), rgba(218,54,52,.44));
+  }
+  [data-scheme="dark"] { color-scheme: dark; }
+  [data-scheme="light"] { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  .scheme-btn {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.35rem 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .scheme-btn:hover { background: var(--border); }
+  .summary {
+    color: var(--muted);
+    margin-bottom: 2rem;
+    font-size: 0.95rem;
+  }
+  .toc {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .toc h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .toc h3 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .toc ul {
+    list-style: none;
+    columns: 2;
+    column-gap: 2rem;
+  }
+  .toc li {
+    margin-bottom: 0.25rem;
+  }
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .toc a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+  }
+  .badge-changed { background: var(--border); }
+  .badge-added { background: var(--added); }
+  .badge-removed { background: var(--removed); }
+  .section-header {
+    font-size: 1.3rem;
+    color: var(--accent);
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  .diff-entry {
+    margin-bottom: 3rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .diff-entry h3 {
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .side {
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .side:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .side h4 {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .svg-wrapper { overflow-x: auto; }
+  .svg-wrapper svg, .side img, .side-only img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 4px;
+  }
+  .side-only {
+    padding: 1rem;
+  }
+  .empty {
+    color: var(--muted);
+    font-style: italic;
+    padding: 2rem;
+    text-align: center;
+  }
+  .toggle-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-bar button {
+    background: var(--border);
+    color: var(--text);
+    border: none;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .toggle-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .intro {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  .intro summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .intro p {
+    margin-top: 0.75rem;
+  }
+  .intro ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+  }
+  .intro li {
+    margin-bottom: 0.25rem;
+  }
+  .intro code {
+    background: var(--border);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .intro a {
+    color: var(--accent);
+  }
+  .metrics {
+    margin-bottom: 2rem;
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .metrics h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .metrics .caption {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 0.75rem;
+  }
+  .metrics table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.82rem;
+  }
+  .metrics th, .metrics td {
+    padding: 0.3rem 0.6rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .metrics th:first-child, .metrics td:first-child {
+    text-align: left;
+  }
+  .metrics th {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .metrics td a { color: var(--text); text-decoration: none; }
+  .metrics td a:hover { color: var(--accent); }
+  .m-flat { color: var(--muted); }
+  .m-better { color: light-dark(#1a8575, #4ec9b0); font-weight: 600; }
+  .m-worse { color: light-dark(#c0392b, #f38ba8); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>Render diff - PR #2181</h1>
+  <button id="scheme-toggle" class="scheme-btn">System</button>
+</div>
+<p class="summary">2 added out of 375 total renders. Generated 2026-11-22 21:25 UTC.</p>
+<details class="intro">
+<summary>What is this page?</summary>
+<p>
+<a href="https://github.com/seqeralabs/nf-metro">nf-metro</a>
+generates metro-map-style SVG diagrams from Mermaid graph definitions.
+This page is automatically generated for every pull request and shows
+<strong>only the renders that changed</strong> compared to the
+<code>main</code> branch.
+</p>
+<p>
+Use it to check that code changes produce the intended visual result
+without unexpected side-effects on other diagrams. Each entry shows
+the <strong>base</strong> (main) render on the left and the
+<strong>PR</strong> render on the right. Use the toggle buttons to
+switch between side-by-side, base-only, and PR-only views.
+</p>
+<p><strong>What to look for:</strong></p>
+<ul>
+<li>Intended improvements in the PR column</li>
+<li>Unintended regressions (overlapping lines, shifted labels,
+    broken routing) in diagrams you did not mean to change</li>
+<li>New renders (green <em>added</em> badge), shown against what the base
+    code makes of the same file, or against the abort it raises there; or
+    removed renders (red <em>removed</em> badge)</li>
+</ul>
+</details>
+<div class="metrics">
+<h2>Layout-quality metrics</h2>
+<p class="caption">Advisory only &mdash; nothing gates on these. <span class="m-better">green</span> improved, <span class="m-worse">red</span> regressed. Lower is better except in the &uarr; column.</p>
+<table>
+<tr><th>Render</th><th>Crossings</th><th>Near-horiz.</th><th>Lone diag.</th><th>Bends/route</th><th>Corners</th><th>Turn/route (rad)</th><th>Label strikes</th><th>Marker gap ↑</th><th>Excess gaps</th><th>Wasted canvas</th></tr>
+<tr><td><a href="#bypass_hidden_lane_side">bypass_hidden_lane_side</a></td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0.5</td><td class="m-flat">4</td><td class="m-flat">0.5</td><td class="m-flat">0</td><td class="m-flat">&ndash;&rarr;n/a</td><td class="m-flat">0</td><td class="m-flat">71%</td></tr>
+<tr><td><a href="#bypass_hidden_lane_side_symmetric">bypass_hidden_lane_side_symmetric</a></td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">0</td><td class="m-flat">1.5</td><td class="m-flat">12</td><td class="m-flat">1.2</td><td class="m-flat">0</td><td class="m-flat">&ndash;&rarr;n/a</td><td class="m-flat">0</td><td class="m-better">73%&rarr;73% (−0%)</td></tr>
+</table>
+</div>
+<div class="toc">
+<h2>Changed renders</h2>
+<h3><a href="#section-bypass-routing">Bypass Routing</a></h3>
+<ul>
+<li><a href="#bypass_hidden_lane_side">bypass_hidden_lane_side</a><span class="badge badge-added">added</span></li>
+<li><a href="#bypass_hidden_lane_side_symmetric">bypass_hidden_lane_side_symmetric</a><span class="badge badge-added">added</span></li>
+</ul>
+</div>
+<h2 class="section-header" id="section-bypass-routing">Bypass Routing</h2>
+
+<div class="diff-entry" id="bypass_hidden_lane_side">
+<h3>Bypass Hidden Lane Side <span class="badge badge-added">added</span></h3>
+<div class="toggle-bar"><button class="active" data-mode="side-by-side">Side by side</button><button data-mode="base">Base only</button><button data-mode="pr">PR only</button></div>
+<div class="comparison">
+<div class="side side-base"><h4>Base code (map new in PR)</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="559" height="351" viewBox="0 0 559 351">
+<defs>
+</defs>
+<style>.nf-metro-bg--bypass_hidden_lane_side-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--bypass_hidden_lane_side-base { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--bypass_hidden_lane_side-base { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--bypass_hidden_lane_side-base { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--bypass_hidden_lane_side-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--bypass_hidden_lane_side-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--bypass_hidden_lane_side-base { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--bypass_hidden_lane_side-base { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--bypass_hidden_lane_side-base { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--bypass_hidden_lane_side-base { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--bypass_hidden_lane_side-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="559" height="351" fill="#2b2b2b" class="nf-metro-bg--bypass_hidden_lane_side-base" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--bypass_hidden_lane_side-base">Hidden bypass opens on its line's lane side</text>
+<path d="M80.0,120.8 L140.0,120.8" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side-base" data-line-id="line2" />
+<path d="M140.0,120.8 L236.0,120.8" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side-base" data-line-id="line2" />
+<path d="M236.0,120.8 L332.0,120.8" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side-base" data-line-id="line2" />
+<path d="M80.0,116.8 L140.0,116.8" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side-base" data-line-id="line1" />
+<path d="M140.0,116.8 L236.0,116.8" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side-base" data-line-id="line1" />
+<path d="M236.0,116.8 L332.0,116.8" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side-base" data-line-id="line1" />
+<path d="M140.0,116.8 L152.5,116.8 Q162.5,116.8,167.06934981397032,125.69500097119553 L187.93065018602968,166.30499902880445 Q192.5,175.2,202.5,175.2 L236.0,175.2" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side-base" data-line-id="line1" />
+<path d="M236.0,175.2 L269.5,175.2 Q279.5,175.2,284.0693498139703,166.30499902880445 L304.9306501860297,125.69500097119553 Q309.5,116.8,319.5,116.8 L332.0,116.8" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side-base" data-line-id="line1" />
+<rect x="75.0" y="111.8" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-base" data-station-id="input1" data-station-lines="line1,line2" data-station-label="input1" data-section-id="__implicit__" data-section-name="" />
+<g data-station-id="input1">
+<path d="M38.8,98.6 L56.8,98.6 L64.8,106.6 L64.8,128.6 Q64.8,130.6,62.8,130.6 L38.8,130.6 Q36.8,130.6,36.8,128.6 L36.8,100.6 Q36.8,98.6,38.8,98.6 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M56.8,98.6 L56.8,106.6 L64.8,106.6 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M56.8,98.6 L56.8,106.6 L64.8,106.6" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<path d="M43.0,102.8 L61.0,102.8 L69.0,110.8 L69.0,132.8 Q69.0,134.8,67.0,134.8 L43.0,134.8 Q41.0,134.8,41.0,132.8 L41.0,104.8 Q41.0,102.8,43.0,102.8 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M61.0,102.8 L61.0,110.8 L69.0,110.8 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M61.0,102.8 L61.0,110.8 L69.0,110.8" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="55.0" y="120.0" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">input</text>
+<text x="55.0" y="138.8" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" class="nf-metro-station-label--bypass_hidden_lane_side-base">input1</text>
+</g>
+<rect x="135.0" y="111.8" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-base" data-station-id="step1" data-station-lines="line1,line2" data-station-label="step1" data-section-id="__implicit__" data-section-name="" />
+<rect x="231.0" y="111.8" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-base" data-station-id="step2" data-station-lines="line1,line2" data-station-label="step2" data-section-id="__implicit__" data-section-name="" />
+<rect x="327.0" y="111.8" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-base" data-station-id="step3" data-station-lines="line1,line2" data-station-label="step3" data-section-id="__implicit__" data-section-name="" />
+<text x="140.0" y="102.8" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side-base" text-anchor="middle" dominant-baseline="auto">step1</text>
+<text x="140.0" y="102.8" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="step1" class="nf-metro-station-label--bypass_hidden_lane_side-base">step1</text>
+<text x="236.0" y="131.8" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side-base" text-anchor="middle" dominant-baseline="hanging">step2</text>
+<text x="236.0" y="131.8" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="step2" class="nf-metro-station-label--bypass_hidden_lane_side-base">step2</text>
+<text x="332.0" y="102.8" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side-base" text-anchor="middle" dominant-baseline="auto">step3</text>
+<text x="332.0" y="102.8" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="step3" class="nf-metro-station-label--bypass_hidden_lane_side-base">step3</text>
+<circle cx="162.5" cy="116.8" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="192.5" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="279.5" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="309.5" cy="116.8" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M12.0,116.8 L392.0,116.8" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="8.0" y="116.8" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M12.0,175.2 L392.0,175.2" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<circle cx="236.0" cy="175.2" r="5" fill="none" stroke="rgba(180, 80, 255, 0.7)" stroke-width="1.5" stroke-dasharray="3,2" />
+<text x="236.0" y="167.2" font-size="7" fill="rgba(180, 80, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">_skip_step2</text>
+<rect x="22.0" y="255.2" width="106.2" height="72.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--bypass_hidden_lane_side-base" />
+<path d="M34.0,279.2 L58.0,279.2" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="279.2" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side-base">Line 1</text>
+<path d="M34.0,303.2 L58.0,303.2" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="303.2" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side-base">Line 2</text>
+<text x="529.0" y="343.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+<div class="side side-pr"><h4>PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="559" height="351" viewBox="0 0 559 351">
+<defs>
+</defs>
+<style>.nf-metro-bg--bypass_hidden_lane_side-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--bypass_hidden_lane_side-pr { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--bypass_hidden_lane_side-pr { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--bypass_hidden_lane_side-pr { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--bypass_hidden_lane_side-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--bypass_hidden_lane_side-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--bypass_hidden_lane_side-pr { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--bypass_hidden_lane_side-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--bypass_hidden_lane_side-pr { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--bypass_hidden_lane_side-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--bypass_hidden_lane_side-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="559" height="351" fill="#2b2b2b" class="nf-metro-bg--bypass_hidden_lane_side-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--bypass_hidden_lane_side-pr">Hidden bypass opens on its line's lane side</text>
+<path d="M80.0,179.2 L140.0,179.2" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side-pr" data-line-id="line2" />
+<path d="M140.0,179.2 L236.0,179.2" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side-pr" data-line-id="line2" />
+<path d="M236.0,179.2 L332.0,179.2" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side-pr" data-line-id="line2" />
+<path d="M80.0,175.2 L140.0,175.2" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side-pr" data-line-id="line1" />
+<path d="M140.0,175.2 L236.0,175.2" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side-pr" data-line-id="line1" />
+<path d="M236.0,175.2 L332.0,175.2" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side-pr" data-line-id="line1" />
+<path d="M140.0,175.2 L152.5,175.2 Q162.5,175.2,167.06934981397032,166.30499902880445 L187.93065018602968,125.69500097119553 Q192.5,116.8,202.5,116.8 L236.0,116.8" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side-pr" data-line-id="line1" />
+<path d="M236.0,116.8 L269.5,116.8 Q279.5,116.8,284.0693498139703,125.69500097119553 L304.9306501860297,166.30499902880445 Q309.5,175.2,319.5,175.2 L332.0,175.2" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side-pr" data-line-id="line1" />
+<rect x="75.0" y="170.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-pr" data-station-id="input1" data-station-lines="line1,line2" data-station-label="input1" data-section-id="__implicit__" data-section-name="" />
+<g data-station-id="input1">
+<path d="M38.8,157.0 L56.8,157.0 L64.8,165.0 L64.8,187.0 Q64.8,189.0,62.8,189.0 L38.8,189.0 Q36.8,189.0,36.8,187.0 L36.8,159.0 Q36.8,157.0,38.8,157.0 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M56.8,157.0 L56.8,165.0 L64.8,165.0 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M56.8,157.0 L56.8,165.0 L64.8,165.0" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<path d="M43.0,161.2 L61.0,161.2 L69.0,169.2 L69.0,191.2 Q69.0,193.2,67.0,193.2 L43.0,193.2 Q41.0,193.2,41.0,191.2 L41.0,163.2 Q41.0,161.2,43.0,161.2 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M61.0,161.2 L61.0,169.2 L69.0,169.2 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M61.0,161.2 L61.0,169.2 L69.0,169.2" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="55.0" y="178.39999999999998" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">input</text>
+<text x="55.0" y="197.2" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" class="nf-metro-station-label--bypass_hidden_lane_side-pr">input1</text>
+</g>
+<rect x="135.0" y="170.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-pr" data-station-id="step1" data-station-lines="line1,line2" data-station-label="step1" data-section-id="__implicit__" data-section-name="" />
+<rect x="231.0" y="170.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-pr" data-station-id="step2" data-station-lines="line1,line2" data-station-label="step2" data-section-id="__implicit__" data-section-name="" />
+<rect x="327.0" y="170.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side-pr" data-station-id="step3" data-station-lines="line1,line2" data-station-label="step3" data-section-id="__implicit__" data-section-name="" />
+<text x="140.0" y="161.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side-pr" text-anchor="middle" dominant-baseline="auto">step1</text>
+<text x="140.0" y="161.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="step1" class="nf-metro-station-label--bypass_hidden_lane_side-pr">step1</text>
+<text x="236.0" y="190.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side-pr" text-anchor="middle" dominant-baseline="hanging">step2</text>
+<text x="236.0" y="190.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="step2" class="nf-metro-station-label--bypass_hidden_lane_side-pr">step2</text>
+<text x="332.0" y="161.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side-pr" text-anchor="middle" dominant-baseline="auto">step3</text>
+<text x="332.0" y="161.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="step3" class="nf-metro-station-label--bypass_hidden_lane_side-pr">step3</text>
+<circle cx="162.5" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="192.5" cy="116.8" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="279.5" cy="116.8" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="309.5" cy="175.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M12.0,116.8 L392.0,116.8" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="8.0" y="116.8" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M12.0,175.2 L392.0,175.2" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<circle cx="236.0" cy="116.8" r="5" fill="none" stroke="rgba(180, 80, 255, 0.7)" stroke-width="1.5" stroke-dasharray="3,2" />
+<text x="236.0" y="108.8" font-size="7" fill="rgba(180, 80, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">_skip_step2</text>
+<rect x="22.0" y="255.2" width="106.2" height="72.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--bypass_hidden_lane_side-pr" />
+<path d="M34.0,279.2 L58.0,279.2" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="279.2" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side-pr">Line 1</text>
+<path d="M34.0,303.2 L58.0,303.2" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="303.2" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side-pr">Line 2</text>
+<text x="529.0" y="343.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
+</div>
+
+<div class="diff-entry" id="bypass_hidden_lane_side_symmetric">
+<h3>Bypass Hidden Lane Side Symmetric <span class="badge badge-added">added</span></h3>
+<div class="toggle-bar"><button class="active" data-mode="side-by-side">Side by side</button><button data-mode="base">Base only</button><button data-mode="pr">PR only</button></div>
+<div class="comparison">
+<div class="side side-base"><h4>Base code (map new in PR)</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="606" height="354" viewBox="0 0 606 354">
+<defs>
+</defs>
+<style>.nf-metro-bg--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--bypass_hidden_lane_side_symmetric-base { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--bypass_hidden_lane_side_symmetric-base { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--bypass_hidden_lane_side_symmetric-base { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="606" height="354" fill="#2b2b2b" class="nf-metro-bg--bypass_hidden_lane_side_symmetric-base" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--bypass_hidden_lane_side_symmetric-base">Hidden bypass lane side (symmetric diamonds)</text>
+<path d="M80.0,153.2 L140.0,153.2" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side_symmetric-base" data-line-id="line2" />
+<path d="M140.0,153.2 L153.3126399637383,153.2 Q163.3126399637383,153.2,170.4786084690638,146.22512398814982 L186.14667145841278,130.97487601185014 Q193.3126399637383,123.99999999999999,203.3126399637383,123.99999999999999 L236.0,123.99999999999999" stroke="#f0ab00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line2--bypass_hidden_lane_side_symmetric-base" data-line-id="line2" />
+<path d="M236.0,123.99999999999999 L268.68736003626174,123.99999999999999 Q278.68736003626174,123.99999999999999,285.85332854158725,130.97487601185014 L301.5213915309362,146.22512398814982 Q308.68736003626174,153.2,318.68736003626174,153.2 L332.0,153.2" stroke="#f0ab00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line2--bypass_hidden_lane_side_symmetric-base" data-line-id="line2" />
+<path d="M80.0,149.2 L140.0,149.2" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-base" data-line-id="line1" />
+<path d="M140.0,149.2 L151.6873600362617,149.2 Q161.6873600362617,149.2,168.85332854158722,142.22512398814982 L184.5213915309362,126.97487601185016 Q191.6873600362617,119.99999999999999,201.6873600362617,119.99999999999999 L236.0,119.99999999999999" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-base" data-line-id="line1" />
+<path d="M236.0,119.99999999999999 L270.31263996373826,119.99999999999999 Q280.31263996373826,119.99999999999999,287.4786084690638,126.97487601185016 L303.14667145841275,142.22512398814982 Q310.31263996373826,149.2,320.31263996373826,149.2 L332.0,149.2" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-base" data-line-id="line1" />
+<path d="M140.0,149.2 L152.5,149.2 Q162.5,149.2,169.6659685053255,156.17487601185016 L185.3340314946745,171.4251239881498 Q192.5,178.39999999999998,202.5,178.39999999999998 L236.0,178.39999999999998" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-base" data-line-id="line1" />
+<path d="M236.0,178.39999999999998 L269.5,178.39999999999998 Q279.5,178.39999999999998,286.6659685053255,171.4251239881498 L302.3340314946745,156.17487601185016 Q309.5,149.2,319.5,149.2 L332.0,149.2" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-base" data-line-id="line1" />
+<rect x="75.0" y="144.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-base" data-station-id="input1" data-station-lines="line1,line2" data-station-label="input1" data-section-id="__implicit__" data-section-name="" />
+<g data-station-id="input1">
+<path d="M38.8,131.0 L56.8,131.0 L64.8,139.0 L64.8,161.0 Q64.8,163.0,62.8,163.0 L38.8,163.0 Q36.8,163.0,36.8,161.0 L36.8,133.0 Q36.8,131.0,38.8,131.0 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M56.8,131.0 L56.8,139.0 L64.8,139.0 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M56.8,131.0 L56.8,139.0 L64.8,139.0" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<path d="M43.0,135.2 L61.0,135.2 L69.0,143.2 L69.0,165.2 Q69.0,167.2,67.0,167.2 L43.0,167.2 Q41.0,167.2,41.0,165.2 L41.0,137.2 Q41.0,135.2,43.0,135.2 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M61.0,135.2 L61.0,143.2 L69.0,143.2 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M61.0,135.2 L61.0,143.2 L69.0,143.2" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="55.0" y="152.39999999999998" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">input</text>
+<text x="55.0" y="171.2" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-base">input1</text>
+</g>
+<rect x="135.0" y="144.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-base" data-station-id="step1" data-station-lines="line1,line2" data-station-label="step1" data-section-id="__implicit__" data-section-name="" />
+<rect x="231.0" y="114.99999999999999" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-base" data-station-id="step2" data-station-lines="line1,line2" data-station-label="step2" data-section-id="__implicit__" data-section-name="" />
+<rect x="327.0" y="144.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-base" data-station-id="step3" data-station-lines="line1,line2" data-station-label="step3" data-section-id="__implicit__" data-section-name="" />
+<text x="140.0" y="164.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side_symmetric-base" text-anchor="middle" dominant-baseline="hanging">step1</text>
+<text x="140.0" y="164.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="step1" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-base">step1</text>
+<text x="236.0" y="105.99999999999999" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side_symmetric-base" text-anchor="middle" dominant-baseline="auto">step2</text>
+<text x="236.0" y="105.99999999999999" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="step2" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-base">step2</text>
+<text x="332.0" y="164.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side_symmetric-base" text-anchor="middle" dominant-baseline="hanging">step3</text>
+<text x="332.0" y="164.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="step3" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-base">step3</text>
+<circle cx="161.6873600362617" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="191.6873600362617" cy="119.99999999999999" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="163.3126399637383" cy="153.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="193.3126399637383" cy="123.99999999999999" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="280.31263996373826" cy="119.99999999999999" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="310.31263996373826" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="278.68736003626174" cy="123.99999999999999" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="308.68736003626174" cy="153.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="162.5" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="192.5" cy="178.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="279.5" cy="178.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="309.5" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M12.0,120.0 L392.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="8.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M12.0,149.2 L392.0,149.2" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M12.0,178.4 L392.0,178.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<circle cx="236.0" cy="178.39999999999998" r="5" fill="none" stroke="rgba(180, 80, 255, 0.7)" stroke-width="1.5" stroke-dasharray="3,2" />
+<text x="236.0" y="170.39999999999998" font-size="7" fill="rgba(180, 80, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">_skip_step2</text>
+<rect x="22.0" y="258.40000000000003" width="106.2" height="72.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--bypass_hidden_lane_side_symmetric-base" />
+<path d="M34.0,282.40000000000003 L58.0,282.40000000000003" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="282.40000000000003" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side_symmetric-base">Line 1</text>
+<path d="M34.0,306.40000000000003 L58.0,306.40000000000003" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="306.40000000000003" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side_symmetric-base">Line 2</text>
+<text x="576.0" y="346.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+<div class="side side-pr"><h4>PR</h4><div class="svg-wrapper"><?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="606" height="358" viewBox="0 0 606 358">
+<defs>
+</defs>
+<style>.nf-metro-bg--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }
+.nf-metro-title--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-title-color, light-dark(#111111, #ffffff)); }
+.nf-metro-station-label--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-label-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-section-box--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-section-fill, light-dark(#ededed, #373737)); stroke: var(--nfm-map-section-stroke, light-dark(#e6e6e6, #595959)); }
+.nf-metro-section-label--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-label--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-group-underline--bypass_hidden_lane_side_symmetric-pr { stroke: var(--nfm-map-section-label-color, light-dark(#666666, #c8c8c8)); }
+.nf-metro-legend-bg--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-legend-bg, light-dark(rgba(255, 255, 255, 0.8), rgba(0, 0, 0, 0.3))); }
+.nf-metro-legend-text--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-legend-text-color, light-dark(#333333, #e0e0e0)); }
+.nf-metro-marker-stroke--bypass_hidden_lane_side_symmetric-pr { stroke: var(--nfm-map-marker-stroke, light-dark(#333333, #f0f0f0)); }
+.nf-metro-label-halo--bypass_hidden_lane_side_symmetric-pr { fill: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); stroke: var(--nfm-map-bg, light-dark(#f5f5f5, #2b2b2b)); }</style>
+<rect x="0" y="0" width="606" height="358" fill="#2b2b2b" class="nf-metro-bg--bypass_hidden_lane_side_symmetric-pr" />
+<text x="60.0" y="30.0" font-size="24.0" fill="#ffffff" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" class="nf-metro-title--bypass_hidden_lane_side_symmetric-pr">Hidden bypass lane side (symmetric diamonds)</text>
+<path d="M80.0,153.2 L140.0,153.2" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" class="metro-line-line2--bypass_hidden_lane_side_symmetric-pr" data-line-id="line2" />
+<path d="M140.0,153.2 L151.6873600362617,153.2 Q161.6873600362617,153.2,168.85332854158722,160.17487601185016 L184.5213915309362,175.4251239881498 Q191.6873600362617,182.39999999999998,201.6873600362617,182.39999999999998 L236.0,182.39999999999998" stroke="#f0ab00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line2--bypass_hidden_lane_side_symmetric-pr" data-line-id="line2" />
+<path d="M236.0,182.39999999999998 L270.31263996373826,182.39999999999998 Q280.31263996373826,182.39999999999998,287.4786084690638,175.4251239881498 L303.14667145841275,160.17487601185016 Q310.31263996373826,153.2,320.31263996373826,153.2 L332.0,153.2" stroke="#f0ab00" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line2--bypass_hidden_lane_side_symmetric-pr" data-line-id="line2" />
+<path d="M80.0,149.2 L140.0,149.2" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-pr" data-line-id="line1" />
+<path d="M140.0,149.2 L153.3126399637383,149.2 Q163.3126399637383,149.2,170.4786084690638,156.17487601185016 L186.14667145841278,171.4251239881498 Q193.3126399637383,178.39999999999998,203.3126399637383,178.39999999999998 L236.0,178.39999999999998" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-pr" data-line-id="line1" />
+<path d="M236.0,178.39999999999998 L268.68736003626174,178.39999999999998 Q278.68736003626174,178.39999999999998,285.85332854158725,171.4251239881498 L301.5213915309362,156.17487601185016 Q308.68736003626174,149.2,318.68736003626174,149.2 L332.0,149.2" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-pr" data-line-id="line1" />
+<path d="M140.0,149.2 L152.5,149.2 Q162.5,149.2,169.6659685053255,142.22512398814982 L185.3340314946745,126.97487601185016 Q192.5,119.99999999999999,202.5,119.99999999999999 L236.0,119.99999999999999" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-pr" data-line-id="line1" />
+<path d="M236.0,119.99999999999999 L269.5,119.99999999999999 Q279.5,119.99999999999999,286.6659685053255,126.97487601185016 L302.3340314946745,142.22512398814982 Q309.5,149.2,319.5,149.2 L332.0,149.2" stroke="#d0006f" stroke-width="3.0" fill="none" stroke-linecap="round" stroke-linejoin="round" class="metro-line-line1--bypass_hidden_lane_side_symmetric-pr" data-line-id="line1" />
+<rect x="75.0" y="144.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-pr" data-station-id="input1" data-station-lines="line1,line2" data-station-label="input1" data-section-id="__implicit__" data-section-name="" />
+<g data-station-id="input1">
+<path d="M38.8,131.0 L56.8,131.0 L64.8,139.0 L64.8,161.0 Q64.8,163.0,62.8,163.0 L38.8,163.0 Q36.8,163.0,36.8,161.0 L36.8,133.0 Q36.8,131.0,38.8,131.0 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M56.8,131.0 L56.8,139.0 L64.8,139.0 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M56.8,131.0 L56.8,139.0 L64.8,139.0" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<path d="M43.0,135.2 L61.0,135.2 L69.0,143.2 L69.0,165.2 Q69.0,167.2,67.0,167.2 L43.0,167.2 Q41.0,167.2,41.0,165.2 L41.0,137.2 Q41.0,135.2,43.0,135.2 Z" fill="#ffffff" stroke="#333333" stroke-width="1.5" stroke-linejoin="round" />
+<path d="M61.0,135.2 L61.0,143.2 L69.0,143.2 Z" fill="#333333" opacity="0.15" stroke="none" />
+<path d="M61.0,135.2 L61.0,143.2 L69.0,143.2" fill="none" stroke="#333333" stroke-width="0.8999999999999999" />
+<text x="55.0" y="152.39999999999998" font-size="7.5" fill="#000000" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dy="0.3em">input</text>
+<text x="55.0" y="171.2" font-size="7.8" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-pr">input1</text>
+</g>
+<rect x="135.0" y="144.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-pr" data-station-id="step1" data-station-lines="line1,line2" data-station-label="step1" data-section-id="__implicit__" data-section-name="" />
+<rect x="231.0" y="173.39999999999998" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-pr" data-station-id="step2" data-station-lines="line1,line2" data-station-label="step2" data-section-id="__implicit__" data-section-name="" />
+<rect x="327.0" y="144.2" width="10.0" height="14.0" rx="5.0" ry="5.0" fill="#ffffff" stroke="#333333" stroke-width="1.5" class="nf-metro-station--bypass_hidden_lane_side_symmetric-pr" data-station-id="step3" data-station-lines="line1,line2" data-station-label="step3" data-section-id="__implicit__" data-section-name="" />
+<text x="140.0" y="135.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side_symmetric-pr" text-anchor="middle" dominant-baseline="auto">step1</text>
+<text x="140.0" y="135.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="step1" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-pr">step1</text>
+<text x="236.0" y="193.39999999999998" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side_symmetric-pr" text-anchor="middle" dominant-baseline="hanging">step2</text>
+<text x="236.0" y="193.39999999999998" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="hanging" data-station-id="step2" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-pr">step2</text>
+<text x="332.0" y="135.2" font-size="13.0" fill="#2b2b2b" stroke="#2b2b2b" stroke-width="3.0" stroke-linejoin="round" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" aria-hidden="true" class="nf-metro-label-halo--bypass_hidden_lane_side_symmetric-pr" text-anchor="middle" dominant-baseline="auto">step3</text>
+<text x="332.0" y="135.2" font-size="13.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="bold" text-anchor="middle" dominant-baseline="auto" data-station-id="step3" class="nf-metro-station-label--bypass_hidden_lane_side_symmetric-pr">step3</text>
+<circle cx="163.3126399637383" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="193.3126399637383" cy="178.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="161.6873600362617" cy="153.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="191.6873600362617" cy="182.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="278.68736003626174" cy="178.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="308.68736003626174" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="280.31263996373826" cy="182.39999999999998" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="310.31263996373826" cy="153.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="162.5" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="192.5" cy="119.99999999999999" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="279.5" cy="119.99999999999999" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<circle cx="309.5" cy="149.2" r="3.0" fill="rgba(255, 200, 50, 0.6)" />
+<path d="M12.0,120.0 L392.0,120.0" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<text x="8.0" y="120.0" font-size="7" fill="rgba(80, 255, 180, 0.5)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">row 0 grid</text>
+<path d="M12.0,149.2 L392.0,149.2" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<path d="M12.0,178.4 L392.0,178.4" stroke="rgba(80, 255, 180, 0.5)" stroke-width="0.75" stroke-dasharray="4,6" />
+<circle cx="236.0" cy="119.99999999999999" r="5" fill="none" stroke="rgba(180, 80, 255, 0.7)" stroke-width="1.5" stroke-dasharray="3,2" />
+<text x="236.0" y="111.99999999999999" font-size="7" fill="rgba(180, 80, 255, 0.7)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle" dominant-baseline="auto">_skip_step2</text>
+<rect x="22.0" y="262.4" width="106.2" height="72.0" rx="6" ry="6" fill="rgba(0, 0, 0, 0.3)" class="nf-metro-legend-bg--bypass_hidden_lane_side_symmetric-pr" />
+<path d="M34.0,286.4 L58.0,286.4" stroke="#d0006f" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="286.4" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side_symmetric-pr">Line 1</text>
+<path d="M34.0,310.4 L58.0,310.4" stroke="#f0ab00" stroke-width="3.0" stroke-linecap="round" />
+<text x="70.0" y="310.4" font-size="14.0" fill="#e0e0e0" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" dy="0.3em" class="nf-metro-legend-text--bypass_hidden_lane_side_symmetric-pr">Line 2</text>
+<text x="576.0" y="350.0" font-size="8" fill="rgba(150, 150, 150, 0.6)" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="end">created with nf-metro v2.1.0+dev</text>
+</svg></div></div>
+</div>
+</div>
+<script>
+(function() {
+  const root = document.documentElement;
+  const btn = document.getElementById('scheme-toggle');
+  const schemes = ['auto', 'dark', 'light'];
+  const labels = {'auto': 'System', 'dark': 'Dark', 'light': 'Light'};
+  let idx = 0;
+  function apply() {
+    const s = schemes[idx];
+    if (s === 'auto') {
+      root.removeAttribute('data-scheme');
+    } else {
+      root.setAttribute('data-scheme', s);
+    }
+    btn.textContent = labels[s];
+  }
+  apply();
+  btn.addEventListener('click', function() {
+    idx = (idx + 1) % schemes.length;
+    apply();
+  });
+})();
+document.querySelectorAll('.toggle-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const entry = btn.closest('.diff-entry');
+    const mode = btn.dataset.mode;
+    const buttons = entry.querySelectorAll('.toggle-bar button');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const comp = entry.querySelector('.comparison');
+    const sideBase = comp.querySelector('.side-base');
+    const sidePr = comp.querySelector('.side-pr');
+    if (mode === 'side-by-side') {
+      comp.style.gridTemplateColumns = '1fr 1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = '';
+    } else if (mode === 'base') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = '';
+      sidePr.style.display = 'none';
+    } else if (mode === 'pr') {
+      comp.style.gridTemplateColumns = '1fr';
+      sideBase.style.display = 'none';
+      sidePr.style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
