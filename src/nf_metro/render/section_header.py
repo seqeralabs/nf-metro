@@ -671,9 +671,29 @@ def resolve_section_header_placement(
         and x0 - gap - badge_diameter >= 0.0
         and box_bottom - side_length >= 0.0
     ):
-        rotated.append(_left(x0, box_bottom, circle_r, gap, side_length, section.name))
+        rotated.append(
+            _left(
+                x0,
+                box_bottom,
+                circle_r,
+                gap,
+                side_length,
+                section.name,
+                has_number=has_number,
+            )
+        )
     if side_room:
-        rotated.append(_right(box_right, y0, circle_r, gap, side_length, section.name))
+        rotated.append(
+            _right(
+                box_right,
+                y0,
+                circle_r,
+                gap,
+                side_length,
+                section.name,
+                has_number=has_number,
+            )
+        )
 
     def _available(candidates: list[SectionHeaderPlacement]) -> list[_Scored]:
         return [
@@ -785,15 +805,18 @@ def _left(
     gap: float,
     length: float,
     name: str,
+    *,
+    has_number: bool = True,
 ) -> SectionHeaderPlacement:
     col_x = x0 - gap - circle_r
     cy = box_bottom - circle_r
+    label_y = cy - circle_r - SECTION_LABEL_TEXT_OFFSET if has_number else box_bottom
     return SectionHeaderPlacement(
         mode="left",
         badge_cx=col_x,
         badge_cy=cy,
         label_x=col_x,
-        label_y=cy - circle_r - SECTION_LABEL_TEXT_OFFSET,
+        label_y=label_y,
         label_rotation=270.0,
         label_lines=(name,),
         keepout=(col_x - circle_r, box_bottom - length, x0, box_bottom),
@@ -807,15 +830,18 @@ def _right(
     gap: float,
     length: float,
     name: str,
+    *,
+    has_number: bool = True,
 ) -> SectionHeaderPlacement:
     col_x = box_right + gap + circle_r
     cy = y0 + circle_r
+    label_y = cy + circle_r + SECTION_LABEL_TEXT_OFFSET if has_number else y0
     return SectionHeaderPlacement(
         mode="right",
         badge_cx=col_x,
         badge_cy=cy,
         label_x=col_x,
-        label_y=cy + circle_r + SECTION_LABEL_TEXT_OFFSET,
+        label_y=label_y,
         label_rotation=90.0,
         label_lines=(name,),
         keepout=(box_right, y0, col_x + circle_r, y0 + length),

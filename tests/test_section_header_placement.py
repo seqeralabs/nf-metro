@@ -555,3 +555,38 @@ def test_unnumbered_header_title_starts_at_the_box_edge() -> None:
     )
     assert placement.mode == "above"
     assert placement.label_x == section.bbox_x
+
+
+@pytest.mark.parametrize("number", [1, 0])
+def test_rotated_header_title_offset_follows_the_badge(number: int) -> None:
+    """A rotated side header starts its title past the badge, or at the badge's
+    own starting edge when the section is numbered 0 and draws none."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment", number=number)
+    section.bbox_x, section.bbox_y = 100.0, 100.0
+    section.bbox_w, section.bbox_h = 120.0, 60.0
+    graph.sections["s"] = section
+
+    # Routes spanning the box width above and below it block every
+    # horizontal position, leaving the rotated side columns.
+    above_route = [(112.0, 90.0), (208.0, 90.0)]
+    below_route = [(112.0, 170.0), (208.0, 170.0)]
+    placement = resolve_section_header_placement(
+        graph,
+        section,
+        label_font_size=13.0,
+        polylines=[above_route, below_route],
+        title_font_size=13.0,
+    )
+
+    assert placement.mode in ("left", "right")
+    box_bottom = section.bbox_y + section.bbox_h
+    edge = box_bottom if placement.mode == "left" else section.bbox_y
+    offset = abs(placement.label_y - edge)
+    if number:
+        assert offset == pytest.approx(
+            2.0 * section_header.SECTION_NUM_CIRCLE_R_LARGE
+            + section_header.SECTION_LABEL_TEXT_OFFSET
+        )
+    else:
+        assert offset == 0.0
