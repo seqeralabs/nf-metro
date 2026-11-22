@@ -544,8 +544,8 @@ Automatic section numbers follow connected visual routes.
 Numbering prefers the nearest connected section on the current row, keeps parallel branch starts together, and completes independent inputs before a merge.
 A clear primary row can finish before numbering a secondary route that rejoins it.
 An explicit `number:` stays fixed, and automatic sections take the lowest positive numbers not already reserved.
-nf-metro ignores duplicate or invalid overrides with a warning.
-Use the value `0` to disable the numbering for a given section.
+Setting `number: 0` removes a section's badge and left-aligns its title; automatic numbering skips that section, so it neither takes nor reserves a number.
+nf-metro ignores duplicate positive overrides and invalid values with a warning; any number of sections can share `0`.
 
 ### Typos and duplicate declarations
 

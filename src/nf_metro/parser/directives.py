@@ -760,8 +760,7 @@ def _apply_scoped_directive(
         try:
             number = int(value)
         except ValueError:
-            _warn_malformed("number", value, "a non-negative integer")
-            return
+            number = -1
         if number < 0:
             _warn_malformed("number", value, "a non-negative integer")
             return

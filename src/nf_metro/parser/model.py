@@ -403,6 +403,11 @@ class Section:
         """Whether the section renders its box, header and number badge."""
         return not (self.is_implicit or self.is_hidden)
 
+    @property
+    def has_badge(self) -> bool:
+        """Whether the section draws a number badge; number 0 means none."""
+        return self.number > 0
+
     # Hints from %%metro entry/exit directives: list of (side, [line_ids])
     exit_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)
     entry_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)

@@ -311,9 +311,11 @@ def test_a_contested_band_loses_to_the_roomier_bottom_edge() -> None:
     """A stroke descending through the default position and leaving only a
     pinched slot in the band drops the caption to the clear bottom edge."""
     graph = MetroGraph()
-    section = Section(id="s", name="Work")
+    section = Section(id="s", name="Work", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
-    header_width = section_header._header_length("Work", 13.0)
+    header_width = section_header._header_length(
+        "Work", 13.0, SECTION_NUM_CIRCLE_R_LARGE
+    )
     section.bbox_w, section.bbox_h = header_width + 30.0, 80.0
     graph.sections["s"] = section
 
@@ -339,7 +341,7 @@ def test_a_band_slot_clear_of_an_over_top_loop_beats_a_roomier_bottom_edge() -> 
     """A loop passing over the box a full header band clear of the slot under it
     leaves the caption above its box, even where the bottom edge has more air."""
     graph = MetroGraph()
-    section = Section(id="s", name="Work")
+    section = Section(id="s", name="Work", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = 600.0, 80.0
     graph.sections["s"] = section
@@ -396,7 +398,7 @@ def test_a_roomy_band_slot_keeps_the_caption_above_its_box() -> None:
     """A band with a wide clear stretch keeps the caption above its box, centred
     in that stretch rather than hugging the stroke it stepped past."""
     graph = MetroGraph()
-    section = Section(id="s", name="Work")
+    section = Section(id="s", name="Work", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = 600.0, 80.0
     graph.sections["s"] = section
@@ -424,9 +426,9 @@ def test_the_band_guard_reports_a_caption_deeper_than_its_gap(
     shallow strands a caption the guard names, so the guard is what holds the
     accounting rather than the ranking happening to agree with it."""
     graph = MetroGraph()
-    upper = Section(id="u", name="Upper work")
+    upper = Section(id="u", name="Upper work", number=1)
     upper.bbox_x, upper.bbox_y, upper.bbox_w, upper.bbox_h = 0.0, 100.0, 300.0, 80.0
-    lower = Section(id="l", name="Lower work")
+    lower = Section(id="l", name="Lower work", number=1)
     lower.bbox_x, lower.bbox_y, lower.bbox_w, lower.bbox_h = 0.0, 210.0, 300.0, 80.0
     graph.sections["u"] = upper
     graph.sections["l"] = lower
@@ -437,6 +439,7 @@ def test_the_band_guard_reports_a_caption_deeper_than_its_gap(
             upper.bbox_y + upper.bbox_h,
             section_header._BandBlock(
                 circle_r=SECTION_NUM_CIRCLE_R_LARGE,
+                badge_r=SECTION_NUM_CIRCLE_R_LARGE,
                 num_y=4.0,
                 length=120.0,
                 half_text=10.4,
@@ -479,7 +482,7 @@ def _horizontal_placement(
         section_header.estimate_section_label_width(line, font_size)
         for line in label_lines
     )
-    width = section_header._badge_span() + text_width
+    width = section_header._badge_span(SECTION_NUM_CIRCLE_R_LARGE) + text_width
     return section_header.SectionHeaderPlacement(
         mode="above",
         badge_cx=0.0,
@@ -493,7 +496,7 @@ def _horizontal_placement(
 
 
 def _single_station_section(section_id: str, bbox_w: float) -> Section:
-    section = Section(id=section_id, name="Novel transcripts")
+    section = Section(id=section_id, name="Novel transcripts", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = bbox_w, 40.0
     return section
@@ -557,8 +560,20 @@ def test_unnumbered_header_title_starts_at_the_box_edge() -> None:
     assert placement.label_x == section.bbox_x
 
 
-@pytest.mark.parametrize("number", [1, 0])
-def test_rotated_header_title_offset_follows_the_badge(number: int) -> None:
+@pytest.mark.parametrize(
+    ("number", "expected_offset"),
+    [
+        pytest.param(
+            1,
+            2.0 * SECTION_NUM_CIRCLE_R_LARGE + section_header.SECTION_LABEL_TEXT_OFFSET,
+            id="badged",
+        ),
+        pytest.param(0, 0.0, id="unnumbered"),
+    ],
+)
+def test_rotated_header_title_offset_follows_the_badge(
+    number: int, expected_offset: float
+) -> None:
     """A rotated side header starts its title past the badge, or at the badge's
     own starting edge when the section is numbered 0 and draws none."""
     graph = MetroGraph()
@@ -579,14 +594,10 @@ def test_rotated_header_title_offset_follows_the_badge(number: int) -> None:
         title_font_size=13.0,
     )
 
-    assert placement.mode in ("left", "right")
-    box_bottom = section.bbox_y + section.bbox_h
-    edge = box_bottom if placement.mode == "left" else section.bbox_y
-    offset = abs(placement.label_y - edge)
-    if number:
-        assert offset == pytest.approx(
-            2.0 * section_header.SECTION_NUM_CIRCLE_R_LARGE
-            + section_header.SECTION_LABEL_TEXT_OFFSET
-        )
-    else:
-        assert offset == 0.0
+    reading_start = {
+        "left": section.bbox_y + section.bbox_h,
+        "right": section.bbox_y,
+    }
+    assert placement.mode in reading_start
+    offset = abs(placement.label_y - reading_start[placement.mode])
+    assert offset == pytest.approx(expected_offset)
