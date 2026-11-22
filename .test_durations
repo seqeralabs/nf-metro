@@ -4105,6 +4105,8 @@
     "tests/test_convert.py::TestUnquotedLabels::test_unquoted_stadium_parses": 0.00020387402037158608,
     "tests/test_convert_section_names.py::TestDuplicateSectionNames::test_subworkflows_keep_distinct_sections[names0]": 0.0796157909790054,
     "tests/test_convert_section_names.py::TestDuplicateSectionNames::test_subworkflows_keep_distinct_sections[names1]": 0.09866837493609637,
+    "tests/test_convert_spurs.py::TestInterSectionSpurs::test_dead_end_connection_is_emitted[False]": 0.009826541878283024,
+    "tests/test_convert_spurs.py::TestInterSectionSpurs::test_dead_end_connection_is_emitted[True]": 0.018894458073191345,
     "tests/test_corner_radius_ratchet.py::test_every_curve_radius_traces_to_a_corners_helper": 0.7522620409727097,
     "tests/test_corner_radius_ratchet.py::test_handler_bundle_base_radius_is_curve_radius_only": 0.2193244159570895,
     "tests/test_corner_radius_ratchet.py::test_helper_derived_radii_accepted[alias-hop]": 0.0005062480340711772,

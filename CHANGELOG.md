@@ -62,6 +62,12 @@ history.
 
 ### Fixed
 
+- Nextflow conversion preserves spur dependencies between subworkflows instead
+  of silently omitting those edges from the emitted map.
+- Nextflow conversion splits a section that runs both before and after another
+  one (top-level processes around a subworkflow become `Main` and `Reporting`;
+  a parent subworkflow's own processes are split around its child), instead of
+  emitting a map that fails with "Sections form a cycle".
 - Section number badges skip sections that draw no badge. A map mixing loose
   stations with subgraphs numbered its visible sections from 2.
 - A perpendicular (top or bottom) entry port fed through merges, or by
