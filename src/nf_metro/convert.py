@@ -491,6 +491,18 @@ def _sanitize_id(name: str) -> str:
     return re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_")
 
 
+def _allocate_unique_id(name: str, used: set[str], fallback: str) -> str:
+    """Sanitise a display name and claim an unused ID in its namespace."""
+    base = _sanitize_id(name) or fallback
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
 def _allocate_station_ids(
     section_order: list[str],
     section_node_order: dict[str, list[str]],
@@ -508,14 +520,7 @@ def _allocate_station_ids(
     station_ids: dict[str, str] = {}
     for sec_key in section_order:
         for nid in section_node_order.get(sec_key, []):
-            base = _sanitize_id(nodes[nid].label) or "node"
-            candidate = base
-            suffix = 2
-            while candidate in used:
-                candidate = f"{base}_{suffix}"
-                suffix += 1
-            used.add(candidate)
-            station_ids[nid] = candidate
+            station_ids[nid] = _allocate_unique_id(nodes[nid].label, used, "node")
     return station_ids
 
 
@@ -593,10 +598,15 @@ def _assign_lines(
     color_idx += 1
 
     bypass_lines: dict[tuple[str, str], tuple[str, str, str]] = {}
+    used_line_ids = {main_line_id, "spur"}
     for src_sec, tgt_sec in sorted(bypass_groups.keys()):
         src_name = _humanize_label(section_names[src_sec], abbreviate=False)
         tgt_name = _humanize_label(section_names[tgt_sec], abbreviate=False)
-        line_id = _sanitize_id(f"{section_names[src_sec]}_{section_names[tgt_sec]}")
+        line_id = _allocate_unique_id(
+            f"{section_names[src_sec]}_{section_names[tgt_sec]}",
+            used_line_ids,
+            "bypass",
+        )
         line_name = f"{src_name} - {tgt_name}"
         line_color = LINE_COLORS[color_idx % len(LINE_COLORS)]
         color_idx += 1
@@ -685,9 +695,10 @@ def _emit_mmd(
     out.append("")
     out.append("graph LR")
 
+    used_section_ids: set[str] = set()
     for sec_key in section_order:
         sec_name = section_names[sec_key]
-        sec_id = _sanitize_id(sec_name)
+        sec_id = _allocate_unique_id(sec_name, used_section_ids, "section")
         display = _humanize_label(sec_name, abbreviate=False)
         ordered_nodes = section_node_order.get(sec_key, [])
 

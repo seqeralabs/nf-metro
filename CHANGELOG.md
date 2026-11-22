@@ -68,6 +68,9 @@ history.
   feeders arriving along two different corridors, now gives each line the
   channel that matches its lane in the section, so the lines no longer cross
   or overlap inside the port's own turn.
+- Nextflow subworkflows with repeated short names get distinct section and
+  bypass line IDs, preserving each subworkflow's stations, section box and
+  bypass line.
 
 ## [2.1.0] — 2026-09-15
 
