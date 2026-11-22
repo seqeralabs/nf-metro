@@ -1351,6 +1351,10 @@
   "note": "The no-clear-majority arm. Movers in a column either converge to one consensus x or sit off it only via hub/exit-port collinearity at a fixed >=20px quantum; the consensus cluster is always the strict majority, so majority_count is never <= half (0 of corpus, no probe topology reproduces a split). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"
  },
+ "postprocess.py::if max(moved_xs) - min(moved_xs) <= 1.0:::#1": {
+  "note": "Early-exit for the agree case: all movers land within 1px of each other. Unreachable for natural pipelines because the engine always seats one fan branch on the hub's trunk row, vetoing companion consensus for the whole column, so moved is empty and the outer guard fires first.",
+  "status": "defensive"
+ },
  "postprocess.py::if multi_diag:::#1": {
   "note": "multi_diag branch of _flat_connects_to_internal_chain; multi_diag is structurally unsatisfiable (see the _classify_centering_routes gate at the same line text), so the function is only ever called with multi_diag False. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
   "status": "defensive"

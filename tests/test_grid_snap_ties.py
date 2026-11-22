@@ -9,7 +9,6 @@ take the same direction so the fan keeps its spacing.
 
 from __future__ import annotations
 
-import math
 from copy import deepcopy
 from pathlib import Path
 
@@ -24,6 +23,7 @@ EXAMPLES = Path(__file__).parents[1] / "examples"
 
 # Every corpus map whose Stage 6.4 snap meets a station midway between slots.
 TIED_FIXTURES = (
+    "genomic_pipeline.mmd",
     "riboseq_metro.mmd",
     "rnaseq_auto.mmd",
     "rnaseq_metro.mmd",
@@ -39,6 +39,16 @@ TIED_FIXTURES = (
 # Fractions of the group pitch: each whole pitch renumbers every slot, and the
 # fractional parts wrap the origin residue past zero for most origins.
 OFFSET_PITCHES = (1.0, 1.5, 2.25, 3.0, -1.0, -2.75)
+# Offsets off the 0.001 px lattice the group origin is rounded to, so each
+# residue rounds differently from where it sat before the move.
+OFFSETS_PX = (1e-4, 1 / 3, 0.1234567, 13.0001, 22.0005, -5.4321, 100 / 7, 333.3333333)
+# A moved row snaps to an origin rounded afresh to 0.001 px.
+ORIGIN_ROUNDING_PX = 1e-3
+
+
+def _offsets(pitch: float) -> tuple[float, ...]:
+    return (*(round(k * pitch, 1) for k in OFFSET_PITCHES), *OFFSETS_PX)
+
 
 _SnapCall = tuple[MetroGraph, float, list[str], dict[str, list[str]]]
 
@@ -74,12 +84,11 @@ def _tied_ids(graph: MetroGraph, sec_ids: list[str], pitch: float) -> set[str]:
     if origin_info is None:
         return set()
     origin = origin_info[0]
-    tied = set()
-    for sid in _group_station_ids(graph, sec_ids):
-        q = (graph.stations[sid].y - origin) / pitch
-        if abs(q - math.floor(q) - 0.5) <= 1e-6:
-            tied.add(sid)
-    return tied
+    return {
+        sid
+        for sid in _group_station_ids(graph, sec_ids)
+        if grid_snap._is_slot_tie(graph.stations[sid].y, origin, pitch)
+    }
 
 
 def _snapped(call: _SnapCall, dy: float) -> dict[str, float]:
@@ -104,11 +113,10 @@ def test_tied_row_snaps_identically_after_vertical_offset(fixture: str) -> None:
     for call in _tied_calls(fixture):
         pitch = call[1]
         base = _snapped(call, 0.0)
-        for k in OFFSET_PITCHES:
-            dy = round(k * pitch, 1)
+        for dy in _offsets(pitch):
             moved = _snapped(call, dy)
             drift = {s: (base[s], moved[s]) for s in base if base[s] != moved[s]}
-            assert moved == pytest.approx(base, abs=1e-6), (
+            assert moved == pytest.approx(base, abs=ORIGIN_ROUNDING_PX), (
                 f"{fixture} group {call[2]} offset {dy}: {drift}"
             )
 
@@ -165,7 +173,7 @@ graph LR
 
 
 def test_tied_two_branch_fan_keeps_its_spacing() -> None:
-    """Both branches midway between slots: half-to-even would fold them onto one."""
+    """Both branches midway between slots snap the same way, one pitch apart."""
     (call,) = [c for c in _group_snap_calls(FAN) if "s" in c[2]]
     graph, _pitch, sec_ids, _ = call
     pitch = 40.0
@@ -176,7 +184,40 @@ def test_tied_two_branch_fan_keeps_its_spacing() -> None:
     graph.stations["down"].y = trunk + pitch / 2.0
     graph.stations["down"].x = graph.stations["up"].x
     frozen = (graph, pitch, sec_ids, {})
-    for k in (0.0, *OFFSET_PITCHES):
-        snapped = _snapped(frozen, round(k * pitch, 1))
-        assert snapped["down"] - snapped["up"] == pytest.approx(pitch), (k, snapped)
-        assert snapped["hub"] == pytest.approx(trunk)
+    for dy in (0.0, *_offsets(pitch)):
+        snapped = _snapped(frozen, dy)
+        spacing = snapped["down"] - snapped["up"]
+        assert spacing == pytest.approx(pitch, abs=ORIGIN_ROUNDING_PX), (dy, snapped)
+        assert snapped["hub"] == pytest.approx(trunk, abs=ORIGIN_ROUNDING_PX)
+
+
+TB_EXIT = Path(__file__).parent / "fixtures" / "tb_exit_terminal_on_carrier.mmd"
+
+
+def _reflected(call: _SnapCall) -> _SnapCall:
+    graph, pitch, sec_ids, convergence_sources = deepcopy(call)
+    for st in graph.stations.values():
+        st.y = -st.y
+    for port in graph.ports.values():
+        port.y = -port.y
+    return graph, pitch, sec_ids, convergence_sources
+
+
+@pytest.mark.parametrize("reflect", [False, True], ids=["as-drawn", "reflected"])
+def test_unlevelled_tie_rides_with_the_station_more_lines_reach(reflect: bool) -> None:
+    """The TE entry port sits midway between its two consumers: one takes
+    riboseq, the other rnaseq and, through the first, riboseq too.  Neither
+    side levels more relations, so the port snaps level with the consumer
+    carrying both lines, in either orientation."""
+    call = next(
+        c
+        for c in _group_snap_calls(TB_EXIT.read_text(), TB_EXIT.parent)
+        if c[2] == ["te"]
+    )
+    assert "te__entry_left_7" in _tied_ids(call[0], call[2], call[1])
+    frozen = _reflected(call) if reflect else call
+    for dy in (0.0, *_offsets(call[1])):
+        snapped = _snapped(frozen, dy)
+        assert snapped["te__entry_left_7"] == pytest.approx(
+            snapped["te_counts_prep"], abs=ORIGIN_ROUNDING_PX
+        ), (dy, snapped["te__entry_left_7"], snapped["te_counts_prep"])

@@ -16,7 +16,7 @@ Each row is a branch point (a *gate*) in a `layout/routing/` dispatch handler or
 
 Modules scoped to routing decision gates; `invariants.py` (the `validate=True` checker) and `__init__.py` are excluded.
 
-The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **435** gaps carry a triage verdict.
+The Triage column carries a curated verdict for gaps no fixture can close: **defensive** (a guard arm a valid topology never violates), **candidate-dead** (no constructible topology reaches it; left in place pending a separate deletion review), or **needs-review** (not yet classified). A blank cell means the gap is still open for a fixture. **436** gaps carry a triage verdict.
 
 ## `arranger.py`
 
@@ -1081,7 +1081,7 @@ Gates with an un-exercised arm:
 | 733 | `if abs(in_flat) < 1 or abs(out_flat) < 1:` | `->L734` |  |
 | 841 | `if abs(other.y - station.y) > 1:` | `->L831` | **defensive** -- The loop-back arm (skip appending a column companion) fires only when another non-port station in the same section shares the moving station's x (within 1px) and its y (within 1px) - two near-coincident distinct stations, forbidden by the no-overlap invariant. |
 | 884 | `if ox is None:` | `->L885` | **defensive** -- Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires. |
-| 911 | `if max(moved_xs) - min(moved_xs) <= 1.0:` | `->L912` |  |
+| 911 | `if max(moved_xs) - min(moved_xs) <= 1.0:` | `->L912` | **defensive** -- Early-exit for the agree case: all movers land within 1px of each other. Unreachable for natural pipelines because the engine always seats one fan branch on the hub's trunk row, vetoing companion consensus for the whole column, so moved is empty and the outer guard fires first. |
 | 917 | `if majority_count <= len(moved) / 2:` | `->L918` | **defensive** -- The no-clear-majority arm. Movers in a column either converge to one consensus x or sit off it only via hub/exit-port collinearity at a fixed >=20px quantum; the consensus cluster is always the strict majority, so majority_count is never <= half (0 of corpus, no probe topology reproduces a split). Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken. |
 | 924 | `if not outliers:` | `->L925` | **defensive** -- The no-outliers arm in the movers-disagree branch. Disagreement only arises from hub/exit-port collinearity at a >=20px quantum, never sub-pixel, so whenever spread exceeds 1px at least one mover rounds >1px from the majority x. outliers is never empty here. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken. |
 | 933 | `if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:` | `->L932` | **defensive** -- Per-route anchor guard: only an outgoing route whose start sits at the dragged station's old x is re-pointed to the new x. The skip arm protects against re-pointing a route not anchored at the station (e.g. an L-shape or bypass leg not snapped by _apply_station_moves); dragged stations in the corpus only carry position-anchored routes, so it never fires. |

@@ -210,14 +210,14 @@ def _off_grid_line(y: float, origin: float, pitch: float, tol: float = 1.0) -> b
     return min(residue, pitch - residue) > tol
 
 
-_TIE_TOLERANCE_PITCHES: float = 1e-6
-"""Distance, in pitches, within which a Y counts as midway between two slots."""
+_SNAP_TOLERANCE_PX: float = 1e-2
+"""Distance within which two grid snap Ys count as coinciding.
 
-_LEVEL_TOLERANCE_PX: float = 1e-3
-"""Distance within which a tie's snap counts as levelling a relation."""
-
-_SNAP_SLACK_PX: float = 1e-6
-"""Float slack on the half-pitch snap bound and the one-pitch relation reach."""
+It decides which residues vote for one grid line, which Ys sit midway between
+two slots, and when a tie's snap levels a relation.  The group origin is
+rounded to 0.001 px, so it must comfortably exceed that rounding's 5e-4 px
+error for these answers not to depend on where the row sits on the canvas.
+"""
 
 _UP = -1
 _DOWN = 1
@@ -226,7 +226,7 @@ _DOWN = 1
 def _is_slot_tie(y: float, origin: float, pitch: float) -> bool:
     """True when ``y`` sits midway between two ``origin + n*pitch`` slots."""
     q = (y - origin) / pitch
-    return abs(q - math.floor(q) - 0.5) <= _TIE_TOLERANCE_PITCHES
+    return abs(q - math.floor(q) - 0.5) * pitch <= _SNAP_TOLERANCE_PX
 
 
 def _slot_snap(
@@ -243,17 +243,20 @@ def _slot_snap(
     else:
         n = round(q)
     snapped = origin + n * pitch
-    return snapped if abs(snapped - y) <= half + _SNAP_SLACK_PX else y
+    return snapped if abs(snapped - y) <= half + _SNAP_TOLERANCE_PX else y
 
 
 def _group_grid_origin(
     graph: MetroGraph, sec_ids: list[str], pitch: float
 ) -> tuple[float, dict[str, set[str]]] | None:
-    """Mode of ``y % pitch`` across the group's on-grid stations, with port map.
+    """Most-held grid line ``y % pitch`` of the group's on-grid stations, with port map.
 
     Returns ``(origin, per_section_ports)``, or None when the group holds no
-    station to read a grid from.  Off-track stations were lifted relative to
-    their consumers; they snap to the same grid but don't influence the origin.
+    station to read a grid from.  Residues within :data:`_SNAP_TOLERANCE_PX` of
+    each other, wrapping at the pitch, vote for one line, so float noise cannot
+    split a line's vote; the origin is the line's first residue, rounded to
+    0.001 px.  Off-track stations were lifted relative to their consumers; they
+    snap to the same grid but don't influence the origin.
 
     Rows a section allocator spread to a pitch the grid does not divide carry
     one residue each and so name no mode.  Every candidate origin puts each of
@@ -261,7 +264,8 @@ def _group_grid_origin(
     first station holds; refusing the vote is the one outcome that leaves the
     rows off the grid the snap exists to restore them to.
     """
-    residues: Counter[float] = Counter()
+    line_residues: list[float] = []
+    line_votes: list[int] = []
     per_section_ports: dict[str, set[str]] = {}
     require_phase_field(graph, "half_grid_station_ids")
     half_grid_ids = graph.half_grid_station_ids
@@ -283,11 +287,19 @@ def _group_grid_origin(
             st = graph.stations.get(sid)
             if st is None or st.off_track:
                 continue
-            residues[round(st.y % pitch, 3)] += 1
-    if not residues:
+            residue = st.y % pitch
+            for i, line in enumerate(line_residues):
+                gap = abs(residue - line)
+                if min(gap, pitch - gap) <= _SNAP_TOLERANCE_PX:
+                    line_votes[i] += 1
+                    break
+            else:
+                line_residues.append(residue)
+                line_votes.append(1)
+    if not line_votes:
         return None
-    origin_r, _count = residues.most_common(1)[0]
-    return origin_r, per_section_ports
+    winner = line_votes.index(max(line_votes))
+    return round(line_residues[winner], 3), per_section_ports
 
 
 def _snap_group_to_grid(
@@ -383,9 +395,11 @@ def _tie_directions(
     resolved from the row's relative geometry alone.  Tied stations joined by
     an edge, or sharing one hub in the same column (a fan's branches), form a
     component that moves as one, so neither a fan nor a run is split across two
-    slots.  A component takes the direction that levels more of its relations to the
-    group's other stations (see :func:`_tie_relations`); failing that, the
-    direction its feeders sit in, then its consumers; failing that, up.
+    slots.  A component takes the direction that levels more of its relations
+    to the group's other stations (see :func:`_tie_relations`); failing that,
+    the direction its feeders sit in, then its consumers; then the direction
+    whose levelled neighbours carry more of its lines (see
+    :func:`_levelled_line_counts`); failing that, up.
     """
     ys = {sid: graph.stations[sid].y for sid in candidate_ids}
     tied = sorted(sid for sid, y in ys.items() if _is_slot_tie(y, origin, pitch))
@@ -408,7 +422,12 @@ def _tie_directions(
     for component in _tie_components(graph, tied, feeders, consumers):
         feeder_relations = _tie_relations(component, feeders, ys, partner_ys, pitch)
         consumer_relations = _tie_relations(component, consumers, ys, partner_ys, pitch)
-        direction = _component_tie_direction(feeder_relations, consumer_relations, half)
+        line_counts = _levelled_line_counts(
+            graph, component, group_ids, ys, partner_ys, pitch
+        )
+        direction = _component_tie_direction(
+            feeder_relations, consumer_relations, half, line_counts
+        )
         for sid in component:
             directions[sid] = direction
     return directions
@@ -499,7 +518,7 @@ def _tie_relations(
         own = [p for p in partners_of(sid) if p not in shared]
         if own:
             relations.append((ys[sid], _centre([partner_ys[p] for p in own])))
-    return [(a, b) for a, b in relations if abs(b - a) <= pitch + _SNAP_SLACK_PX]
+    return [(a, b) for a, b in relations if abs(b - a) <= pitch + _SNAP_TOLERANCE_PX]
 
 
 def _centre(ys: list[float]) -> float:
@@ -510,12 +529,17 @@ def _component_tie_direction(
     feeder_relations: list[tuple[float, float]],
     consumer_relations: list[tuple[float, float]],
     half: float,
+    line_counts: dict[int, int],
 ) -> int:
-    """The direction levelling more relations; else toward feeders, consumers, up."""
+    """The direction levelling more relations; else toward feeders, consumers.
+
+    Failing those, the direction whose levelled neighbours carry more of the
+    component's lines (``line_counts``); failing that, up.
+    """
 
     def levelled(direction: int) -> int:
         return sum(
-            abs(own + direction * half - partner) < _LEVEL_TOLERANCE_PX
+            abs(own + direction * half - partner) < _SNAP_TOLERANCE_PX
             for own, partner in feeder_relations + consumer_relations
         )
 
@@ -524,9 +548,71 @@ def _component_tie_direction(
         return _UP if up > down else _DOWN
     for relations in (feeder_relations, consumer_relations):
         net = sum(partner - own for own, partner in relations)
-        if abs(net) > _LEVEL_TOLERANCE_PX:
+        if abs(net) > _SNAP_TOLERANCE_PX:
             return _UP if net < 0 else _DOWN
+    if line_counts[_UP] != line_counts[_DOWN]:
+        return _UP if line_counts[_UP] > line_counts[_DOWN] else _DOWN
     return _UP
+
+
+def _levelled_line_counts(
+    graph: MetroGraph,
+    component: list[str],
+    group_ids: set[str],
+    ys: dict[str, float],
+    partner_ys: dict[str, float],
+    pitch: float,
+) -> dict[int, int]:
+    """Per direction, the lines passing through the neighbours it levels with.
+
+    A member's neighbour counts each line that reaches it from the member along
+    the group's own edges, directly or via other group stations, so the station
+    where a member's bundle reunites outweighs a one-line detour.
+    """
+    members = set(component)
+    consumers_by_line: dict[tuple[str, str], set[str]] = {}
+    feeders_by_line: dict[tuple[str, str], set[str]] = {}
+    for edge in graph.edges:
+        if edge.source in group_ids and edge.target in group_ids:
+            consumers_by_line.setdefault((edge.line_id, edge.source), set()).add(
+                edge.target
+            )
+            feeders_by_line.setdefault((edge.line_id, edge.target), set()).add(
+                edge.source
+            )
+    line_ids = sorted({line_id for line_id, _sid in consumers_by_line})
+    half = pitch / 2.0
+    counts = {_UP: 0, _DOWN: 0}
+    for sid in component:
+        for step in (consumers_by_line, feeders_by_line):
+            adjacent = {
+                p for line_id in line_ids for p in step.get((line_id, sid), ())
+            } - members
+            for line_id in line_ids:
+                for p in _line_reach(sid, line_id, step, members) & adjacent:
+                    for direction in (_UP, _DOWN):
+                        gap = ys[sid] + direction * half - partner_ys[p]
+                        if abs(gap) < _SNAP_TOLERANCE_PX:
+                            counts[direction] += 1
+    return counts
+
+
+def _line_reach(
+    start: str,
+    line_id: str,
+    step: dict[tuple[str, str], set[str]],
+    blocked: set[str],
+) -> set[str]:
+    """Stations ``line_id`` reaches from ``start`` without entering ``blocked``."""
+    reached: set[str] = set()
+    frontier = list(step.get((line_id, start), ()))
+    while frontier:
+        sid = frontier.pop()
+        if sid in reached or sid in blocked:
+            continue
+        reached.add(sid)
+        frontier.extend(step.get((line_id, sid), ()))
+    return reached
 
 
 def _restore_partial_trunk_descents(graph: MetroGraph) -> None:
