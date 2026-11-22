@@ -1,0 +1,19 @@
+%%metro title: BT Entry Bypass On Spread Diagonal
+%%metro line: dna | DNA | #e63946
+%%metro line: rna | RNA | #2a9d8f
+%%metro line: atac | ATAC | #457b9d
+
+graph LR
+    subgraph source [Source]
+        reads[Reads]
+    end
+    subgraph work [Work]
+        %%metro direction: BT
+        align[Align]
+        call[Call]
+        sort[Sort]
+        align -->|dna| sort
+        align -->|rna| call
+        align -->|atac| call
+    end
+    reads -->|rna| call

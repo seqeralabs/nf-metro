@@ -49,7 +49,9 @@ The mapping is many-to-one.
 Declare it with `%%metro process:` directives, each pairing a station id with a regex matched against the **fully-qualified** process name:
 
 ```metro
+%% [!callout /.*ALIGN.*/] Everything after `|` is one regex, never split at commas.
 %%metro process: align | NFCORE_RNASEQ:RNASEQ:.*ALIGN.*
+%% [!callout /FASTQC/] A bare name also matches `NFCORE_RNASEQ:RNASEQ:FASTQC`.
 %%metro process: qc    | FASTQC
 %%metro process: qc    | MULTIQC
 ```
@@ -99,6 +101,7 @@ Each `process:` value then becomes the **tail** under that scope, joined as `<sc
 %%metro process_scope: NFCORE_RNASEQ:RNASEQ
 %%metro auto_process: true
 
+%% [!callout /FASTQ_FASTQC/] Only the tail: matched literally as `NFCORE_RNASEQ:RNASEQ:` plus this.
 %%metro process: fastqc_raw    | FASTQ_FASTQC_UMITOOLS_TRIMGALORE:FASTQC
 %%metro process: salmon_quant  | QUANTIFY_STAR_SALMON:SALMON_QUANT
 %%metro process: salmon_pseudo | QUANTIFY_PSEUDO_ALIGNMENT:SALMON_QUANT
@@ -166,15 +169,19 @@ If the map opted out with `%%metro manifest: false`, drop that directive and re-
 Pass the Nextflow command after `--` and `serve` handles everything.
 It wires `-with-weblog` automatically, opens your browser, and shuts itself down when the run finishes.
 
-```bash
-# from a source file
+:::code-tabs{sync="serve-input"}
+
+```bash label="From a source file"
 nf-metro serve path/to/map.mmd --open --shutdown-after-complete -- \
     nextflow run my/pipeline
+```
 
-# from a pre-rendered SVG
+```bash label="From a pre-rendered SVG"
 nf-metro serve path/to/map.svg --open --shutdown-after-complete -- \
     nextflow run my/pipeline
 ```
+
+:::
 
 ### Two-shell alternative
 
@@ -338,7 +345,7 @@ nf-metro serve-multi --port 8080            # dashboard at http://localhost:8080
 
 Point any pipeline at it via the plugin's `metro` config (in `nextflow.config` or a `-c` overlay), then run it normally:
 
-```groovy
+```nextflow title="nextflow.config"
 plugins { id 'nf-metro@0.1.0' }
 metro {
     server = 'http://localhost:8080'
@@ -383,13 +390,10 @@ A mapping can drift in three ways:
 
 `check-mapping` makes all three loud so CI can gate on them:
 
-```bash
-# Export the pipeline's process graph, then lint the map against it
-nextflow run my/pipeline -with-dag dag.mmd -preview
-nf-metro check-mapping path/to/map.mmd --dag dag.mmd
-```
-
-```text
+```bash frame="terminal"
+$ # Export the pipeline's process graph, then lint the map against it
+$ nextflow run my/pipeline -with-dag dag.mmd -preview
+$ nf-metro check-mapping path/to/map.mmd --dag dag.mmd
 Processes with no station (invisible): 1
   - BWA_MEM
 Station patterns matching no process (stale): 1

@@ -122,6 +122,10 @@ EXPECTED_CLASSIFIER_ONLY_REVERSALS = frozenset(
         # a merge: east's LEFT exit lands on sink's RIGHT entry, the same net
         # half-turn.
         ("merge_right_entry_cross_row_wrap", "east", "sink", "L->R"),
+        # A LEFT exit that wraps under its own section: lower (col 0, row 1)
+        # leaves west and climbs into sink's RIGHT entry two columns over, the
+        # same net half-turn.
+        ("left_exit_wrap_under_own_section", "lower", "sink", "L->R"),
         # A LEFT-exit fan on one RL row: split's junction sends side on to
         # side_step and skip round below it to report.  Both runs keep the row's
         # flow, but the classifier counts every junction-mediated LEFT->RIGHT seam

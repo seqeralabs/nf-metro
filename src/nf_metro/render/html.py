@@ -40,14 +40,15 @@ def render_html(
     embed_basename: str = "metro_map.html",
     font_portability: Literal["embed", "paths"] | None = None,
     inject_dark_mode_css: bool = True,
+    self_color_scheme: bool = True,
     baked_mode: str | None = None,
 ) -> str:
     """Render the graph to an interactive standalone HTML page.
 
     The HTML side panel replaces the SVG legend in interactive mode.
 
-    ``font_portability``, ``inject_dark_mode_css``, and ``baked_mode`` are
-    forwarded to the inlined SVG.  See :func:`nf_metro.render.svg.render_svg`.
+    ``font_portability``, ``inject_dark_mode_css``, ``self_color_scheme`` and
+    ``baked_mode`` are forwarded to :func:`emit_render_plan_html`.
     """
     plan = build_render_plan(
         graph,
@@ -64,6 +65,7 @@ def render_html(
         embed_basename=embed_basename,
         font_portability=font_portability,
         inject_dark_mode_css=inject_dark_mode_css,
+        self_color_scheme=self_color_scheme,
         baked_mode=baked_mode,
     )
 
@@ -75,14 +77,27 @@ def emit_render_plan_html(
     embed_basename: str = "metro_map.html",
     font_portability: Literal["embed", "paths"] | None = None,
     inject_dark_mode_css: bool = True,
+    self_color_scheme: bool = True,
     baked_mode: str | None = None,
 ) -> str:
-    """Create a standalone HTML page from an immutable render plan."""
+    """Create a standalone HTML page from an immutable render plan.
+
+    The page declares ``color-scheme`` on its own root: *baked_mode* when set,
+    else ``light dark`` to follow the viewer.  The embed snippet declares the
+    same on its wrapper unless ``self_color_scheme`` is False, in which case
+    it and its SVG inherit the host page's ``color-scheme``, the way
+    ``--no-self-color-scheme`` does for a bare SVG.
+    """
+    mode = (baked_mode or "").strip().lower()
+    baked = mode if mode in ("light", "dark") else None
+    color_scheme = baked or "light dark"
     svg = emit_render_plan(
         plan,
         animate=animate,
         inject_dark_mode_css=inject_dark_mode_css,
-        baked_mode=baked_mode,
+        dark_mode_css_follows_color_scheme=True,
+        self_color_scheme=self_color_scheme,
+        baked_mode=baked,
     )
     svg = apply_font_portability(svg, font_portability)
 
@@ -98,7 +113,9 @@ def emit_render_plan_html(
         for lid, ln in graph.lines.items()
     ]
     snippet_id = "m" + hashlib.sha1(svg.encode("utf-8")).hexdigest()[:8]
-    inline_snippet = _build_inline_snippet(svg, lines, snippet_id)
+    inline_snippet = _build_inline_snippet(
+        svg, lines, snippet_id, color_scheme if self_color_scheme else None
+    )
 
     return _STANDALONE_TEMPLATE.substitute(
         title=html.escape(title),
@@ -107,6 +124,7 @@ def emit_render_plan_html(
         embed_basename=html.escape(embed_basename),
         inline_snippet_json=_script_safe_json(inline_snippet),
         shared_js=get_driver_js(),
+        color_scheme=color_scheme,
     )
 
 
@@ -123,9 +141,12 @@ def _script_safe_json(value: list[dict[str, str]] | str) -> str:
     return json.dumps(value).replace("</", "<\\/")
 
 
-def _build_inline_snippet(svg: str, lines: list[dict[str, str]], sid: str) -> str:
+def _build_inline_snippet(
+    svg: str, lines: list[dict[str, str]], sid: str, color_scheme: str | None
+) -> str:
     return _INLINE_TEMPLATE.substitute(
         sid=sid,
+        color_scheme_decl=f"color-scheme: {color_scheme}; " if color_scheme else "",
         svg=svg,
         lines_json=_script_safe_json(lines),
         shared_js=get_driver_js(),

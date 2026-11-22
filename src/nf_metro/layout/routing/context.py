@@ -45,6 +45,10 @@ from nf_metro.layout.routing.common import (
     row_top_edge,
     vertical_flow_sections,
 )
+from nf_metro.layout.routing.perp_columns import (
+    PerpEntryColumn,
+    settled_perp_entry_columns,
+)
 from nf_metro.layout.routing.reserved_bands import ReservedCorridors
 from nf_metro.layout.routing.reversal import (
     detect_reversed_sections,
@@ -262,6 +266,7 @@ class _RoutingCtx:
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
+    perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge_fanouts: set[str] = field(default_factory=set)
@@ -510,6 +515,11 @@ def _build_routing_context(
         curve_radius=curve_radius,
         validate_final_route_frames=validate_final_route_frames,
         junction_fan_info=junction_fan_info,
+        perp_entry_columns=(
+            {}
+            if station_offsets is None
+            else settled_perp_entry_columns(graph, station_offsets)
+        ),
         fan_corridors=fan_corridors,
         skip_edges=merge.skip_edges,
         section_trunk_y=section_trunk_y,

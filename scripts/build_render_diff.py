@@ -3,10 +3,16 @@
 
 Usage:
     python scripts/build_render_diff.py BASE_DIR PR_DIR OUTPUT_DIR [--pr NUMBER]
+        [--base-added DIR]
 
 Compares SVG files in BASE_DIR (main branch renders) against PR_DIR (PR branch
 renders). Generates a self-contained HTML page showing side-by-side before/after
 for changed outputs only, grouped by section (read from manifest.json).
+
+A render the PR adds has no counterpart in BASE_DIR. ``--base-added`` names the
+output of ``render_added_on_base.py``: the same maps rendered with the base
+code. Each such map is shown as a before/after pair, or with the base code's
+abort in place of the "before" image.
 
 Exit codes:
     0 - changes detected, diff page written
@@ -22,6 +28,7 @@ import re
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tests"))
@@ -315,8 +322,9 @@ switch between side-by-side, base-only, and PR-only views.
 <li>Intended improvements in the PR column</li>
 <li>Unintended regressions (overlapping lines, shifted labels,
     broken routing) in diagrams you did not mean to change</li>
-<li>New renders (green <em>added</em> badge) or removed renders
-    (red <em>removed</em> badge)</li>
+<li>New renders (green <em>added</em> badge), shown against what the base
+    code makes of the same file, or against the abort it raises there; or
+    removed renders (red <em>removed</em> badge)</li>
 </ul>
 </details>
 {metrics}
@@ -576,17 +584,49 @@ def _comparable_bytes(path: Path) -> bytes:
     return _WATERMARK_VERSION_RE.sub(rb"\1v", path.read_bytes())
 
 
+_TOGGLE_BAR = (
+    '<div class="toggle-bar">'
+    '<button class="active" data-mode="side-by-side">Side by side</button>'
+    '<button data-mode="base">Base only</button>'
+    '<button data-mode="pr">PR only</button>'
+    "</div>"
+)
+
+
+def _before_panel(stem: str, before: Path | None, abort: str | None) -> str:
+    """The "before" panel body for a new map: its base-code render or the abort."""
+    if abort is not None:
+        text = escape(abort)
+        return f'<div class="empty">Aborts on base: {text}</div>'
+    assert before is not None
+    svg = _inline_svg(before, _panel_namespace(stem, "base"))
+    return f'<div class="svg-wrapper">{svg}</div>'
+
+
 def build_diff(
     base_dir: Path,
     pr_dir: Path,
     output_dir: Path,
     pr_number: str | None = None,
     marker: str = "",
+    base_added_dir: Path | None = None,
 ) -> bool:
-    """Compare renders and generate diff page. Returns True if changes found."""
+    """Compare renders and generate diff page. Returns True if changes found.
+
+    *base_added_dir* holds the base-code renders of the maps *pr_dir* adds (see
+    ``render_added_on_base.py``). A new map found there is shown against its
+    base-code render, or against the abort recorded for it.
+    """
     base_svgs = {p.name for p in base_dir.glob("*.svg")} if base_dir.exists() else set()
     pr_svgs = {p.name for p in pr_dir.glob("*.svg")} if pr_dir.exists() else set()
     all_names = sorted(base_svgs | pr_svgs)
+
+    # New maps, mapped to the base-code render that is their "before" image.
+    added_before: dict[str, Path] = {}
+    added_aborts: dict[str, str] = {}
+    if base_added_dir is not None and base_added_dir.exists():
+        added_before = {p.name: p for p in base_added_dir.glob("*.svg")}
+        added_aborts = _load_json(base_added_dir, "aborts.json")
 
     changed: list[tuple[str, str]] = []  # (name, kind)
     for name in all_names:
@@ -611,6 +651,8 @@ def build_diff(
             manifest[name] = base_manifest[name]
 
     base_metrics = _load_json(base_dir, "metrics.json")
+    if base_added_dir is not None:
+        base_metrics.update(_load_json(base_added_dir, "metrics.json"))
     pr_metrics = _load_json(pr_dir, "metrics.json")
 
     # Group changed files by section
@@ -676,16 +718,8 @@ def build_diff(
             if kind == "changed":
                 base_svg = _inline_svg(base_dir / name, _panel_namespace(stem, "base"))
                 pr_svg = _inline_svg(pr_dir / name, _panel_namespace(stem, "pr"))
-                toggle = (
-                    '<div class="toggle-bar">'
-                    '<button class="active" data-mode="side-by-side">'
-                    "Side by side</button>"
-                    '<button data-mode="base">Base only</button>'
-                    '<button data-mode="pr">PR only</button>'
-                    "</div>"
-                )
                 entry = (
-                    f"{div_open}\n{h3}\n{toggle}\n"
+                    f"{div_open}\n{h3}\n{_TOGGLE_BAR}\n"
                     f'<div class="comparison">\n'
                     f'<div class="side side-base"><h4>Base (main)</h4>'
                     f'<div class="svg-wrapper">{base_svg}</div></div>\n'
@@ -693,11 +727,38 @@ def build_diff(
                     f'<div class="svg-wrapper">{pr_svg}</div></div>\n'
                     f"</div>\n</div>"
                 )
+            elif kind == "added" and (
+                name in added_aborts
+                or (
+                    name in added_before
+                    and _comparable_bytes(added_before[name])
+                    != _comparable_bytes(pr_dir / name)
+                )
+            ):
+                pr_svg = _inline_svg(pr_dir / name, _panel_namespace(stem, "pr"))
+                before = _before_panel(
+                    stem, added_before.get(name), added_aborts.get(name)
+                )
+                entry = (
+                    f"{div_open}\n{h3}\n{_TOGGLE_BAR}\n"
+                    f'<div class="comparison">\n'
+                    f'<div class="side side-base"><h4>Base code (map new in PR)</h4>'
+                    f"{before}</div>\n"
+                    f'<div class="side side-pr"><h4>PR</h4>'
+                    f'<div class="svg-wrapper">{pr_svg}</div></div>\n'
+                    f"</div>\n</div>"
+                )
             elif kind == "added":
                 pr_svg = _inline_svg(pr_dir / name, _panel_namespace(stem, "pr"))
+                same_on_base = name in added_before
+                title = (
+                    "New in PR (identical on base code)"
+                    if same_on_base
+                    else "New in PR"
+                )
                 entry = (
                     f"{div_open}\n{h3}\n"
-                    f'<div class="side-only"><h4>New in PR</h4>'
+                    f'<div class="side-only"><h4>{title}</h4>'
                     f'<div class="svg-wrapper">{pr_svg}</div></div>\n'
                     f"</div>"
                 )
@@ -740,10 +801,22 @@ def main() -> None:
         help="Opaque build id embedded in the page so a publisher can confirm "
         "this exact render is the one being served.",
     )
+    parser.add_argument(
+        "--base-added",
+        type=Path,
+        default=None,
+        help="Output directory of render_added_on_base.py: the maps the PR adds, "
+        "rendered with the base code.",
+    )
     args = parser.parse_args()
 
     has_changes = build_diff(
-        args.base_dir, args.pr_dir, args.output_dir, args.pr, args.marker
+        args.base_dir,
+        args.pr_dir,
+        args.output_dir,
+        args.pr,
+        args.marker,
+        args.base_added,
     )
     if has_changes:
         print(f"Diff page written to {args.output_dir}/index.html")

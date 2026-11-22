@@ -1,0 +1,32 @@
+%%metro title: Same-Row Fan With A Bypass Under
+%%metro line: p | P | #3779b1
+%%metro line: q | Q | #6ef362
+%%metro line: r | R bypass | #a66d13
+%%metro line: s | S through | #c9b458
+%%metro line: t | T | #156075
+%%metro grid: side | 0,0
+%%metro grid: blk | 1,0
+%%metro grid: mid | 2,0
+%%metro grid: sink | 3,0
+graph LR
+    subgraph side [Side]
+        x0[X0]
+        x1[X1]
+        x0 -->|r,t| x1
+    end
+    subgraph blk [Blocker]
+        b0[B0]
+        b1[B1]
+        b0 -->|t| b1
+    end
+    subgraph mid [Mid]
+        m0[M0]
+        m1[M1]
+        m0 -->|p,q,s| m1
+    end
+    subgraph sink [Sink]
+        k0[K0]
+    end
+    x1 -->|t| b0
+    x1 -->|r| k0
+    m1 -->|p,q,s| k0

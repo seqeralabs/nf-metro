@@ -1,0 +1,45 @@
+%%metro title: Fuzz 8403570
+%%metro line: l0 | Gather | #e6194b
+%%metro line: l1 | Filter | #3cb44b
+%%metro line: l2 | Cluster_Merge | #4363d8
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 2,0
+
+graph LR
+    subgraph sec0 [Cluster 0]
+        s0n0[markdup_call]
+        s0n1[export_bam_trim]
+        s0n2[filter]
+        s0n0 -->|l0,l1,l2| s0n1
+        s0n1 -->|l0,l2| s0n2
+    end
+    subgraph sec1 [Filter 1]
+        s1n0[dedup]
+        s1n1[trim_filter]
+        s1n2[call]
+        s1n3[trim]
+        s1n4[fastqc]
+        s1n0 -->|l0,l1,l2| s1n1
+        s1n1 -->|l0| s1n4
+        s1n1 -->|l1| s1n2
+        s1n2 -->|l1| s1n3
+        s1n3 -->|l1| s1n4
+    end
+    subgraph sec2 [Trim_Assemble 2]
+        %%metro entry: left | l0, l1, l2
+        s2n0[NORMALIZE]
+        s2n1[fastqc]
+        s2n2[sort_qc_export]
+        s2n3[GATHER_QC]
+        s2n1 -->|l1| s2n2
+        s2n2 -->|l1| s2n3
+        s2n0 -->|l2| s2n1
+        s2n1 -->|l2| s2n3
+    end
+    s0n2 -->|l0,l2| s1n0
+    s0n2 -->|l0| s2n3
+    s0n1 -->|l1| s1n0
+    s1n4 -->|l1| s2n1
+    s1n1 -->|l2| s2n0
+    s0n0 -->|l2| s1n3

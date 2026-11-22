@@ -178,6 +178,7 @@ def fanout_divergence_peel_order(
     reach: list[int] = []
     row_delta: list[int] = []
     target_x: list[float] = []
+    entry_side: list[PortSide | None] = []
     claimed: dict[str, str] = {}
     converging = False
     for edge in graph.edges_from(junction_id):
@@ -201,11 +202,8 @@ def fanout_divergence_peel_order(
         row_delta.append(target_row - source_row)
         target_x.append(coordinate)
         entry_port = graph.ports.get(entry_id)
-        if _traverses_near_band(
-            entry_port.side if entry_port is not None else None,
-            reach[branch],
-            row_delta[branch],
-        ):
+        entry_side.append(entry_port.side if entry_port is not None else None)
+        if _traverses_near_band(entry_side[branch], reach[branch], row_delta[branch]):
             near_band.add(branch)
 
     if len(reach) < 2:
@@ -229,9 +227,30 @@ def fanout_divergence_peel_order(
     def priority(branch: int) -> int:
         return line_priority.get(line_of[branch], 0)
 
-    if len(set(reach)) > 1 and 0 in row_delta:
-        if len(set(row_delta)) < 2:
+    if len(set(reach)) > 1 and set(row_delta) == {0}:
+        # Every branch stays on the source row, so each leaves the shared run at
+        # its own target column.  A fan whose branches all climb over the row --
+        # into a TOP entry, or round to a flow-side entry facing away from the
+        # source -- peels each branch down off the run above it, so the
+        # farthest-reaching branch runs outermost, on top, and every nearer one
+        # peels off inside the siblings that travel on.  Any other branch may
+        # leave below the row, which leaves the fan no single side to order by.
+        def climbs(branch: int) -> bool:
+            side = entry_side[branch]
+            return side is PortSide.TOP or (
+                (side is PortSide.RIGHT and reach[branch] > 0)
+                or (side is PortSide.LEFT and reach[branch] < 0)
+            )
+
+        if PortSide.TOP not in entry_side or not all(map(climbs, branches)):
             return None
+        return opening_order(
+            sorted(
+                branches, key=lambda branch: (-abs(reach[branch]), priority(branch))
+            ),
+            [float(abs(reach[branch])) for branch in branches],
+        )
+    if len(set(reach)) > 1 and 0 in row_delta:
         if len({value > 0 for value in row_delta if value != 0}) != 1:
             return None
 

@@ -45,6 +45,18 @@ The post-diagnosis gate challenges **whether** there is a defect at all, not
 only which kind, plus the claim behind whichever verdict came back - and, for
 an engine bug, the recommended fix path against the plan-time rule below.
 
+**An escalation verdict needs its falsifying test.** "Needs new machinery",
+"needs a policy decision", "blocked on a new primitive" are claims about the
+existing mechanism, and they are tested like any other claim: the worker names
+the in-scope fix it tried or would try, and the observation that rules it out.
+Without that, the coordinator does not accept the verdict; it briefs a second
+HIGH diagnostician with the strongest counter-hypothesis ("generalise the
+existing X one step further") and compares. On one run of this skill, five
+successive escalation verdicts were overturned that way, each by generalising
+machinery that already existed; the one that held was the fourth recurrence of
+the same failure class in the writer loop, which is the genuine signal to stop
+and report rather than patch a fifth instance.
+
 **When the issue already states its own root cause** (it names the function,
 the call site, and the acceptance bar), do not re-derive it from scratch at HIGH
 cost. Brief `fix-issue-diagnostician-mid` to *confirm or refute that specific
@@ -149,11 +161,11 @@ work, usable for **any** layout issue regardless of how it was reported:
 ```bash
 # Validator/crash/guard verdict: parse -> layout -> validate -> route, with
 # findings split into authoring mistakes vs engine bugs.
-PYTHONPATH=/tmp/nf-metro-fix-<N>/src \
+PYTHONPATH=~/projects/nf-metro-fix-<N>/src \
   python .claude/skills/nf-metro-stress-render/scripts/probe_layout.py <file.mmd> --json
 # Per-section station coordinates, flagging stations off their section trunk,
 # off-track in/outputs far from their consumer, and oversized inter-row gaps.
-PYTHONPATH=/tmp/nf-metro-fix-<N>/src \
+PYTHONPATH=~/projects/nf-metro-fix-<N>/src \
   python .claude/skills/nf-metro-stress-render/scripts/inspect_layout.py <file.mmd>
 ```
 

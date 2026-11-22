@@ -86,7 +86,7 @@ nf-metro embed-script -o nf-metro-embed.js
 
 Then on the host page:
 
-```html
+```html title="index.html"
 <!-- 1. Inline the SVG (must contain data-* attributes and manifest) -->
 <div id="my-map">
   <div class="nf-metro-canvas">
@@ -103,6 +103,7 @@ Then on the host page:
 <script>
   const api = attachMetroMap({
     root: document.getElementById("my-map"),
+    <!-- [!callout /lines/] Must match the lines embedded in the SVG. -->
     lines: [
       {
         id: "star_salmon",
@@ -176,7 +177,7 @@ CSS classes written by `selectNode`:
 The default templates ship CSS for these classes.
 If you load the driver separately, add your own styles:
 
-```css
+```css title="styles.css"
 .nf-metro-station-selected rect,
 .nf-metro-station-selected circle {
   stroke: #fff;
@@ -213,7 +214,7 @@ The `highlightLine` and `selectNode` API and the overlay approach solve differen
 
 This snippet builds a self-contained host page that loads a separately generated SVG and driver, then drives the public API from application state.
 
-```html
+```html focus={63-70}
 <!doctype html>
 <html>
   <head>

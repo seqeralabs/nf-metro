@@ -329,3 +329,102 @@ def test_level_approach_carry_is_refused_whole_where_a_lane_is_held() -> None:
     writes, refused = _plan_level_approach_carries(ctx, port_id, [("b", 0.0)])
     assert refused == frozenset({"b"})
     assert writes == {}
+
+
+LEVEL_RETURN_MMD = """\
+%%metro line: l0 | Summarise | #e6194b
+%%metro line: l1 | Sort | #3cb44b
+%%metro grid: sec0 | 2,0
+%%metro grid: sec1 | 0,0
+
+graph LR
+    subgraph sec0 [Report 0]
+        %%metro direction: RL
+        s0n0 -->|l0,l1| s0n1
+        s0n1 -->|l0| s0n3
+        s0n0 -->|l0| s0n2
+    end
+    subgraph sec1 [Qc_Annotate_Classify 1]
+        s1n2 -->|l1| s1n3
+    end
+    subgraph sec2 [Count 2]
+        s2n0[fastqc]
+    end
+    s0n3 -->|l0| s2n0
+    s0n2 -->|l1| s1n2
+    s1n4 -->|l1| s2n0
+"""
+
+PARTIAL_UTURN_MMD = """\
+%%metro line: l0 | Count_Pca | #e6194b
+%%metro line: l1 | Call_Normalize | #3cb44b
+%%metro grid: sec0 | 2,0
+%%metro grid: sec1 | 1,0
+
+graph LR
+    subgraph sec0 [Export_Bam 0]
+        %%metro direction: RL
+        s0n1 -->|l0| s0n2
+        s0n2 -->|l0| s0n3
+        s0n1 -->|l1| s0n3
+    end
+    subgraph sec1 [Bam 1]
+        %%metro direction: RL
+        s1n1 -->|l0| s1n2
+        s1n2 -->|l0| s1n4
+    end
+    subgraph sec2 [Summarise 2]
+        s2n0[gather_pca]
+        s2n2[normalize]
+    end
+    s0n3 -->|l0| s1n1
+    s1n4 -->|l0| s2n2
+    s0n3 -->|l1| s2n0
+"""
+
+
+def _inline_routes(text: str):  # noqa: ANN202
+    graph = prepare_graph(text)
+    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
+    return graph, {
+        (route.edge.source, route.edge.target, route.line_id): list(points)
+        for route, points in zip(plan.routes, plan.route_polylines)
+    }
+
+
+def test_feeder_past_the_port_drawn_level_is_not_a_u_turn() -> None:
+    """A feeder lying past the port whose route runs straight at it arrives flat.
+
+    Only a route that loops round the section turns its line over; one the
+    dispatch draws with no vertical leg keeps its lane, so re-slotting it as a
+    loop would hand it a lane its own short leg then has to step across.
+    """
+    graph, routes = _inline_routes(LEVEL_RETURN_MMD)
+    (port_id,) = graph.sections["sec2"].entry_ports
+    entry = same_row_bypass_entry(graph, port_id, compute_station_offsets(graph))
+    assert entry is None or not entry.u_turn
+    (leg,) = [
+        points
+        for (source, target, line_id), points in routes.items()
+        if source.startswith("__junction") and target == port_id and line_id == "l0"
+    ]
+    assert all(abs(b[1] - a[1]) <= abs(b[0] - a[0]) for a, b in _segments(leg)), leg
+
+
+def test_partial_section_is_not_levelled_against_a_u_turn_hand_over() -> None:
+    """A section handing its line round a loop into the next port keeps its row.
+
+    The loop turns the line through two corners, so the lane it lands on says
+    nothing about where the section has to sit for a level connector; seating
+    the section on it instead steps the junction leg feeding the section.
+    """
+    graph, routes = _inline_routes(PARTIAL_UTURN_MMD)
+    assert graph.stations["s1n1"].y == graph.stations["s0n3"].y
+    (leg,) = [
+        points
+        for (source, target, line_id), points in routes.items()
+        if source.startswith("__junction")
+        and target.startswith("sec1__entry")
+        and line_id == "l0"
+    ]
+    assert {round(y, 3) for _x, y in leg} == {round(leg[0][1], 3)}, leg

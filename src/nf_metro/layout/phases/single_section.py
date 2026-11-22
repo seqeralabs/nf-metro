@@ -403,6 +403,8 @@ def _layout_single_section(
     # distinct line tracks at a layer with only one occupant per line.
     _resolve_station_collisions(sub, section, x_spacing, effective_y_spacing)
 
+    _seat_fan_in_branches_on_lane_side(sub, section, graph, frame)
+
     apply_planned_fans_to_section_subgraph(graph, sub, section)
 
     # Normalize Y so minimum is 0 (raw tracks can be negative)
@@ -523,6 +525,113 @@ def _layout_single_section(
     return sub
 
 
+def _lane_sign(section: Section, graph: MetroGraph) -> float:
+    """Screen sign of *section*'s lane stacking, positive-fan sections resolved."""
+    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
+
+    return section_lane_sign(section, tb_positive_fan_sections(graph))
+
+
+def _in_section_sources(sub: MetroGraph, sid: str) -> list[str]:
+    """Sources of *sid*'s in-edges that are non-port stations of *sub*, per edge."""
+    return [
+        e.source
+        for e in sub.edges_to(sid)
+        if e.source in sub.stations and not sub.stations[e.source].is_port
+    ]
+
+
+def _fan_in_branch_chain(sub: MetroGraph, head: str, join: str) -> list[str] | None:
+    """The in-section source chain ending at *head* that feeds *join*, or ``None``.
+
+    A fan-in branch is a run of stations with no in-section ancestor other than
+    the run itself, each handing on to exactly one station.  Anything that forks
+    or is fed from elsewhere in the section is not a free-standing branch.
+    """
+    chain = [head]
+    current = head
+    while True:
+        if len({e.target for e in sub.edges_from(current)}) != 1:
+            return None
+        preds = set(_in_section_sources(sub, current))
+        if not preds:
+            return chain
+        if len(preds) != 1:
+            return None
+        current = next(iter(preds))
+        if current == join or current in chain:
+            return None
+        chain.append(current)
+
+
+def _slot_occupied(
+    sub: MetroGraph, frame: AxisFrame, sid: str, c: float, chain: list[str]
+) -> bool:
+    """Whether a station outside *chain* sits at *sid*'s flow position and track *c*."""
+    at = frame.primary.get(sub.stations[sid])
+    return any(
+        abs(frame.primary.get(other) - at) < SAME_COORD_TOLERANCE
+        and abs(frame.secondary.get(other) - c) < SAME_COORD_TOLERANCE
+        for oid, other in sub.stations.items()
+        if oid not in chain
+    )
+
+
+def _seat_fan_in_branches_on_lane_side(
+    sub: MetroGraph, section: Section, graph: MetroGraph, frame: AxisFrame
+) -> None:
+    """Seat a partitioned fan-in's branches on the side its section's lanes stack.
+
+    The fan-in mirror of :func:`~nf_metro.layout.fan_plans.fan_lane_sign`: a
+    branch carrying lines the join's trunk does not carry lands on its own lane at
+    the join, so it must arrive from the side the bundle stacks that lane on.
+    :func:`assign_tracks` progresses tracks along the positive secondary axis, so
+    in a section whose lanes stack the other way each such branch is reflected
+    across the join.
+    """
+    # assign_tracks seats lines in priority order, which is the section's lane
+    # order only while no seam delivers an order of its own: at most one line
+    # enters the section (offsets._reorder_reconvergence leaves it on priority).
+    seam_lines = {
+        edge.line_id
+        for port_id in section.entry_ports
+        for edge in graph.edges_to(port_id)
+    }
+    if len(seam_lines) > 1:
+        return
+    lane_sign = _lane_sign(section, graph)
+    if lane_sign > 0:
+        return
+    axis = frame.secondary
+
+    for join_id, join in sub.stations.items():
+        if join.is_port or join.off_track:
+            continue
+        preds = dict.fromkeys(_in_section_sources(sub, join_id))
+        if len(preds) < 2:
+            continue
+        join_c = axis.get(join)
+        pred_lines = {pid: set(graph.station_lines(pid)) for pid in preds}
+        for pid, lines in pred_lines.items():
+            st = sub.stations[pid]
+            delta = axis.get(st) - join_c
+            if delta * lane_sign >= -SAME_COORD_TOLERANCE:
+                continue
+            if any(lines & other for o, other in pred_lines.items() if o != pid):
+                continue
+            chain = _fan_in_branch_chain(sub, pid, join_id)
+            if chain is None:
+                continue
+            reflected = {sid: 2 * join_c - axis.get(sub.stations[sid]) for sid in chain}
+            if any(
+                _slot_occupied(sub, frame, sid, c, chain)
+                for sid, c in reflected.items()
+            ):
+                continue
+            for sid, c in reflected.items():
+                axis.set(sub.stations[sid], c)
+
+
 def _align_bypass_v_to_lane_side(
     sub: MetroGraph, section: Section, graph: MetroGraph
 ) -> None:
@@ -551,9 +660,7 @@ def _align_bypass_v_to_lane_side(
     if not bypass_vs:
         return
 
-    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
-
-    lane_sign = section_lane_sign(section, tb_positive_fan_sections(graph))
+    lane_sign = _lane_sign(section, graph)
     real_xs = [
         s.x
         for s in sub.stations.values()

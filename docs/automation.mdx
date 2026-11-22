@@ -13,11 +13,13 @@ nf-metro ships two integrations:
 
 The composite action renders the map and reports what it wrote and whether anything changed.
 
-```yaml
+```yaml title=".github/workflows/metro.yml"
 - uses: actions/checkout@v4
 - uses: seqeralabs/nf-metro@2.1.0
+  # [!callout /metro/] The id is how later steps read `steps.metro.outputs.*`.
   id: metro
   with:
+    # [!callout /input/] Path of the `.mmd` to render.
     input: assets/metro_map.mmd
     theme: nfcore
     embed-font: "true"
@@ -44,8 +46,9 @@ Paths that stay inside the checkout are fine, `..` hops included, so `assets/met
 
 A `%%metro output:` path can carry [per-output render overrides](/nf-metro/cli/#per-output-render-overrides) after a `|`, which is how one action run produces a whole image set without any `extra-args`:
 
-```
+```metro
 %%metro output: nf-core-demo_metro_map.svg
+%% [!callout /animate/] Per-output overrides follow a `|`.
 %%metro output: nf-core-demo_metro_map_animated.svg | animate
 %%metro output: nf-core-demo_metro_map_dark.png     | mode=dark
 %%metro output: nf-core-demo_metro_map_light.png    | mode=light
@@ -58,8 +61,7 @@ The same block drives the pre-commit hook below, so a single commit keeps all fo
 
 Re-render the SVG locally on every commit so it cannot drift from the source.
 
-```yaml
-# .pre-commit-config.yaml
+```yaml title=".pre-commit-config.yaml"
 repos:
   - repo: https://github.com/seqeralabs/nf-metro
     rev: 2.1.0
@@ -75,8 +77,9 @@ It runs with `--theme nfcore --embed-font` by default.
 Setting `args` replaces that whole list.
 Repeat the flags you want to keep alongside the new one:
 
-```yaml
+```yaml title=".pre-commit-config.yaml"
 - id: nf-metro
+  # [!callout /--mode/] The one new flag. The rest repeat the defaults.
   args: [--theme, nfcore, --embed-font, --mode, light]
 ```
 

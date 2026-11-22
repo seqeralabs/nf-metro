@@ -83,14 +83,51 @@ const examples = {};
 
 /* ------------------------------- editor -------------------------------- */
 
+// Mirrors src/grammars/metro.tmLanguage.json (the docs' code-block grammar);
+// keep the two in sync.
 function defineMode() {
+  const hex = { regex: /#[0-9A-Fa-f]{3,8}\b/, token: "metro-hex" };
+  const number = { regex: /\b\d+(?:\.\d+)?\b/, token: "metro-number" };
   CodeMirror.defineSimpleMode("metro", {
     start: [
-      { regex: /%%metro\b.*/, token: "metro-directive" },
+      {
+        regex: /(%%metro)(\s+)([a-zA-Z_]+:)/,
+        token: ["metro-directive", null, "metro-property"],
+        next: "directive",
+      },
       { regex: /%%.*/, token: "comment" },
-      { regex: /\b(graph|subgraph|end|LR|RL|TB|BT)\b/, token: "metro-keyword" },
-      { regex: /\|[^|]*\|/, token: "metro-line" },
-      { regex: /(--+>|<--+|-\.->|==+>)/, token: "metro-arrow" },
+      {
+        regex: /\b(graph|flowchart)(\s+)(LR|RL|TB|TD|BT)\b/,
+        token: ["metro-keyword", null, "metro-keyword"],
+      },
+      {
+        regex:
+          /\b(?:graph|flowchart|subgraph|end|direction|classDef|class|style|linkStyle)\b/,
+        token: "metro-keyword",
+      },
+      {
+        regex: /-{2,3}>|<-{2,3}|-\.->|-\.-|={2,3}>|===|~~~|--/,
+        token: "metro-arrow",
+      },
+      { regex: /\|[^|]*\|/, token: "metro-edgelabel" },
+      { regex: /[[({][^\])}]*[\])}]/, token: "metro-nodelabel" },
+      hex,
+      number,
+      { regex: /\w+/, token: null },
+    ],
+    // A directive runs to the end of its line. The zero-width `sol` rule
+    // drops back to `start` on the next line; CodeMirror retries the token
+    // after a non-advancing state change.
+    directive: [
+      { regex: /(?:)/, sol: true, next: "start" },
+      hex,
+      {
+        regex:
+          /\b(?:true|false|left|right|top|bottom|bundle|centered|rails|solid|dashed|dotted|definition|span|straight|symmetric)\b/,
+        token: "metro-constant",
+      },
+      number,
+      { regex: /\w+/, token: null },
     ],
   });
 }

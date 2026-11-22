@@ -290,7 +290,13 @@ def _apply_statements(statements: list[_Statement], graph: MetroGraph) -> None:
         if isinstance(stmt, _End):
             current_section_id = None
         elif isinstance(stmt, _Subgraph):
-            graph.add_section(Section(id=stmt.section_id, name=stmt.name))
+            graph.add_section(
+                Section(
+                    id=stmt.section_id,
+                    name=stmt.name,
+                    is_hidden=stmt.section_id.startswith("_"),
+                )
+            )
             current_section_id = stmt.section_id
         elif isinstance(stmt, _Directive):
             _apply_directive(stmt.key, stmt.value, graph, current_section_id)

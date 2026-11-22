@@ -150,8 +150,6 @@
     "_guard_no_mixed_entry_directions|None",
     "_guard_no_same_row_backward_feed|None",
     "_guard_no_mixed_entry_directions|None",
-    "_guard_no_same_row_backward_feed|None",
-    "_guard_no_mixed_entry_directions|None",
     "_guard_section_bboxes_positive|after Stage 1.1",
     "_guard_no_negative_grid_columns|after Stage 1.1",
     "_guard_explicit_grid_directions|after Stage 1.1",

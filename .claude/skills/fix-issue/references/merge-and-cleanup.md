@@ -100,7 +100,7 @@ Stop on any mismatch. Then use this order:
    and stop if any fails; branch deletion can auto-close a dependent PR.
 2. Delete the **remote** branch: `git push origin --delete fix/<N>-<slug>` (or via
    the GitHub UI's auto-delete on merge).
-3. Remove the local worktree: `git worktree remove /tmp/nf-metro-fix-<N>`.
+3. Remove the local worktree: `git worktree remove ~/projects/nf-metro-fix-<N>`.
 4. Delete the reconciled local branch with `git branch -d fix/<N>-<slug>`. Use
    `-D` only after explicit user authority and proof that `-d` rejects a fully
    reconciled branch for a harmless bookkeeping reason.
@@ -117,7 +117,7 @@ exist until the PR does: create the body with the placeholder, then fill it in
 with `gh pr edit` at Step 10.
 
 ```bash
-cd /tmp/nf-metro-fix-<N>
+cd ~/projects/nf-metro-fix-<N>
 gh pr create --draft --repo seqeralabs/nf-metro --base main --title "<title>" --body "$(cat <<'EOF'
 ## Summary
 <bullets describing the aggregate diff against main, no narrative>

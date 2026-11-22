@@ -12,7 +12,10 @@ additive-only PR hygiene so a fix never silently regresses the gallery.
 **Communication:** keep status updates terse and lead any explanation of a
 mechanism or a render with one plain-English sentence before the code or
 coordinates. Prefer a narrow table to a wide one. When asked to "explain
-simply" or for "less words", cut - don't re-expand.
+simply" or for "less words", cut - don't re-expand. Say what a long worker is
+doing before going quiet; one line per handoff. A decision put to the user
+comes with full renders; open nothing on their screen unasked. "Pause" follows
+the protocol in [`coordinator.md`](references/coordinator.md).
 
 **Conventions** (substitute if your setup differs):
 - Local nf-metro checkout: `~/projects/nf-metro`
@@ -158,22 +161,17 @@ the one it got: that call belongs at spawn time or not at all.
 **A hook blocks `model` on a named `fix-issue-*` spawn** (`.claude/settings.json`),
 except lowering `fix-issue-writer` to MID; see `agent-types.md`.
 
-**Never use the `fork` subagent type.** A fork inherits the parent's entire
-conversation and always runs on the parent's model - the `model` parameter is
-ignored - so every tier rule here is void. Measured, fork spawns cost about 4x a comparable named
-worker. Use the named role types.
+**Never use the `fork` subagent type.** A fork inherits the whole conversation
+and runs on the parent's model (`model` is ignored), voiding every tier rule
+here, at about 4x the cost of a named worker.
 
-**LIGHT is unvalidated.** No historical spawn in this repo ran on the LIGHT
-model, so nothing shows those four roles can do their jobs there. Treat early
-LIGHT spawns as an experiment: if one blocks or returns something wrong, re-route
-it up and say so rather than trusting the table.
+**LIGHT is unvalidated.** No historical spawn ran on the LIGHT model. Treat
+early LIGHT spawns as an experiment; a LIGHT worker that returns "blocked, this
+needs judgment" is a correct outcome. Re-route it up a tier and say so rather
+than starting high pre-emptively.
 
-A LIGHT worker that returns "blocked, this needs judgment" is a correct
-outcome, not a failure. Re-route it up a tier rather than pre-emptively
-starting high.
-
-`effort` is a second dial but fixed per definition, with no per-invocation
-form: see [`agent-types.md`](references/agent-types.md).
+`effort` is fixed per definition, with no per-invocation form:
+[`agent-types.md`](references/agent-types.md).
 
 Resolution order when tiers collide, including the `CLAUDE_CODE_SUBAGENT_MODEL`
 override that beats everything in this skill:
@@ -189,19 +187,18 @@ parameter resolves to the definition's model, not the session's, so a named type
 carries its tier whether or not anyone remembers to pass it. That is the whole
 point of the definitions - the tier is structural rather than remembered.
 
-Two cases still need the model passed explicitly. If you spawn a generic type
-(`general-purpose`, `Explore`) there is no definition to fall back on, so an
-omitted model means the session's. And if `CLAUDE_CODE_SUBAGENT_MODEL` is set it
-overrides both; check it once at session start. Every definition carries an explicit `tools` allowlist: without one a subagent
-inherits every tool the main conversation has, including all MCP servers and
-`Agent`, which would let a worker spawn untiered children.
+Two cases still need the model passed explicitly: a generic type
+(`general-purpose`, `Explore`) has no definition to fall back on, so an omitted
+model means the session's; and `CLAUDE_CODE_SUBAGENT_MODEL`, if set, overrides
+both, so check it once at session start. Every definition carries an explicit
+`tools` allowlist; without one a subagent inherits every tool, including all
+MCP servers and `Agent`, and could spawn untiered children.
 
 The read-only roles carry no `Edit` or `Write`, but all hold `Bash`: a backstop,
 not a guarantee. The instruction is what enforces read-only.
 
-Substituting `Explore`/`Plan` saves each spawn both CLAUDE.md files but discards
-the role definition and blocks re-briefing, and is measured at about $1.65 a run:
-a curiosity, not a lever.
+Substituting `Explore`/`Plan` discards the role definition and blocks
+re-briefing to save about $1.65 a run: not a lever.
 
 ### Briefing a worker
 
@@ -258,13 +255,15 @@ and is re-read on all of them.
 The measured levers, in order: keep bulk command output out of every context
 (tool output is 74.5% of all resident-context cost), hand the writer off around
 200 turns, name a tier on every spawn, never `fork`, and do not park a large
-context across a CI wait. Full list with the figures behind each:
+context across a CI wait. A hook refuses a local full suite without the
+`full-suite-ok` marker; never `/loop` on CI. Full list with figures:
 [`coordinator.md`](references/coordinator.md).
 
 ## Scope discipline
 
 Resolve bounded fallout surfaced by diagnosis, implementation, `/simplify`, lint,
 review, or CI **in the current run**. Filing and deferring is the exception, and
-a different subsystem is not by itself a reason to defer. Full rules, including
-when a sibling PR is the right home and what a legitimate blocker looks like:
-[`scope-discipline.md`](references/scope-discipline.md).
+a different subsystem is not by itself a reason to defer. The snowball
+checkpoint in [`scope-discipline.md`](references/scope-discipline.md) bounds
+it: past its thresholds the coordinator stops and reports, or in autonomous
+mode lands the green core and stacks the rest. Full rules there.

@@ -1,0 +1,32 @@
+%%metro title: Two feeders into a bottom entry column
+%%metro line: l1 | Quant_Trim_Pca | #3cb44b
+%%metro line: l2 | Gather | #4363d8
+%%metro line: l4 | Bin_Filter | #911eb4
+%%metro grid: sec2 | 0,0
+%%metro grid: sec3 | 0,3
+%%metro grid: sec4 | 0,4
+
+graph LR
+    subgraph sec2 [Dedup_Summarise_Count 2]
+        s2n0[markdup_bin_vcf]
+        s2n1[bam]
+        s2n2[quant_merge]
+        s2n0 -->|l1,l2,l4| s2n1
+        s2n1 -->|l1,l2,l4| s2n2
+    end
+    subgraph sec3 [Sort 3]
+        s3n0[bin_index]
+        s3n1[filter]
+        s3n2[polish]
+        s3n0 -->|l1,l2| s3n1
+        s3n1 -->|l1,l2| s3n2
+    end
+    subgraph sec4 [Assemble_Assemble 4]
+        %%metro entry: bottom | l1, l2, l4
+        s4n0[pca_annotate]
+        s4n1[qc_qc]
+        s4n0 -->|l1,l2,l4| s4n1
+    end
+    s2n2 -->|l1,l2| s3n0
+    s3n2 -->|l1,l2| s4n0
+    s2n2 -->|l4| s4n0

@@ -1,0 +1,27 @@
+%% Label-strike clearance grows several levers in one section; the order they
+%% enter the section's gap dicts decides which ones minimisation keeps.
+%%metro line: l0 | Qc_Sort | #e6194b
+%%metro line: l1 | Trim_Count_Export | #3cb44b
+%%metro line: l2 | Polish_Gather_Merge | #4363d8
+%%metro grid: sec0 | 2,0
+%%metro grid: sec1 | 1,0
+
+graph LR
+    subgraph sec0 [Quant 0]
+        %%metro direction: RL
+        %%metro exit: top | l2
+        s0n1 -->|l2| s0n2
+    end
+    subgraph sec1 [Normalize_Pca 1]
+        %%metro direction: RL
+        s1n0[markdup_vcf]
+        s1n1[NORMALIZE]
+        s1n0 -->|l0,l1| s1n1
+        s1n1 -->|l1| s1n2
+    end
+    subgraph sec2 [Dedup_Pca 2]
+        s2n0 -->|l0,l1,l2| s2n1
+    end
+    s1n1 -->|l0| s2n0
+    s1n2 -->|l1| s2n0
+    s0n1 -->|l2| s2n0

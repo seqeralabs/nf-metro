@@ -33,7 +33,7 @@ The examples that follow show the unedited output.
 
 A five-process pipeline with no subworkflows:
 
-```groovy
+```nextflow title="main.nf"
 workflow {
     reads_ch = Channel.of(["sample1", [file("reads/s1_1.fq.gz"), file("reads/s1_2.fq.gz")]])
     reference_ch = Channel.of(file("genome.fa"))
@@ -64,8 +64,8 @@ Output rarely comes out tidier than this.
 
 A pipeline with three subworkflows (Preprocess, Alignment, Quantification) plus a standalone MultiQC process:
 
-```groovy
-workflow PREPROCESS {
+```nextflow title="main.nf"
+workflow PREPROCESS {  // [!mention subworkflow]
     take: reads
     main:
     FASTQC(reads)
@@ -76,19 +76,19 @@ workflow PREPROCESS {
     trim_log = TRIMGALORE.out.log
 }
 
-workflow ALIGNMENT {
+workflow ALIGNMENT {  // [!mention subworkflow]
     take: reads; genome; gtf
     main:
     STAR_GENOMEGENERATE(genome, gtf)
     STAR_ALIGN(reads, STAR_GENOMEGENERATE.out.index.collect())
     SAMTOOLS_SORT(STAR_ALIGN.out.bam)
-    SAMTOOLS_INDEX(SAMTOOLS_SORT.out.bam)
+    SAMTOOLS_INDEX(SAMTOOLS_SORT.out.bam)  // [!mention spur]
     emit:
     bam = SAMTOOLS_SORT.out.bam
     star_log = STAR_ALIGN.out.log
 }
 
-workflow QUANTIFICATION {
+workflow QUANTIFICATION {  // [!mention subworkflow]
     take: bam; gtf
     main:
     SALMON_QUANT(bam, gtf)
@@ -100,7 +100,7 @@ workflow {
     PREPROCESS(reads_ch)
     ALIGNMENT(PREPROCESS.out.reads, genome_ch, gtf_ch)
     QUANTIFICATION(ALIGNMENT.out.bam, gtf_ch)
-    MULTIQC(/* all logs */)
+    MULTIQC(/* all logs */)  // [!mention standalone]
 }
 ```
 
@@ -115,22 +115,22 @@ nf-metro render dag.mmd -o pipeline.svg --from-nextflow
   mmd={false}
 />
 
-The converter maps each subworkflow to a section and creates a Reporting section for the standalone MultiQC.
+The converter maps each [subworkflow](#mention:subworkflow) to a section and creates a Reporting section for the [standalone MultiQC](#mention:standalone).
 It also detects bypass lines, meaning edges that skip sections, such as QC metrics going from Preprocess straight to Reporting.
-Dead-end processes such as Samtools Index get spur lines.
+Dead-end processes such as [Samtools Index](#mention:spur) get spur lines.
 
 ### Variant calling pipeline (diamond pattern)
 
 A pipeline where two variant callers (GATK and DeepVariant) both receive input from the same alignment step and reconverge at BCFtools Stats:
 
-```groovy
+```nextflow title="main.nf"
 workflow VARIANT_CALLING {
     take: bam; bai; genome
     main:
     bam_bai = bam.join(bai)
-    GATK_HAPLOTYPECALLER(bam_bai, genome.collect())
-    DEEPVARIANT(bam_bai, genome.collect())
-    BCFTOOLS_STATS(GATK_HAPLOTYPECALLER.out.vcf.mix(DEEPVARIANT.out.vcf))
+    GATK_HAPLOTYPECALLER(bam_bai, genome.collect())  // [!mention fanout]
+    DEEPVARIANT(bam_bai, genome.collect())  // [!mention fanout]
+    BCFTOOLS_STATS(GATK_HAPLOTYPECALLER.out.vcf.mix(DEEPVARIANT.out.vcf))  // [!mention fanin]
     emit:
     stats = BCFTOOLS_STATS.out.stats
 }
@@ -154,7 +154,7 @@ nf-metro render dag.mmd -o pipeline.svg --from-nextflow
   mmd={false}
 />
 
-The Variant Calling section fans out to the two callers and back in again without further editing.
+The Variant Calling section [fans out](#mention:fanout) to the two callers and [back in](#mention:fanin) again without further editing.
 
 ## Hand-tune the output
 
@@ -169,10 +169,12 @@ nf-metro render pipeline.mmd -o pipeline.svg
 
 The converter produces this for the variant calling pipeline:
 
-```metro
+```metro playground="metro"
+%% [!mention title]
 %%metro title: Preprocess / Alignment / Variant Calling Pipeline
 %%metro style: nfcore
 %%metro line: main | Main | #2db572
+%% [!mention bypass]
 %%metro line: preprocess_reporting | Preprocess - Reporting | #0570b0
 
 graph LR
@@ -183,8 +185,8 @@ graph LR
 
     subgraph alignment [Alignment]
         bwa_index([Bwa Index])
-        bwa_mem([Bwa Mem])
-        samtools_sort([Samtools Sort])
+        bwa_mem([Bwa Mem])  %% [!mention labels]
+        samtools_sort([Samtools Sort])  %% [!mention labels]
         samtools_index([Samtools Index])
 
         bwa_index -->|main| bwa_mem
@@ -193,7 +195,7 @@ graph LR
     end
 
     subgraph variant_calling [Variant Calling]
-        gatk_haplotypecaller([Gatk Haplotypeca])
+        gatk_haplotypecaller([Gatk Haplotypeca])  %% [!mention labels]
         deepvariant([Deepvariant])
         bcftools_stats([Bcftools Stats])
 
@@ -216,7 +218,7 @@ graph LR
     fastp -->|preprocess_reporting| multiqc
 ```
 
-Cleaning up the labels, renaming the bypass line, and adding a proper title gives this:
+Cleaning up the [labels](#mention:labels), renaming the [bypass line](#mention:bypass), and adding a proper [title](#mention:title) gives this:
 
 <Metro src="examples/variant_calling.mmd" />
 
@@ -234,6 +236,8 @@ Starting from the hand-tuned variant calling example earlier, three things chang
 1. Add `%%metro file:` directives at the top of the file, one per file terminus:
 
    ```metro
+   %% [!callout /fastq_in/] The station ID. The blank terminus station uses the same ID.
+   %% [!callout /FASTQ/] The label drawn on the document icon.
    %%metro file: fastq_in | FASTQ
    %%metro file: ref_in | FASTA
    %%metro file: vcf_out | VCF
@@ -276,18 +280,18 @@ Use it when the format should stand out, as in `%%metro files: aln_out | BAM | A
 The `-with-dag` output from Nextflow contains three types of node: processes (the pipeline steps), channels and values (data plumbing), and operators (Nextflow internals such as `mix` and `collect`).
 The raw DAG for the flat pipeline example looks like this:
 
-```metro
+```metro annotations="side"
 flowchart TB
     subgraph " "
-    v0["Channel.of"]
-    v1["Channel.of"]
+    v0["Channel.of"] %% [!annotate] A channel node: data plumbing, dropped.
+    v1["Channel.of"] %% [!annotate] A value node: data plumbing, dropped.
     end
-    v2(["FASTQC"])
+    v2(["FASTQC"]) %% [!annotate] A process node (stadium shape): the only kind kept.
     v4(["TRIM_READS"])
     v6(["ALIGN"])
     v7(["SORT_BAM"])
     v11(["MULTIQC"])
-    v5(( ))
+    v5(( )) %% [!annotate] An operator node such as `mix` or `collect`: Nextflow internals, dropped.
     v8(( ))
     v0 --> v2
     v0 --> v4
@@ -331,7 +335,7 @@ The converter:
 
 For this example, the result is:
 
-```metro
+```metro playground="metro"
 %%metro title: Pipeline
 %%metro style: nfcore
 %%metro line: main | Main | #2db572

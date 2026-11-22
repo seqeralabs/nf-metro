@@ -182,6 +182,7 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
                 "grid_inferred": grid is None or not grid.is_author_owned,
                 "grid_provenance": _decision_info(grid),
                 "is_implicit": sec.is_implicit,
+                "is_hidden": sec.is_hidden,
                 "stations": [
                     st for st in sec.station_ids if station_kind(graph, st) == "station"
                 ],
@@ -413,7 +414,13 @@ def _info_detail(info: dict[str, Any]) -> dict[str, Any]:
             {
                 "number": sec["number"],
                 "name": sec["name"],
-                "box": "implicit" if sec["is_implicit"] else "explicit",
+                "box": (
+                    "implicit"
+                    if sec["is_implicit"]
+                    else "hidden"
+                    if sec["is_hidden"]
+                    else "explicit"
+                ),
                 "direction": sec["direction"],
                 "direction_source": (
                     sec["direction_provenance"]["state"]

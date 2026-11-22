@@ -153,6 +153,7 @@ def render_graph_result(
             embed_basename=cfg.embed_basename,
             font_portability=cfg.font_portability,
             inject_dark_mode_css=cfg.inject_dark_mode_css,
+            self_color_scheme=cfg.self_color_scheme,
             baked_mode=cfg.baked_mode,
         )
         return RenderResult(content, plan)

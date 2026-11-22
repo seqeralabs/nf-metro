@@ -660,8 +660,9 @@ def _partial_handovers(
     """Direct port-to-port through-line hand-overs from *partial* to a carrier.
 
     A hand-over qualifies when it runs port to port to a carrier one grid column
-    away with no junction between them and no cell-mate forcing a bypass -- the
-    cases a level connector can be drawn for.  Each carries the offset step
+    away with no junction between them, no cell-mate forcing a bypass, and no
+    loop round the far section into a port facing away from it -- the cases a
+    level connector can be drawn for.  Each carries the offset step
     (destination lane minus source lane) at the current frame.  *carrier_ports*
     is the union of every carrier section's port IDs.
     """
@@ -670,6 +671,7 @@ def _partial_handovers(
         _hop_needs_bypass,
         _resolve_section_colrow,
     )
+    from nf_metro.layout.routing.offsets import loops_round_entry_section
 
     junction_ids = graph.junction_ids
     handovers: list[_Handover] = []
@@ -707,6 +709,10 @@ def _partial_handovers(
                 HopEnd(p_station, p_col, p_row),
                 HopEnd(c_station, c_col, c_row),
             ).needed:
+                continue
+            if loops_round_entry_section(
+                graph, graph.stations[edge.source], graph.stations[edge.target]
+            ):
                 continue
             lid = edge.line_id
             step = offsets.get((other, lid), 0.0) - offsets.get((pid, lid), 0.0)

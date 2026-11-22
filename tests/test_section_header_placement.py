@@ -12,9 +12,10 @@ Covers:
 * Meaningfulness: with header relocation disabled (the resolver pinned to its
   default above-left position) the new fixtures clash, proving the chain - not
   coincidence - is what keeps them clear.
-* Ranking: a caption held in the band above its box keeps at least the room from
-  route ink that the bottom edge it declined would have given it, measured off
-  the drawn map rather than by re-running the resolver's own search.
+* Ranking: a caption held in the band above its box keeps a full header band of
+  room from route ink, or at least the room the bottom edge it declined would
+  have given it, measured off the drawn map rather than by re-running the
+  resolver's own search.
 * Accounting: whichever side a caption takes, the room the placed boxes leave on
   that side holds its ink.
 """
@@ -269,8 +270,9 @@ def test_every_caption_fits_the_band_its_own_side_leaves(path: Path) -> None:
     "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
 )
 def test_a_band_caption_is_never_tighter_than_the_edge_it_declined(path: Path) -> None:
-    """A caption kept in the band above its box keeps at least as much room from
-    route ink as the bottom edge it passed over would have given it.
+    """A caption kept in the band above its box keeps a full header band of room
+    from route ink, or at least as much as the bottom edge it passed over would
+    have given it.
 
     This is the ranking read back off the drawn map.  A caption squeezed into a
     contested band beside a descending stroke fails it whenever the bottom edge
@@ -297,7 +299,7 @@ def test_a_band_caption_is_never_tighter_than_the_edge_it_declined(path: Path) -
         if depth > _side_room(graph, section, "below") + 0.5:
             continue
         rival = _min_route_distance(below, polylines)
-        if rival < SECTION_HEADER_ROUTE_PAD:
+        if rival < SECTION_HEADER_ROUTE_PAD or taken >= SECTION_HEADER_PROTRUSION:
             continue
         assert taken >= rival - 0.5, (
             f"{section_id} was held in its band with {taken:.2f}px of route "
@@ -311,12 +313,12 @@ def test_a_contested_band_loses_to_the_roomier_bottom_edge() -> None:
     graph = MetroGraph()
     section = Section(id="s", name="Work")
     section.bbox_x, section.bbox_y = 0.0, 100.0
-    section.bbox_w, section.bbox_h = 200.0, 80.0
+    header_width = section_header._header_length("Work", 13.0)
+    section.bbox_w, section.bbox_h = header_width + 30.0, 80.0
     graph.sections["s"] = section
 
     # Two risers straddling the box width: each crosses the band, and the gap
     # between them is only just wide enough for the header.
-    header_width = section_header._header_length("Work", 13.0)
     left_riser = [(4.0, 60.0), (4.0, 140.0)]
     right_riser = [(header_width + 14.0, 60.0), (header_width + 14.0, 140.0)]
     placement = resolve_section_header_placement(
@@ -331,6 +333,63 @@ def test_a_contested_band_loses_to_the_roomier_bottom_edge() -> None:
     assert placement.keepout[1] >= section.bbox_y + section.bbox_h - 0.01
     below_clearance = _min_route_distance(placement.keepout, [left_riser, right_riser])
     assert below_clearance > 3.0 * SECTION_HEADER_ROUTE_PAD
+
+
+def test_a_band_slot_clear_of_an_over_top_loop_beats_a_roomier_bottom_edge() -> None:
+    """A loop passing over the box a full header band clear of the slot under it
+    leaves the caption above its box, even where the bottom edge has more air."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Work")
+    section.bbox_x, section.bbox_y = 0.0, 100.0
+    section.bbox_w, section.bbox_h = 600.0, 80.0
+    graph.sections["s"] = section
+
+    riser = [(10.0, 60.0), (10.0, 140.0)]
+    keepout_top = section.bbox_y - SECTION_HEADER_PROTRUSION
+    loop_y = keepout_top - SECTION_HEADER_PROTRUSION - 6.0
+    loop = [(-100.0, 200.0), (-100.0, loop_y), (700.0, loop_y), (700.0, 200.0)]
+    polylines = [riser, loop]
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=polylines, title_font_size=13.0
+    )
+
+    assert placement.mode == "nudge"
+    box_bottom = section.bbox_y + section.bbox_h
+    x0, y0, x1, y1 = placement.keepout
+    below = (section.bbox_x, box_bottom, section.bbox_x + x1 - x0, box_bottom + y1 - y0)
+    assert _min_route_distance(below, polylines) > _min_route_distance(
+        placement.keepout, polylines
+    ), "fixture lost its roomier bottom edge"
+    assert _min_route_distance(placement.keepout, polylines) >= (
+        SECTION_HEADER_PROTRUSION
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "section_id"),
+    [
+        (EXAMPLE_TOPOLOGIES / "fan_over_top_reach_order.mmd", "b"),
+        (
+            REPO_ROOT
+            / "tests"
+            / "fixtures"
+            / "curve_invariant_repros"
+            / "fan_over_top_flow_feeder.mmd",
+            "sec2",
+        ),
+    ],
+    ids=["fan_over_top_reach_order", "fan_over_top_flow_feeder"],
+)
+def test_an_over_top_loop_keeps_the_caption_above_its_box(
+    path: Path, section_id: str
+) -> None:
+    graph, polylines, font_size, title_font_size = _polylines_and_font(path)
+    placement = resolve_all_section_headers(
+        graph, font_size, polylines, title_font_size
+    )[section_id]
+    assert placement.mode in ("above", "nudge"), (
+        f"{section_id} caption dropped {placement.mode} its box"
+    )
 
 
 def test_a_roomy_band_slot_keeps_the_caption_above_its_box() -> None:

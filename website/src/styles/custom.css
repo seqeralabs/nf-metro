@@ -157,8 +157,8 @@ nav.sidebar a[aria-current="page"]:hover {
   background-color: var(--nfm-accent-soft);
 }
 
-/* links in prose carry the brand green */
-.sl-markdown-content a {
+/* links in prose carry the brand green; code-block links keep the plugin's colours */
+.sl-markdown-content a:not(:where(.expressive-code *)) {
   color: var(--nfm-accent-text);
 }
 

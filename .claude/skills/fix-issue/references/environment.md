@@ -24,8 +24,8 @@ command - **do not** `pip install -e` the worktree into this env:
 
 ```bash
 source ~/.local/bin/mm-activate nf-metro-dev
-cd /tmp/nf-metro-fix-<N>
-export PYTHONPATH=/tmp/nf-metro-fix-<N>/src
+cd ~/projects/nf-metro-fix-<N>
+export PYTHONPATH=~/projects/nf-metro-fix-<N>/src
 python -m nf_metro render <file.mmd> -o /tmp/out.png
 python -m pytest -k <selector>
 ```
@@ -57,14 +57,15 @@ near-total false diff that costs a full re-measurement to disprove.
 hand back a concurrent session's entry instead of yours, conflicting against
 changes you never made. Use a throwaway commit instead.
 
-## A `/tmp` worktree can vanish mid-session
+## A missing worktree is not lost work
 
-The OS can reclaim `/tmp/nf-metro-fix-<N>` during a long-running session. A
-missing worktree or branch is not evidence of lost work by itself: check
-whether the last known candidate SHA is still reachable from any ref (a
-branch already merged elsewhere, a remote tracking ref) before treating it as
-data loss. If it is, recreate the worktree at that SHA and continue; only
-escalate to the user if no ref reaches it.
+A worktree or branch can go missing between sessions (a peer session pruned
+it, or an older run used `/tmp`, which the OS reclaims on reboot). A missing
+worktree is not evidence of lost work by itself: check whether the last known
+candidate SHA is still reachable from any ref (a branch already merged
+elsewhere, a remote tracking ref) before treating it as data loss. If it is,
+recreate the worktree at that SHA and continue; only escalate to the user if
+no ref reaches it.
 
 ## Commit hooks
 
@@ -102,7 +103,7 @@ being written defensively.
 
 ```bash
 # Paths are relative to the worktree root; cd there first or use an absolute path.
-cd /tmp/nf-metro-fix-<N>
+cd ~/projects/nf-metro-fix-<N>
 source ~/.local/bin/mm-activate nf-metro-dev
 .claude/skills/fix-issue/scripts/verify_candidate.sh --candidate <SHA> --selector "<fixture-or-invariant>"
 ```
@@ -121,8 +122,8 @@ Fast sanity check of one specific `.mmd` before pushing:
 
 ```bash
 source ~/.local/bin/mm-activate nf-metro-dev
-export PYTHONPATH=/tmp/nf-metro-fix-<N>/src
-cd /tmp/nf-metro-fix-<N> && python -m nf_metro render <file.mmd> -o /tmp/<name>.png
+export PYTHONPATH=~/projects/nf-metro-fix-<N>/src
+cd ~/projects/nf-metro-fix-<N> && python -m nf_metro render <file.mmd> -o /tmp/<name>.png
 open /tmp/<name>.png
 ```
 

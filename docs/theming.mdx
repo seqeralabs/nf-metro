@@ -53,6 +53,8 @@ That is the deterministic escape hatch for a case such as a PNG export.
 ## `var()` for host overrides (optional)
 
 ```css
+/* [!callout /--my-bg/] A host page sets this to override the color. */
+/* [!callout /light-dark/] Used when the host sets nothing. */
 fill: var(--my-bg, light-dark(#ffffff, #1a1a1a));
 ```
 
@@ -84,8 +86,7 @@ That is the right behavior for a file opened on its own, or dropped into a page 
 Every `<Metro>` embed on this docs site uses it (`website/src/lib/render-metro.mjs:277`).
 This site's theme picker sets `color-scheme` on `<html>`:
 
-```css
-/* reset.css, from Starlight - the framework this docs site is built with */
+```css title="reset.css (Starlight)"
 html {
   color-scheme: dark;
 }
@@ -145,6 +146,9 @@ That media query branches a whole stylesheet rule, rather than a property like `
 ```
 
 `--no-dark-mode-css` turns it off, for a host whose own theming it would otherwise fight.
+
+In `--format html` output the page paints the canvas itself, so these rules use `light-dark()` instead of the media query.
+They then follow the page's mode rather than the OS setting.
 
 <Aside type="note" title="One theme opts out of all of this on purpose">
 
@@ -228,7 +232,8 @@ That is why the nf-metro docs site inlines its maps.
 None of this is specific to nf-metro.
 A standalone example:
 
-```html
+```html title="index.html"
+<!-- [!callout /color-scheme/] Drop this to follow the page's color-scheme instead of the OS. -->
 <svg viewBox="0 0 200 100" style="color-scheme: light dark">
   <style>
     rect {
@@ -246,7 +251,7 @@ A standalone example:
 Inline it in an HTML page and it follows the OS preference.
 To make it follow a manual toggle on your own site instead, drop the SVG's own `style="color-scheme: light dark"` and drive `color-scheme` from your toggle at the page level, the same way the Starlight `reset.css` does:
 
-```css
+```css title="styles.css"
 :root {
   color-scheme: dark;
 }

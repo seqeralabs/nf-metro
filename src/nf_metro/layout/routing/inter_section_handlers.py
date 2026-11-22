@@ -38,7 +38,12 @@ from nf_metro.layout.constants import (
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_ROUTE_CLEARANCE,
 )
-from nf_metro.layout.geometry import cotravelling_lane_clearance, lanes_run_along_x
+from nf_metro.layout.geometry import (
+    cotravelling_lane_clearance,
+    lanes_run_along_x,
+    lanes_run_along_y,
+    section_bbox_span,
+)
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
@@ -90,6 +95,7 @@ from nf_metro.layout.routing.common import (
     right_normal_axis_sign,
     row_bottom_edge,
     row_top_edge,
+    section_exists_above_row,
     section_header_top,
     section_ids_of_stations,
     segment_direction,
@@ -125,6 +131,7 @@ from nf_metro.layout.routing.perp import (
     _perp_entry_crossing_x,
     _perp_riser_lateral,
 )
+from nf_metro.layout.routing.perp_columns import feeder_sources, perp_corridor_feeder
 from nf_metro.layout.routing.reserved_bands import (
     EdgeKey,
     ReservedBand,
@@ -1206,28 +1213,26 @@ def _left_exit_wrap_over_top_y(
 
     A same-row wrap dips below the target box; when the target is tall that dip
     runs far below every section before returning the full width.  Returns the
-    centre of the inter-row band ABOVE the target row -- humping the loop over the
-    target's top, never descending past the box bottom, mirroring the from-above
-    gap-above approach -- when the port is fed by this line alone, that band
-    exists, is wide enough for the traverse, and all three loop legs (source-side
-    ascent at *cx*, band traverse, target-side descent at *vx*) clear other
-    section interiors.  Returns ``None`` to keep the dip otherwise.
+    traverse Y of the band ABOVE the target row (:func:`_gap_above_channel_y`) --
+    humping the loop over the target's top, never descending past the box bottom,
+    mirroring the from-above gap-above approach -- when the port is fed by this
+    line alone, that band exists, is wide enough for the traverse, and all three
+    loop legs (source-side ascent at *cx*, band traverse, target-side descent at
+    *vx*) clear other section interiors.  Returns ``None`` to keep the dip otherwise.
 
     A port fed by more than one line keeps the dip: the band above holds a single
     channel, so pooling every feeder into it collinearly overlays them, whereas
     the dips give each feeder its own descent below the target.
     """
     graph, src, tgt, tgt_row = f.graph, f.src, f.tgt, f.tgt_row
-    gap_top, gap_bottom = (
-        _gap_above_target_y(graph, tgt_row) if tgt_row is not None else (0.0, 0.0)
-    )
+    if tgt_row is None:
+        return None
+    gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
     if gap_bottom <= gap_top or not _inter_row_band_fits(gap_top, gap_bottom):
         return None
     if len({e.line_id for e in graph.edges_to(tgt.id)}) > 1:
         return None
-    gy = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=f.ctx.reserved_bands.rows.at(tgt_row)
-    )
+    gy = _gap_above_channel_y(f.ctx, tgt_row)
     blocked = (
         f.v_segment_crosses_other_section(cx, src.y, gy)
         or f.v_segment_crosses_other_section(vx, gy, tgt.y)
@@ -1275,9 +1280,7 @@ def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
             edge, src, tgt, ctx, pos_n=pos_n, delta=delta, corner_x=corner_x
         )
     if f.tgt_row is not None and _right_entry_gap_above_is_clear(f):
-        return _route_right_entry_via_gap_above(
-            edge, src, tgt, f.i, f.n, ctx, f.tgt_row
-        )
+        return _route_right_entry_via_gap_above(f)
     return _route_right_entry_around_below(f)
 
 
@@ -2204,12 +2207,15 @@ def _match_inter_section_rule(f: _InterFacts) -> _Rule | None:
     return None
 
 
-def arrives_descending(edge: Edge, ctx: _RoutingCtx) -> bool:
-    """Whether inter-section *edge* reaches its target coming down from above.
+def arrival_approach(edge: Edge, ctx: _RoutingCtx) -> Direction | None:
+    """The way inter-section *edge* travels on its last vertical leg.
 
-    Builds the route its dispatch rule draws and reads the last vertical leg:
-    a descent arrives from above the target, a climb from below.  A route
-    with no vertical leg arrives level, which is not a descent.
+    Builds the route its dispatch rule draws and reads that leg:
+    :attr:`Direction.D` comes down into the target from above,
+    :attr:`Direction.U` climbs into it from below, and ``None`` is a route with
+    no vertical leg at all, which arrives level.  A route whose vertical steps
+    are all shorter than a curve radius only shifts its line's lane on the way,
+    so it arrives level too.
     """
     src, tgt = ctx.graph.edge_endpoints(edge)
     f = _build_inter_facts(edge, src, tgt, ctx)
@@ -2220,12 +2226,14 @@ def arrives_descending(edge: Edge, ctx: _RoutingCtx) -> bool:
         else _route_l_shape(edge, src, tgt, f.i, f.n, ctx)
     )
     points = route.points if route is not None else []
-    vertical_legs = [
-        y2 - y1
-        for (x1, y1), (x2, y2) in zip(points, points[1:])
-        if abs(y2 - y1) > max(abs(x2 - x1), COORD_TOLERANCE)
+    vertical_steps = [
+        end[1] - start[1]
+        for start, end in zip(points, points[1:])
+        if abs(end[1] - start[1]) > max(abs(end[0] - start[0]), COORD_TOLERANCE)
     ]
-    return bool(vertical_legs) and vertical_legs[-1] > 0
+    if all(abs(dy) <= ctx.curve_radius for dy in vertical_steps):
+        return None
+    return Direction.D if vertical_steps[-1] > 0 else Direction.U
 
 
 @dataclass(frozen=True, slots=True)
@@ -3151,6 +3159,16 @@ def _is_row_level_bottom_row_climb(
         return False
     tgt_port = graph.ports.get(edge.target)
     if tgt_port is None or not tgt_port.is_entry:
+        return False
+    src_port = graph.ports.get(edge.source)
+    exit_faces_away = (
+        src_port is not None
+        and src_port.side in (PortSide.LEFT, PortSide.RIGHT)
+        and tgt_col != src_col
+        and (src_port.side is PortSide.LEFT) == (tgt_col > src_col)
+    )
+    if exit_faces_away:
+        # A run at the source's own Y would lead back across the source box.
         return False
     return _bottom_row_climb_corridor_clear(
         graph, src_row, tgt_row, src_col, tgt_col, max_content_row=max_content_row
@@ -4267,6 +4285,7 @@ class _PerpExitGeometry:
     member_offset: float
     bundle_offsets: tuple[float, ...]
     target_offsets: tuple[float, ...] | None
+    member_target_offset: float | None
     transition_leg: int | None
     aligned_drop: bool
     seam: _SourceSeam
@@ -4282,6 +4301,7 @@ def _perp_exit_record(
     transition_leg: int | None,
     *,
     aligned_drop: bool,
+    member_target_offset: float | None = None,
 ) -> _PerpExitGeometry:
     """Complete a perpendicular-exit record from its centreline.
 
@@ -4313,6 +4333,7 @@ def _perp_exit_record(
         member_offset,
         bundle_offsets,
         target_offsets,
+        member_target_offset,
         transition_leg,
         aligned_drop,
         _SourceSeam(
@@ -4451,6 +4472,7 @@ def _perp_exit_over_geometry(
             tuple(_get_offset(ctx, edge.target, lid) for lid in line_ids),
             3,
             aligned_drop=False,
+            member_target_offset=_get_offset(ctx, edge.target, edge.line_id),
         )
 
     assert tgt_port is not None
@@ -4504,14 +4526,71 @@ def _perp_exit_over_geometry(
         # ending the corridor short of the port centre keeps the two legs one
         # continuous line instead of jogging onto the port marker.
         points = ((sx, sy), (sx, cy_base), (tx, cy_base), (tx, ty))
+    landing = _perp_exit_landing_offsets(ctx, edge, tgt_sec, line_ids, src_offs)
     return _perp_exit_record(
         points,
         src_offs[edge.line_id],
         tuple(src_offs[lid] for lid in line_ids),
-        None,
-        None,
+        None if landing is None else tuple(landing[lid] for lid in line_ids),
+        None if landing is None else len(points) - 2,
         aligned_drop=False,
+        member_target_offset=None if landing is None else landing[edge.line_id],
     )
+
+
+def _perp_exit_landing_offsets(
+    ctx: _RoutingCtx,
+    edge: Edge,
+    tgt_sec: Section | None,
+    line_ids: list[str],
+    src_offs: Mapping[str, float],
+) -> dict[str, float] | None:
+    """Right-hand laterals landing an up-and-over bundle on its port crossing.
+
+    The final leg descends into a horizontal-flow section's perpendicular entry
+    on the X each line's in-section drop departs from
+    (:func:`_perp_entry_landing_x`), so the two legs meet as one stroke.  That leg
+    descends into a TOP port and ascends into a BOTTOM one, so one crossing X
+    reads as opposite laterals on the two sides.
+
+    Two kinds of port are landed so: a port whose column is dealt from its trunk
+    (:class:`perp_columns.PerpEntryColumn`), and a port this exit alone feeds,
+    whose crossing is set by this feeder's own lines.  ``None`` keeps the bundle
+    on its riser laterals all the way down: into every other port, into a port
+    continuing a corridor run at its own Y
+    (:func:`perp_columns.perp_corridor_feeder`), where the crossing is undefined,
+    and where the crossing orders the lines unlike the risers, so the bundle
+    could only land by crossing its own lines.
+    """
+    tgt_port = ctx.graph.ports[edge.target]
+    if tgt_sec is None or not lanes_run_along_y(tgt_sec.direction):
+        return None
+    column = ctx.perp_entry_columns.get(edge.target)
+    if column is None:
+        if (
+            len(feeder_sources(ctx.graph, edge.target)) != 1
+            or perp_corridor_feeder(ctx.graph, edge.target) is not None
+        ):
+            return None
+    elif column.offsets is None:
+        return None
+    tx = ctx.graph.stations[edge.target].x
+    landing_sign = -1.0 if tgt_port.side is PortSide.TOP else 1.0
+    landing: dict[str, float] = {}
+    for lid in line_ids:
+        crossing = _perp_entry_landing_x(ctx, edge, tgt_sec, tx, lid)
+        if crossing is None:
+            return None
+        landing[lid] = landing_sign * (crossing - tx)
+    risers = {lid: src_offs[lid] for lid in line_ids}
+    for laterals in (landing, risers):
+        if len(set(laterals.values())) != len(laterals):
+            return None
+    if sorted(line_ids, key=landing.__getitem__) != sorted(
+        line_ids, key=risers.__getitem__
+    ):
+        return None
+    return landing
 
 
 def _route_perp_exit(f: _InterFacts) -> RoutedPath | None:
@@ -4591,9 +4670,16 @@ def _route_perp_exit_over(
         )
     else:
         assert geometry.transition_leg is not None
-        target_offset = _get_offset(ctx, edge.target, edge.line_id)
+        assert geometry.member_target_offset is not None
         routes = build_tapered_bundle(
-            [(edge, edge.line_id, geometry.member_offset, target_offset)],
+            [
+                (
+                    edge,
+                    edge.line_id,
+                    geometry.member_offset,
+                    geometry.member_target_offset,
+                )
+            ],
             list(geometry.points),
             transition_leg=geometry.transition_leg,
             base_radius=ctx.curve_radius,
@@ -4632,12 +4718,53 @@ def _top_entry_side_fan_traverse_is_clear(
         and abs(graph.station_for_edge_target(sib).x - src.x) <= ctx.curve_radius
         for sib in graph.edges_from(edge.source)
     )
-    if not aligned_sibling:
-        return False
+    return aligned_sibling and _traverse_then_turn_is_clear(graph, src, tgt, final_x)
+
+
+def _traverse_then_turn_is_clear(
+    graph: MetroGraph, src: Station, tgt: Station, final_x: float
+) -> bool:
+    """Whether running along the source's Y to *final_x*, then along *final_x*
+    to the target's Y, clears every section but the two the run joins."""
     exclude = {sid for sid in (src.section_id, tgt.section_id) if sid is not None}
-    if _h_segment_crosses_other_section(graph, src.x, final_x, src.y, exclude):
-        return False
-    return not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
+    return not _h_segment_crosses_other_section(
+        graph, src.x, final_x, src.y, exclude
+    ) and not _v_segment_crosses_other_section(graph, final_x, src.y, tgt.y, exclude)
+
+
+def _perp_entry_source_beyond_channel(
+    src: Station,
+    tgt: Station,
+    tgt_sec: Section | None,
+    final_x: float,
+    channel_y: float,
+    lead: Direction,
+    n: int,
+    ctx: _RoutingCtx,
+    *,
+    is_top: bool,
+) -> bool:
+    """Whether a perpendicular entry's source already stands past its channel.
+
+    The staircase climbs from the source to the channel outside the port's box
+    edge and turns twice on that riser, so the riser needs a full outer-lane
+    radius for each turn.  A source standing outside that edge at or beyond the
+    channel leaves the riser shorter than that, and its corners clamp.  Such a
+    source can traverse on its own Y to the landing column and turn once into
+    the port, provided that turn fits outside the box and both legs clear every
+    other section.
+    """
+    runway = outer_lane_radius(n, ctx.curve_radius, ctx.offset_step)
+    two_turn_riser = 2 * runway
+    travel = 1.0 if is_top else -1.0
+    return (
+        tgt_sec is not None
+        and (channel_y - src.y) * travel < two_turn_riser
+        and (final_x - src.x) * lead.sign >= runway
+        and (section_bbox_span(tgt_sec, "y")[0 if is_top else 1] - src.y) * travel
+        >= runway
+        and _traverse_then_turn_is_clear(ctx.graph, src, tgt, final_x)
+    )
 
 
 def _corridor_riser_x(
@@ -5425,14 +5552,22 @@ def _perp_entry_l_geometry(
                 run_start=lx0,
                 run_end=final_x,
             )
-        points = (
-            (sx, sy),
-            (lx0, sy),
-            (lx0, mid_y),
-            (final_x, mid_y),
-            (final_x, ty),
-        )
-        transition_leg = 3
+        # A fan branch nests its staircase with its siblings', so it keeps it.
+        if fan_single is None and _perp_entry_source_beyond_channel(
+            src, tgt, tgt_sec, final_x, mid_y, lead, n, ctx, is_top=is_top
+        ):
+            points = ((sx, sy), (final_x, sy), (final_x, ty))
+            transition_leg = 1
+        else:
+            points = (
+                (sx, sy),
+                (lx0, sy),
+                (lx0, mid_y),
+                (final_x, mid_y),
+                (final_x, ty),
+            )
+            transition_leg = 3
+    members = _members_landing_on_column(edge, points, members, side, ctx)
     return _perp_entry_l_record(
         points,
         tuple(members),
@@ -5441,6 +5576,34 @@ def _perp_entry_l_geometry(
         fan_source_offsets,
         flanked_gap,
     )
+
+
+def _members_landing_on_column(
+    edge: Edge,
+    points: tuple[tuple[float, float], ...],
+    members: list[tuple[Edge, str, float, float]],
+    side: PortSide,
+    ctx: _RoutingCtx,
+) -> list[tuple[Edge, str, float, float]]:
+    """*members* re-seated for a staircase that climbs into a dealt column.
+
+    The landing laterals assume the final leg runs into the port from the
+    port's own side.  A staircase whose channel sits on the section's side of
+    the port reaches it running the other way, and that leg's right-hand normal
+    points the other way too, so a dealt column
+    (:class:`perp_columns.PerpEntryColumn`) lands each line on its own channel
+    only with the laterals negated.
+    """
+    entry_port_id = ctx.merge.entry_port_for.get(edge.target, edge.target)
+    column = ctx.perp_entry_columns.get(entry_port_id)
+    inward = Direction.D if side is PortSide.TOP else Direction.U
+    if (
+        column is None
+        or column.offsets is None
+        or segment_direction(points[-2], points[-1]) in (inward, None)
+    ):
+        return members
+    return [(item, lid, src, -tgt) for item, lid, src, tgt in members]
 
 
 def _perp_entry_turn_is_planned(
@@ -5870,6 +6033,7 @@ def _route_entry_wrap(
     entry_side: PortSide,
     normalize_exempt: bool = True,
     source_leads_down: bool = False,
+    lead_under: tuple[float, float] | None = None,
 ) -> RoutedPath:
     """Fan a single-member entry-wrap loop along its centreline.
 
@@ -5900,6 +6064,12 @@ def _route_entry_wrap(
     vertical run down the exit column (*corner_x*), collapsing the 6-point loop
     to a 5-point D-H-?-H shape.  The source stagger then rides the drop's normal
     (X) rather than the lead-in's (Y).
+
+    A LEFT exit on its section's left edge would lead in rightward back along
+    its own trunk, so *lead_under* ``(lx, uy)`` leads it out leftward to
+    column ``lx`` instead, down to ``uy`` below the source box and right under
+    it to *corner_x*.  Leading out leftward flips the lead-in's normal, so its
+    baked stagger flips with it.
     """
     sx, sy = src.x, src.y
     ex, ey = entry_port.x, entry_port.y
@@ -5910,6 +6080,18 @@ def _route_entry_wrap(
         centerline = [
             (corner_x + src_off + delta, sy),
             (corner_x + src_off + delta, channel_y),
+            (descent_x, channel_y),
+            (descent_x, ey + tgt_off + entry_delta),
+            (ex, ey + tgt_off + entry_delta),
+        ]
+    elif lead_under is not None:
+        lx, uy = lead_under
+        centerline = [
+            (sx, sy + src_off - delta),
+            (lx, sy + src_off - delta),
+            (lx, uy),
+            (corner_x, uy),
+            (corner_x, channel_y),
             (descent_x, channel_y),
             (descent_x, ey + tgt_off + entry_delta),
             (ex, ey + tgt_off + entry_delta),
@@ -6741,12 +6923,13 @@ def _right_entry_over_top_geometry(
     """Resolve the seam shared by over-top planning and emission.
 
     See :func:`_route_right_entry_over_top` for the loop this describes.  The
-    bundle keeps its source mean end to end, so both the source-side and the
-    entry-side horizontals sit on ``src_center``; this line's own rank against
-    that centreline is what puts its rise one stagger off ``lead_x``.
+    source-side horizontal sits on ``src_center`` and the entry-side one on
+    ``tgt_center``, the lanes the port seated the looping lines on; this line's
+    own rank against the centreline is what puts its rise one stagger off
+    ``lead_x``.
     """
     graph = ctx.graph
-    members, src_center, _tgt_center = gather_bundle(ctx, edge)
+    members, src_center, tgt_center = gather_bundle(ctx, edge)
 
     sx, sy = src.x, src.y
     ex, ey = tgt.x, tgt.y
@@ -6831,7 +7014,7 @@ def _right_entry_over_top_geometry(
         channel_y,
         descent_x,
         mid_sy,
-        ey + src_center,
+        ey + tgt_center,
         _SourceSeam(
             _leg_direction((sx, mid_sy), (lead_x, mid_sy)),
             turn_direction,
@@ -6858,8 +7041,6 @@ def _route_right_entry_over_top(
     Built via :func:`build_concentric_bundle` from the bundle's centreline, so
     the loop cannot flip and every corner is concentric by construction.
     """
-    # A U-turn keeps the bundle centred on its source mean end-to-end (the
-    # descent's reversal is matched by the section's reversed internal order).
     members, _src_center, _tgt_center = gather_bundle(ctx, edge)
     geometry = _right_entry_over_top_geometry(ctx, edge, src, tgt)
     centerline = [
@@ -7101,6 +7282,23 @@ def _gap_above_target_y(graph: MetroGraph, tgt_row: int) -> tuple[float, float]:
     return gap_top, gap_bottom
 
 
+def _gap_above_channel_y(ctx: _RoutingCtx, tgt_row: int) -> float:
+    """Y of the traverse a route runs in the band ABOVE *tgt_row*.
+
+    Below another row the traverse centres in the inter-row gap.  The topmost
+    row has no gap above it, only the canvas-top padding that holds the title,
+    so the traverse takes the over-the-top headroom placement reserves above the
+    row (``_reserve_over_top_headroom``): clear of every header badge in the row
+    by the same margin as :func:`_right_entry_over_top_geometry`'s channel.
+    """
+    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
+    if not section_exists_above_row(ctx.graph, tgt_row):
+        return gap_bottom - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
+    return _center_inter_row_channel(
+        gap_top, gap_bottom, reserved=ctx.reserved_bands.rows.at(tgt_row)
+    )
+
+
 def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
     """Whether a RIGHT-entry feed from above can use the inter-row gap.
 
@@ -7121,9 +7319,7 @@ def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
     # source box bottom, so the feed loops around below the target row instead.
     if not _inter_row_band_fits(gap_top, gap_bottom):
         return False
-    gy = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=f.ctx.reserved_bands.rows.at(tgt_row)
-    )
+    gy = _gap_above_channel_y(f.ctx, tgt_row)
 
     ep_section = (
         graph.sections.get(entry_port.section_id) if entry_port.section_id else None
@@ -7141,12 +7337,7 @@ def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
 
 
 def _build_right_entry_wrap_route(
-    edge: Edge,
-    src: Station,
-    entry_port: Station,
-    i: int,
-    n: int,
-    ctx: _RoutingCtx,
+    f: _InterFacts,
     channel_y_base: float,
     normalize_exempt: bool = True,
 ) -> RoutedPath:
@@ -7164,10 +7355,11 @@ def _build_right_entry_wrap_route(
     :func:`build_concentric_bundle` nests every corner concentrically so the
     R-D-R-D-L loop cannot flip.
     """
+    edge, src, entry_port, ctx = f.edge, f.src, f.tgt, f.ctx
     ex = entry_port.x
 
     _fan, pos_n, delta, corner_x = _wrap_fan_geometry(
-        ctx, edge, src, i, n, vertical_direction(entry_port.y - src.y)
+        ctx, edge, src, f.i, f.n, vertical_direction(entry_port.y - src.y)
     )
 
     # V_down/up channel centre, just RIGHT of the target section's bbox in the
@@ -7181,6 +7373,7 @@ def _build_right_entry_wrap_route(
         else ex
     )
     vx = _right_entry_descent_x(ctx, section_right, pos_n)
+    lead_under = _left_exit_lead_under(f, pos_n, corner_x, channel_y_base)
 
     # R-D-R-D-L loop: down to the traverse channel, right past the target's
     # right edge, then in to the RIGHT port from its own outward side.
@@ -7196,27 +7389,64 @@ def _build_right_entry_wrap_route(
         descent_x=vx,
         entry_side=PortSide.RIGHT,
         normalize_exempt=normalize_exempt,
+        lead_under=lead_under,
     )
     _declare_channel(route, ctx, vx, vertical_direction(entry_port.y - channel_y_base))
     if not normalize_exempt:
         # Open to the gap-bundle pass: its source-side lead-in also drops
         # through an inter-column gap, so declare that channel too or the
         # always-on gap-channel guard flags it as unmaterialised.
+        rise_from = src.y if lead_under is None else lead_under[1]
         _declare_channel(
-            route, ctx, corner_x, vertical_direction(channel_y_base - src.y)
+            route, ctx, corner_x, vertical_direction(channel_y_base - rise_from)
         )
     return route
 
 
-def _route_right_entry_via_gap_above(
-    edge: Edge,
-    src: Station,
-    entry_port: Station,
-    i: int,
-    n: int,
-    ctx: _RoutingCtx,
-    tgt_row: int,
-) -> RoutedPath:
+def _left_exit_lead_under(
+    f: _InterFacts,
+    pos_n: int,
+    corner_x: float,
+    channel_y: float,
+) -> tuple[float, float] | None:
+    """``(lx, uy)`` for a wrap leaving a LEFT exit under its own section, or ``None``.
+
+    A rightward lead-in from a LEFT exit would run back over every station the
+    line has just served, so the wrap leads out leftward, drops below the box and
+    runs right under it to the turn column.  ``None`` (rightward lead-in) when
+    the port is not a LEFT exit on its box's edge, the turn column is not past
+    the box, or a leg of the detour would cross another section.
+    """
+    ctx, src, port = f.ctx, f.src, f.src_port
+    graph = f.graph
+    section = graph.sections.get(src.section_id) if src.section_id else None
+    if (
+        port is None
+        or port.side is not PortSide.LEFT
+        or section is None
+        or section.bbox_w <= 0
+        or src.x > _section_left_edge(graph, src) + COORD_TOLERANCE
+        or corner_x < _section_right_edge(graph, src)
+    ):
+        return None
+    lx = _fan_stand_off_x(ctx, src, pos_n, Direction.L)
+    uy = (
+        section.bbox_y
+        + section.bbox_h
+        + SECTION_ROUTE_CLEARANCE
+        + _fan_corner_run(ctx, pos_n)
+    )
+    exclude = {section.id}
+    if (
+        f.v_segment_crosses_other_section(lx, src.y, uy, exclude)
+        or f.h_segment_crosses_other_section(lx, corner_x, uy, exclude)
+        or f.v_segment_crosses_other_section(corner_x, uy, channel_y, exclude)
+    ):
+        return None
+    return lx, uy
+
+
+def _route_right_entry_via_gap_above(f: _InterFacts) -> RoutedPath:
     """Route to a RIGHT entry port via the inter-row gap ABOVE the target row.
 
     Used when the source sits in a row ABOVE the target's row.  Going UNDER
@@ -7236,10 +7466,9 @@ def _route_right_entry_via_gap_above(
     outward side), and the horizontal never crosses a section interior
     (guaranteed by :func:`_right_entry_gap_above_is_clear` at the call site).
     """
-    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
-    channel_y_base = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=ctx.reserved_bands.rows.at(tgt_row)
-    )
+    ctx, entry_port, tgt_row = f.ctx, f.tgt, f.tgt_row
+    assert tgt_row is not None
+    channel_y_base = _gap_above_channel_y(ctx, tgt_row)
     # When two or more distinct lines converge into this one RIGHT entry port,
     # each independently picks the same descent X just right of the target
     # column and they overlay.  Open those to the gap-bundle pass so the
@@ -7248,14 +7477,7 @@ def _route_right_entry_via_gap_above(
     # only re-shape its self-contained loop).
     converging = len({e.line_id for e in ctx.graph.edges_to(entry_port.id)}) > 1
     return _build_right_entry_wrap_route(
-        edge,
-        src,
-        entry_port,
-        i,
-        n,
-        ctx,
-        channel_y_base,
-        normalize_exempt=not converging,
+        f, channel_y_base, normalize_exempt=not converging
     )
 
 
@@ -7606,7 +7828,7 @@ def _route_right_entry_around_below(f: _InterFacts) -> RoutedPath:
     """
     # Bypass Y below all sections in the column range so the route clears
     # every intervening section, including the target row.
-    edge, src, entry_port, ctx = f.edge, f.src, f.tgt, f.ctx
+    ctx = f.ctx
     src_col, src_row = f.src_col, f.src_row
     ep_col = f.tgt_col
     bc_src_col = src_col if src_col is not None else 0
@@ -7619,6 +7841,4 @@ def _route_right_entry_around_below(f: _InterFacts) -> RoutedPath:
         src_row=src_row,
         cross_row=True,
     )
-    return _build_right_entry_wrap_route(
-        edge, src, entry_port, f.i, f.n, ctx, channel_y_base
-    )
+    return _build_right_entry_wrap_route(f, channel_y_base)

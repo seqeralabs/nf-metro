@@ -82,8 +82,11 @@ def test_balls_on_one_track_are_spread_evenly_across_the_cycle() -> None:
         tracks=(_track(((0.0, 0.0), (100.0, 0.0)), 1.0),),
     )
 
-    assert timeline.ball_positions(0.0) == pytest.approx(
-        [(0.0, 0.0), (25.0, 0.0), (50.0, 0.0), (75.0, 0.0)]
+    expected = [(0.0, 0.0), (25.0, 0.0), (50.0, 0.0), (75.0, 0.0)]
+    actual = timeline.ball_positions(0.0)
+    assert len(actual) == len(expected)
+    assert [c for p in actual for c in p] == pytest.approx(
+        [c for p in expected for c in p]
     )
 
 
@@ -98,7 +101,10 @@ def test_phase_one_is_phase_zero_again() -> None:
         ),
     )
 
-    assert timeline.ball_positions(1.0) == pytest.approx(timeline.ball_positions(0.0))
+    seam = timeline.ball_positions(1.0)
+    start = timeline.ball_positions(0.0)
+    assert len(seam) == len(start)
+    assert [c for p in seam for c in p] == pytest.approx([c for p in start for c in p])
 
 
 def test_frame_timestamps_span_the_loop_without_drifting() -> None:

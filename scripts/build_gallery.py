@@ -161,6 +161,11 @@ _manifest: dict[str, str] = {}
 # and reported as per-render deltas in the render-diff page. Advisory only.
 _metrics: dict[str, dict[str, float | None]] = {}
 
+# Render parameters per SVG filename, written to RENDERS_DIR/sources.json so the
+# render-diff can replay a map the PR adds against the base code
+# (scripts/render_added_on_base.py).
+_sources: dict[str, dict[str, str | bool]] = {}
+
 _SVG_DIMS_RE = re.compile(r'<svg[^>]*\bwidth="([\d.]+)"[^>]*\bheight="([\d.]+)"')
 
 
@@ -248,6 +253,13 @@ def render_mmd(
     )
     svg_path.write_text(svg_str)
     _record_metrics(graph, plan, svg_path.name, svg_str)
+    if mmd_path.resolve().is_relative_to(project_root):
+        _sources[svg_path.name] = {
+            "src": mmd_path.resolve().relative_to(project_root).as_posix(),
+            "debug": debug,
+            "self_color_scheme": self_color_scheme,
+            "from_nextflow": from_nextflow,
+        }
     return svg_str
 
 
@@ -537,6 +549,13 @@ def write_metrics() -> None:
     print(f"Metrics written to {metrics_path} ({len(_metrics)} entries)")
 
 
+def write_sources() -> None:
+    """Write the per-render source and parameters used by the render-diff."""
+    sources_path = RENDERS_DIR / "sources.json"
+    sources_path.write_text(json.dumps(_sources, indent=2, sort_keys=True) + "\n")
+    print(f"Sources written to {sources_path} ({len(_sources)} entries)")
+
+
 if __name__ == "__main__":
     if ONLY_CHANGED is None:
         # Clean stale renders so removed gallery entries don't persist
@@ -556,4 +575,5 @@ if __name__ == "__main__":
     build_pipelines_manifest()
     write_manifest()
     write_metrics()
+    write_sources()
     sys.exit(report_dropped())

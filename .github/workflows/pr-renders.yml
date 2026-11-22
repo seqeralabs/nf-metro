@@ -87,6 +87,19 @@ jobs:
           mkdir -p /tmp/pr_renders
           cp docs/assets/renders/*.svg docs/assets/renders/manifest.json /tmp/pr_renders/
           cp docs/assets/renders/metrics.json /tmp/pr_renders/ 2>/dev/null || true
+          cp docs/assets/renders/sources.json /tmp/pr_renders/ 2>/dev/null || true
+
+      # The base build renders the base gallery.yaml, so a map this PR registers
+      # has no base render. Render each one from the PR's .mmd with the base
+      # code, so the diff shows a before/after (or the base abort) for it.
+      - name: Render PR-added maps with base code
+        run: |
+          {
+            git worktree add --detach /tmp/base_src '${{ github.event.pull_request.base.sha }}' &&
+            python scripts/render_added_on_base.py \
+              /tmp/base_renders /tmp/pr_renders /tmp/base_added_renders \
+              --base-src /tmp/base_src/src
+          } || echo "::warning::could not render the PR-added maps with the base code; they show as new only"
 
       - name: Generate render diff
         id: diff
@@ -94,6 +107,7 @@ jobs:
           set +e
           python scripts/build_render_diff.py \
             /tmp/base_renders /tmp/pr_renders /tmp/diff_site \
+            --base-added /tmp/base_added_renders \
             --pr ${{ github.event.number }} \
             --marker ${{ github.run_id }}
           EXIT_CODE=$?

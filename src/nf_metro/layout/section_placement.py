@@ -39,6 +39,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     packed_section_visual_order,
+    section_bbox_span,
     section_column_span,
     section_row_span,
     shift_section,
@@ -1857,12 +1858,7 @@ def _position_ports_on_boundary(
             port.x = station.x
             port.y = station.y
 
-    if free_axis == "y":
-        span_start = section.bbox_y
-        span_end = section.bbox_y + section.bbox_h
-    else:
-        span_start = section.bbox_x
-        span_end = section.bbox_x + section.bbox_w
+    span_start, span_end = section_bbox_span(section, free_axis)
 
     _spread_overlapping_ports(
         port_ids,

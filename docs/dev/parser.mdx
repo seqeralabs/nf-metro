@@ -42,12 +42,15 @@ The work splits in two:
 
 ```metro title="example.mmd"
 %%metro title: Pipeline Name
+%% [!callout /%%metro line:/] Declare every line here before an edge uses it.
 %%metro line: line_id | Display Name | #hexcolor | style
 
 graph LR
+    %% [!callout /subgraph/] A Mermaid `subgraph` becomes a `Section`.
     subgraph section_id [Section Name]
         %%metro entry: left | line1, line2
         %%metro exit: right | line1, line2
+        %% [!callout /node_id[Label]/] A node becomes a `Station`.
         node_id[Label]
         node_id -->|line_id| other_node
     end
@@ -77,6 +80,7 @@ The grammar lives as a string in `grammar.py` (`_GRAMMAR`), and reads roughly:
 
 ```lark title="src/nf_metro/parser/grammar.py"
 node:  NAME SHAPE?
+// [!callout /SHAPE?/] Each endpoint may carry an inline shape.
 edge:  NAME SHAPE? ARROW EDGELABEL? NAME SHAPE?
 
 SHAPE: /\(\[...\]\)|\[\[...\]\]|\(\(...\)\)|\[...\]|\(...\)|\{...\}/

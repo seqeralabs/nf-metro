@@ -38,7 +38,7 @@ between steps and `set -e` does not fire under this harness. Both carry
 
 ```bash
 # Paths are relative to the worktree root; cd there first or use an absolute path.
-cd /tmp/nf-metro-fix-<N>
+cd ~/projects/nf-metro-fix-<N>
 source ~/.local/bin/mm-activate nf-metro-dev
 .claude/skills/fix-issue/scripts/visual_preview.sh --pr <N> --branch <HEAD_BRANCH> --candidate <CANDIDATE_SHA>
 ```

@@ -83,6 +83,18 @@ generalizing is genuinely out of scope for this fix, and say so in one line -
 this project has already paid down this exact debt once, and a fix that
 quietly adds a third or fourth hand-mirrored variant is re-accumulating it.
 
+## Commands you never run
+
+- The full test suite. Name the test file, or `-k` / `--lf`; the hook refuses
+  a bare `pytest`. The coordinator runs the one late full suite, with the
+  `# full-suite-ok` marker, when Step 7's cases apply.
+- Anything that destroys state or triggers a permission prompt: `rm -rf`
+  outside your artifact directory, `git clean`, `git reset --hard`,
+  `git branch -D`, `git worktree remove`, `git stash`. A prompt the user is not
+  there to answer stalls the run until morning; cleanup belongs to the
+  coordinator at Step 12 with the user present.
+- `git push`, `gh pr`, `gh issue` mutations: the coordinator's, as above.
+
 ## Judgment above your tier
 
 Your brief names a tier. If the work turns out to need judgment beyond it, say

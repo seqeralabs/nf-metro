@@ -1,0 +1,29 @@
+%%metro title: LEFT exit wrapping under its own section
+%%metro line: l1 | Left exit feeder | #3cb44b
+%%metro line: l2 | Middle | #4363d8
+%%metro grid: lower | 0,1
+%%metro grid: middle | 1,0
+%%metro grid: sink | 2,0
+
+graph LR
+    subgraph lower [Lower]
+        %%metro exit: left | l1
+        w0[qc]
+        w1[classify]
+        w2[gather]
+        w0 -->|l1| w1
+        w1 -->|l1| w2
+    end
+    subgraph middle [Middle]
+        m0[index]
+        m1[count]
+        m0 -->|l2| m1
+    end
+    subgraph sink [Sink]
+        %%metro direction: RL
+        %%metro entry: right | l1
+        k0[call]
+        k1[report]
+        k0 -->|l1| k1
+    end
+    w2 -->|l1| k0

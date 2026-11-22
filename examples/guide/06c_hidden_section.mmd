@@ -1,0 +1,33 @@
+%%metro title: Hidden Sections
+%%metro style: nfcore
+%%metro line: simulate | Simulate | #c792ea
+%%metro grid: input | 0,0
+%%metro grid: _no_regions | 1,0
+%%metro grid: split_bam | 1,1
+%%metro grid: downsample | 2,0
+
+graph LR
+    subgraph input [Inputs]
+        reads[Input BAMs]
+    end
+
+    subgraph split_bam [Split BAMs]
+        region[If regions]
+        view[samtools\nview]
+        merge[samtools\nmerge]
+        region -->|simulate| view
+        view -->|simulate| merge
+    end
+
+    subgraph _no_regions [No regions]
+        noregion[If no regions]
+    end
+
+    subgraph downsample [Downsample]
+        coverage[Coverage\n/ region]
+    end
+
+    reads -->|simulate| region
+    reads -->|simulate| noregion
+    noregion -->|simulate| coverage
+    merge -->|simulate| coverage

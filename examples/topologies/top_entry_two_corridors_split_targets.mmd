@@ -1,0 +1,28 @@
+%%metro title: Whole-genome and panel sequencing
+%%metro line: wgs | Whole genome | #0570b0
+%%metro line: panel | Targeted panel | #d62728
+
+graph LR
+    subgraph qc [Read QC]
+        fastqc[FastQC]
+        fastp[fastp]
+        fastqc -->|wgs,panel| fastp
+    end
+    subgraph align [Alignment]
+        bwa[BWA-MEM]
+        markdup[MarkDuplicates]
+        bqsr[BQSR]
+        bwa -->|wgs,panel| markdup
+        markdup -->|wgs,panel| bqsr
+    end
+    subgraph reporting [Reporting]
+        %%metro entry: top | wgs, panel
+        qc_stats[Stats]
+        multiqc[MultiQC]
+        panel_coverage[Panel coverage]
+        qc_stats -->|wgs,panel| multiqc
+    end
+    fastp -->|wgs,panel| bwa
+    fastqc -->|wgs| qc_stats
+    bqsr -->|panel| panel_coverage
+    bqsr -->|wgs,panel| qc_stats
