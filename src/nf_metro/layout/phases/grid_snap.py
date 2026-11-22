@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Callable
 
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
@@ -211,11 +210,14 @@ def _off_grid_line(y: float, origin: float, pitch: float, tol: float = 1.0) -> b
     return min(residue, pitch - residue) > tol
 
 
-SNAP_TIE_TOLERANCE: float = 1e-6
+_TIE_TOLERANCE_PITCHES: float = 1e-6
 """Distance, in pitches, within which a Y counts as midway between two slots."""
 
-_LEVEL_TOLERANCE: float = 1e-3
-"""Distance, in px, within which a tie's snap counts as levelling a relation."""
+_LEVEL_TOLERANCE_PX: float = 1e-3
+"""Distance within which a tie's snap counts as levelling a relation."""
+
+_SNAP_SLACK_PX: float = 1e-6
+"""Float slack on the half-pitch snap bound and the one-pitch relation reach."""
 
 _UP = -1
 _DOWN = 1
@@ -224,11 +226,11 @@ _DOWN = 1
 def _is_slot_tie(y: float, origin: float, pitch: float) -> bool:
     """True when ``y`` sits midway between two ``origin + n*pitch`` slots."""
     q = (y - origin) / pitch
-    return abs(q - math.floor(q) - 0.5) <= SNAP_TIE_TOLERANCE
+    return abs(q - math.floor(q) - 0.5) <= _TIE_TOLERANCE_PITCHES
 
 
 def _slot_snap(
-    y: float, origin: float, pitch: float, half: float, tie_direction: int
+    y: float, origin: float, pitch: float, half: float, tie_direction: int = _UP
 ) -> float:
     """Snap ``y`` to ``origin + n*pitch`` unless that shifts it over half a pitch.
 
@@ -241,7 +243,7 @@ def _slot_snap(
     else:
         n = round(q)
     snapped = origin + n * pitch
-    return snapped if abs(snapped - y) <= half + 1e-6 else y
+    return snapped if abs(snapped - y) <= half + _SNAP_SLACK_PX else y
 
 
 def _group_grid_origin(
@@ -376,13 +378,12 @@ def _tie_directions(
 ) -> dict[str, int]:
     """One snap direction for each connected set of stations tied between slots.
 
-    The grid origin is a residue of ``y % pitch``, so where a row sits on the
-    canvas decides how its slots are numbered; a tie broken by slot number would
-    snap the same row differently once it moved.  Ties are instead resolved
-    from the row's own relative geometry.  Tied stations joined by an edge, or
-    sharing one hub in the same column (a fan's branches), form a component that
-    moves as one, so neither a fan nor a run is split across two slots.  A
-    component takes the direction that levels more of its relations to the
+    The grid origin is a residue of ``y % pitch``, so how a row's slots are
+    numbered depends on where the row sits on the canvas; ties are therefore
+    resolved from the row's relative geometry alone.  Tied stations joined by
+    an edge, or sharing one hub in the same column (a fan's branches), form a
+    component that moves as one, so neither a fan nor a run is split across two
+    slots.  A component takes the direction that levels more of its relations to the
     group's other stations (see :func:`_tie_relations`); failing that, the
     direction its feeders sit in, then its consumers; failing that, up.
     """
@@ -391,25 +392,22 @@ def _tie_directions(
     if not tied:
         return {}
     half = pitch / 2.0
+    tied_set = set(tied)
     feeders: dict[str, set[str]] = {}
     consumers: dict[str, set[str]] = {}
     for edge in graph.edges:
-        consumers.setdefault(edge.source, set()).add(edge.target)
-        feeders.setdefault(edge.target, set()).add(edge.source)
-
-    def partner_y(sid: str) -> float:
-        if sid in ys:
-            return _slot_snap(ys[sid], origin, pitch, half, _UP)
-        return graph.stations[sid].y
+        if edge.source in tied_set or edge.target in tied_set:
+            consumers.setdefault(edge.source, set()).add(edge.target)
+            feeders.setdefault(edge.target, set()).add(edge.source)
+    partner_ys = {sid: graph.stations[sid].y for sid in group_ids}
+    partner_ys.update(
+        (sid, _slot_snap(y, origin, pitch, half)) for sid, y in ys.items()
+    )
 
     directions: dict[str, int] = {}
     for component in _tie_components(graph, tied, feeders, consumers):
-        feeder_relations = _tie_relations(
-            component, feeders, group_ids, ys, partner_y, pitch
-        )
-        consumer_relations = _tie_relations(
-            component, consumers, group_ids, ys, partner_y, pitch
-        )
+        feeder_relations = _tie_relations(component, feeders, ys, partner_ys, pitch)
+        consumer_relations = _tie_relations(component, consumers, ys, partner_ys, pitch)
         direction = _component_tie_direction(feeder_relations, consumer_relations, half)
         for sid in component:
             directions[sid] = direction
@@ -425,21 +423,27 @@ def _tie_components(
     """Tied stations joined by an edge or by one hub's same-column fan."""
     tied_set = set(tied)
     links: dict[str, set[str]] = {sid: set() for sid in tied}
+
+    def link(a: str, b: str) -> None:
+        links[a].add(b)
+        links[b].add(a)
+
     for sid in tied:
         for other in consumers.get(sid, set()) & tied_set:
-            links[sid].add(other)
-            links[other].add(sid)
+            link(sid, other)
     for neighbours in (feeders, consumers):
         for hub in sorted(neighbours):
+            fan_ids = neighbours[hub] & tied_set
+            if len(fan_ids) < 2:
+                continue
             columns: dict[float, list[str]] = {}
-            for sid in sorted(neighbours[hub] & tied_set):
+            for sid in sorted(fan_ids):
                 st = graph.stations[sid]
                 if not st.is_port and not st.off_track:
                     columns.setdefault(round(st.x, 3), []).append(sid)
             for fan in columns.values():
                 for sid in fan[1:]:
-                    links[fan[0]].add(sid)
-                    links[sid].add(fan[0])
+                    link(fan[0], sid)
     components: list[list[str]] = []
     seen: set[str] = set()
     for root in tied:
@@ -460,14 +464,14 @@ def _tie_components(
 def _tie_relations(
     component: list[str],
     neighbours: dict[str, set[str]],
-    group_ids: set[str],
     ys: dict[str, float],
-    partner_y: Callable[[str], float],
+    partner_ys: dict[str, float],
     pitch: float,
 ) -> list[tuple[float, float]]:
     """``(component y, partner y)`` pairs along one side of a tied component.
 
-    Partners are the snap group's stations outside the component.  A partner
+    Partners are the snap group's stations outside the component, keyed in
+    ``partner_ys`` by the Y they hold once snapped.  A partner
     shared by several members (the hub of a tied fan) is compared with the
     members' centre; a member with several partners on this side is compared
     with their centre.  Partners more than one pitch away say nothing about
@@ -477,7 +481,9 @@ def _tie_relations(
 
     def partners_of(sid: str) -> list[str]:
         return sorted(
-            p for p in neighbours.get(sid, set()) if p not in members and p in group_ids
+            p
+            for p in neighbours.get(sid, set())
+            if p not in members and p in partner_ys
         )
 
     members_by_partner: dict[str, list[str]] = {}
@@ -487,15 +493,13 @@ def _tie_relations(
     shared = {p: ms for p, ms in members_by_partner.items() if len(ms) >= 2}
 
     relations = [
-        (_centre([ys[sid] for sid in ms]), partner_y(p)) for p, ms in shared.items()
+        (_centre([ys[sid] for sid in ms]), partner_ys[p]) for p, ms in shared.items()
     ]
     for sid in component:
         own = [p for p in partners_of(sid) if p not in shared]
-        if len(own) >= 2:
-            relations.append((ys[sid], _centre([partner_y(p) for p in own])))
-        else:
-            relations.extend((ys[sid], partner_y(p)) for p in own)
-    return [(a, b) for a, b in relations if abs(b - a) <= pitch + 1e-6]
+        if own:
+            relations.append((ys[sid], _centre([partner_ys[p] for p in own])))
+    return [(a, b) for a, b in relations if abs(b - a) <= pitch + _SNAP_SLACK_PX]
 
 
 def _centre(ys: list[float]) -> float:
@@ -511,7 +515,7 @@ def _component_tie_direction(
 
     def levelled(direction: int) -> int:
         return sum(
-            abs(own + direction * half - partner) < _LEVEL_TOLERANCE
+            abs(own + direction * half - partner) < _LEVEL_TOLERANCE_PX
             for own, partner in feeder_relations + consumer_relations
         )
 
@@ -520,7 +524,7 @@ def _component_tie_direction(
         return _UP if up > down else _DOWN
     for relations in (feeder_relations, consumer_relations):
         net = sum(partner - own for own, partner in relations)
-        if abs(net) > _LEVEL_TOLERANCE:
+        if abs(net) > _LEVEL_TOLERANCE_PX:
             return _UP if net < 0 else _DOWN
     return _UP
 
