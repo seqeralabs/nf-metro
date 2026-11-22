@@ -819,6 +819,14 @@
         "mmd": "%%metro title: Fold Bypass Creep (tight)\n%%metro fold_threshold: 4\n%%metro file: vcf_out | VCF\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\n\ngraph LR\n    subgraph prep [Prep]\n        in0[ ]\n        align[Align]\n        in0 -->|main,qc| align\n    end\n    subgraph calling [Calling]\n        caller1[Caller A]\n        caller2[Caller B]\n        stats[Stats]\n        vcf_out[ ]\n        caller1 -->|main| stats\n        caller2 -->|main| stats\n        stats -->|main| vcf_out\n    end\n    subgraph report [Report]\n        mqc[MultiQC]\n    end\n    align -->|main| caller1\n    align -->|main| caller2\n    stats -->|qc| mqc\n    align -->|qc| mqc\n"
       },
       {
+        "name": "bypass_hidden_lane_side",
+        "mmd": "%%metro title: Hidden bypass opens on its line's lane side\n%%metro style: dark\n%%metro line: line1 | Line 1 | #d0006f\n%%metro line: line2 | Line 2 | #f0ab00\n%%metro files: input1 | input | input1\ngraph LR\n    input1[input1]\n    step1[step1]\n    step2[step2]\n    step3[step3]\n    _skip_step2\n    input1 -->|line1,line2| step1\n    step1 -->|line1,line2| step2\n    step2 -->|line1,line2| step3\n    step1 -->|line1| _skip_step2\n    _skip_step2 -->|line1| step3\n"
+      },
+      {
+        "name": "bypass_hidden_lane_side_symmetric",
+        "mmd": "%%metro title: Hidden bypass lane side (symmetric diamonds)\n%%metro style: dark\n%%metro line: line1 | Line 1 | #d0006f\n%%metro line: line2 | Line 2 | #f0ab00\n%%metro diamond_style: symmetric\n%%metro files: input1 | input | input1\ngraph LR\n    input1[input1]\n    step1[step1]\n    step2[step2]\n    step3[step3]\n    _skip_step2\n    input1 -->|line1,line2| step1\n    step1 -->|line1,line2| step2\n    step2 -->|line1,line2| step3\n    step1 -->|line1| _skip_step2\n    _skip_step2 -->|line1| step3\n"
+      },
+      {
         "name": "merge_offrow_continuation",
         "mmd": "%%metro title: Off-Row Merge Continuation\n%%metro style: dark\n%%metro line: trunk | Trunk | #2db572\n%%metro line: bypass | Bypass | #e63946\n\n%%metro grid: above_src | 0,0\n%%metro grid: horiz_src | 0,1\n%%metro grid: sink | 1,1\n%%metro grid: out | 2,0\n\ngraph LR\n    subgraph above_src [Above Source]\n        %%metro exit: right | bypass\n        a1[Start A]\n        a2[Prep A]\n        a1 -->|bypass| a2\n    end\n\n    subgraph horiz_src [Horizontal Source]\n        %%metro exit: right | trunk\n        h1[Start B]\n        h2[Prep B]\n        h1 -->|trunk| h2\n    end\n\n    subgraph sink [Sink]\n        %%metro entry: left | trunk,bypass\n        %%metro exit: right | trunk\n        s1[Merge]\n        s2[Combine]\n        s1 -->|trunk,bypass| s2\n    end\n\n    subgraph out [Output]\n        o1[Report]\n    end\n\n    a2 -->|bypass| s1\n    h2 -->|trunk| s1\n    s2 -->|trunk| o1\n"
       },
