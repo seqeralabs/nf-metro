@@ -376,6 +376,116 @@ def _assign_sections(
     return assignment
 
 
+def _cyclic_members(graph: nx.DiGraph[str]) -> set[str]:
+    """Nodes of ``graph`` that lie on a cycle."""
+    return {
+        member
+        for component in nx.strongly_connected_components(graph)
+        if len(component) > 1
+        for member in component
+    }
+
+
+def _unit(sections: _SectionAssignment, nid: str, split_secs: set[str]) -> str:
+    sec = sections.node_section[nid]
+    return f"node:{nid}" if sec in split_secs else f"section:{sec}"
+
+
+def _unit_graph(
+    sections: _SectionAssignment, edges: list[tuple[str, str]], split_secs: set[str]
+) -> nx.DiGraph[str]:
+    """Graph of whole sections plus the individual processes of ``split_secs``.
+
+    Edge weight ``w`` is 1 where the edge crosses a section boundary, else 0.
+    """
+    node_section = sections.node_section
+    graph: nx.DiGraph[str] = nx.DiGraph()
+    graph.add_nodes_from(
+        sorted({_unit(sections, nid, split_secs) for nid in node_section})
+    )
+    for s, t in edges:
+        u, v = _unit(sections, s, split_secs), _unit(sections, t, split_secs)
+        if u != v:
+            crossing = int(node_section[s] != node_section[t])
+            graph.add_edge(
+                u, v, w=max(crossing, graph.get_edge_data(u, v, {}).get("w", 0))
+            )
+    return graph
+
+
+def _split_cyclic_sections(
+    sections: _SectionAssignment, edges: list[tuple[str, str]]
+) -> _SectionAssignment:
+    """Split sections that form a cycle into acyclic groups by flow depth.
+
+    Unassigned processes share one section, and Nextflow flattens a parent
+    subworkflow's own processes into a subgraph beside its children's, so a
+    section can run both before and after another one. Each section caught in
+    a section-level cycle is split by depth: the longest path to a process,
+    counting one per section boundary crossed. Every inter-section edge then
+    strictly increases depth, so the split sections are acyclic. The
+    unassigned section is split first, when it is on a cycle; a subgraph is
+    split only if it still closes a cycle after that, and sections not on a
+    cycle stay whole. A split unassigned section is named ``Reporting``
+    for its last group and ``Main`` before that; a split subgraph keeps its
+    name on every group.
+    """
+    node_section = sections.node_section
+    section_graph = directed_graph(
+        list(sections.names),
+        sorted(
+            {
+                (node_section[s], node_section[t])
+                for s, t in edges
+                if node_section[s] != node_section[t]
+            }
+        ),
+    )
+    cyclic = _cyclic_members(section_graph)
+    if not cyclic:
+        return sections
+
+    split_secs = {"__reporting"} & cyclic or cyclic
+    unit_graph = _unit_graph(sections, edges, split_secs)
+    split_secs |= {
+        unit.removeprefix("section:")
+        for unit in _cyclic_members(unit_graph)
+        if unit.startswith("section:")
+    }
+    unit_graph = _unit_graph(sections, edges, split_secs)
+    depth: dict[str, int] = {}
+    for unit in nx.lexicographical_topological_sort(unit_graph):
+        depth[unit] = max(
+            (
+                depth[p] + unit_graph[p][unit]["w"]
+                for p in unit_graph.predecessors(unit)
+            ),
+            default=0,
+        )
+
+    split = _SectionAssignment()
+    for sec, name in sections.names.items():
+        members = sections.nodes[sec]
+        if sec not in split_secs:
+            split.names[sec] = name
+            split.nodes[sec] = list(members)
+            for nid in members:
+                split.node_section[nid] = sec
+            continue
+        depths = sorted({depth[_unit(sections, nid, split_secs)] for nid in members})
+        for index, d in enumerate(depths):
+            key = f"{sec}__{index}"
+            if sec == "__reporting":
+                split.names[key] = "Reporting" if d == depths[-1] else "Main"
+            else:
+                split.names[key] = name
+            for nid in members:
+                if depth[_unit(sections, nid, split_secs)] == d:
+                    split.node_section[nid] = key
+                    split.nodes[key].append(nid)
+    return split
+
+
 def _classify_edges(
     edges: list[tuple[str, str]], node_section: dict[str, str]
 ) -> tuple[dict[str, list[tuple[str, str]]], list[tuple[str, str]]]:
@@ -529,16 +639,14 @@ class _LineAssignment:
     ``main`` carries adjacent flow; ``bypass_lines`` keys a ``(src_sec,
     tgt_sec)`` section pair to its ``(id, name, color)``; ``spur`` (when
     present) carries dead-end branches. ``edge_line`` maps every emitted edge
-    to its line id, and ``main_inter_edges`` / ``bypass_groups`` partition the
-    inter-section edges for emission order.
+    to its line id; its insertion order (intra-section, adjacent, bypass, then
+    spur edges) is the emission order.
     """
 
     main: tuple[str, str, str]
     spur: tuple[str, str, str] | None
     bypass_lines: dict[tuple[str, str], tuple[str, str, str]]
     edge_line: dict[tuple[str, str], str]
-    main_inter_edges: list[tuple[str, str]]
-    bypass_groups: dict[tuple[str, str], list[tuple[str, str]]]
 
 
 def _assign_lines(
@@ -628,8 +736,6 @@ def _assign_lines(
         spur=spur,
         bypass_lines=bypass_lines,
         edge_line=edge_line,
-        main_inter_edges=main_inter_edges,
-        bypass_groups=bypass_groups,
     )
 
 
@@ -707,7 +813,6 @@ def _emit_mmd(
         out.append("    end")
         out.append("")
 
-    # edge_line includes spur edges too; the main/bypass groups do not.
     intra = {edge for sec_edges in intra_edges.values() for edge in sec_edges}
     all_inter = [edge for edge in lines.edge_line if edge not in intra]
 
@@ -804,7 +909,7 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
     edges = cycle_break.kept
     dropped_feedback = reconnected.self_loops + cycle_break.removed
 
-    sections = _assign_sections(kept_ids, dag, title)
+    sections = _split_cyclic_sections(_assign_sections(kept_ids, dag, title), edges)
     section_order = _topological_order(
         list(sections.names.keys()), edges, sections.node_section
     )

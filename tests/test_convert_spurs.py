@@ -5,6 +5,7 @@ import re
 import pytest
 
 from nf_metro.convert import convert_nextflow_dag
+from nf_metro.layout import compute_layout
 from nf_metro.parser import parse_metro_mermaid
 
 
@@ -45,3 +46,59 @@ class TestInterSectionSpurs:
             edge.line_id == "spur" and edge.target == "qc_report"
             for edge in graph.edges
         )
+
+
+class TestCyclicSections:
+    @staticmethod
+    def _section_names(result):
+        graph = parse_metro_mermaid(result)
+        compute_layout(graph, validate=True)
+        return {
+            station: graph.sections[graph.stations[station].section_id].name
+            for station in graph.stations
+            if not graph.stations[station].is_port
+            and graph.stations[station].section_id
+        }, graph
+
+    @pytest.mark.parametrize("summary_is_dead_end", [True, False])
+    def test_unassigned_processes_split_around_subworkflow(self, summary_is_dead_end):
+        """Top-level processes before and after a subworkflow get two sections."""
+        text = (
+            "flowchart TB\n"
+            '    subgraph " "\n    v0["Channel.fromFilePairs"]\n    end\n'
+            '    v1(["FASTQC"])\n'
+            '    subgraph "QC [QC]"\n'
+            '    v2(["QC_SUMMARY"])\n    v3(["SAMTOOLS_STATS"])\n    end\n'
+            '    v4(["MULTIQC"])\n'
+            "    v0 --> v1\n    v0 --> v3\n    v1 --> v2\n    v3 --> v4\n"
+        )
+        if not summary_is_dead_end:
+            text += "    v2 --> v4\n"
+
+        names, graph = self._section_names(convert_nextflow_dag(text))
+
+        assert names == {
+            "fastqc": "Main",
+            "qc_summary": "Qc",
+            "samtools_stats": "Qc",
+            "multiqc": "Reporting",
+        }
+        assert len(graph.sections) == 3
+
+    def test_parent_subworkflow_split_around_child(self):
+        """A parent's own processes before and after its child are split."""
+        text = (
+            "flowchart TB\n"
+            '    subgraph "PIPE:PARENT [PARENT]"\n'
+            '    v1(["PREPARE"])\n    v4(["SUMMARISE"])\n    end\n'
+            '    subgraph "PIPE:PARENT:CHILD [CHILD]"\n'
+            '    v2(["ALIGN"])\n    v3(["SORT"])\n    end\n'
+            "    v1 --> v2\n    v2 --> v3\n    v3 --> v4\n"
+        )
+
+        names, graph = self._section_names(convert_nextflow_dag(text))
+
+        assert len(graph.sections) == 3
+        assert names["prepare"] == names["summarise"] == "Parent"
+        prepare = graph.stations["prepare"].section_id
+        assert graph.stations["summarise"].section_id != prepare
