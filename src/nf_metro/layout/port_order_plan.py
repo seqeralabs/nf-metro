@@ -40,13 +40,17 @@ Such a bypass U-turn takes a corridor, ranked in the travel frame from the
 placed boxes: only a side whose corridor crosses no other section and no
 other line into the entry is a candidate; among the candidates the side the
 entry's other same-band U-turns pass on wins (one bundle), then the shorter
-detour, then the side whose corridor runs in room the layout already has rather
-than at the edge of the map, then the turn-round side.  Bypass U-turns sharing
+detour, then the side whose corridor runs in free room the layout already has
+rather than at the edge of the map, then the turn-round side.  Room is not free
+where another line of the hop's fork or of the target section ends beyond the
+traverse.  Detour and room read each box's lateral faces no further than the
+section padding beyond its content, so the bundle clearance later sizers add for
+the planned lanes cannot change the ranking.  Bypass U-turns sharing
 a line and travelling opposite ways over overlapping spans of one band are
 decided together, so no two of them take one screen side; a U-turn outside that
 ranked set constrains none of them.
 A direct turn-round whose two sides are clear and equally long takes the side
-with room.  Any other U-turn keeps the screen-below side.
+with free room.  Any other U-turn keeps the screen-below side.
 
 **Entry order**, as a sort key with the earlier field deciding:
 
@@ -94,10 +98,13 @@ from types import MappingProxyType
 from typing import Literal
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
     CURVE_RADIUS,
     INTER_ROW_HEADER_CLEARANCE,
     SAME_Y_TOLERANCE,
     SECTION_ROUTE_CLEARANCE,
+    SECTION_X_PADDING,
+    SECTION_Y_PADDING,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
@@ -142,9 +149,6 @@ _U_TURN_SPREAD = 0.75
 _REACH_STEP = 0.01
 _CORRIDOR_CLEAR = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
 """How far a U-turn's traverse runs past the extreme of the band it rounds."""
-_ROOM_TOLERANCE = 1.0
-"""Pixels inside a band's extreme that a section's edge may reach and still lie
-beyond the band."""
 
 
 class ApproachKind(Enum):
@@ -172,10 +176,10 @@ class SideRule(Enum):
     """A bypass U-turn's side chosen among the sides whose corridor crosses no
     other section and no other line into its entry: the side shared with the
     entry's forced siblings, else the shorter detour, else the side whose
-    corridor runs in room the layout already has rather than growing the map;
-    read in the entry's travel frame, so a reflection flips it.  A direct
+    corridor runs in free room the layout already has rather than growing the
+    map; read in the entry's travel frame, so a reflection flips it.  A direct
     turn-round whose two sides are clear and equally long takes the side with
-    room by the same rule."""
+    free room by the same rule."""
     FORK_NEST = "fork-nest"
     """A fork's branch off an exit heading across the entry's travel, holding the
     outermost lanes of its turn there, passes on the side the exit faces; a
@@ -218,9 +222,10 @@ class _Corridor:
     hop's two ends, and no other line into the entry starts beyond the
     traverse, where it would have to cross the loop to land."""
     room: bool
-    """Whether a section lies beyond the band on this side within the hop's
-    span, so the corridor runs in room the layout already has rather than at
-    the edge of the map."""
+    """Whether the corridor runs in free room the layout already has rather
+    than at the edge of the map: a section lies beyond the band on this side
+    within the hop's span, and no other line of the hop's fork or of the
+    target section ends beyond the traverse."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +319,28 @@ def _box(section: Section, travel: Direction) -> _Box:
     along = [_along(c, travel) for c in corners]
     lateral = [_lateral(c, _ORIGIN, travel) for c in corners]
     return (min(along), max(along), min(lateral), max(lateral))
+
+
+def _face_span(graph: MetroGraph, section: Section, travel: Direction) -> _Span:
+    """*section*'s lateral span across *travel*, each face read no further than
+    the section padding beyond its content: its stations and its ports on the
+    faces *travel* crosses.  Ports on the lateral faces are left out, since they
+    sit on the faces the bundle sizers move; with no content, the box."""
+    lateral = lateral_axis(travel)
+    content = [
+        _lateral((station.x, station.y), _ORIGIN, travel)
+        for node_id, station in graph.stations.items()
+        if station.section_id == section.id
+        and (
+            (port := graph.ports.get(node_id)) is None
+            or lateral_axis(ENTRY_SIDE_DIRECTION[port.side]) == lateral
+        )
+    ]
+    _a0, _a1, lo, hi = _box(section, travel)
+    if not content:
+        return lo, hi
+    pad = SECTION_Y_PADDING if lateral == "y" else SECTION_X_PADDING
+    return max(lo, min(content) - pad), min(hi, max(content) + pad)
 
 
 def _overlap(a: _Span, b: _Span) -> float:
@@ -712,10 +739,23 @@ class PortOrderBuilder:
         clear of the band's extreme on its side and descends just outside the
         entry, at the offsets the wrap leaves use.  The band's extreme is the
         outermost of the two ends, the target box and every gridded section on
-        the band overlapping the span.  A corridor is clear only if no edge
-        into the entry outside the hop's connector leaves a node beyond its
-        traverse: the loop would enclose the entry from that side, so such a
-        feeder could reach the port only by crossing it."""
+        the band overlapping the span.
+
+        A corridor is clear only if its legs cross no section but the hop's two
+        ends, and no edge into the entry outside the hop's connector leaves a
+        node beyond its traverse: such a feeder could reach the port only by
+        crossing the loop.  A side's room is free only if a section lies beyond
+        the band on that side within the span and no other line of the hop's
+        fork (the connector's source nodes) or of the target section (an edge
+        into or out of its ports) ends beyond that side's traverse.  Whether
+        such a line crosses the loop depends on the lane order at the fork,
+        which the record itself decides, so it contests the room rather than
+        closing the side.
+
+        The detour and the room read each box's lateral faces no further than
+        the section padding beyond its content (:func:`_face_span`), so the
+        bundle clearance the sizers add later for the record's own lanes cannot
+        change them; the crossing tests read the boxes as placed."""
         graph = self.graph
         band = self.shared_band(entry_id, source_id, travel)
         assert band is not None
@@ -736,48 +776,88 @@ class PortOrderBuilder:
         )
         lead = a_s + (CURVE_RADIUS + step) * (1 if descent > a_s else -1)
         lows, highs = [l_s, l_e], [l_s, l_e]
+        face_lows, face_highs = [l_s, l_e], [l_s, l_e]
         others: list[_Box] = []
+        beyond: list[_Span] = []
         for section in graph.sections.values():
             if section.bbox_w <= 0 or section.bbox_h <= 0:
                 continue
             box = _box(section, travel)
             if section is target_box:
+                on_band = True
+            elif section is source_box:
+                continue
+            else:
+                others.append(box)
+                if _overlap(box[:2], span) <= SAME_Y_TOLERANCE:
+                    continue
+                s0, s1 = _section_extent(section, rows)
+                on_band = (
+                    section.grid_col >= 0
+                    and min(s1, band[1]) - max(s0, band[0]) > SAME_Y_TOLERANCE
+                )
+            face = _face_span(graph, section, travel)
+            if section is not target_box:
+                beyond.append(face)
+            if on_band:
                 lows.append(box[2])
                 highs.append(box[3])
-            if section is source_box or section is target_box:
-                continue
-            others.append(box)
-            if section.grid_col < 0:
-                continue
-            s0, s1 = _section_extent(section, rows)
-            if (
-                min(s1, band[1]) - max(s0, band[0]) > SAME_Y_TOLERANCE
-                and _overlap(box[:2], span) > SAME_Y_TOLERANCE
-            ):
-                lows.append(box[2])
-                highs.append(box[3])
-        high, low = max(highs), min(lows)
-        beyond = [box for box in others if _overlap(box[:2], span) > SAME_Y_TOLERANCE]
-        hop = {(e.source, e.line_id) for e in self.connector(entry_id, source_id)}
+                face_lows.append(face[0])
+                face_highs.append(face[1])
+        right_channel = max(highs) + _CORRIDOR_CLEAR
+        left_channel = min(lows) - _CORRIDOR_CLEAR
+        face_high, face_low = max(face_highs), min(face_lows)
+        connector = self.connector(entry_id, source_id)
+        hop = {(e.source, e.line_id) for e in connector}
         feeders = [
             _lateral(self.point(e.source), _ORIGIN, travel)
             for e in graph.edges_to(entry_id)
             if (e.source, e.line_id) not in hop
         ]
-        right_channel, left_channel = high + _CORRIDOR_CLEAR, low - _CORRIDOR_CLEAR
+        contested = self.contested_ends(connector, target_box, travel)
         right = _Corridor(
-            2 * high - l_s - l_e,
+            2 * face_high - l_s - l_e,
             not _legs_cross(others, lead, descent, l_s, l_e, right_channel)
             and all(lateral <= right_channel for lateral in feeders),
-            any(box[2] >= high - _ROOM_TOLERANCE for box in beyond),
+            any(lo >= face_high - COORD_TOLERANCE for lo, _hi in beyond)
+            and all(lateral <= right_channel for lateral in contested),
         )
         left = _Corridor(
-            l_s + l_e - 2 * low,
+            l_s + l_e - 2 * face_low,
             not _legs_cross(others, lead, descent, l_s, l_e, left_channel)
             and all(lateral >= left_channel for lateral in feeders),
-            any(box[3] <= low + _ROOM_TOLERANCE for box in beyond),
+            any(hi <= face_low + COORD_TOLERANCE for _lo, hi in beyond)
+            and all(lateral >= left_channel for lateral in contested),
         )
         return right, left, span, band
+
+    def contested_ends(
+        self, connector: Sequence[Edge], target: Section, travel: Direction
+    ) -> list[float]:
+        """Laterals across *travel* of the ends outside *target* of every edge
+        but *connector*'s that leaves one of *connector*'s source nodes or
+        enters or leaves one of *target*'s ports."""
+        graph = self.graph
+        hop = {(e.source, e.target, e.line_id) for e in connector}
+        ports = sorted(
+            p for p, port in graph.ports.items() if port.section_id == target.id
+        )
+        touching = [
+            *(e for p in ports for e in graph.edges_to(p)),
+            *(e for p in ports for e in graph.edges_from(p)),
+            *(
+                e
+                for n in sorted({e.source for e in connector})
+                for e in graph.edges_from(n)
+            ),
+        ]
+        return [
+            _lateral(self.point(node), _ORIGIN, travel)
+            for e in touching
+            if (e.source, e.target, e.line_id) not in hop
+            for node in (e.source, e.target)
+            if graph.stations[node].section_id != target.id
+        ]
 
     def forced_side(
         self, entry_id: str, source_id: str, travel: Direction

@@ -1598,7 +1598,11 @@ through the record's draw accessors (`planned_offsets` in
   owner of the side a U-turn into a side entry passes on, decided here.  It
   reads grid cells and spans, port sides, edges and junction topology, station
   positions and section boxes as they stand at the close of Stage 6.12, and
-  the line sets and source positions of the edges into each entry.  Stages 6.14, 6.15a, 6.17 and 6.18
+  the line sets and end positions of the edges into each entry, out of the
+  hop's fork and into or out of the target section's ports.  Its detour and
+  room read each box's lateral faces no further than the section padding
+  beyond the section's content, so the bundle sizing of Stages 6.13 and 6.15a
+  does not move them.  Stages 6.14, 6.15a, 6.17 and 6.18
   and envelope settlement move positions after it and never re-decide the
   side; routing reads it (the RIGHT- and LEFT-entry gap-above traverses, the
   far-left U-turn wrap, `draws_over_top_loop` and the exit turn it opens with)

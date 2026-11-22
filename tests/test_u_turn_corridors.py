@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+import cohort_shadow_oracle
 import pytest
 
 import nf_metro.layout.lane_plan as lane_plan_module
@@ -17,10 +18,13 @@ import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import SAME_Y_TOLERANCE
 from nf_metro.layout.port_order_plan import (
+    _CORRIDOR_CLEAR,
     PortOrderBuilder,
     SideRule,
+    _box,
     _Corridor,
     _CorridorHop,
+    _lateral,
     approach_source,
     port_travel,
 )
@@ -98,7 +102,7 @@ def _screen(graph: MetroGraph, key: _Key) -> str:
 
 
 # Every curated U-turn whose two clear corridors are equally long where the lane
-# plan reads them, with the side the ranking gives it: the corridor in room
+# plan reads them, with the side the ranking gives it: the corridor in free room
 # the layout already has, else the turn-round side.
 TIES: tuple[tuple[str, _Key, SideRule, str], ...] = (
     (
@@ -110,7 +114,7 @@ TIES: tuple[tuple[str, _Key, SideRule, str], ...] = (
     (
         "examples/topologies/bypass_left_entry_from_right.mmd",
         ("target__entry_left_1", "source__exit_left_0"),
-        SideRule.CORRIDOR,
+        SideRule.TURN_ROUND,
         "below",
     ),
     (
@@ -263,3 +267,110 @@ def test_a_loop_never_encloses_another_line_into_its_entry() -> None:
     assert ys
     assert min(ys) > target.bbox_y
     assert max(ys) > target.bbox_y + target.bbox_h
+
+
+def _connector_ys(laid: _Laid, key: _Key) -> list[float]:
+    return [
+        y
+        for route in laid.routes
+        if route.edge.target == key[0]  # type: ignore[attr-defined]
+        and approach_source(laid.drawn, route.edge.source, route.edge.line_id)  # type: ignore[attr-defined]
+        == key[1]
+        for _x, y in route.points  # type: ignore[attr-defined]
+    ]
+
+
+# Direct turn-rounds whose two clear corridors are equally long and whose only
+# section beyond the band lies on a side another line ends beyond the traverse
+# of: (map, key, the contested side, the contesting edge, its end beyond).
+CONTESTED: tuple[tuple[str, _Key, int, tuple[str, str, str], str], ...] = (
+    (
+        "f8404976",
+        ("sec1__entry_left_3", "sec0__exit_left_0"),
+        -1,
+        ("sec1__exit_right_1", "sec2__entry_left_4", "l0"),
+        "sec2__entry_left_4",
+    ),
+    (
+        "f8500517",
+        ("sec2__entry_right_3", "sec1__exit_right_1"),
+        -1,
+        ("__junction_6", "__merge_2", "l1"),
+        "__merge_2",
+    ),
+    (
+        "f8500832",
+        ("sec1__entry_right_3", "sec0__exit_right_0"),
+        -1,
+        ("__junction_6", "sec4__entry_right_4", "l0"),
+        "sec4__entry_right_4",
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("stem", "key", "side", "edge", "end"),
+    CONTESTED,
+    ids=[stem for stem, *_rest in CONTESTED],
+)
+def test_room_another_line_ends_beyond_is_not_free(
+    stem: str, key: _Key, side: int, edge: tuple[str, str, str], end: str
+) -> None:
+    """f8404976's target section sends l0 out round the room above the loop;
+    f8500517's and f8500832's fork sends a sibling branch out round the room
+    below it.  Whether that line crosses the loop depends on the lane order the
+    record decides, so the room is not free and the tie takes the turn-round
+    side."""
+    laid = _laid(CANVAS_DATA / f"{stem}.mmd")
+    approach = laid.drawn._lane_plan.port_orders.approaches[key]  # type: ignore[union-attr]
+    assert (approach.side, approach.rule) == (1, SideRule.TURN_ROUND)
+    graph = laid.sealed
+    builder = _builder(graph)
+    travel = builder.same_axis_u_turn(*key)
+    assert travel is not None
+    right, left, _span, _band = builder.side_corridors(*key, travel)
+    assert right.feasible and left.feasible
+    assert abs(right.detour - left.detour) <= SAME_Y_TOLERANCE
+    assert not right.room and not left.room
+    connector = builder.connector(*key)
+    assert edge in {(e.source, e.target, e.line_id) for e in graph.edges}
+    assert edge not in {(e.source, e.target, e.line_id) for e in connector}
+    assert end in edge[:2]
+    target = graph.section_for_port(graph.ports[key[0]])
+    reach = _lateral(builder.point(end), (0.0, 0.0), travel)
+    assert reach in builder.contested_ends(connector, target, travel)
+    _a0, _a1, low, high = _box(target, travel)
+    face = high if side == 1 else low
+    assert side * (reach - face) > _CORRIDOR_CLEAR
+
+
+@pytest.mark.parametrize("stem", [stem for stem, *_rest in CONTESTED])
+def test_a_contested_turn_round_is_drawn_on_its_recorded_side(stem: str) -> None:
+    """The render draws each loop on the turn-round side its record holds."""
+    laid = _laid(CANVAS_DATA / f"{stem}.mmd")
+    key = next(key for name, key, *_rest in CONTESTED if name == stem)
+    graph = laid.drawn
+    target = graph.sections[graph.ports[key[0]].section_id]
+    ys = _connector_ys(laid, key)
+    assert ys
+    if _screen(graph, key) == "above":
+        assert min(ys) < target.bbox_y
+    else:
+        assert max(ys) > target.bbox_y + target.bbox_h
+
+
+def test_a_contested_turn_round_draws_its_plan() -> None:
+    assert cohort_shadow_oracle.shadow_failure(CANVAS_DATA / "f8500832.mmd") is None
+
+
+def test_a_direct_turn_round_reads_the_padding_its_target_has() -> None:
+    """f8401369's sec3 carries less padding below its stations than above, so
+    the corridor below is the shorter and the turn-round side holds."""
+    laid = _laid(CANVAS_DATA / "f8401369.mmd")
+    key = ("sec3__entry_left_3", "sec2__exit_left_0")
+    approach = laid.drawn._lane_plan.port_orders.approaches[key]  # type: ignore[union-attr]
+    assert (approach.side, approach.rule) == (1, SideRule.TURN_ROUND)
+    assert _screen(laid.drawn, key) == "below"
+    right, left = _corridors(laid.sealed, key)
+    assert right.feasible and left.feasible
+    assert right.detour + SAME_Y_TOLERANCE < left.detour
