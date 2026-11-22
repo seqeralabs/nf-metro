@@ -1,5 +1,7 @@
 """Tests for Nextflow DAG conversion regressions."""
 
+import re
+
 import pytest
 
 from nf_metro.convert import convert_nextflow_dag
@@ -31,3 +33,25 @@ class TestDuplicateSectionNames:
         for index, section_id in enumerate(section_ids):
             assert f"process_{index}" in graph.sections[section_id].station_ids
         compute_layout(graph, validate=True)
+
+    def test_repeated_names_keep_distinct_bypass_lines(self):
+        """Two same-named sections bypassing to one target get two lines."""
+        text = (
+            "flowchart TB\n"
+            '    subgraph "PIPELINE:FIRST:QC [QC]"\n    v1(["FASTQC"])\n    end\n'
+            '    subgraph "PIPELINE:MID [MID]"\n    v2(["TRIM"])\n    end\n'
+            '    subgraph "PIPELINE:SECOND:QC [QC]"\n    v3(["MULTIQC"])\n    end\n'
+            '    subgraph "PIPELINE:ALIGN [ALIGN]"\n    v4(["STAR"])\n    end\n'
+            '    subgraph "PIPELINE:END [END]"\n'
+            '    v5(["REPORT"])\n    v6(["FINAL"])\n    end\n'
+            "    v1 --> v2\n    v2 --> v3\n    v3 --> v4\n    v4 --> v5\n"
+            "    v5 --> v6\n    v1 --> v6\n    v3 --> v6\n"
+        )
+
+        result = convert_nextflow_dag(text)
+
+        assert len(parse_metro_mermaid(result).lines) == 3
+        bypass = re.search(r"fastqc -->\|(\w+)\| final", result)
+        second_bypass = re.search(r"multiqc -->\|(\w+)\| final", result)
+        assert bypass and second_bypass
+        assert bypass.group(1) != second_bypass.group(1)

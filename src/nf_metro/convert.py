@@ -598,10 +598,15 @@ def _assign_lines(
     color_idx += 1
 
     bypass_lines: dict[tuple[str, str], tuple[str, str, str]] = {}
+    used_line_ids = {main_line_id, "spur"}
     for src_sec, tgt_sec in sorted(bypass_groups.keys()):
         src_name = _humanize_label(section_names[src_sec], abbreviate=False)
         tgt_name = _humanize_label(section_names[tgt_sec], abbreviate=False)
-        line_id = _sanitize_id(f"{section_names[src_sec]}_{section_names[tgt_sec]}")
+        line_id = _allocate_unique_id(
+            f"{section_names[src_sec]}_{section_names[tgt_sec]}",
+            used_line_ids,
+            "bypass",
+        )
         line_name = f"{src_name} - {tgt_name}"
         line_color = LINE_COLORS[color_idx % len(LINE_COLORS)]
         color_idx += 1
