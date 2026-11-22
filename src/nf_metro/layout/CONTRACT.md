@@ -438,8 +438,8 @@ in pipeline order.
   next. The nearest connected section on the current lane is preferred;
   parallel branch starts remain together; joins wait for aligned or independent
   predecessor routes. A secondary cross-row route may rejoin a section already
-  numbered on a dominant row. Authored numbers are preserved, and automatic
-  sections take the lowest unused positive numbers.
+  numbered on a dominant row. Authored numbers are preserved (an authored 0 stays 0, meaning
+  no badge), and automatic sections take the lowest unused positive numbers.
 - **Invariants preserved**: Section IDs, station coords, bboxes,
   edges. Pure metadata pass.
 - **Related tests**: `tests/test_section_numbering.py`.

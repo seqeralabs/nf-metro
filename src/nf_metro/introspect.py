@@ -17,13 +17,18 @@ are out of scope here -- render and read the manifest for laid-out geometry.
 
 Everything reported is available immediately after
 :func:`~nf_metro.parser.parse_metro_mermaid`, which runs auto-layout and section
-resolution internally; no full layout pass is required.
+resolution internally; no full layout pass is required.  The one exception is
+the section number badge, which the layout assigns:
+:func:`rendered_section_numbers` supplies it.
 """
 
 from __future__ import annotations
 
+import copy
 import json
+import warnings
 from collections import Counter
+from collections.abc import Mapping
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -34,10 +39,16 @@ from nf_metro.parser.route_topology import build_route_topology_query
 from nf_metro.themes import resolve_style
 
 if TYPE_CHECKING:
-    from nf_metro.parser.model import MetroGraph
+    from nf_metro.parser.model import MetroGraph, Section
     from nf_metro.parser.route_topology import RouteConnector
 
-__all__ = ["build_info", "format_info_json", "format_info_text", "station_kind"]
+__all__ = [
+    "build_info",
+    "format_info_json",
+    "format_info_text",
+    "rendered_section_numbers",
+    "station_kind",
+]
 
 StationKind = Literal["station", "junction", "port", "bypass", "hidden", "unknown"]
 
@@ -116,11 +127,58 @@ def station_kind(graph: MetroGraph, station_id: str) -> StationKind:
     return "station"
 
 
-def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str, Any]:
+def rendered_section_numbers(graph: MetroGraph) -> dict[str, int | None] | None:
+    """Section badge numbers as the render draws them, or ``None`` if layout
+    fails.
+
+    Numbers are assigned in layout (stage 1.4), so this lays out a copy of *graph*
+    (the original, and the inferred defaults recorded on it, stay untouched).
+    A section that draws no badge maps to ``None``."""
+    from nf_metro.layout.engine import compute_layout
+
+    laid_out = copy.deepcopy(graph)
+    # Layout warnings describe the render, not the map being inspected.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            compute_layout(laid_out)
+        except Exception:
+            return None
+    return {
+        sid: section.number if section.has_badge else None
+        for sid, section in laid_out.sections.items()
+    }
+
+
+def _badge_number(
+    section_numbers: Mapping[str, int | None] | None, section: Section
+) -> int | None:
+    """The section's badge number: the supplied one if given, else its authored
+    override or parsed number, with none for a section that draws no box."""
+    if section_numbers is not None and section.id in section_numbers:
+        return section_numbers[section.id]
+    if not section.draws_box:
+        return None
+    number = (
+        section.number if section.number_override is None else section.number_override
+    )
+    return number if number > 0 else None
+
+
+def build_info(
+    graph: MetroGraph,
+    warnings: list[str] | None = None,
+    *,
+    section_numbers: Mapping[str, int | None] | None = None,
+) -> dict[str, Any]:
     """Assemble the structured introspection dict for a parsed graph.
 
     *warnings* are parse-time warning messages captured by the caller (the
     parser emits these via :mod:`warnings`); pass ``None`` for none.
+
+    *section_numbers* overrides the badge numbers read from *graph* (use
+    :func:`rendered_section_numbers` for a graph that has not been laid out).
+    A section that draws no badge reports ``None``.
 
     ``style`` reports the theme name the map resolves to, which is the name
     ``--theme`` accepts: an alias or an unrecognised value is reported as the
@@ -166,7 +224,7 @@ def build_info(graph: MetroGraph, warnings: list[str] | None = None) -> dict[str
             {
                 "id": sid,
                 "name": sec.name,
-                "number": sec.number,
+                "number": _badge_number(section_numbers, sec),
                 "n_stations": len(sec.station_ids),
                 "direction": sec.direction,
                 "direction_inferred": (
