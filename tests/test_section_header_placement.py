@@ -118,7 +118,7 @@ def test_nudge_clears_a_route_to_the_right_of_the_box() -> None:
     trunk fixes the nudge origin; a second route sits to the right of the box,
     past the un-nudged header's right edge, inside the nudged header's span."""
     graph = MetroGraph()
-    section = Section(id="s", name="Alignment")
+    section = Section(id="s", name="Alignment", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = 97.0, 18.0
     graph.sections["s"] = section
@@ -539,3 +539,19 @@ def test_wrapped_header_with_breakable_widest_line_still_reported() -> None:
     assert check_section_headers_fit_box_width(graph, {"wide_break": placement}) == [
         "wide_break"
     ]
+
+
+def test_unnumbered_header_title_starts_at_the_box_edge() -> None:
+    """A section numbered 0 draws no badge, so its title sits where the badge
+    would have started rather than a badge-width to the right."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment", number=0)
+    section.bbox_x, section.bbox_y = 40.0, 100.0
+    section.bbox_w, section.bbox_h = 200.0, 80.0
+    graph.sections["s"] = section
+
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=[], title_font_size=13.0
+    )
+    assert placement.mode == "above"
+    assert placement.label_x == section.bbox_x
