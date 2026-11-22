@@ -55,7 +55,7 @@ from nf_metro.layout.route_plan import (
     fan_lane_seat_keys,
 )
 from nf_metro.parser.commitments import FlowDirection, is_flow_direction
-from nf_metro.parser.model import LineSpread, MetroGraph, PortSide
+from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section
 from nf_metro.parser.route_topology import (
     AuthoredEdgeFact,
     BundleId,
@@ -367,17 +367,24 @@ def fan_lane_sign(
     open away from its feeder.
     """
     section = graph.sections.get(layout_section_id or "")
-    if section is not None and (
-        _branches_partition(branches)
-        or _branches_nest_on_priority_lanes(graph, section.id, branches)
+    if section is None:
+        return fan_appearance_lane_sign(
+            graph, frame, layout_section_id, source_station_id
+        )
+    line_sets = _branch_line_sets(branches)
+    if _line_sets_partition(line_sets) or _branches_nest_on_priority_lanes(
+        graph, section, line_sets
     ):
         return section_lane_sign(section, tb_positive_fan)
     return fan_appearance_lane_sign(graph, frame, layout_section_id, source_station_id)
 
 
-def _branches_partition(branches: Sequence[FanBranchPlan]) -> bool:
+def _branch_line_sets(branches: Sequence[FanBranchPlan]) -> list[frozenset[str]]:
+    return [frozenset(branch.line_ids) for branch in branches]
+
+
+def _line_sets_partition(line_sets: Sequence[frozenset[str]]) -> bool:
     """Whether any two of the fan's branches carry disjoint lines."""
-    line_sets = [frozenset(branch.line_ids) for branch in branches]
     return any(
         left.isdisjoint(right)
         for index, left in enumerate(line_sets)
@@ -386,25 +393,18 @@ def _branches_partition(branches: Sequence[FanBranchPlan]) -> bool:
 
 
 def _branches_nest_on_priority_lanes(
-    graph: MetroGraph,
-    layout_section_id: str | None,
-    branches: Sequence[FanBranchPlan],
+    graph: MetroGraph, section: Section, line_sets: Sequence[frozenset[str]]
 ) -> bool:
-    """Whether the fan's branches nest, unpartitioned, in a priority-ordered section.
+    """Whether one branch strictly carries every other branch's lines, in lane order.
 
-    One branch strictly carries every other branch's lines and no two branches
-    are disjoint.  The lines the trunk branch carries beyond the others sit on
-    their own priority lanes, so each subset branch has a side to peel toward --
-    but only while the section's lanes follow line priority.
+    The lines the trunk branch carries beyond the others sit on their own
+    priority lanes, so each subset branch has a side to peel toward -- but only
+    while the section's lanes follow line priority.
     """
-    section = graph.sections.get(layout_section_id or "")
-    if section is None or not section_lanes_follow_line_priority(graph, section):
+    if not section_lanes_follow_line_priority(graph, section):
         return False
-    if _branches_partition(branches):
-        return False
-    line_sets = [frozenset(branch.line_ids) for branch in branches]
     return any(
-        all(other < trunk for other in line_sets[:index] + line_sets[index + 1 :])
+        all(other < trunk for other in [*line_sets[:index], *line_sets[index + 1 :]])
         for index, trunk in enumerate(line_sets)
     )
 
@@ -2309,12 +2309,18 @@ def _seat_symmetric_branches_by_line_rail(
     ``diamond_style: symmetric`` fan keeps its discovery-order seating.
     """
     centered = graph.section_line_spread(layout_section_id) is LineSpread.CENTERED
+    section = graph.sections.get(layout_section_id or "")
+    line_sets = _branch_line_sets(branch_plans)
     if (
         appearance_policy is not FanAppearancePolicy.SYMMETRIC
         or appearance_lane_sign is None
         or not (
             centered
-            or _branches_nest_on_priority_lanes(graph, layout_section_id, branch_plans)
+            or (
+                section is not None
+                and not _line_sets_partition(line_sets)
+                and _branches_nest_on_priority_lanes(graph, section, line_sets)
+            )
         )
     ):
         return branch_plans

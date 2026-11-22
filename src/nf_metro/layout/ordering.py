@@ -780,7 +780,7 @@ def _bypass_lane_side(
     rank = {lid: i for i, lid in enumerate(graph.lines)}
 
     def mean_rank(lines: set[str]) -> float:
-        return sum(rank.get(lid, DEFAULT_LINE_PRIORITY) for lid in lines) / len(lines)
+        return sum(rank.get(lid, len(rank)) for lid in lines) / len(lines)
 
     rank_gap = mean_rank(branch_lines) - mean_rank(staying)
     if rank_gap == 0.0:

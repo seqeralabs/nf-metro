@@ -20,6 +20,7 @@ from layout_metrics import drawn_polylines, measured_geometry
 
 from nf_metro.api import resolve_theme
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.routing.common import segments_properly_cross
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import build_render_plan
 
@@ -39,22 +40,6 @@ FIXTURES = [
     "bypass_hidden_lane_side_chain.mmd",
 ]
 
-Point = tuple[float, float]
-
-
-def _orientation(p: Point, q: Point, r: Point) -> int:
-    cross = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
-    if abs(cross) < 1e-9:
-        return 0
-    return 1 if cross > 0 else -1
-
-
-def _properly_cross(a: Point, b: Point, c: Point, d: Point) -> bool:
-    return (
-        _orientation(a, b, c) * _orientation(a, b, d) < 0
-        and _orientation(c, d, a) * _orientation(c, d, b) < 0
-    )
-
 
 def _drawn_crossings(path: Path) -> int:
     """Proper crossings between different lines' drawn segments, hidden edges too."""
@@ -73,7 +58,8 @@ def _drawn_crossings(path: Path) -> int:
         if route_a.line_id != route_b.line_id
         for seg_a in itertools.pairwise(points_a)
         for seg_b in itertools.pairwise(points_b)
-        if _properly_cross(*seg_a, *seg_b)
+        if segments_properly_cross(*seg_a, *seg_b, reject_collinear_touch=True)
+        is not None
     )
 
 
