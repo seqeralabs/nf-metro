@@ -37,13 +37,14 @@ the target section.  One whose exit heads along or against the travel turns
 round left-handed, so its loop lies on the entry traveller's right, unless a
 section on the grid stands between the ends of every edge of its connector.
 Such a bypass U-turn takes a corridor, ranked in the travel frame from the
-placed boxes: only a side whose corridor crosses no other section is a
-candidate; among the candidates the side the entry's other same-band U-turns
-pass on wins (one bundle), then the shorter detour, then the side whose corridor
-runs in room the layout already has rather than at the edge of the map, then
-the turn-round side.  Bypass U-turns sharing a line and travelling opposite
-ways over overlapping spans of one band are decided together, so no two of them
-take one screen side; a U-turn outside that ranked set constrains none of them.
+placed boxes: only a side whose corridor crosses no other section and no
+other line into the entry is a candidate; among the candidates the side the
+entry's other same-band U-turns pass on wins (one bundle), then the shorter
+detour, then the side whose corridor runs in room the layout already has rather
+than at the edge of the map, then the turn-round side.  Bypass U-turns sharing
+a line and travelling opposite ways over overlapping spans of one band are
+decided together, so no two of them take one screen side; a U-turn outside that
+ranked set constrains none of them.
 A direct turn-round whose two sides are clear and equally long takes the side
 with room.  Any other U-turn keeps the screen-below side.
 
@@ -169,11 +170,12 @@ class SideRule(Enum):
     it, on the side the exit faces, never through the target section."""
     CORRIDOR = "corridor"
     """A bypass U-turn's side chosen among the sides whose corridor crosses no
-    other section: the side shared with the entry's forced siblings, else the
-    shorter detour, else the side whose corridor runs in room the layout
-    already has rather than growing the map; read in the entry's travel frame,
-    so a reflection flips it.  A direct turn-round whose two sides are clear
-    and equally long takes the side with room by the same rule."""
+    other section and no other line into its entry: the side shared with the
+    entry's forced siblings, else the shorter detour, else the side whose
+    corridor runs in room the layout already has rather than growing the map;
+    read in the entry's travel frame, so a reflection flips it.  A direct
+    turn-round whose two sides are clear and equally long takes the side with
+    room by the same rule."""
     FORK_NEST = "fork-nest"
     """A fork's branch off an exit heading across the entry's travel, holding the
     outermost lanes of its turn there, passes on the side the exit faces; a
@@ -213,7 +215,8 @@ class _Corridor:
     """How far the loop runs out beyond the two ends and back."""
     feasible: bool
     """Whether its lead, traverse and descent legs cross no section but the
-    hop's two ends."""
+    hop's two ends, and no other line into the entry starts beyond the
+    traverse, where it would have to cross the loop to land."""
     room: bool
     """Whether a section lies beyond the band on this side within the hop's
     span, so the corridor runs in room the layout already has rather than at
@@ -709,7 +712,10 @@ class PortOrderBuilder:
         clear of the band's extreme on its side and descends just outside the
         entry, at the offsets the wrap leaves use.  The band's extreme is the
         outermost of the two ends, the target box and every gridded section on
-        the band overlapping the span."""
+        the band overlapping the span.  A corridor is clear only if no edge
+        into the entry outside the hop's connector leaves a node beyond its
+        traverse: the loop would enclose the entry from that side, so such a
+        feeder could reach the port only by crossing it."""
         graph = self.graph
         band = self.shared_band(entry_id, source_id, travel)
         assert band is not None
@@ -752,14 +758,23 @@ class PortOrderBuilder:
                 highs.append(box[3])
         high, low = max(highs), min(lows)
         beyond = [box for box in others if _overlap(box[:2], span) > SAME_Y_TOLERANCE]
+        hop = {(e.source, e.line_id) for e in self.connector(entry_id, source_id)}
+        feeders = [
+            _lateral(self.point(e.source), _ORIGIN, travel)
+            for e in graph.edges_to(entry_id)
+            if (e.source, e.line_id) not in hop
+        ]
+        right_channel, left_channel = high + _CORRIDOR_CLEAR, low - _CORRIDOR_CLEAR
         right = _Corridor(
             2 * high - l_s - l_e,
-            not _legs_cross(others, lead, descent, l_s, l_e, high + _CORRIDOR_CLEAR),
+            not _legs_cross(others, lead, descent, l_s, l_e, right_channel)
+            and all(lateral <= right_channel for lateral in feeders),
             any(box[2] >= high - _ROOM_TOLERANCE for box in beyond),
         )
         left = _Corridor(
             l_s + l_e - 2 * low,
-            not _legs_cross(others, lead, descent, l_s, l_e, low - _CORRIDOR_CLEAR),
+            not _legs_cross(others, lead, descent, l_s, l_e, left_channel)
+            and all(lateral >= left_channel for lateral in feeders),
             any(box[3] <= low + _ROOM_TOLERANCE for box in beyond),
         )
         return right, left, span, band
