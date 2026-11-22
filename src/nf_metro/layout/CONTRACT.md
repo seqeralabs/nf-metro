@@ -1377,9 +1377,10 @@ in pipeline order.
   or bypass helper); a band holding a port or bypass helper is left intact.
   The upward grow can breach the canvas top margin, so
   `_shift_graph_into_canvas` runs immediately after. That shift keeps every
-  section `section_y_padding` below the canvas top and, on a titled map, keeps
-  every *drawn* section `TITLE_BAND_CLEARANCE` below it so the header badge
-  clears the title band (issue #1273).
+  section `section_y_padding` below the canvas top and, when render draws a
+  title or standalone logo there, lifts any section reaching into that band
+  (`layout/title_band.py`: a drawn section's header badge, an implicit holder's
+  box) `TITLE_BAND_HEADER_GAP` clear of it (issues #1273, #2169).
   Two row-top seating passes run in this stage only under `row_align == "top"`
   and are a no-op under the content default: `_top_align_packed_row_bboxes`
   levels a packed cell's header line with its contiguous row, and
@@ -1438,7 +1439,7 @@ in pipeline order.
   shifted onto integer `y_spacing` multiples; mixed-residue (multi-row)
   layouts and half-grid / convergence stations are left untouched. A
   candidate grid shift is rejected if it would pull the top above the
-  canvas margin or (on a titled map) a drawn section into the title band.
+  canvas margin or any section into the canvas-top title/logo band.
 - **Invariants preserved**: Relative station/section/port Ys (the whole
   canvas moves by one delta).
 - **Related tests**: `test_auto_y_spacing_fits_content`.

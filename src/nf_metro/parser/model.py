@@ -545,14 +545,13 @@ class MetroGraph:
     # of aborting with no output. Takes precedence over strict.
     permissive: bool = False
     embed_manifest: bool = True
-    # Whether a render will actually draw a title/logo band at the canvas
-    # top for a titled map. Set by prepare_graph (from --bare, %%metro
-    # legend:, and whether a logo is configured) before compute_layout runs,
-    # mirroring render.svg's own drawing decision so the title-band
-    # clearance in layout/phases/canvas.py doesn't reserve space for a
-    # header nothing will occupy. Defaults to True (always reserve) for
-    # callers that build a graph directly and skip prepare_graph.
-    reserve_title_band: bool = True
+    # Lowest y the canvas-top title and standalone logo reach (0 when render
+    # draws neither). Set by prepare_graph from --bare, the output format,
+    # %%metro legend: and the logo before compute_layout runs, so the band
+    # clearance in layout/phases/canvas.py reserves exactly what render draws.
+    # None for a graph that skipped prepare_graph: read it through
+    # layout.title_band.title_band_bottom, which then assumes a default SVG.
+    title_band_bottom: float | None = None
     # When set, every real station with no explicit %%metro process: directive
     # gets its own id as a default process pattern, so a map whose station ids
     # already name their processes lights up live with no per-station mapping.
@@ -613,7 +612,7 @@ class MetroGraph:
     # against the .mmd's own directory and folds the overrides over the run's
     # global options; layout and render never read this.
     declared_outputs: list[tuple[str, dict[str, object]]] = field(default_factory=list)
-    logo_scale: float = 1.0  # multiplies the logo size within the legend block
+    logo_scale: float = 1.0  # multiplies the logo size, in the legend or standalone
     legend_logo_gap: float | None = None  # px gap between logo and legend entries
     # Multiplies every text size for the render (station labels, title,
     # section labels, legend, terminus/icon captions) and the label-width

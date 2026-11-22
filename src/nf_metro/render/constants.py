@@ -20,6 +20,10 @@ from nf_metro.layout.constants import (
     Y_OFFSET,
 )
 from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
+from nf_metro.layout.constants import LOGO_HEIGHT as LOGO_HEIGHT  # re-export
+from nf_metro.layout.constants import (
+    LOGO_Y_STANDALONE as LOGO_Y_STANDALONE,  # re-export
+)
 from nf_metro.layout.constants import (
     RAIL_KNOB_RADIUS_RATIO as RAIL_KNOB_RADIUS_RATIO,  # re-export
 )
@@ -58,9 +62,6 @@ LEGEND_INSET: float = 10.0
 
 LEGEND_ROUTE_CLEARANCE: float = 6.0
 """Clearance kept between the legend box and routed lines when testing overlap."""
-
-LOGO_Y_STANDALONE: float = 5.0
-"""Y offset for standalone logo (no legend)."""
 
 # ---------------------------------------------------------------------------
 # Legend
@@ -145,7 +146,11 @@ is nearest in their growth direction (the map title, another section's box,
 or the canvas edge).  Matches the buffer ``TITLE_BAND_CLEARANCE`` adds on the
 layout side for the same single-line-header clearance."""
 
-TEXT_VCENTER_DY: str = "0.3em"
+TEXT_VCENTER_EM: float = 0.3
+"""Baseline drop, in ems below a graphic's centre line, that visually centres
+text on it (see ``TEXT_VCENTER_DY``)."""
+
+TEXT_VCENTER_DY: str = f"{TEXT_VCENTER_EM}em"
 """Downward dy shift applied to text that must be visually centered on
 a companion graphic (badge circles, legend swatches).  Using dy instead
 of ``dominant-baseline: central`` gives more consistent results across
@@ -232,6 +237,10 @@ def title_baseline_y(title_font_size: float) -> float:
     glyph ascent once it outgrows the default offset.
     """
     return max(TITLE_Y_OFFSET, title_font_size * TITLE_ASCENT_RATIO)
+
+
+TITLE_LOGO_GAP: float = 16.0
+"""Gap between a standalone logo's right edge and the title drawn beside it."""
 
 
 TITLE_CANVAS_SAFETY_MARGIN: float = 4.0

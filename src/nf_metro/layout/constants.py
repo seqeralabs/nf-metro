@@ -172,7 +172,10 @@ is the hard floor a titled map must never breach; a map already at or below it
 already clear.
 """
 
-TITLE_BAND_CLEARANCE: float = TITLE_BAND_OVERLAP_FLOOR + 8.0
+TITLE_BAND_HEADER_GAP: float = 8.0
+"""Visible gap left between the canvas-top band and a lifted header badge."""
+
+TITLE_BAND_CLEARANCE: float = TITLE_BAND_OVERLAP_FLOOR + TITLE_BAND_HEADER_GAP
 """``bbox_y`` a titled map's topmost drawn section is lifted to when it overlaps.
 
 Only a map whose header actually overlaps the title (top above
@@ -180,6 +183,12 @@ Only a map whose header actually overlaps the title (top above
 the floor so the badge sits a visible gap below the title rather than flush
 against it.  Untitled maps keep the tighter ``SECTION_Y_PADDING`` top.
 """
+
+LOGO_HEIGHT: float = 80.0
+"""Height a logo is drawn at before ``logo_scale``; its width follows its aspect."""
+
+LOGO_Y_STANDALONE: float = 5.0
+"""Top of a standalone logo (one not folded into the legend)."""
 
 # ---------------------------------------------------------------------------
 # Routing
@@ -497,6 +506,11 @@ side keeps from its bbox bottom.  Section placement reserves this band
 (``_wrap_bundle_row_minimums``) and routing centres within it
 (``_center_inter_row_channel``); the single definition keeps the two in
 lockstep."""
+
+OVER_TOP_HEADROOM: float = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
+"""Room reserved above a topmost row whose RIGHT-entry section is fed over its
+top by a same-row source: the loop's traverse runs this far above the row's
+box top, clear of the header badge."""
 
 # ---------------------------------------------------------------------------
 # Engine: entry/exit alignment

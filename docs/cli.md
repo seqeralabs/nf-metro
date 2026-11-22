@@ -130,7 +130,7 @@ Because it has no light/dark pair, `--mode` does not apply to it.
 | Option                      | Default | Description                                                                                                                                               |
 | --------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--legend TEXT`             | auto    | Position the legend and logo block: keyword (`bl`/`br`/`tl`/`tr`/`bottom`/`right`/`none`), `<keyword> \| canvas`, `<keyword> \| dx,dy`, or absolute `x,y` |
-| `--logo-scale FLOAT`        | 1.0     | Scale the logo within the legend block (1.0 = default auto-size)                                                                                          |
+| `--logo-scale FLOAT`        | 1.0     | Scale the logo, in the legend block or standalone (1.0 = default auto-size)                                                                               |
 | `--legend-min-height FLOAT` | 0       | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny)                                              |
 | `--legend-logo-gap FLOAT`   | auto    | Horizontal gap in pixels between the logo and the legend entries                                                                                          |
 

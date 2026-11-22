@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import warnings
 from collections import defaultdict, deque
 from collections.abc import Iterator
@@ -2678,15 +2679,13 @@ _PLACEHOLDER_LOGO = str(EXAMPLES / "placeholder_logo.png")
 
 
 @pytest.mark.parametrize("fixture", _TITLE_BAND_OVERLAP_FIXTURES)
-def test_title_band_not_reserved_when_nothing_drawn_there(fixture):
-    """A titled map reserves no title-band lift when render draws nothing there.
+def test_title_band_reserved_only_where_render_draws_it(fixture):
+    """The title-band lift follows what render draws at the canvas top.
 
-    ``--bare`` omits the title outright, and a configured logo folded into
-    the legend (``%%metro legend:`` with a logo set) means neither the logo
-    nor the title text renders standalone at the canvas top (render.svg's
-    ``logo_in_legend`` branch beats both). Both cases must land exactly
-    where an untitled map would, even when the header would otherwise
-    overlap the title band.
+    ``--bare`` omits the title outright, so it must land exactly where an
+    untitled map would, even when the header would otherwise overlap the title
+    band.  A logo folded into the legend leaves the title drawn top-left, so
+    that map must land exactly where the same titled map with no logo does.
     """
     path = _resolve_fixture(fixture)
     text = path.read_text()
@@ -2705,14 +2704,25 @@ def test_title_band_not_reserved_when_nothing_drawn_there(fixture):
         f"title"
     )
 
-    logo_in_legend_graph = prepare_graph(
-        text, logo=_PLACEHOLDER_LOGO, legend="bl", source_dir=str(EXAMPLES)
+    no_logo_text = re.sub(r"^%%metro logo(_scale)?:.*$", "", text, flags=re.M)
+    no_logo_top = _min_drawn_section_bbox_top(
+        prepare_graph(no_logo_text, title="Map", legend="bl", source_dir=source_dir)
     )
-    logo_in_legend_top = _min_drawn_section_bbox_top(logo_in_legend_graph)
-    assert logo_in_legend_top == pytest.approx(untitled_top, abs=GUARD_TOLERANCE), (
-        f"{fixture}: logo-in-legend top y={logo_in_legend_top:.1f} reserves "
-        f"title-band space above the untitled baseline {untitled_top:.1f} "
-        f"despite drawing neither a title nor a standalone logo"
+    logo_in_legend_top = _min_drawn_section_bbox_top(
+        prepare_graph(
+            text,
+            title="Map",
+            logo=_PLACEHOLDER_LOGO,
+            legend="bl",
+            source_dir=source_dir,
+        )
+    )
+    assert no_logo_top is not None and logo_in_legend_top is not None
+    assert no_logo_top >= TITLE_BAND_OVERLAP_FLOOR - GUARD_TOLERANCE
+    assert logo_in_legend_top == pytest.approx(no_logo_top, abs=GUARD_TOLERANCE), (
+        f"{fixture}: logo-in-legend top y={logo_in_legend_top:.1f} differs from "
+        f"the logo-free titled top {no_logo_top:.1f}; the title is drawn "
+        f"top-left either way"
     )
 
 

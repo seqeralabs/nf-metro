@@ -180,6 +180,7 @@ from nf_metro.render.constants import (
     LEGEND_GAP,
     LEGEND_INSET,
     LEGEND_ROUTE_CLEARANCE,
+    LOGO_HEIGHT,
     LOGO_Y_STANDALONE,
     MARKER_PILL_LENGTH_RATIO,
     RAIL_KNOB_RADIUS_RATIO,
@@ -192,7 +193,10 @@ from nf_metro.render.constants import (
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
+    TEXT_VCENTER_EM,
+    TITLE_ASCENT_RATIO,
     TITLE_CANVAS_SAFETY_MARGIN,
+    TITLE_LOGO_GAP,
     WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
@@ -2397,9 +2401,7 @@ def _build_render_plan_scaled(
     # Whether this render draws the map title as standalone chrome: the one
     # predicate that both the canvas-sizing term and the title-draw block read,
     # so the two cannot drift and reintroduce a clipped or unmeasured title.
-    draws_standalone_title = (
-        not bare and bool(graph.title) and not logo_in_legend and not show_logo
-    )
+    draws_standalone_title = not bare and bool(graph.title)
 
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
         graph,
@@ -2436,17 +2438,24 @@ def _build_render_plan_scaled(
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
 
-    # The title is authored text drawn at x=padding but never folded into the
-    # content extent, so a title wider than the map is clipped at the right
-    # edge.  Grow the canvas to its true glyph advance plus a small margin.
+    # The title is authored text never folded into the content extent, so a
+    # title wider than the map is clipped at the right edge.  Grow the canvas
+    # to its true glyph advance plus a small margin.
     if draws_standalone_title:
         title_advance = DEFAULT_TEXT_METRICS.advance(
             graph.title,
             text_style(theme.title_font_size, "bold"),
             TextRole.TITLE,
         )
+        title_x, _ = _title_origin(
+            padding,
+            theme.title_font_size,
+            (logo_x, logo_y, logo_w, logo_h)
+            if show_logo and not logo_in_legend
+            else None,
+        )
         auto_width = max(
-            auto_width, padding + title_advance + TITLE_CANVAS_SAFETY_MARGIN
+            auto_width, title_x + title_advance + TITLE_CANVAS_SAFETY_MARGIN
         )
 
     # A relocated header may sit past the box; let it use the margins already
@@ -2728,7 +2737,8 @@ def _emit_render_plan(
 
     # Title / Logo (omitted in bare mode; standalone logo only when not in legend)
     if not bare:
-        if show_logo and not logo_in_legend:
+        standalone_logo = show_logo and not logo_in_legend
+        if standalone_logo:
             if adaptive_logo:
                 _render_adaptive_logo(
                     d,
@@ -2741,13 +2751,18 @@ def _emit_render_plan(
                 )
             else:
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
-        elif plan.draws_standalone_title:
+        if plan.draws_standalone_title:
+            title_x, title_y = _title_origin(
+                padding,
+                theme.title_font_size,
+                (logo_x, logo_y, logo_w, logo_h) if standalone_logo else None,
+            )
             d.append(
                 draw.Text(
                     graph.title,
                     theme.title_font_size,
-                    padding,
-                    title_baseline_y(theme.title_font_size),
+                    title_x,
+                    title_y,
                     fill=theme.title_color,
                     font_family=theme.label_font_family,
                     font_weight="bold",
@@ -2988,6 +3003,27 @@ def _effective_logo_path(graph: MetroGraph, mode: str) -> str:
     return graph.logo_path
 
 
+def _title_origin(
+    padding: float,
+    title_font_size: float,
+    standalone_logo: tuple[float, float, float, float] | None,
+) -> tuple[float, float]:
+    """``(x, baseline_y)`` of the map title.
+
+    Top-left at ``padding`` on its own; beside a standalone logo (given as
+    ``(x, y, w, h)``) it sits to the logo's right, vertically centred on it,
+    with its baseline kept low enough that the glyphs never rise off the top.
+    """
+    if standalone_logo is None:
+        return padding, title_baseline_y(title_font_size)
+    logo_x, logo_y, logo_w, logo_h = standalone_logo
+    centred = logo_y + logo_h / 2 + title_font_size * TEXT_VCENTER_EM
+    return (
+        logo_x + logo_w + TITLE_LOGO_GAP,
+        max(centred, title_font_size * TITLE_ASCENT_RATIO),
+    )
+
+
 def _is_adaptive_mode(graph: MetroGraph) -> bool:
     """True when the %%metro logo: directive used pipe syntax (one or both variants)."""
     return bool(graph.logo_path_light) or bool(graph.logo_path_dark)
@@ -3036,7 +3072,7 @@ def _resolve_logo(
 
 def compute_logo_dimensions(
     logo_path: str,
-    logo_height: float = 80.0,
+    logo_height: float = LOGO_HEIGHT,
 ) -> tuple[float, float]:
     """Compute logo display dimensions preserving aspect ratio."""
     img = open_logo_image(logo_path)
