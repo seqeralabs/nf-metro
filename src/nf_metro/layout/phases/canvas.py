@@ -300,9 +300,15 @@ def _canvas_top_shortfall(graph: MetroGraph, section_y_padding: float) -> float:
     whose header badge or content enters that band is lifted clear by
     :func:`~nf_metro.layout.title_band.title_band_lift` -- a map already
     clearing the band is left untouched.
+
+    The band lift waits for the Stage 6.4 per-section grid snap
+    (``graph._consumers_grid_snapped``): that snap rounds half-pitch ties on
+    absolute slot indices, so a lift taken before it would re-break ties and
+    rearrange content instead of translating it.
     """
     min_all = _min_section_bbox_top(graph, section_y_padding)
-    return max(0.0, section_y_padding - min_all, title_band_lift(graph))
+    band = title_band_lift(graph) if graph._consumers_grid_snapped else 0.0
+    return max(0.0, section_y_padding - min_all, band)
 
 
 def _canvas_top_preserved(

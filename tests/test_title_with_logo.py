@@ -17,9 +17,16 @@ from typing import Literal
 
 import pytest
 
-from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
+from nf_metro.api import (
+    RenderConfig,
+    _prepare_graph_state,
+    prepare_graph,
+    render_graph_result,
+)
+from nf_metro.layout import compute_layout
 from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION, TITLE_BAND_BOTTOM
 from nf_metro.layout.phases.bbox import _min_drawn_section_bbox_top
+from nf_metro.parser.model import MetroGraph
 from nf_metro.render.constants import TITLE_CANVAS_SAFETY_MARGIN
 from nf_metro.render.plan import RenderPlan
 from nf_metro.text_metrics import (
@@ -261,4 +268,74 @@ def test_over_the_top_loop_runs_below_standalone_logo(name: str, scale: float) -
     assert top_ink >= logo_bottom, (
         f"{name} [logo_scale={scale}]: route climbs to y={top_ink:.1f}, above "
         f"the standalone logo bottom {logo_bottom:.1f}"
+    )
+
+
+def _validated_layout(text: str, source_dir: str, **options: object) -> MetroGraph:
+    graph = _prepare_graph_state(text, source_dir=source_dir, **options)  # type: ignore[arg-type]
+    compute_layout(graph, validate=True)
+    return graph
+
+
+def _placed_geometry(graph: MetroGraph) -> dict[str, tuple[float, ...]]:
+    geometry: dict[str, tuple[float, ...]] = {}
+    for sid, station in graph.stations.items():
+        geometry[f"station:{sid}"] = (station.x, station.y)
+    for pid, port in graph.ports.items():
+        geometry[f"port:{pid}"] = (port.x, port.y)
+    for sid, section in graph.sections.items():
+        geometry[f"section:{sid}"] = (
+            section.bbox_x,
+            section.bbox_y,
+            section.bbox_w,
+            section.bbox_h,
+        )
+    return geometry
+
+
+@pytest.mark.parametrize("output_format", ["svg", "html"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "examples/riboseq_metro.mmd",
+        "examples/sarek_metro.mmd",
+        "examples/topologies/packed_cell_right_exit_left_entry_wrap.mmd",
+    ],
+)
+def test_title_band_only_translates_the_bare_layout(
+    name: str, output_format: Literal["svg", "html"]
+) -> None:
+    """Reserving the title/logo band moves the whole map down by one offset:
+    every station, port and section box sits exactly where the ``--bare``
+    layout (which reserves nothing) puts it, shifted by a single ``dy``."""
+    text, source_dir = _fixture(name)
+    bare = _placed_geometry(_validated_layout(text, source_dir, bare=True))
+    banded = _placed_geometry(
+        _validated_layout(
+            text,
+            source_dir,
+            title="Map title",
+            logo=PLACEHOLDER_LOGO,
+            legend="none" if output_format == "svg" else None,
+            layout_options={"logo_scale": 1.0},
+            output_format=output_format,
+        )
+    )
+    assert banded.keys() == bare.keys()
+    # Every geometry tuple carries its y at index 1 and nothing else moves.
+    anchor = next(iter(bare))
+    dy = banded[anchor][1] - bare[anchor][1]
+    assert dy >= 0.0
+    shifted = {
+        key: tuple(v + dy if i == 1 else v for i, v in enumerate(values))
+        for key, values in bare.items()
+    }
+    moved = {
+        key: (shifted[key], banded[key])
+        for key in bare
+        if any(abs(a - b) > 0.01 for a, b in zip(shifted[key], banded[key]))
+    }
+    assert not moved, (
+        f"{name} [{output_format}]: {len(moved)} elements are not the bare "
+        f"layout shifted by dy={dy:.2f}; e.g. {sorted(moved.items())[:3]}"
     )

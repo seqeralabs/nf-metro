@@ -185,12 +185,14 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
     "_consumers_grid_snapped": PhaseFieldSpec(
         name="_consumers_grid_snapped",
         writer_stage="6.4",
-        reader_stages=("6.6",),
+        reader_stages=("6.6", "6.15a"),
         enforcement=FieldEnforcement.REQUIRE_WRITER,
         why=(
             "readiness flag set right after the Stage 6.4 snap so the off-track "
             "reanchor re-pins against final consumer Ys; _reanchor_off_track_to_"
-            "consumer carries its own always-on guard on this field"
+            "consumer carries its own always-on guard on this field. The "
+            "canvas fit (_canvas_top_shortfall) also reads it at every stage, "
+            "withholding the title-band lift while it is still False"
         ),
     ),
     "_carrier_clearance_shifted": PhaseFieldSpec(

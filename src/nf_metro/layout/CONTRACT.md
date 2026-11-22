@@ -286,7 +286,9 @@ pass:
   6.4 grid snap, which re-seats each partial from the carrier port's post-snap Y,
   and by the `_guard_partial_trunk_descent_seated` postcondition.
 - `graph._consumers_grid_snapped` - set right after the Stage 6.4 snap; the
-  Stage 6.6 off-track reanchor carries its own always-on guard on it.
+  Stage 6.6 off-track reanchor carries its own always-on guard on it. The
+  canvas fit (`_shift_graph_into_canvas`) reads it to withhold the title-band
+  lift until the grid snap has run, so the lift is a pure translation.
 
 The remaining channels tolerate an unwritten value by design (their read sites
 fall back to live geometry or a `None`/empty default), so they are documented in
