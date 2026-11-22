@@ -406,62 +406,95 @@ def _unit_graph(
     for s, t in edges:
         u, v = _unit(sections, s, split_secs), _unit(sections, t, split_secs)
         if u != v:
-            crossing = int(node_section[s] != node_section[t])
-            graph.add_edge(
-                u, v, w=max(crossing, graph.get_edge_data(u, v, {}).get("w", 0))
-            )
+            graph.add_edge(u, v, w=int(node_section[s] != node_section[t]))
     return graph
 
 
+def _cyclic_sections(
+    sections: _SectionAssignment, edges: list[tuple[str, str]], split_secs: set[str]
+) -> set[str]:
+    """Whole sections still on a cycle once ``split_secs`` are split apart."""
+    return {
+        unit.removeprefix("section:")
+        for unit in _cyclic_members(_unit_graph(sections, edges, split_secs))
+        if unit.startswith("section:")
+    }
+
+
+def _flow_depths(graph: nx.DiGraph[str], latest: bool) -> dict[str, int]:
+    """Longest-path depth of each unit, earliest or latest feasible.
+
+    Either choice makes depth strictly increase along every weight-1 edge and
+    never decrease along a weight-0 one.
+    """
+    order = list(nx.lexicographical_topological_sort(graph))
+    depth: dict[str, int] = {}
+    if not latest:
+        for unit in order:
+            depth[unit] = max(
+                (depth[p] + graph[p][unit]["w"] for p in graph.predecessors(unit)),
+                default=0,
+            )
+        return depth
+    height: dict[str, int] = {}
+    for unit in reversed(order):
+        height[unit] = max(
+            (height[s] + graph[unit][s]["w"] for s in graph.successors(unit)),
+            default=0,
+        )
+    top = max(height.values(), default=0)
+    return {unit: top - height[unit] for unit in order}
+
+
 def _split_cyclic_sections(
-    sections: _SectionAssignment, edges: list[tuple[str, str]]
+    sections: _SectionAssignment, edges: list[tuple[str, str]], dag: _ParsedDag
 ) -> _SectionAssignment:
     """Split sections that form a cycle into acyclic groups by flow depth.
 
     Unassigned processes share one section, and Nextflow flattens a parent
     subworkflow's own processes into a subgraph beside its children's, so a
-    section can run both before and after another one. Each section caught in
-    a section-level cycle is split by depth: the longest path to a process,
-    counting one per section boundary crossed. Every inter-section edge then
-    strictly increases depth, so the split sections are acyclic. The
-    unassigned section is split first, when it is on a cycle; a subgraph is
-    split only if it still closes a cycle after that, and sections not on a
-    cycle stay whole. A split unassigned section is named ``Reporting``
-    for its last group and ``Main`` before that; a split subgraph keeps its
-    name on every group.
+    section can run both before and after another one. Sections are split
+    outermost first: the unassigned section, then subgraphs by nesting depth
+    of their full name, each tier only where a cycle remains. Sections not on
+    a cycle stay whole.
+
+    A split section's processes are grouped by flow depth, the longest path
+    counting one per section boundary crossed, so every inter-section edge
+    strictly increases depth and the result is acyclic. Earliest and latest
+    depths are both valid; whichever yields fewer groups is used. A split
+    unassigned section is named ``Main`` up to its last group, ``Reporting``;
+    a split subgraph keeps its name on every group.
     """
-    node_section = sections.node_section
-    section_graph = directed_graph(
-        list(sections.names),
-        sorted(
-            {
-                (node_section[s], node_section[t])
-                for s, t in edges
-                if node_section[s] != node_section[t]
-            }
-        ),
-    )
-    cyclic = _cyclic_members(section_graph)
-    if not cyclic:
+    if not _cyclic_sections(sections, edges, set()):
         return sections
 
-    split_secs = {"__reporting"} & cyclic or cyclic
+    def tier(sec: str) -> int:
+        if sec.startswith("__"):
+            return 0
+        return 1 + dag.subgraphs[sec].full_name.count(":")
+
+    split_secs: set[str] = set()
+    for level in sorted({tier(sec) for sec in sections.names}):
+        split_secs |= {
+            sec
+            for sec in _cyclic_sections(sections, edges, split_secs)
+            if tier(sec) == level
+        }
     unit_graph = _unit_graph(sections, edges, split_secs)
-    split_secs |= {
-        unit.removeprefix("section:")
-        for unit in _cyclic_members(unit_graph)
-        if unit.startswith("section:")
-    }
-    unit_graph = _unit_graph(sections, edges, split_secs)
-    depth: dict[str, int] = {}
-    for unit in nx.lexicographical_topological_sort(unit_graph):
-        depth[unit] = max(
-            (
-                depth[p] + unit_graph[p][unit]["w"]
-                for p in unit_graph.predecessors(unit)
-            ),
-            default=0,
+
+    def group_count(depth: dict[str, int]) -> int:
+        return len(
+            {
+                (sec, depth[f"node:{nid}"])
+                for sec in split_secs
+                for nid in sections.nodes[sec]
+            }
         )
+
+    depth = min(
+        (_flow_depths(unit_graph, latest) for latest in (False, True)),
+        key=group_count,
+    )
 
     split = _SectionAssignment()
     for sec, name in sections.names.items():
@@ -756,11 +789,13 @@ def _infer_title(section_names: dict[str, str], section_order: list[str]) -> str
     """Derive a pipeline title from the section names."""
     if len(section_names) == 1 and "__pipeline" in section_names:
         return "Pipeline"
-    named_secs = [
-        _humanize_label(section_names[k])
-        for k in section_order
-        if not k.startswith("__")
-    ]
+    named_secs = list(
+        dict.fromkeys(
+            _humanize_label(section_names[k])
+            for k in section_order
+            if not k.startswith("__")
+        )
+    )
     if named_secs:
         return " / ".join(named_secs) + " Pipeline"
     return "Pipeline"
@@ -920,7 +955,9 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
     edges = cycle_break.kept
     dropped_feedback = reconnected.self_loops + cycle_break.removed
 
-    sections = _split_cyclic_sections(_assign_sections(kept_ids, dag, title), edges)
+    sections = _split_cyclic_sections(
+        _assign_sections(kept_ids, dag, title), edges, dag
+    )
     section_order = _topological_order(
         list(sections.names.keys()), edges, sections.node_section
     )

@@ -102,3 +102,48 @@ class TestCyclicSections:
         assert names["prepare"] == names["summarise"] == "Parent"
         prepare = graph.stations["prepare"].section_id
         assert graph.stations["summarise"].section_id != prepare
+
+    def test_child_stays_whole_when_splitting_parent_suffices(self):
+        """Only the outer subworkflow splits, and the title lists each once."""
+        text = (
+            "flowchart TB\n"
+            '    subgraph "PIPE:PARENT [PARENT]"\n'
+            '    v1(["PREPARE"])\n    v4(["SUMMARISE"])\n    end\n'
+            '    subgraph "PIPE:PARENT:CHILD [CHILD]"\n'
+            '    v2(["ALIGN"])\n    v3(["SORT"])\n    end\n'
+            '    subgraph "PIPE:QC [QC]"\n    v5(["FASTQC"])\n    end\n'
+            "    v1 --> v2\n    v2 --> v4\n    v1 --> v5\n    v5 --> v3\n"
+        )
+
+        result = convert_nextflow_dag(text)
+        names, graph = self._section_names(result)
+
+        assert sorted(sec.name for sec in graph.sections.values()) == [
+            "Child",
+            "Parent",
+            "Parent",
+            "Qc",
+        ]
+        assert graph.stations["align"].section_id == graph.stations["sort"].section_id
+        assert "%%metro title: Parent / Qc / Child Pipeline" in result
+
+    def test_unassigned_split_uses_fewest_groups(self):
+        """Dead-end and final top-level processes share the Reporting group."""
+        text = (
+            "flowchart TB\n"
+            '    v1(["TRIM"])\n'
+            '    subgraph "PIPE:ALIGN [ALIGN]"\n    v2(["STAR"])\n    end\n'
+            '    subgraph "PIPE:QUANT [QUANT]"\n    v3(["SALMON"])\n    end\n'
+            '    v4(["DESEQ2_QC"])\n    v5(["MULTIQC"])\n'
+            "    v1 --> v2\n    v2 --> v4\n    v2 --> v3\n    v3 --> v5\n"
+        )
+
+        names, _ = self._section_names(convert_nextflow_dag(text))
+
+        assert names == {
+            "trim": "Main",
+            "star": "Align",
+            "salmon": "Quant",
+            "deseq2_qc": "Reporting",
+            "multiqc": "Reporting",
+        }
