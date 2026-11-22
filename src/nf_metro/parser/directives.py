@@ -760,10 +760,9 @@ def _apply_scoped_directive(
         try:
             number = int(value)
         except ValueError:
-            _warn_malformed("number", value, "a positive integer")
-            return
-        if number < 1:
-            _warn_malformed("number", value, "a positive integer")
+            number = -1
+        if number < 0:
+            _warn_malformed("number", value, "a non-negative integer")
             return
         graph.sections[section_id].number_override = number
     else:
@@ -874,7 +873,7 @@ def _deduplicate_section_number_overrides(graph: MetroGraph) -> None:
     owners: dict[int, str] = {}
     for section in graph.sections.values():
         number = section.number_override
-        if number is None:
+        if number is None or number == 0:
             continue
         if conflict := owners.get(number):
             _warn_directive(

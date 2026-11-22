@@ -17,6 +17,9 @@ history.
 
 ### Added
 
+- `%%metro number: 0` hides a section's number badge and starts its title where
+  the badge would have been. Automatic numbering skips such a section, so the
+  remaining sections number from 1 as if it were absent (#2058).
 - Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
   but draws no box, title or number badge, mirroring hidden stations. Use it
   to place stations independently without a visible section. Existing maps
@@ -62,6 +65,12 @@ history.
 
 ### Fixed
 
+- Nextflow conversion preserves spur dependencies between subworkflows instead
+  of silently omitting those edges from the emitted map.
+- Nextflow conversion splits a section that runs both before and after another
+  one (top-level processes around a subworkflow become `Main` and `Reporting`;
+  a parent subworkflow's own processes are split around its child), instead of
+  emitting a map that fails with "Sections form a cycle".
 - A map with a `%%metro logo:` draws its title again. With the logo in the
   legend the title sits top-left as usual; with a standalone logo
   (`%%metro legend: none`, and every HTML output) the title sits beside the
@@ -75,6 +84,14 @@ history.
   feeders arriving along two different corridors, now gives each line the
   channel that matches its lane in the section, so the lines no longer cross
   or overlap inside the port's own turn.
+- Nextflow subworkflows with repeated short names get distinct section and
+  bypass line IDs, preserving each subworkflow's stations, section box and
+  bypass line.
+- `nf-metro info` now reports the section numbers the render draws, including
+  route renumbering and `%%metro number:` overrides, instead of the numbers
+  assigned at parse time. `--json` `sections[].number` is `null` for a section
+  with no badge: number 0, a hidden section, or the implicit section of a map
+  with no `subgraph` (#2058).
 
 ## [2.1.0] — 2026-09-15
 

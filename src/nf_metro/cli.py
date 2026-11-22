@@ -37,6 +37,7 @@ from nf_metro.introspect import (
     build_info,
     format_info_json,
     format_info_text,
+    rendered_section_numbers,
     to_yaml,
 )
 from nf_metro.layout import (
@@ -1758,12 +1759,19 @@ def info(input_file: Path, as_json: bool, verbose: bool) -> None:
     text = input_file.read_text()
     graph, messages = _parse_reporting_warnings(input_file, text)
 
+    section_numbers = rendered_section_numbers(graph)
+    if section_numbers is None:
+        messages.append(
+            "layout failed, so section numbers are as authored or parsed, "
+            "not as rendered"
+        )
+
     # The JSON and the verbose text report both carry the captured warnings;
     # the default summary does not, so they surface on stderr instead.
     if messages and not (as_json or verbose):
         _echo_block("Warnings", messages)
 
-    report = build_info(graph, messages)
+    report = build_info(graph, messages, section_numbers=section_numbers)
     if as_json:
         click.echo(format_info_json(report))
     else:
