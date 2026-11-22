@@ -19,8 +19,9 @@ history.
 
 - `%%metro number: 0` hides a section's number badge and starts its title where
   the badge would have been. Automatic numbering skips such a section, so the
-  remaining sections number from 1 as if it were absent (#2058); `nf-metro info` now reports the
-  section numbers the render draws, `null` for a section with no badge (#2058).
+  remaining sections number from 1 as if it were absent. `nf-metro info` now
+  reports the section numbers the render draws, `null` for a section with no
+  badge (#2058).
 - Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
   but draws no box, title or number badge, mirroring hidden stations. Use it
   to place stations independently without a visible section. Existing maps
