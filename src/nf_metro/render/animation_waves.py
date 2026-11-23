@@ -20,8 +20,9 @@ from __future__ import annotations
 
 __all__ = ["LineWaves", "Route", "plan_line_waves"]
 
-from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from functools import reduce
+from operator import or_
 
 import networkx as nx
 
@@ -148,21 +149,29 @@ def _without_back_edges(
 ) -> dict[str, list[_Leg]]:
     """Drop the edges that close a cycle, so every line is a DAG."""
     done: set[str] = set()
-    on_path: set[str] = set()
+    on_path = [_VIRTUAL_ROOT]
+    on_path_set = {_VIRTUAL_ROOT}
+    resume = [0]
     kept: dict[str, list[_Leg]] = {}
 
-    def visit(node: str) -> None:
-        on_path.add(node)
-        for leg in children.get(node, ()):
-            if leg.target in on_path:
-                continue
-            kept.setdefault(node, []).append(leg)
-            if leg.target not in done:
-                visit(leg.target)
-        on_path.discard(node)
-        done.add(node)
-
-    visit(_VIRTUAL_ROOT)
+    while on_path:
+        node = on_path[-1]
+        legs = children.get(node, ())
+        if resume[-1] == len(legs):
+            on_path.pop()
+            on_path_set.discard(node)
+            resume.pop()
+            done.add(node)
+            continue
+        leg = legs[resume[-1]]
+        resume[-1] += 1
+        if leg.target in on_path_set:
+            continue
+        kept.setdefault(node, []).append(leg)
+        if leg.target not in done:
+            on_path.append(leg.target)
+            on_path_set.add(leg.target)
+            resume.append(0)
     return kept
 
 
@@ -176,56 +185,36 @@ def _group_branches(
     """
     groups: list[tuple[_Leg | _Turn, int]] = [(leg, reach[leg.target]) for leg in legs]
     while len(groups) > 1:
-        meets = {
-            (i, j): _lowest_bit(groups[i][1] & groups[j][1])
+        shared = {
+            (i, j): groups[i][1] & groups[j][1]
             for i in range(len(groups))
             for j in range(i + 1, len(groups))
-            if groups[i][1] & groups[j][1]
+        }
+        # The lowest set bit of a mask is the lowest-ranked node it holds.
+        meets = {
+            pair: (mask & -mask).bit_length() - 1
+            for pair, mask in shared.items()
+            if mask
         }
         if not meets:
             break
         lowest = min(meets.values())
-        joined = [pair for pair, at in meets.items() if at == lowest]
+        joined: nx.Graph[int] = nx.Graph()
+        joined.add_nodes_from(range(len(groups)))
+        joined.add_edges_from(pair for pair, at in meets.items() if at == lowest)
 
         merged: list[tuple[_Leg | _Turn, int]] = []
-        for indices in _components(len(groups), joined):
+        for component in nx.connected_components(joined):
+            indices = sorted(component)
             if len(indices) == 1:
                 merged.append(groups[indices[0]])
                 continue
             options = tuple(groups[i][0] for i in indices)
             turn = _Turn(len(turn_sizes), options)
             turn_sizes.append(len(options))
-            merged.append((turn, _union(groups[i][1] for i in indices)))
+            merged.append((turn, reduce(or_, (groups[i][1] for i in indices))))
         groups = merged
     return tuple(branch for branch, _ in groups)
-
-
-def _lowest_bit(mask: int) -> int:
-    return (mask & -mask).bit_length() - 1
-
-
-def _components(size: int, pairs: list[tuple[int, int]]) -> list[list[int]]:
-    """Connected components of ``range(size)`` under *pairs*, in first-member order."""
-    parent = list(range(size))
-
-    def find(i: int) -> int:
-        while parent[i] != i:
-            i = parent[i]
-        return i
-
-    for i, j in pairs:
-        parent[find(j)] = find(i)
-    members: dict[int, list[int]] = {}
-    for i in range(size):
-        members.setdefault(find(i), []).append(i)
-    return sorted(members.values())
-
-
-def _union(masks: Iterable[int]) -> int:
-    result = 0
-    for mask in masks:
-        result |= mask
-    return result
 
 
 def _round_waves(plan: LineWaves) -> int:

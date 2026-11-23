@@ -39,7 +39,7 @@ from nf_metro.render.ns import ns
 from nf_metro.render.path_geometry import materialize_source_turnout
 from nf_metro.render.style import Theme
 
-# A line whose travel fraction is within this of a full cycle gets a plain
+# A dot whose travel fraction is within this of its whole lifetime gets a plain
 # two-stop keyframe (no terminus hold), avoiding a degenerate hold of ~0s.
 _FULL_CYCLE_EPSILON = 0.001
 
@@ -56,7 +56,7 @@ _PERCENT_STEP = 10**-_PERCENT_DECIMALS
 
 
 def _fills_the_cycle(move_frac: float) -> bool:
-    """Return whether a track travels for (near enough) the whole cycle."""
+    """Return whether a dot travels for (near enough) its whole lifetime."""
     return move_frac >= 1.0 - _FULL_CYCLE_EPSILON
 
 
@@ -282,7 +282,6 @@ class _LineRoutes:
 
     line_id: str
     plan: LineWaves
-    edges: list[Edge]
     route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]]
     line_polylines: list[list[tuple[float, float]]]
     line_turnouts: tuple[tuple[tuple[float, float], SourceTurnout], ...]
@@ -305,7 +304,7 @@ def build_animation_timeline(
     whole rounds of waves, departures spread evenly over the loop, so the loop
     seam is exact.
     """
-    lines = _plan_lines(graph, routes, station_offsets, curve_radius)
+    lines = _plan_lines(graph, routes, station_offsets)
     geometry: dict[tuple[str, tuple[tuple[str, str], ...]], list[str]] = {}
 
     def pieces(line: _LineRoutes, route: Route) -> list[str]:
@@ -346,7 +345,9 @@ def build_animation_timeline(
         cycles = max(1, min(rounds, math.floor(_MAX_LOOP_SECONDS / cycle + 1e-9)))
         sent = {
             id(line): line.plan.waves(
-                -(-cycles // line.plan.round_waves) * line.plan.round_waves * balls
+                math.ceil(cycles / line.plan.round_waves)
+                * line.plan.round_waves
+                * balls
             )
             for line in lines
         }
@@ -424,10 +425,8 @@ def _plan_lines(
     graph: MetroGraph,
     routes: list[RoutedPath],
     station_offsets: dict[tuple[str, str], float],
-    curve_radius: float,
 ) -> list[_LineRoutes]:
     """Plan the waves of every animated line and gather its route geometry."""
-    # Single offset-applied polyline per route, reused below.
     route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]] = {}
     for route in routes:
         key = (route.edge.source, route.edge.target, route.line_id)
@@ -448,7 +447,6 @@ def _plan_lines(
             _LineRoutes(
                 line_id=line_id,
                 plan=plan,
-                edges=edges,
                 route_polylines=route_polylines,
                 line_polylines=[
                     pts for key, pts in route_polylines.items() if key[2] == line_id
@@ -511,9 +509,8 @@ def _flatten_path(
     """Flatten an M/L/Q path to a polyline and its cumulative arc lengths.
 
     :func:`_compute_path_length` stays the authority on a track's *duration*
-    (changing it would retime every animated map); this is the geometry a
-    frame samples a ball's position from, where a curve has to be walked
-    rather than approximated by its chord.
+    (changing it would retime every animated map); a sampled position needs
+    the curve walked rather than approximated by its chord.
     """
     tokens = re.findall(r"[MLQ]|[-+]?\d*\.?\d+", d_attr)
     points: list[tuple[float, float]] = []
@@ -563,7 +560,7 @@ def _flatten_path(
 
 def _travel_keyframes(move_frac: float, registry: dict[str, str]) -> str:
     """Return the @keyframes name for a ball that travels for *move_frac* of
-    the shared cycle then holds at the terminus, registering its CSS in
+    its lifetime then holds at the terminus, registering its CSS in
     *registry*.  Lines sharing a *move_frac* reuse one block; the name is
     namespaced (``ns``) so maps inlined on the same page don't collide.
     """
@@ -622,7 +619,7 @@ def _build_line_motion_paths(
     """
     paths: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    for line in _plan_lines(graph, routes, station_offsets, curve_radius):
+    for line in _plan_lines(graph, routes, station_offsets):
         for wave in line.plan.waves(line.plan.round_waves):
             for route in wave:
                 for d_attr in _route_pieces(line, route, curve_radius):

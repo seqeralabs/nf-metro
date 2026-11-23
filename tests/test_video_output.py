@@ -72,7 +72,6 @@ def test_point_at_walks_the_track_by_arc_length() -> None:
 
 
 def test_a_short_line_holds_at_its_terminus_for_the_rest_of_its_lifetime() -> None:
-    """move_frac is the share of the lifetime spent moving, as in the keyframes."""
     track = _track(((0.0, 0.0), (100.0, 0.0)))
     timeline = AnimationTimeline(
         cycle=10.0, loop=10.0, dots=(_dot(track, 0.0, 10.0, move_frac=0.5),)
@@ -98,22 +97,31 @@ def test_dots_on_one_track_are_spread_by_their_departures() -> None:
     )
 
 
-def test_a_dot_is_hidden_once_its_lifetime_is_over() -> None:
+@pytest.mark.parametrize(
+    ("depart", "phase", "expected_x"),
+    [
+        (20.0, 0.49, None),
+        (20.0, 0.5, 0.0),
+        (20.0, 0.7, 80.0),
+        (20.0, 0.76, None),
+        # Departing late in the loop, the dot is shown on after the wrap.
+        (35.0, 0.0, 50.0),
+        (35.0, 0.2, None),
+    ],
+)
+def test_a_dot_is_shown_only_for_its_lifetime_from_its_departure(
+    depart: float, phase: float, expected_x: float | None
+) -> None:
     track = _track(((0.0, 0.0), (100.0, 0.0)))
-    timeline = AnimationTimeline(cycle=10.0, loop=40.0, dots=(_dot(track, 20.0, 10.0),))
+    timeline = AnimationTimeline(
+        cycle=10.0, loop=40.0, dots=(_dot(track, depart, 10.0),)
+    )
 
-    assert timeline.ball_positions(0.49) == []
-    assert timeline.ball_positions(0.5) == [(0.0, 0.0)]
-    assert len(timeline.ball_positions(0.7)) == 1
-    assert timeline.ball_positions(0.76) == []
-
-
-def test_a_dot_departing_late_in_the_loop_is_still_shown_after_the_wrap() -> None:
-    track = _track(((0.0, 0.0), (100.0, 0.0)))
-    timeline = AnimationTimeline(cycle=10.0, loop=40.0, dots=(_dot(track, 35.0, 10.0),))
-
-    assert timeline.ball_positions(0.0)[0] == pytest.approx((50.0, 0.0), abs=0.1)
-    assert timeline.ball_positions(0.2) == []
+    positions = timeline.ball_positions(phase)
+    if expected_x is None:
+        assert positions == []
+    else:
+        assert positions[0] == pytest.approx((expected_x, 0.0), abs=0.1)
 
 
 def test_phase_one_is_phase_zero_again() -> None:
@@ -197,7 +205,7 @@ def test_a_video_animates_a_map_that_was_not_asked_to(tmp_path: Path) -> None:
 
 
 def test_the_last_frame_is_not_a_repeat_of_the_first(tmp_path: Path) -> None:
-    """The sequence covers one cycle and stops short of restarting it.
+    """The sequence covers one loop and stops short of restarting it.
 
     Ending on a copy of frame 0 would hold the picture for two frame times
     every time the loop wraps.

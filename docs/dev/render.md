@@ -265,7 +265,7 @@ It is then selectable through `%%metro style: <brand>` and `%%metro mode: <mode>
 | `validate.py`        | `validate_render` - render-geometry guards that read the drawn SVG (markers, route ink, label ink) as their own oracle                |
 | `animate.py`         | `render_animation` - animated dots via CSS `offset-path` + `@keyframes`; `build_animation_timeline` - the same dots, sampleable       |
 | `animation_waves.py` | which routes the dots of a line take, wave by wave (turn-taking at rejoining forks, cloning elsewhere)                                |
-| `video.py`           | `write_animation` - a looping GIF/WebP/MP4/WebM of the animation, one rasterized frame per moment of the cycle, muxed through PyAV    |
+| `video.py`           | `write_animation` - a looping GIF/WebP/MP4/WebM of the animation, one rasterized frame per moment of the loop, muxed through PyAV     |
 | `style.py`           | `Theme` dataclass                                                                                                                     |
 | `legend.py`          | `render_legend`, `compute_legend_dimensions`                                                                                          |
 | `icons.py`           | `render_file_icon`, `render_files_icon`, `render_folder_icon`                                                                         |

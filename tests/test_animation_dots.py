@@ -18,6 +18,7 @@ from bisect import bisect_left
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 import drawsvg as draw
@@ -31,6 +32,7 @@ from nf_metro.render.animate import (
     build_animation_timeline,
     render_animation,
 )
+from nf_metro.render.animation_waves import plan_line_waves
 from nf_metro.themes import THEMES
 
 REPO = Path(__file__).parent.parent
@@ -38,10 +40,11 @@ EXAMPLES_DIR = REPO / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 FIXTURES = Path(__file__).parent / "fixtures" / "animation"
 THEME = THEMES["nfcore"]
+REPRO3 = FIXTURES / "fork_rejoin_vs_branch_3.mmd"
 
 REJOIN_FIXTURES = [
     FIXTURES / "fork_rejoin_vs_branch_2.mmd",
-    FIXTURES / "fork_rejoin_vs_branch_3.mmd",
+    REPRO3,
     FIXTURES / "fork_rejoin_vs_branch_4.mmd",
 ]
 TIMELINE_FIXTURES = [
@@ -55,12 +58,15 @@ TIMELINE_FIXTURES = [
     FIXTURES / "multi_root.mmd",
     FIXTURES / "clone_tree.mmd",
 ]
+# Fixtures whose dots must never be drawn fewer than are alive at a boundary.
+BOUNDARY_FIXTURES = [REPRO3, EXAMPLES_DIR / "rnaseq_sections.mmd"]
 
 
 def _ids(paths: list[Path]) -> list[str]:
     return [p.stem for p in paths]
 
 
+@cache
 def _routed(path: Path):
     graph = parse_metro_mermaid(path.read_text())
     graph.source_dir = str(path.parent)
@@ -92,8 +98,6 @@ def _line_edges(path: Path) -> dict[str, list]:
 
 
 def _plan(path: Path, line_id: str = "l1"):
-    from nf_metro.render.animation_waves import plan_line_waves
-
     plan = plan_line_waves(_line_edges(path)[line_id])
     assert plan is not None
     return plan
@@ -140,6 +144,7 @@ class _CssDot:
 
 
 def _sample(points, distances, frac: float) -> tuple[float, float]:
+    # Deliberately independent of BallTrack.point_at, which it cross-checks.
     total = distances[-1]
     target = min(max(frac, 0.0), 1.0) * total
     index = bisect_left(distances, target)
@@ -185,7 +190,15 @@ def _sample_times(loop: float) -> Iterator[float]:
 
 
 def _end_station(d_attr: str, graph, names: tuple[str, ...]) -> str:
-    x, y = (float(v) for v in re.findall(r"-?\d+\.?\d*", d_attr)[-2:])
+    return _nearest_station(re.findall(r"-?\d+\.?\d*", d_attr)[-2:], graph, names)
+
+
+def _start_station(d_attr: str, graph, names: tuple[str, ...]) -> str:
+    return _nearest_station(re.findall(r"-?\d+\.?\d*", d_attr)[:2], graph, names)
+
+
+def _nearest_station(point: list[str], graph, names: tuple[str, ...]) -> str:
+    x, y = (float(v) for v in point)
     nearest = min(
         names,
         key=lambda n: (graph.stations[n].x - x) ** 2 + (graph.stations[n].y - y) ** 2,
@@ -218,7 +231,7 @@ def test_the_rejoining_branches_and_the_lone_branch_get_equal_dots(fixture: Path
 
 
 def test_the_rejoining_branches_rotate_through_every_alternative():
-    svg, graph = _animation_svg(FIXTURES / "fork_rejoin_vs_branch_3.mmd")
+    svg, graph = _animation_svg(REPRO3)
     dots = _css_dots(svg)
     via_a = Counter(
         d.d_attr
@@ -230,7 +243,7 @@ def test_the_rejoining_branches_rotate_through_every_alternative():
 
 
 def test_a_round_of_the_rejoin_repro_is_three_waves():
-    plan = _plan(FIXTURES / "fork_rejoin_vs_branch_3.mmd")
+    plan = _plan(REPRO3)
     assert plan.round_waves == 3
     first, second, third = plan.waves(3)
     middles = {
@@ -260,7 +273,7 @@ def test_each_turn_taking_level_uses_its_children_equally_per_round():
     assert used[("src", "w")] == 4
 
 
-def test_forks_that_never_rejoin_clone_into_exactly_todays_routes():
+def test_forks_that_never_rejoin_send_one_dot_down_every_root_to_leaf_path():
     plan = _plan(FIXTURES / "clone_tree.mmd")
     assert plan.round_waves == 1
     routes = {tuple(_edge_keys(r)) for r in plan.waves(1)[0]}
@@ -275,20 +288,12 @@ def test_forks_that_never_rejoin_clone_into_exactly_todays_routes():
 # --- every root, every edge ------------------------------------------------
 
 
-def test_every_root_of_a_line_starts_dots():
-    plan = _plan(FIXTURES / "multi_root.mmd")
+def test_every_root_of_a_line_starts_dots_in_the_css():
+    svg, graph = _animation_svg(FIXTURES / "multi_root.mmd")
     started = {
-        route[0].source for wave in plan.waves(plan.round_waves) for route in wave
+        _start_station(d.d_attr, graph, ("r1", "r2", "r3")) for d in _css_dots(svg)
     }
     assert started == {"r1", "r2", "r3"}
-
-
-def test_every_root_of_a_line_is_animated_in_the_css():
-    svg, _ = _animation_svg(FIXTURES / "multi_root.mmd")
-    starts = {
-        re.match(r"M ([\d.]+) ([\d.]+)", d.d_attr).groups() for d in _css_dots(svg)
-    }  # type: ignore[union-attr]
-    assert len(starts) >= 3
 
 
 def _corpus() -> list[Path]:
@@ -297,8 +302,6 @@ def _corpus() -> list[Path]:
 
 def test_every_line_edge_gets_a_dot_each_round_across_the_corpus():
     """Parse-only: the plan depends on a line's edges, not on their geometry."""
-    from nf_metro.render.animation_waves import plan_line_waves
-
     offenders: list[str] = []
     for path in _corpus():
         try:
@@ -328,11 +331,8 @@ def test_every_line_edge_gets_a_dot_each_round_across_the_corpus():
 
 @pytest.mark.parametrize("fixture", TIMELINE_FIXTURES, ids=_ids(TIMELINE_FIXTURES))
 def test_the_css_and_the_sampled_timeline_place_every_dot_alike(fixture: Path):
-    graph, routes, offsets = _routed(fixture)
-    timeline = build_animation_timeline(graph, routes, offsets, THEME)
-    drawing = draw.Drawing(100, 100)
-    render_animation(drawing, graph, routes, offsets, THEME)
-    dots = _css_dots(drawing.as_svg())
+    timeline = _timeline(fixture)
+    dots = _css_dots(_animation_svg(fixture)[0])
     assert dots
     assert all(d.duration == pytest.approx(timeline.loop) for d in dots)
 
@@ -366,14 +366,6 @@ def test_the_loop_is_bounded_and_seamless(fixture: Path):
         assert (x0, y0) == pytest.approx((x1, y1))
 
 
-def test_every_dot_is_visible_for_exactly_one_cycle():
-    timeline = _timeline(FIXTURES / "fork_rejoin_vs_branch_3.mmd")
-    assert timeline.dots
-    assert all(d.depart >= 0 and d.depart < timeline.loop for d in timeline.dots)
-    for dot in timeline.dots:
-        assert dot.lifetime == pytest.approx(timeline.cycle, abs=0.011)
-
-
 # --- no dot vanishes early ---------------------------------------------------
 
 
@@ -398,11 +390,7 @@ def _alive_at(timeline, now: float) -> int:
     )
 
 
-@pytest.mark.parametrize(
-    "fixture",
-    [FIXTURES / "fork_rejoin_vs_branch_3.mmd", EXAMPLES_DIR / "rnaseq_sections.mmd"],
-    ids=["repro3", "hero"],
-)
+@pytest.mark.parametrize("fixture", BOUNDARY_FIXTURES, ids=["repro3", "hero"])
 def test_no_dot_vanishes_before_its_lifetime_ends(fixture: Path):
     """Rounding the hide may leave a dot lingering at its terminus a moment
     past its lifetime, never take it away early: at every departure, every end
@@ -411,16 +399,21 @@ def test_no_dot_vanishes_before_its_lifetime_ends(fixture: Path):
     short = []
     for now in _boundary_phases(timeline):
         phase = now / timeline.loop
+        alive = _alive_at(timeline, now)
         # The frame clock reaches a boundary with float noise either way.
         for sampled in (phase, math.nextafter(phase, 0), math.nextafter(phase, 2)):
             shown = len(timeline.ball_positions(sampled))
-            if shown < _alive_at(timeline, now):
-                short.append((now, shown, _alive_at(timeline, now)))
+            if shown < alive:
+                short.append((now, shown, alive))
     assert not short, short[:5]
 
 
-def test_a_cycle_boundary_of_the_rejoin_repro_still_shows_its_dots():
-    timeline = _timeline(FIXTURES / "fork_rejoin_vs_branch_3.mmd")
+def test_the_rejoin_repro_shows_each_dot_for_one_cycle_through_every_cycle_boundary():
+    timeline = _timeline(REPRO3)
+    assert all(0 <= d.depart < timeline.loop for d in timeline.dots)
+    for dot in timeline.dots:
+        assert dot.lifetime == pytest.approx(timeline.cycle, abs=0.011)
+
     steady = len(timeline.ball_positions(0.5 / 3 + 0.01))
     assert steady == 2
     for k in range(1, 3):
@@ -436,6 +429,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.animate import render_animation
+from nf_metro.render.animation_waves import plan_line_waves
 from nf_metro.themes import THEMES
 
 digest = hashlib.sha256()
