@@ -1,22 +1,21 @@
-"""Theme stacks: ordered lists of themes merged left to right.
+"""Theme files, theme stacks, and their resolution to a light and dark theme.
 
-A ``%%metro style:`` value or ``--theme`` argument is a comma-separated list
-of entries. Each entry is a built-in theme name or the path to a YAML theme
-file. Entries apply in order and a later entry wins per property, so
-``nfcore, london-tube`` takes every property london-tube sets from london-tube
-and everything else from nfcore. Light and dark merge independently.
-
-A theme file has this shape (every key optional except ``name``)::
+A theme file is YAML. Every key except ``name`` is optional::
 
     name: my-theme
-    extends: nfcore          # or a list; shorthand for stacking these first
-    label_font_size: 13      # top-level fields apply to both modes
+    extends: london-tube      # names or files stacked before this one
+    fixed_mode: dark          # one palette, rendered in this mode only
+    label_font_size: 13       # top-level fields apply to both modes
     light:
       label_color: "#1c3f94"
     dark:
       label_color: "#e8ecf8"
     layout:
-      track_gap: 2           # layout options, below directives and CLI flags
+      y_spacing: 45           # layout options, below directives and CLI flags
+
+A stack is an ordered list of theme names and files. It always starts from the
+base theme (``nfcore``), then applies each entry in turn; a later entry wins
+for every field it sets, and light and dark merge independently.
 """
 
 from __future__ import annotations
@@ -33,31 +32,23 @@ import yaml
 
 from nf_metro.errors import NfMetroError
 from nf_metro.options import INVALID, LAYOUT_OPTIONS, LayoutOption, coerce
-from nf_metro.render.style import Theme
+from nf_metro.render.style import Theme, authored_fields
 
 __all__ = [
+    "MODES",
     "THEMEABLE_LAYOUT_OPTIONS",
+    "ResolvedTheme",
     "ThemeError",
     "ThemeLayer",
     "is_theme_file_entry",
-    "layer_from_family",
     "layer_from_mapping",
     "load_theme_file",
     "merge_layers",
     "split_stack",
 ]
 
+MODES = ("light", "dark")
 _THEME_FILE_SUFFIXES = (".yaml", ".yml")
-
-# Theme identity fields are derived from the stack, never authored.
-_IDENTITY_FIELDS = frozenset({"name", "brand", "mode"})
-_THEME_FIELDS: dict[str, dataclasses.Field[Any]] = {
-    f.name: f for f in dataclasses.fields(Theme) if f.name not in _IDENTITY_FIELDS
-}
-
-_CHOICE_FIELDS: dict[str, tuple[str, ...]] = {
-    "station_glyph": ("pill", "tick"),
-}
 
 # Layout options that shape a map's look. Options that change what is drawn
 # or how a render behaves (size pinning, animation, guards, folding) stay with
@@ -96,6 +87,10 @@ _COLOR = re.compile(
     re.VERBOSE,
 )
 
+_TOP_LEVEL_KEYS = frozenset(
+    {"name", "extends", "fixed_mode", "light", "dark", "layout"}
+)
+
 
 class ThemeError(NfMetroError, ValueError):
     """A theme stack entry or theme file is unknown, unreadable, or invalid."""
@@ -103,15 +98,36 @@ class ThemeError(NfMetroError, ValueError):
 
 @dataclass(frozen=True)
 class ThemeLayer:
-    """One stack entry's contribution: per-mode Theme fields and layout options."""
+    """One stack entry's contribution: the fields it sets per mode, and more."""
 
     name: str
     light: Mapping[str, Any]
     dark: Mapping[str, Any]
     layout: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    # Whether the entry fixes one palette for both modes (the transparent
-    # ``light`` embed theme), so a render of it alone has no light/dark pair.
-    single_palette: bool = False
+    fixed_mode: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedTheme:
+    """A resolved stack: both themes, its layout options, and its mode rules.
+
+    ``fixed_mode`` comes from a single-palette theme, which renders in that
+    mode whatever mode is asked for and carries no light/dark pair.
+    ``pinned_mode`` comes from a mode-suffixed name (``nfcore-light``): the
+    baked mode is fixed but both palettes are kept.
+    """
+
+    name: str
+    light: Theme
+    dark: Theme
+    layout: Mapping[str, Any]
+    fixed_mode: str | None = None
+    pinned_mode: str | None = None
+
+    def for_mode(self, mode: str) -> Theme:
+        """The theme to bake for a requested *mode*."""
+        effective = self.fixed_mode or self.pinned_mode or mode
+        return self.light if effective == "light" else self.dark
 
 
 def split_stack(value: str) -> list[str]:
@@ -124,28 +140,18 @@ def is_theme_file_entry(entry: str) -> bool:
     return entry.lower().endswith(_THEME_FILE_SUFFIXES)
 
 
-def layer_from_family(name: str, light: Theme, dark: Theme) -> ThemeLayer:
-    """A built-in theme as a layer setting every field in both modes."""
-
-    def fields(theme: Theme) -> dict[str, Any]:
-        return {key: getattr(theme, key) for key in _THEME_FIELDS}
-
-    return ThemeLayer(
-        name=name,
-        light=fields(light),
-        dark=fields(dark),
-        single_palette=light is dark,
-    )
+def _field_kind(field: dataclasses.Field[Any]) -> str:
+    return field.type if isinstance(field.type, str) else field.type.__name__
 
 
 def _check_field(key: str, value: object, where: str) -> object:
-    field = _THEME_FIELDS.get(key)
+    field = authored_fields().get(key)
     if field is None:
         raise ThemeError(
             f"{where}: unknown theme field {key!r}; valid fields are "
-            + ", ".join(sorted(_THEME_FIELDS))
+            + ", ".join(sorted(authored_fields()))
         )
-    kind = field.type if isinstance(field.type, str) else field.type.__name__
+    kind = _field_kind(field)
     if kind == "bool":
         if not isinstance(value, bool):
             raise ThemeError(f"{where}: {key} must be true or false, got {value!r}")
@@ -158,20 +164,14 @@ def _check_field(key: str, value: object, where: str) -> object:
         return int(value) if kind == "int" else float(value)
     if not isinstance(value, str):
         raise ThemeError(f"{where}: {key} must be a string, got {value!r}")
-    choices = _CHOICE_FIELDS.get(key)
-    if choices is not None and value not in choices:
+    choices = field.metadata["choices"]
+    if choices and value not in choices:
         raise ThemeError(
             f"{where}: {key} must be one of {', '.join(choices)}, got {value!r}"
         )
-    if _is_color_field(key) and not _COLOR.match(value.strip()):
+    if field.metadata["color"] and not _COLOR.match(value.strip()):
         raise ThemeError(f"{where}: {key} is not a colour: {value!r}")
     return value
-
-
-def _is_color_field(key: str) -> bool:
-    if key.endswith(("_width", "_dasharray", "_radius", "_size")):
-        return False
-    return key.endswith(("_color", "_fill", "_stroke", "_background"))
 
 
 def _check_fields(data: object, where: str) -> dict[str, Any]:
@@ -179,7 +179,7 @@ def _check_fields(data: object, where: str) -> dict[str, Any]:
         return {}
     if not isinstance(data, Mapping):
         raise ThemeError(f"{where}: expected a mapping of theme fields")
-    return {str(k): _check_field(str(k), v, f"{where}") for k, v in data.items()}
+    return {str(k): _check_field(str(k), v, where) for k, v in data.items()}
 
 
 def _check_layout(data: object, where: str) -> dict[str, Any]:
@@ -203,9 +203,6 @@ def _check_layout(data: object, where: str) -> dict[str, Any]:
     return checked
 
 
-_TOP_LEVEL_KEYS = frozenset({"name", "extends", "light", "dark", "layout"})
-
-
 def layer_from_mapping(data: object, where: str) -> tuple[ThemeLayer, list[str]]:
     """Validate a parsed theme file; return its layer and ``extends`` entries."""
     if not isinstance(data, Mapping):
@@ -222,13 +219,19 @@ def layer_from_mapping(data: object, where: str) -> tuple[ThemeLayer, list[str]]
         extends = [e.strip() for e in extends_raw if e.strip()]
     else:
         raise ThemeError(f"{where}: 'extends' must be a name or a list of names")
+    fixed_mode = data.get("fixed_mode")
+    if fixed_mode is not None and fixed_mode not in MODES:
+        raise ThemeError(
+            f"{where}: fixed_mode must be light or dark, got {fixed_mode!r}"
+        )
     shared = _check_fields(
         {k: v for k, v in data.items() if k not in _TOP_LEVEL_KEYS}, where
     )
     light = {**shared, **_check_fields(data.get("light"), f"{where} (light)")}
     dark = {**shared, **_check_fields(data.get("dark"), f"{where} (dark)")}
     layout = _check_layout(data.get("layout"), f"{where} (layout)")
-    return ThemeLayer(name=name.strip(), light=light, dark=dark, layout=layout), extends
+    layer = ThemeLayer(name.strip(), light, dark, layout, fixed_mode)
+    return layer, extends
 
 
 @lru_cache(maxsize=64)
@@ -252,18 +255,35 @@ def load_theme_file(path: Path) -> tuple[ThemeLayer, list[str]]:
 
 
 def merge_layers(
-    layers: Sequence[ThemeLayer], *, name: str, brand: str
-) -> tuple[Theme, Theme, dict[str, Any]]:
-    """Merge *layers* left to right into a light theme, a dark theme, and layout."""
-    light: dict[str, Any] = {}
-    dark: dict[str, Any] = {}
+    layers: Sequence[ThemeLayer], *, name: str, pinned_mode: str | None = None
+) -> ResolvedTheme:
+    """Merge *layers* left to right into a :class:`ResolvedTheme`."""
+    fields: dict[str, dict[str, Any]] = {"light": {}, "dark": {}}
     layout: dict[str, Any] = {}
+    fixed_mode: str | None = None
     for layer in layers:
-        light.update(layer.light)
-        dark.update(layer.dark)
+        fields["light"].update(layer.light)
+        fields["dark"].update(layer.dark)
         layout.update(layer.layout)
-    return (
-        Theme(name=f"{name}-light", brand=brand, mode="light", **light),
-        Theme(name=f"{name}-dark", brand=brand, mode="dark", **dark),
+        fixed_mode = layer.fixed_mode or fixed_mode
+    try:
+        if fixed_mode is not None:
+            theme = Theme(name=name, mode=fixed_mode, **fields[fixed_mode])
+            return ResolvedTheme(name, theme, theme, layout, fixed_mode, pinned_mode)
+        light = Theme(name=f"{name}-light", mode="light", **fields["light"])
+        dark = Theme(name=f"{name}-dark", mode="dark", **fields["dark"])
+    except TypeError as e:
+        raise ThemeError(f"theme {name!r} leaves required fields unset: {e}") from None
+    mode_colors = tuple(
+        (key, getattr(light, key), getattr(dark, key))
+        for key, field in authored_fields().items()
+        if field.metadata["color"]
+    )
+    return ResolvedTheme(
+        name,
+        dataclasses.replace(light, mode_colors=mode_colors),
+        dataclasses.replace(dark, mode_colors=mode_colors),
         layout,
+        None,
+        pinned_mode,
     )

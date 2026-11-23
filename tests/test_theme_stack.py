@@ -13,21 +13,21 @@ from click.testing import CliRunner
 from nf_metro.api import prepare_graph, render_string, resolve_theme
 from nf_metro.cli import cli
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.render.style import color_pair
 from nf_metro.themes import (
     NFCORE_DARK_THEME,
     NFCORE_LIGHT_THEME,
+    PAIRED_THEMES,
     SEQERA_LIGHT_THEME,
-    THEME_MODES,
     THEMES,
     ThemeError,
     check_stack,
-    mode_pair,
     resolve_stack,
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
 _RNASEQ = _ROOT / "examples" / "rnaseq_sections.mmd"
-_TUBE = THEME_MODES["london-tube"]
+_TUBE = {"light": THEMES["london-tube-light"], "dark": THEMES["london-tube-dark"]}
 
 _MMD = textwrap.dedent("""\
     %%metro line: main | Main | #ff0000
@@ -70,7 +70,7 @@ def test_london_tube_sets_its_look_and_inherits_the_rest_from_nfcore():
     assert light.label_color == "#1c3f94"
     assert light.title_font_size == NFCORE_LIGHT_THEME.title_font_size
     assert light.terminus_width == NFCORE_LIGHT_THEME.terminus_width
-    assert mode_pair(light) == (_TUBE["light"], _TUBE["dark"])
+    assert color_pair(light, "label_color") == ("#1c3f94", "#dfe6ff")
 
 
 # ---------------------------------------------------------------------------
@@ -84,8 +84,8 @@ def test_later_entry_wins_per_property():
     assert over_nfcore.label_color == _TUBE["light"].label_color
 
     under_nfcore = resolve_stack("london-tube, nfcore").light
-    assert under_nfcore.station_glyph == "pill"
     assert under_nfcore.label_color == NFCORE_LIGHT_THEME.label_color
+    assert under_nfcore.station_glyph == "tick", "nfcore does not set the glyph"
 
 
 def test_properties_a_later_entry_leaves_unset_come_from_the_earlier_one():
@@ -156,10 +156,10 @@ def test_top_level_fields_apply_to_both_modes_and_per_mode_blocks_win(tmp_path):
 def test_a_stacked_theme_carries_both_palettes():
     graph = parse_metro_mermaid(_MMD)
     light = resolve_theme("seqera, london-tube", graph, mode="light")
-    pair = mode_pair(light)
-    assert pair is not None
-    assert pair[0].label_color == _TUBE["light"].label_color
-    assert pair[1].label_color == _TUBE["dark"].label_color
+    assert color_pair(light, "label_color") == (
+        _TUBE["light"].label_color,
+        _TUBE["dark"].label_color,
+    )
     svg = render_string(_MMD, theme="seqera, london-tube")
     assert "light-dark(#1c3f94, #dfe6ff)" in svg
 
@@ -378,5 +378,52 @@ def test_nfcore_render_is_untouched_by_the_shape_fields():
 
 
 def test_every_builtin_name_is_in_the_flat_registry():
-    for brand in THEME_MODES:
+    for brand in PAIRED_THEMES:
         assert {brand, f"{brand}-light", f"{brand}-dark"} <= set(THEMES)
+
+
+# ---------------------------------------------------------------------------
+# Names, single-palette themes, and schema-driven chrome
+# ---------------------------------------------------------------------------
+
+
+def test_aliases_name_the_same_theme():
+    assert resolve_stack("light") is resolve_stack("transparent")
+    assert resolve_stack("dark") is resolve_stack("nfcore")
+    assert THEMES["light"] is THEMES["transparent"]
+
+
+def test_pinned_names_share_their_theme_objects():
+    assert THEMES["nfcore-light"] is resolve_stack("nfcore").light
+    assert resolve_stack("nfcore-light").for_mode("dark") is THEMES["nfcore-light"]
+
+
+def test_fixed_mode_file_renders_one_palette_for_every_mode(tmp_path):
+    path = _write(
+        tmp_path,
+        "flat.yaml",
+        """\
+        name: flat
+        fixed_mode: light
+        light:
+          label_color: "#123456"
+        """,
+    )
+    stack = resolve_stack(str(path))
+    for mode in ("light", "dark"):
+        theme = stack.for_mode(mode)
+        assert theme.label_color == "#123456"
+        assert not theme.mode_colors
+
+
+def test_new_chrome_colours_follow_the_viewer():
+    svg = render_string(_MMD, theme="london-tube")
+    assert "stroke: var(--nfm-map-legend-stroke, light-dark(#000000, #ffffff))" in svg
+
+
+def test_every_chrome_binding_reaches_the_stylesheet():
+    from nf_metro.render.style import chrome_bindings
+
+    svg = render_string(_MMD, theme="london-tube")
+    for binding in chrome_bindings():
+        assert binding.css_var in svg, binding.css_var

@@ -1,0 +1,38 @@
+# The reference look and the base every theme stack starts from, so it sets
+# every field that has no default in the Theme schema.
+name: nfcore
+
+station_fill: "#ffffff"
+station_stroke: "#333333"
+station_stroke_width: 1.5
+line_width: 3
+label_font_family: "'Helvetica Neue', Helvetica, Arial, sans-serif"
+label_font_size: 13
+label_font_weight: "bold"
+title_font_size: 24
+section_label_font_size: 16
+legend_font_size: 14
+animation_ball_stroke: "#333333"
+animation_ball_stroke_width: 1.5
+
+light:
+  background_color: "#f5f5f5"
+  label_color: "#333333"
+  title_color: "#111111"
+  section_fill: "#ededed"
+  section_stroke: "#e6e6e6"
+  section_label_color: "#666666"
+  legend_background: "rgba(255, 255, 255, 0.8)"
+  legend_text_color: "#333333"
+  marker_stroke: "#333333"
+
+dark:
+  background_color: "#2b2b2b"
+  label_color: "#e0e0e0"
+  title_color: "#ffffff"
+  section_fill: "#373737"
+  section_stroke: "#595959"
+  section_label_color: "#c8c8c8"
+  legend_background: "rgba(0, 0, 0, 0.3)"
+  legend_text_color: "#e0e0e0"
+  marker_stroke: "#f0f0f0"

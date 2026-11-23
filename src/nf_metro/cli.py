@@ -79,11 +79,9 @@ from nf_metro.render.constants import LOGO_GAP
 from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
 from nf_metro.themes import (
     DEFAULT_MODE,
-    STYLE_NAMES,
-    THEMES,
     ThemeError,
     check_stack,
-    resolve_style,
+    resolve_stack,
 )
 from nf_metro.themes.stack import is_theme_file_entry
 
@@ -344,7 +342,7 @@ class _ThemeStack(click.ParamType[str]):
     def get_metavar(  # type: ignore[override]
         self, param: click.Parameter, ctx: click.Context | None = None
     ) -> str:
-        return "[" + "|".join(sorted(STYLE_NAMES)) + "|FILE.yaml][,...]"
+        return "THEMES"
 
     def convert(
         self, value: object, param: click.Parameter | None, ctx: click.Context | None
@@ -805,8 +803,9 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     cls=_DescribedDefault,
     default_text="from %%metro style, else nfcore",
     help=(
-        "Visual theme: a built-in name, a .yaml theme file, or a comma list "
-        "of both, merged left to right."
+        "Visual theme: nfcore, seqera, london-tube or transparent (each but "
+        "transparent also as NAME-light/NAME-dark), a .yaml theme file, or a "
+        "comma list of these merged left to right."
     ),
 )
 @click.option(
@@ -2024,7 +2023,7 @@ def serve(
 )
 @click.option(
     "--theme",
-    type=click.Choice(sorted(STYLE_NAMES)),
+    type=_ThemeStack(),
     default="nfcore",
     show_default=True,
     help="Visual theme applied to every map registered with this server.",
@@ -2063,7 +2062,7 @@ def serve_multi_cmd(
             err=True,
         )
     httpd = serve_multi(
-        THEMES[resolve_style(theme)],
+        resolve_stack(theme).for_mode(DEFAULT_MODE),
         host=host,
         port=port,
         token=token,

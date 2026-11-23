@@ -453,10 +453,10 @@ clearances are a property of its region, resolved before any theme is in
 hand."""
 
 WIDEST_THEME_LINE_WIDTH: float = 4.0
-"""The widest ``Theme.line_width`` any registered brand sets.
+"""The widest ``Theme.line_width`` any built-in theme sets.
 
 A corridor's clearances are a property of its region, resolved before a theme
-is in hand, so a demand that has to hold for every brand takes the widest
+is in hand, so a demand that has to hold for every theme takes the widest
 stroke rather than the default one.  Pinned to the registry by
 ``test_the_canvas_edge_clearance_bounds_every_theme``."""
 

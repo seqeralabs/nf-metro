@@ -21,10 +21,10 @@ from nf_metro.render.svg import (
     render_svg,
 )
 from nf_metro.themes import (
-    LIGHT_THEME,
     NFCORE_DARK_THEME,
     SEQERA_DARK_THEME,
     SEQERA_LIGHT_THEME,
+    TRANSPARENT_THEME,
 )
 
 
@@ -114,9 +114,9 @@ def test_render_light_theme():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, LIGHT_THEME)
+    svg = render_svg(graph, TRANSPARENT_THEME)
     # Light theme uses transparent background (no background rectangle)
-    assert LIGHT_THEME.background_color == "none"
+    assert TRANSPARENT_THEME.background_color == "none"
     assert "#333333" in svg  # label/stroke color present
 
 
@@ -1356,7 +1356,7 @@ def test_label_halo_color_resolves_to_opaque_background():
 
 
 def test_label_halo_color_resolves_to_white_on_transparent_theme():
-    color = _label_halo_color(replace(LIGHT_THEME, label_halo_color=""))
+    color = _label_halo_color(replace(TRANSPARENT_THEME, label_halo_color=""))
     assert color == "#ffffff"
 
 

@@ -248,7 +248,7 @@ from nf_metro.render.section_header import (
     check_section_headers_hold_the_reserved_band,
     resolve_all_section_headers,
 )
-from nf_metro.render.style import Theme
+from nf_metro.render.style import Theme, chrome_bindings, color_pair, is_adaptive
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
     MetricsFace,
@@ -2742,12 +2742,10 @@ def _emit_render_plan(
     logo_w, logo_h = plan.logo_w, plan.logo_h
     legend_logo_size = plan.legend_logo_size
 
-    from nf_metro.themes import mode_pair
-
     root_attrs: dict[str, str] = {}
     if responsive:
         root_attrs["preserveAspectRatio"] = "xMinYMin meet"
-    if self_color_scheme and mode_pair(theme) is not None:
+    if self_color_scheme and is_adaptive(theme):
         color_scheme = baked_mode if baked_mode is not None else "light dark"
         root_attrs["style"] = f"color-scheme: {color_scheme}"
     d = draw.Drawing(svg_width, svg_height, **root_attrs)
@@ -3298,85 +3296,52 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     can recolor the map's non-semantic surfaces (background, labels, section
     boxes, legend) by setting those properties on a wrapping element.  The
     fallback for each property is the mode-adaptive ``light-dark()`` of the
-    theme's light and dark palettes (or the theme's single baked value when it
-    has no light/dark family), so the map follows the viewer's ``color-scheme``
-    with no host intervention.  Line/route colors carry semantic meaning and
-    remain as baked presentation attributes.
+    theme's light and dark values (or the baked value for a single-palette
+    theme), so the map follows the viewer's ``color-scheme`` with no host
+    intervention.  The rules come from the chrome bindings declared on the
+    :class:`~nf_metro.render.style.Theme` schema.  Line/route colors carry
+    semantic meaning and remain as baked presentation attributes.
 
     ``any_inactive`` adds the muted-state rules; a map with no inactive line
     has nothing for them to match, so it ships without them.
     """
-    from nf_metro.themes import mode_pair
-
-    pair = mode_pair(theme)
-    light, dark = pair if pair is not None else (theme, theme)
 
     def _adapt(light_val: str, dark_val: str) -> str:
         if light_val == dark_val:
             return light_val
         return f"light-dark({light_val}, {dark_val})"
 
-    def _prop(var: str, attr: str) -> str:
-        return f"var({var}, {_adapt(getattr(light, attr), getattr(dark, attr))})"
+    def _pair(name: str, fallback: str = "") -> tuple[str, str]:
+        light, dark = color_pair(theme, name)
+        if fallback:
+            fb_light, fb_dark = color_pair(theme, fallback)
+            light, dark = light or fb_light, dark or fb_dark
+        return light, dark
 
     def _rule(cls: str, props: str, *also: str) -> str:
         selector = "".join(f".{_ns(c)}" for c in (cls, *also))
         return f"{selector} {{ {props}; }}"
 
-    section_label = "--nfm-map-section-label-color"
-    lines: list[str] = []
-    if theme.background_color and theme.background_color != "none":
-        lines.append(
-            _rule("nf-metro-bg", f"fill: {_prop('--nfm-map-bg', 'background_color')}")
+    rules: dict[str, list[str]] = {}
+    for binding in chrome_bindings():
+        baked = getattr(theme, binding.field) or (
+            getattr(theme, binding.fallback) if binding.fallback else ""
         )
-    lines += [
-        _rule(
-            "nf-metro-title", f"fill: {_prop('--nfm-map-title-color', 'title_color')}"
-        ),
-        _rule(
-            "nf-metro-station-label",
-            f"fill: {_prop('--nfm-map-label-color', 'label_color')}",
-        ),
-        _rule(
-            "nf-metro-section-box",
-            f"fill: {_prop('--nfm-map-section-fill', 'section_fill')};"
-            f" stroke: {_prop('--nfm-map-section-stroke', 'section_stroke')}",
-        ),
-        _rule(
-            "nf-metro-section-label",
-            f"fill: {_prop(section_label, 'section_label_color')}",
-        ),
-        _rule(
-            "nf-metro-group-label",
-            f"fill: {_prop(section_label, 'section_label_color')}",
-        ),
-        _rule(
-            "nf-metro-group-underline",
-            f"stroke: {_prop(section_label, 'section_label_color')}",
-        ),
-        _rule(
-            "nf-metro-legend-bg",
-            f"fill: {_prop('--nfm-map-legend-bg', 'legend_background')}",
-        ),
-        _rule(
-            "nf-metro-legend-text",
-            f"fill: {_prop('--nfm-map-legend-text-color', 'legend_text_color')}",
-        ),
-    ]
-    _ms_adapt = _adapt(
-        light.marker_stroke or light.station_stroke,
-        dark.marker_stroke or dark.station_stroke,
-    )
-    lines.append(
-        _rule(
-            "nf-metro-marker-stroke",
-            f"stroke: var(--nfm-map-marker-stroke, {_ms_adapt})",
+        if not baked or baked == "none":
+            continue
+        value = (
+            f"var({binding.css_var}, {_adapt(*_pair(binding.field, binding.fallback))})"
         )
-    )
+        for cls, prop in binding.targets:
+            rules.setdefault(cls, []).append(f"{prop}: {value}")
+    lines = [_rule(cls, "; ".join(props)) for cls, props in rules.items()]
     # The label halo is a knockout of the background, so it tracks --nfm-map-bg
     # and must flip with the mode too; otherwise a dark-baked halo blots out
     # labels in light mode. Disabled-halo themes draw no halo, so emit nothing.
-    halo_light, halo_dark = _label_halo_color(light), _label_halo_color(dark)
+    bg_light, bg_dark = color_pair(theme, "background_color")
+    halo_light_set, halo_dark_set = color_pair(theme, "label_halo_color")
+    halo_light = _label_halo_color_for(theme.label_halo_width, halo_light_set, bg_light)
+    halo_dark = _label_halo_color_for(theme.label_halo_width, halo_dark_set, bg_dark)
     if halo_light is not None and halo_dark is not None:
         halo_val = f"var(--nfm-map-bg, {_adapt(halo_light, halo_dark)})"
         lines.append(
@@ -3387,7 +3352,7 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     # Each muted state therefore needs a selector that outranks its own plain
     # rule, and its own property so a host can recolor the two states apart.
     if any_inactive:
-        muted_val = _prop("--nfm-map-muted-color", "muted_line_color")
+        muted_val = f"var(--nfm-map-muted-color, {_adapt(*_pair('muted_line_color'))})"
         lines += [
             _rule("nf-metro-station-label", f"fill: {muted_val}", _MUTED_CLASS),
             _rule("nf-metro-marker-stroke", f"stroke: {muted_val}", _MUTED_CLASS),
@@ -5498,21 +5463,26 @@ def _render_terminus_icons(
             )
 
 
-def _label_halo_color(theme: Theme) -> str | None:
-    """Resolve the halo colour, or ``None`` when haloing is disabled.
+def _label_halo_color_for(width: float, color: str, background: str) -> str | None:
+    """Resolve a halo colour, or ``None`` when haloing is disabled.
 
-    Haloing is disabled by a non-positive ``label_halo_width`` or an explicit
-    ``label_halo_color`` of ``"none"`` (matching the SVG ``fill="none"``
-    convention). An empty colour resolves to the background, so the name
-    punches a knockout through any route it crosses, or white on transparent
-    themes.
+    Haloing is disabled by a non-positive *width* or an explicit *color* of
+    ``"none"`` (matching the SVG ``fill="none"`` convention). An empty colour
+    resolves to the *background*, so the name punches a knockout through any
+    route it crosses, or white on a transparent canvas.
     """
-    if theme.label_halo_width <= 0 or theme.label_halo_color == "none":
+    if width <= 0 or color == "none":
         return None
-    if theme.label_halo_color:
-        return theme.label_halo_color
-    bg = theme.background_color
-    return bg if bg and bg != "none" else "#ffffff"
+    if color:
+        return color
+    return background if background and background != "none" else "#ffffff"
+
+
+def _label_halo_color(theme: Theme) -> str | None:
+    """:func:`_label_halo_color_for` with *theme*'s baked values."""
+    return _label_halo_color_for(
+        theme.label_halo_width, theme.label_halo_color, theme.background_color
+    )
 
 
 def _render_labels(

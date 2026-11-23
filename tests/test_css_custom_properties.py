@@ -16,7 +16,7 @@ from nf_metro.api import render_string
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes import LIGHT_THEME, NFCORE_DARK_THEME, NFCORE_LIGHT_THEME
+from nf_metro.themes import NFCORE_DARK_THEME, NFCORE_LIGHT_THEME, TRANSPARENT_THEME
 
 _MMD = (
     "%%metro title: Test\n"
@@ -148,7 +148,7 @@ def test_chrome_css_fallbacks_single_value_for_unfamilied_theme():
     Transparent themes (background_color='none') emit no ``.nf-metro-bg`` fill
     rule; the halo knockout references --nfm-map-bg with a solid fallback.
     """
-    theme = LIGHT_THEME
+    theme = TRANSPARENT_THEME
     svg = render_svg(_make_graph(), theme)
     assert ".nf-metro-bg {" not in svg
     assert "light-dark(" not in svg

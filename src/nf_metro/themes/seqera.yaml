@@ -1,0 +1,38 @@
+# Seqera brand: Inter type and the Platform palette, stepping down from the
+# brand navy (#160F26) into deep purple-greys for dark mode.
+name: seqera
+
+station_fill: "#ffffff"
+station_stroke: "#2D273C"
+station_stroke_width: 2
+line_width: 4
+label_font_family: "'Inter Variable', Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+label_font_size: 14
+label_font_weight: "600"
+title_font_size: 26
+section_label_font_size: 17
+legend_font_size: 16
+animation_ball_stroke: "#2D273C"
+animation_ball_stroke_width: 1.5
+
+light:
+  background_color: "#f8f9fa"
+  label_color: "#242424"
+  title_color: "#160F26"
+  section_fill: "#F3F3F4"
+  section_stroke: "#D0CFD4"
+  section_label_color: "#6c757d"
+  legend_background: "rgba(248, 249, 250, 0.9)"
+  legend_text_color: "#242424"
+  marker_stroke: "#2D273C"
+
+dark:
+  background_color: "#1a1625"
+  label_color: "#e0d9f7"
+  title_color: "#f0ecff"
+  section_fill: "#231e30"
+  section_stroke: "#3d3650"
+  section_label_color: "#9d94b8"
+  legend_background: "rgba(0, 0, 0, 0.4)"
+  legend_text_color: "#e0d9f7"
+  marker_stroke: "#7b6ea6"

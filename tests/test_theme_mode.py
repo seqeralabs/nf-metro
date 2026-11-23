@@ -9,15 +9,16 @@ import pytest
 
 from nf_metro.api import resolve_theme
 from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.render.style import color_pair, is_adaptive
 from nf_metro.themes import (
     DEFAULT_MODE,
     NFCORE_DARK_THEME,
     NFCORE_LIGHT_THEME,
+    PAIRED_THEMES,
     SEQERA_DARK_THEME,
     SEQERA_LIGHT_THEME,
-    THEME_MODES,
     THEMES,
-    mode_pair,
+    resolve_stack,
 )
 
 _MMD = "%%metro line: main | Main | #ff0000\ngraph LR\n    a -->|main| b\n"
@@ -101,21 +102,29 @@ def test_invalid_mode_directive_ignored():
 # ---------------------------------------------------------------------------
 
 
-def test_theme_modes_cover_both_modes_per_brand():
-    for brand, family in THEME_MODES.items():
-        assert set(family) == {"light", "dark"}
-        for mode, theme in family.items():
-            assert theme.brand == brand
-            assert theme.mode == mode
+def test_paired_themes_resolve_to_one_theme_per_mode():
+    for name in PAIRED_THEMES:
+        resolved = resolve_stack(name)
+        assert (resolved.light.mode, resolved.dark.mode) == ("light", "dark")
+        assert resolved.for_mode("light") is resolved.light
+        assert resolved.for_mode("dark") is resolved.dark
 
 
-def test_mode_pair_returns_light_then_dark():
-    light, dark = mode_pair(NFCORE_DARK_THEME)
-    assert (light.mode, dark.mode) == ("light", "dark")
+def test_paired_theme_carries_both_palettes():
+    assert is_adaptive(NFCORE_DARK_THEME)
+    assert color_pair(NFCORE_DARK_THEME, "background_color") == (
+        NFCORE_LIGHT_THEME.background_color,
+        NFCORE_DARK_THEME.background_color,
+    )
 
 
-def test_mode_pair_none_without_family():
-    assert mode_pair(THEMES["light"]) is None
+def test_single_palette_theme_has_no_pair():
+    transparent = THEMES["transparent"]
+    assert not is_adaptive(transparent)
+    assert color_pair(transparent, "label_color") == (
+        transparent.label_color,
+        transparent.label_color,
+    )
 
 
 def test_bare_brand_names_resolve_to_default_mode():
