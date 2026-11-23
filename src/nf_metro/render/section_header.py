@@ -50,7 +50,9 @@ took rather than a fixed band above ``bbox_y``.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
@@ -135,10 +137,46 @@ class _Scored(NamedTuple):
     placement: SectionHeaderPlacement
 
 
+class HeaderLettering(NamedTuple):
+    """How a theme sets section titles: in capitals, and with extra tracking."""
+
+    uppercase: bool = False
+    letter_spacing: float = 0.0
+
+
+_HEADER_LETTERING: ContextVar[HeaderLettering] = ContextVar(
+    "nf_metro_header_lettering", default=HeaderLettering()
+)
+
+
+@contextmanager
+def header_lettering_context(lettering: HeaderLettering) -> Iterator[None]:
+    """Measure section titles as the render's theme draws them."""
+    token = _HEADER_LETTERING.set(lettering)
+    try:
+        yield
+    finally:
+        _HEADER_LETTERING.reset(token)
+
+
 def estimate_section_label_width(name: str, font_size: float) -> float:
-    """Estimate the rendered width of a section title in pixels."""
+    """Estimate the rendered width of a section title in pixels.
+
+    Under a theme that draws titles in capitals or with letter spacing, the
+    title is measured as drawn: in capitals, by the wider of the reservation
+    policy and the face's per-glyph advances, plus the tracking after every
+    letter.
+    """
     style = text_style(font_size, "bold")
-    return DEFAULT_TEXT_METRICS.reserve_width(name, style, TextRole.SECTION_HEADER)
+    lettering = _HEADER_LETTERING.get()
+    if lettering == HeaderLettering():
+        return DEFAULT_TEXT_METRICS.reserve_width(name, style, TextRole.SECTION_HEADER)
+    text = name.upper() if lettering.uppercase else name
+    width = max(
+        DEFAULT_TEXT_METRICS.reserve_width(text, style, TextRole.SECTION_HEADER),
+        DEFAULT_TEXT_METRICS.advance(text, style, TextRole.SECTION_HEADER),
+    )
+    return width + lettering.letter_spacing * len(text)
 
 
 def _widest_label_line(lines: Sequence[str], font_size: float) -> str:

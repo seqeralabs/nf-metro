@@ -239,6 +239,7 @@ from nf_metro.render.plan import (
     thaw_render_value,
 )
 from nf_metro.render.section_header import (
+    HeaderLettering,
     SectionHeaderBandError,
     SectionHeaderClashError,
     SectionHeaderOverflowError,
@@ -246,6 +247,7 @@ from nf_metro.render.section_header import (
     check_section_headers_clear_routes,
     check_section_headers_fit_box_width,
     check_section_headers_hold_the_reserved_band,
+    header_lettering_context,
     resolve_all_section_headers,
 )
 from nf_metro.render.style import (
@@ -2388,21 +2390,25 @@ def _build_render_plan_scaled(
 
     # Resolve headers against the final section bboxes (label and group
     # reservations above can grow a box, moving where its header sits).
-    header_placements = resolve_all_section_headers(
-        graph,
-        theme.section_label_font_size,
-        header_polylines,
-        theme.title_font_size,
-        badges=theme.section_badges,
+    lettering = HeaderLettering(
+        theme.section_label_uppercase, theme.section_label_letter_spacing
     )
-    _guard_section_headers_clear_routes(header_placements, header_polylines)
-    _guard_section_headers_fit_box_width(graph, header_placements)
-    _guard_section_headers_hold_the_reserved_band(
-        graph,
-        header_placements,
-        theme.section_label_font_size,
-        theme.title_font_size,
-    )
+    with header_lettering_context(lettering):
+        header_placements = resolve_all_section_headers(
+            graph,
+            theme.section_label_font_size,
+            header_polylines,
+            theme.title_font_size,
+            badges=theme.section_badges,
+        )
+        _guard_section_headers_clear_routes(header_placements, header_polylines)
+        _guard_section_headers_fit_box_width(graph, header_placements)
+        _guard_section_headers_hold_the_reserved_band(
+            graph,
+            header_placements,
+            theme.section_label_font_size,
+            theme.title_font_size,
+        )
 
     max_x, max_y = _compute_canvas_bounds(graph, routes, debug, header_placements)
 
