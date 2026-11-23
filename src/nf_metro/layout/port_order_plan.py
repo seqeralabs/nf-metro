@@ -45,10 +45,17 @@ rather than at the edge of the map, then the turn-round side.  Room is not free
 where another line of the hop's fork or of the target section ends beyond the
 traverse.  Detour and room read each box's lateral faces no further than the
 section padding beyond its content, so the bundle clearance later sizers add for
-the planned lanes cannot change the ranking.  Bypass U-turns sharing
-a line and travelling opposite ways over overlapping spans of one band are
-decided together, so no two of them take one screen side; a U-turn outside that
-ranked set constrains none of them.
+the planned lanes cannot change the ranking.
+Two same-axis U-turns are linked when they share a line and travel opposite
+ways over overlapping spans of one band with interleaving legs, each loop
+having a leg inside the other's: on one side they cross whatever their depths,
+while nested loops nest concentrically and constrain nothing.  Linked bypass
+U-turns are decided together, so no two of them take one screen side, nor the
+screen side of a direct turn-round linked to one of them; that partner keeps
+the side it takes alone and is never re-decided.  A group no assignment
+separates takes the turn-round side throughout, which lies opposite every
+turn-round partner's; a plan in which two linked U-turns share a screen side
+raises.
 A direct turn-round whose two sides are clear and equally long takes the side
 with free room.  Any other U-turn keeps the screen-below side.
 
@@ -171,12 +178,13 @@ class SideRule(Enum):
     TURN_ROUND = "turn-round"
     """The loop turns round: from an exit heading along the port's axis,
     left-handed onto the entry traveller's right; from an exit heading across
-    it, on the side the exit faces, never through the target section."""
+    it, on the side the exit faces, never through the target section.  Every
+    bypass U-turn of a linked group no assignment separates takes it."""
     CORRIDOR = "corridor"
     """The side the corridor ranking (module docstring, **Approach**) gives a
-    bypass U-turn, or the side with free room a direct turn-round takes when
-    its two clear sides are equally long; read in the entry's travel frame, so
-    a reflection flips it."""
+    bypass U-turn, never a screen side a U-turn linked to it takes, or the side
+    with free room a direct turn-round takes when its two clear sides are
+    equally long; read in the entry's travel frame, so a reflection flips it."""
     FORK_NEST = "fork-nest"
     """A fork's branch off an exit heading across the entry's travel, holding the
     outermost lanes of its turn there, passes on the side the exit faces; a
@@ -227,8 +235,9 @@ class _Corridor:
 
 @dataclass(frozen=True, slots=True)
 class _CorridorHop:
-    """A bypass U-turn (:meth:`PortOrderBuilder.corridor_scope`) and its two
-    corridors."""
+    """A same-axis U-turn and its two corridors: a bypass U-turn
+    (:meth:`PortOrderBuilder.corridor_scope`) or a direct turn-round
+    (:meth:`PortOrderBuilder.turn_rounds`)."""
 
     key: tuple[str, str]
     travel: Direction
@@ -236,10 +245,13 @@ class _CorridorHop:
     left: _Corridor
     span: _Span
     """Extent along the travel between the source and the entry."""
+    legs: _Span
+    """Extent along the travel between the loop's lead and descent legs."""
     band: _Span
     lines: frozenset[str]
     held: tuple[int, SideRule] | None
-    """The side and rule a bundle or a single clear corridor fixes."""
+    """The side and rule a bundle or a single clear corridor fixes; a direct
+    turn-round's own side."""
 
     def corridor(self, side: int) -> _Corridor:
         return self.right if side == 1 else self.left
@@ -268,6 +280,9 @@ class PortOrderPlan:
     orders: Mapping[str, PortOrder]
     approaches: Mapping[tuple[str, str], Approach]
     """Keyed ``(entry port, upstream source)``."""
+    turn_round_fallbacks: tuple[tuple[str, str], ...] = ()
+    """The approach keys of every bypass U-turn whose linked group no
+    assignment separates, so it took the turn-round side."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "orders", MappingProxyType(dict(self.orders)))
@@ -369,15 +384,39 @@ def _screen_side(side: int, travel: Direction) -> int:
     return side * right_normal_axis_sign(travel)
 
 
+def _legs_interleave(a: _Span, b: _Span) -> bool:
+    """Whether leg extents *a* and *b*, read along opposite travels, interleave:
+    neither lies inside the other, clear of both its ends by more than
+    ``SAME_Y_TOLERANCE``.  Two interleaving loops on one side each run a leg
+    through the other's traverse, so they cross whatever their depths; nested
+    loops nest concentrically, the inner shallower."""
+    b0, b1 = -b[1], -b[0]
+
+    def inside(x0: float, x1: float, y0: float, y1: float) -> bool:
+        return y0 + SAME_Y_TOLERANCE < x0 and x1 < y1 - SAME_Y_TOLERANCE
+
+    return not (inside(*a, b0, b1) or inside(b0, b1, *a))
+
+
 def _runs_opposite(a: _CorridorHop, b: _CorridorHop) -> bool:
-    """Whether two bypass U-turns share a line and travel opposite ways over
-    overlapping spans of one band."""
+    """Whether two same-axis U-turns are linked: they share a line and travel
+    opposite ways over overlapping spans of one band with interleaving legs
+    (:func:`_legs_interleave`)."""
     va, vb = direction_vector(a.travel), direction_vector(b.travel)
     return (
         va == (-vb[0], -vb[1])
         and bool(a.lines & b.lines)
         and _overlap(a.span, (-b.span[1], -b.span[0])) > SAME_Y_TOLERANCE
         and _overlap(a.band, b.band) > SAME_Y_TOLERANCE
+        and _legs_interleave(a.legs, b.legs)
+    )
+
+
+def _cross(a: _CorridorHop, side_a: int, b: _CorridorHop, side_b: int) -> bool:
+    """Whether linked U-turns *a* and *b* on travel-frame sides *side_a* and
+    *side_b* share a screen side, where their loops cross."""
+    return _runs_opposite(a, b) and _screen_side(side_a, a.travel) == _screen_side(
+        side_b, b.travel
     )
 
 
@@ -463,7 +502,9 @@ class PortOrderBuilder:
         self.approaching: set[tuple[str, str]] = set()
         self.corridor_hops: dict[tuple[str, str], _CorridorHop | None] = {}
         self.ranked_hops: dict[tuple[str, str], _CorridorHop] | None = None
+        self.direct_hops: dict[tuple[str, str], _CorridorHop] | None = None
         self.corridor_sides: dict[tuple[str, str], tuple[int, SideRule]] = {}
+        self.turn_round_fallbacks: list[tuple[str, str]] = []
 
     def point(self, node_id: str) -> _Point:
         station = self.graph.stations[node_id]
@@ -663,7 +704,7 @@ class PortOrderBuilder:
             return self.corridor_sides[key]
         direct = self.same_axis_u_turn(entry_id, source_id)
         if direct is not None:
-            right, left, _span, _band = self.side_corridors(entry_id, source_id, direct)
+            right, left, *_extents = self.side_corridors(entry_id, source_id, direct)
             if (
                 right.feasible
                 and left.feasible
@@ -730,9 +771,10 @@ class PortOrderBuilder:
 
     def side_corridors(
         self, entry_id: str, source_id: str, travel: Direction
-    ) -> tuple[_Corridor, _Corridor, _Span, _Span]:
+    ) -> tuple[_Corridor, _Corridor, _Span, _Span, _Span]:
         """The U-turn's right and left corridors (:class:`_Corridor`), its span
-        along *travel* and its shared band, from the placed boxes.
+        and its legs' extent along *travel* and its shared band, from the placed
+        boxes.
 
         Each corridor leads out of the source just past its exit, traverses
         clear of the band's extreme on its side and descends just outside the
@@ -824,7 +866,7 @@ class PortOrderBuilder:
             any(hi <= face_low + COORD_TOLERANCE for _lo, hi in beyond)
             and all(lateral >= left_channel for lateral in contested),
         )
-        return right, left, span, band
+        return right, left, span, (min(lead, descent), max(lead, descent)), band
 
     def contested_ends(
         self, connector: Sequence[Edge], target: Section, travel: Direction
@@ -892,7 +934,7 @@ class PortOrderBuilder:
         travel = self.corridor_scope(*key)
         hop = None
         if travel is not None:
-            right, left, span, band = self.side_corridors(*key, travel)
+            right, left, span, legs, band = self.side_corridors(*key, travel)
             held = None
             forced = self.forced_side(*key, travel)
             if forced is not None and (right if forced[0] == 1 else left).feasible:
@@ -902,26 +944,49 @@ class PortOrderBuilder:
             elif not right.feasible:
                 held = 1, SideRule.TURN_ROUND
             lines = frozenset(e.line_id for e in self.connector(*key))
-            hop = _CorridorHop(key, travel, right, left, span, band, lines, held)
+            hop = _CorridorHop(key, travel, right, left, span, legs, band, lines, held)
         self.corridor_hops[key] = hop
         return hop
 
-    def opposite_group(self, key: tuple[str, str]) -> list[_CorridorHop]:
-        """*key*'s hop and every bypass U-turn linked to it, transitively, by
-        :func:`_runs_opposite`, in key order."""
-        if self.ranked_hops is None:
-            graph = self.graph
-            self.ranked_hops = {
-                (port_id, origin): hop
-                for port_id in sorted(graph.ports)
-                if graph.ports[port_id].is_entry
+    def entry_sources(self) -> Iterator[tuple[str, str]]:
+        """Every ``(entry port, approach source)`` pair, in key order."""
+        graph = self.graph
+        for port_id in sorted(graph.ports):
+            if graph.ports[port_id].is_entry:
                 for origin in sorted(
                     {
                         approach_source(graph, e.source, e.line_id)
                         for e in graph.edges_to(port_id)
                     }
+                ):
+                    yield port_id, origin
+
+    def turn_rounds(self) -> dict[tuple[str, str], _CorridorHop]:
+        """Every direct turn-round, a same-axis U-turn outside
+        :meth:`corridor_scope`, held to the side :meth:`u_turn_side` gives it
+        alone."""
+        if self.direct_hops is None:
+            self.direct_hops = {}
+            for key in self.entry_sources():
+                travel = self.same_axis_u_turn(*key)
+                if travel is None or self.corridor_scope(*key) is not None:
+                    continue
+                right, left, span, legs, band = self.side_corridors(*key, travel)
+                lines = frozenset(e.line_id for e in self.connector(*key))
+                held = self.u_turn_side(*key, 1)
+                self.direct_hops[key] = _CorridorHop(
+                    key, travel, right, left, span, legs, band, lines, held
                 )
-                if (hop := self.corridor_hop((port_id, origin))) is not None
+        return self.direct_hops
+
+    def opposite_group(self, key: tuple[str, str]) -> list[_CorridorHop]:
+        """*key*'s hop and every bypass U-turn linked to it, transitively, by
+        :func:`_runs_opposite`, in key order."""
+        if self.ranked_hops is None:
+            self.ranked_hops = {
+                key: hop
+                for key in self.entry_sources()
+                if (hop := self.corridor_hop(key)) is not None
             }
         hops = self.ranked_hops
         group, frontier = {key}, [key]
@@ -937,25 +1002,31 @@ class PortOrderBuilder:
         """Decide every hop of an :meth:`opposite_group` at once: a held hop
         keeps its side, and the free hops take the module docstring's ranking
         summed over the group (total detour, then corridors in free room, then
-        turn-round sides) among the assignments putting no two linked hops on
-        one screen side and each free hop on a clear side; with none, every hop
-        keeps the turn-round side."""
+        turn-round sides) among the assignments putting each free hop on a clear
+        side and no two linked hops on one screen side, the group's partners
+        (direct turn-rounds linked to a hop, :meth:`turn_rounds`) counted at
+        their own sides; with none, every hop takes the turn-round side, recorded
+        in :attr:`turn_round_fallbacks`."""
+        partners = [
+            (turn, turn.held[0])
+            for turn in self.turn_rounds().values()
+            if turn.held is not None and any(_runs_opposite(turn, h) for h in group)
+        ]
         best: tuple[tuple[float, int, tuple[int, ...]], tuple[int, ...]] | None = None
         choices = [[hop.held[0]] if hop.held else [1, -1] for hop in group]
         for combo in product(*choices):
-            pairs = zip(group, combo)
+            pairs = list(zip(group, combo))
             if any(
-                _runs_opposite(a, b)
-                and _screen_side(sa, a.travel) == _screen_side(sb, b.travel)
-                for (a, sa), (b, sb) in combinations(pairs, 2)
+                _cross(*a, *b)
+                for a, b in [*combinations(pairs, 2), *product(pairs, partners)]
             ) or any(
                 hop.held is None and not hop.corridor(side).feasible
-                for hop, side in zip(group, combo)
+                for hop, side in pairs
             ):
                 continue
             rank = (
-                round(sum(h.corridor(s).detour for h, s in zip(group, combo)), 6),
-                sum(not h.corridor(s).room for h, s in zip(group, combo)),
+                round(sum(h.corridor(s).detour for h, s in pairs), 6),
+                sum(not h.corridor(s).room for h, s in pairs),
                 tuple(int(side != 1) for side in combo),
             )
             if best is None or rank < best[0]:
@@ -963,6 +1034,7 @@ class PortOrderBuilder:
         if best is None:
             for hop in group:
                 self.corridor_sides[hop.key] = (1, SideRule.TURN_ROUND)
+                self.turn_round_fallbacks.append(hop.key)
             return
         for hop, side in zip(group, best[1]):
             if hop.held is not None:
@@ -970,6 +1042,7 @@ class PortOrderBuilder:
                 continue
             tie = (
                 len(group) == 1
+                and not partners
                 and abs(hop.right.detour - hop.left.detour) <= SAME_Y_TOLERANCE
                 and hop.right.room == hop.left.room
             )
@@ -1414,12 +1487,39 @@ def _same_band_sources(builder: PortOrderBuilder) -> list[tuple[str, str]]:
     return sorted(pairs)
 
 
+def _check_linked_sides(
+    hops: Sequence[_CorridorHop], approaches: Mapping[tuple[str, str], Approach]
+) -> None:
+    """Raise when two linked same-axis U-turns (:func:`_runs_opposite`) are
+    recorded on one screen side, where their loops cross.
+
+    Raises:
+        RuntimeError: two linked U-turns share a screen side.
+    """
+    for a, b in combinations(hops, 2):
+        if _cross(a, approaches[a.key].side, b, approaches[b.key].side):
+            raise RuntimeError(
+                f"U-turns {a.key} and {b.key} run opposite ways with interleaving "
+                "legs on one side of their band"
+            )
+
+
 def decide_ports(builder: PortOrderBuilder) -> PortOrderPlan:
     """Decide every port's order and every same-band approach."""
     graph = builder.graph
     for port_id in sorted(graph.ports):
         builder.order_of(port_id)
     approaches = {key: builder.approach(*key) for key in _same_band_sources(builder)}
+    _check_linked_sides(
+        [
+            hop
+            for key in approaches
+            if (hop := builder.corridor_hop(key) or builder.turn_rounds().get(key))
+        ],
+        approaches,
+    )
     return PortOrderPlan(
-        {pid: builder.decided[pid] for pid in sorted(graph.ports)}, approaches
+        {pid: builder.decided[pid] for pid in sorted(graph.ports)},
+        approaches,
+        tuple(sorted(builder.turn_round_fallbacks)),
     )

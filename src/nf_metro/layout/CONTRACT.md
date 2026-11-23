@@ -1602,7 +1602,13 @@ through the record's draw accessors (`planned_offsets` in
   its inputs.  Stages 6.14, 6.15a, 6.17 and 6.18 and envelope settlement never
   re-decide the side; routing reads it (the RIGHT- and LEFT-entry gap-above
   traverses, the far-left U-turn wrap, `draws_over_top_loop` and the exit turn
-  it opens with) with no fallback of its own.
+  it opens with) with no fallback of its own.  Two same-axis U-turns sharing
+  a line and running opposite ways over one band with interleaving legs are
+  linked: linked bypass U-turns are decided together and never take the
+  screen side of a linked direct turn-round, which keeps the side it takes
+  alone.  A group no assignment separates takes the turn-round side and is
+  listed in `PortOrderPlan.turn_round_fallbacks`; `decide_ports` raises where
+  two linked U-turns share a screen side.
 - **Invariants preserved**: The record reads no lane offset, route or draft.
   `compute_station_offsets` returns exactly
   `planned_offsets(graph, record, step)`; the record holds every station

@@ -26,7 +26,9 @@ from nf_metro.layout.phases.guards import (
     LayoutInvariantError,
     assert_junctions_on_their_anchors,
 )
+from nf_metro.layout.port_order_plan import approach_source
 from nf_metro.layout.routing.inter_section_handlers import _gap_above_band_fits
+from nf_metro.layout.routing.offsets import _recorded_approach
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
@@ -383,24 +385,52 @@ def test_the_band_above_the_topmost_row_is_never_a_gap(
     assert _gap_above_band_fits(graph, topmost) is False
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        ROOT / "examples/topologies/bypass_left_entry_from_right.mmd",
-        ROOT / "examples/topologies/left_exit_wrap_under_own_section.mmd",
-        ROOT / "examples/topologies/bypass_leftward_far_side_entry.mmd",
-        CANVAS_DATA / "f8401267.mmd",
-        CANVAS_DATA / "f8402283.mmd",
-    ],
-    ids=lambda path: path.stem,
+# Maps whose every run stays below the map top, or (map, a hop recorded below)
+# where another hop goes over it.
+BELOW_THE_MAP_TOP: tuple[tuple[Path, tuple[str, str] | None], ...] = (
+    *(
+        (path, None)
+        for path in (
+            ROOT / "examples/topologies/bypass_left_entry_from_right.mmd",
+            ROOT / "examples/topologies/left_exit_wrap_under_own_section.mmd",
+            ROOT / "examples/topologies/bypass_leftward_far_side_entry.mmd",
+            CANVAS_DATA / "f8401267.mmd",
+            CANVAS_DATA / "f8402283.mmd",
+        )
+    ),
+    (CANVAS_DATA / "f8404063.mmd", ("sec3__entry_left_3", "sec2__exit_left_1")),
+    (CANVAS_DATA / "f8404575.mmd", ("sec3__entry_left_4", "sec2__exit_left_1")),
 )
-def test_a_wrap_into_the_topmost_row_stays_below_the_map_top(path: Path) -> None:
+
+
+@pytest.mark.parametrize(
+    ("path", "hop"),
+    BELOW_THE_MAP_TOP,
+    ids=[path.stem for path, _hop in BELOW_THE_MAP_TOP],
+)
+def test_a_wrap_into_the_topmost_row_stays_below_the_map_top(
+    path: Path, hop: tuple[str, str] | None
+) -> None:
     """A hop whose approach record sends it below stays below the map top: no
-    run is drawn above the topmost box."""
-    plan = _render_plan(path)
-    boxes = [s for s in plan.graph.sections.values() if s.bbox_w > 0]
-    top = min(s.bbox_y for s in boxes)
-    highest = min(y for route in plan.routes for _x, y in route.points)
+    run of it is drawn above the topmost box."""
+    graph = _laid_out(path, {})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        plan = build_render_plan(graph, resolve_theme(None, graph))
+    routes = [
+        route
+        for route in plan.routes
+        if hop is None
+        or (
+            route.edge.target == hop[0]
+            and approach_source(graph, route.edge.source, route.edge.line_id) == hop[1]
+        )
+    ]
+    assert routes
+    if hop is not None:
+        assert {_recorded_approach(graph, route.edge) for route in routes} == {"below"}
+    top = min(s.bbox_y for s in plan.graph.sections.values() if s.bbox_w > 0)
+    highest = min(y for route in routes for _x, y in route.points)
     assert highest >= top, f"{path.stem} runs a line {top - highest:.1f}px over the map"
 
 

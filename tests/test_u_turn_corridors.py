@@ -6,14 +6,16 @@ from __future__ import annotations
 
 import copy
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
+from itertools import combinations
 from pathlib import Path
 
 import cohort_shadow_oracle
 import pytest
 
 import nf_metro.layout.lane_plan as lane_plan_module
+import nf_metro.layout.port_order_plan as port_order_plan_module
 import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import SAME_Y_TOLERANCE
@@ -26,6 +28,7 @@ from nf_metro.layout.port_order_plan import (
     _Corridor,
     _CorridorHop,
     _lateral,
+    _runs_opposite,
     approach_source,
     port_travel,
 )
@@ -92,7 +95,7 @@ def _corridors(graph: MetroGraph, key: _Key) -> tuple[_Corridor, _Corridor]:
     builder = _builder(graph)
     travel = builder.same_axis_u_turn(*key)
     assert travel is not None, key
-    right, left, _span, _band = builder.side_corridors(*key, travel)
+    right, left, *_extents = builder.side_corridors(*key, travel)
     return right, left
 
 
@@ -374,3 +377,255 @@ def test_a_direct_turn_round_reads_the_padding_its_target_has() -> None:
     right, left = _corridors(laid.sealed, key)
     assert right.feasible and left.feasible
     assert right.detour + SAME_Y_TOLERANCE < left.detour
+
+
+def _hops(laid: _Laid) -> dict[_Key, _CorridorHop]:
+    """Every same-axis U-turn the record keys, ranked or direct, read where
+    the lane plan read it."""
+    builder = _builder(laid.sealed)
+    direct = builder.turn_rounds()
+    approaches = laid.drawn._lane_plan.port_orders.approaches  # type: ignore[union-attr]
+    return {
+        key: hop
+        for key in approaches
+        if (hop := builder.corridor_hop(key) or direct.get(key)) is not None
+    }
+
+
+def _drawn_side(laid: _Laid, key: _Key) -> str:
+    """The screen side *key*'s connector is drawn round the boxes of its
+    target's row that it spans."""
+    graph = laid.drawn
+    target = graph.sections[graph.ports[key[0]].section_id]
+    points = [
+        point
+        for route in laid.routes
+        if route.edge.target == key[0]
+        and approach_source(graph, route.edge.source, route.edge.line_id) == key[1]
+        for point in route.points
+    ]
+    assert points, key
+    x0, x1 = min(x for x, _y in points), max(x for x, _y in points)
+    band = [
+        s
+        for s in graph.sections.values()
+        if s.bbox_w > 0
+        and s.grid_row == target.grid_row
+        and s.bbox_x <= x1
+        and x0 <= s.bbox_x + s.bbox_w
+    ]
+    above = min(y for _x, y in points) < min(s.bbox_y for s in band)
+    below = max(y for _x, y in points) > max(s.bbox_y + s.bbox_h for s in band)
+    assert above != below, key
+    return "above" if above else "below"
+
+
+# Interleaving opposite U-turns: (map, the bypass U-turn, its direct turn-round
+# partner).
+PARTNERED: tuple[tuple[str, _Key, _Key], ...] = (
+    (
+        "f8404063",
+        ("sec3__entry_left_3", "sec2__exit_left_1"),
+        ("sec2__entry_right_2", "sec0__exit_right_0"),
+    ),
+    (
+        "f8404575",
+        ("sec3__entry_left_4", "sec2__exit_left_1"),
+        ("sec2__entry_right_3", "sec1__exit_right_0"),
+    ),
+)
+
+
+# Stress maps placed only under their option sets (``test_canvas_placed_once``).
+OPTION_SET_ONLY = frozenset({"f8400004", "f8400369"})
+
+
+@pytest.mark.parametrize(
+    "path",
+    [p for p in sorted(CANVAS_DATA.glob("*.mmd")) if p.stem not in OPTION_SET_ONLY],
+    ids=lambda path: path.stem,
+)
+def test_interleaving_opposite_u_turns_take_opposite_screen_sides(path: Path) -> None:
+    """Two same-axis U-turns sharing a line and running opposite ways over one
+    band with interleaving legs, bypass or direct, are recorded and drawn on
+    opposite screen sides: on one side their loops cross."""
+    laid = _laid(path)
+    hops = _hops(laid)
+    linked = {
+        (a.key, b.key)
+        for a, b in combinations(hops.values(), 2)
+        if _runs_opposite(a, b)
+    }
+    for a, b in linked:
+        assert _screen(laid.drawn, a) != _screen(laid.drawn, b), (a, b)
+        assert _drawn_side(laid, a) == _screen(laid.drawn, a), a
+        assert _drawn_side(laid, b) == _screen(laid.drawn, b), b
+    for stem, ranked, partner in PARTNERED:
+        if stem == path.stem:
+            assert {(ranked, partner), (partner, ranked)} & linked
+
+
+# Opposite U-turns whose legs nest: (map, the outer, the inner).
+NESTED: tuple[tuple[str, _Key, _Key], ...] = (
+    (
+        "f8401267",
+        ("sec1__entry_right_2", "sec0__exit_right_0"),
+        ("sec2__entry_left_3", "sec1__exit_left_1"),
+    ),
+    (
+        "f8402283",
+        ("sec1__entry_right_2", "sec0__exit_right_0"),
+        ("sec2__entry_left_3", "sec1__exit_left_1"),
+    ),
+)
+
+
+def _traverse_depths(laid: _Laid, key: _Key) -> tuple[list[float], tuple[float, float]]:
+    """Each line's deepest drawn y on *key*'s connector, and the x extent of
+    the traverses at those depths."""
+    routes = [
+        route
+        for route in laid.routes
+        if route.edge.target == key[0]
+        and approach_source(laid.drawn, route.edge.source, route.edge.line_id) == key[1]
+    ]
+    assert routes, key
+    depths = [max(y for _x, y in route.points) for route in routes]
+    xs = [
+        x
+        for route, depth in zip(routes, depths, strict=True)
+        for x, y in route.points
+        if abs(y - depth) <= SAME_Y_TOLERANCE
+    ]
+    return depths, (min(xs), max(xs))
+
+
+@pytest.mark.parametrize(
+    ("stem", "outer", "inner"), NESTED, ids=[stem for stem, *_rest in NESTED]
+)
+def test_nested_opposite_u_turns_nest_concentrically(
+    stem: str, outer: _Key, inner: _Key
+) -> None:
+    """Opposite U-turns whose legs nest are not linked: both are recorded below
+    their band, and every line of the inner loop traverses strictly between the
+    boxes it rounds and every line of the outer loop."""
+    laid = _laid(CANVAS_DATA / f"{stem}.mmd")
+    hops = _hops(laid)
+    assert hops[outer].lines & hops[inner].lines
+    assert not _runs_opposite(hops[outer], hops[inner])
+    assert _screen(laid.drawn, outer) == _screen(laid.drawn, inner) == "below"
+    inner_depths, (x0, x1) = _traverse_depths(laid, inner)
+    outer_depths, _extent = _traverse_depths(laid, outer)
+    graph = laid.drawn
+    target = graph.sections[graph.ports[inner[0]].section_id]
+    rounded = max(
+        s.bbox_y + s.bbox_h
+        for s in graph.sections.values()
+        if s.bbox_w > 0
+        and s.grid_row == target.grid_row
+        and s.bbox_x < x1
+        and x0 < s.bbox_x + s.bbox_w
+    )
+    assert rounded < min(inner_depths)
+    assert max(inner_depths) < min(outer_depths)
+
+
+@pytest.mark.parametrize(("stem", "ranked", "partner"), PARTNERED[1:], ids=["f8404575"])
+def test_group_without_assignment_takes_turn_round(
+    stem: str, ranked: _Key, partner: _Key
+) -> None:
+    """f8404575's bypass U-turn is held above by its single clear corridor,
+    where its direct turn-round partner passes: no assignment separates them,
+    so it takes the turn-round side, opposite its partner's, and the plan
+    records it."""
+    laid = _laid(CANVAS_DATA / f"{stem}.mmd")
+    graph = laid.drawn
+    assert _hops(laid)[ranked].held == (-1, SideRule.CORRIDOR)
+    approach = _approach(graph, ranked)
+    assert (approach.side, approach.rule) == (1, SideRule.TURN_ROUND)
+    assert _approach(graph, partner).side == 1
+    assert _screen(graph, ranked) != _screen(graph, partner)
+    plan = graph._lane_plan.port_orders  # type: ignore[union-attr]
+    assert plan.turn_round_fallbacks == (ranked,)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "interleave"),
+    [
+        ((0.0, 100.0), (-150.0, -50.0), True),
+        ((20.0, 80.0), (-100.0, 0.0), False),
+        ((0.0, 100.0), (-80.0, -20.0), False),
+        ((0.0, 100.0), (-100.0, 0.0), True),
+        ((0.0, 100.0), (-80.0, -0.05), True),
+        ((0.05, 80.0), (-100.0, 0.0), True),
+    ],
+    ids=[
+        "interleaved",
+        "inside-the-other",
+        "holding-the-other",
+        "equal",
+        "touching-at-one-end",
+        "touching-inside",
+    ],
+)
+def test_legs_interleave_unless_one_nests_clear_inside_the_other(
+    a: tuple[float, float], b: tuple[float, float], interleave: bool
+) -> None:
+    legs_interleave = port_order_plan_module._legs_interleave
+    assert legs_interleave(a, b) is interleave
+    assert legs_interleave(b, a) is interleave
+
+
+def _f8404575_builder(
+    mp: pytest.MonkeyPatch, ranked: _Key, partner: _Key
+) -> PortOrderBuilder:
+    builder = _builder(_laid(CANVAS_DATA / "f8404575.mmd").sealed)
+    real_side = builder.u_turn_side
+
+    def u_turn_side(entry_id: str, source_id: str, below: int) -> tuple[int, SideRule]:
+        if (entry_id, source_id) == partner:
+            return -1, SideRule.CORRIDOR
+        return real_side(entry_id, source_id, below)
+
+    mp.setattr(builder, "u_turn_side", u_turn_side)
+    return builder
+
+
+def test_a_group_sharing_a_corridor_partners_side_raises() -> None:
+    """A bypass U-turn held to the screen side a CORRIDOR partner takes has no
+    assignment, and the turn-round fallback cannot separate it from that
+    partner: the plan raises rather than knot the loops."""
+    _stem, ranked, partner = PARTNERED[1]
+    with pytest.MonkeyPatch.context() as mp:
+        builder = _f8404575_builder(mp, ranked, partner)
+        real_hop = builder.corridor_hop
+
+        def corridor_hop(key: _Key) -> _CorridorHop | None:
+            hop = real_hop(key)
+            if key == ranked and hop is not None:
+                return replace(hop, held=(1, SideRule.CORRIDOR))
+            return hop
+
+        mp.setattr(builder, "corridor_hop", corridor_hop)
+        with pytest.raises(RuntimeError, match="interleaving legs"):
+            port_order_plan_module.decide_ports(builder)
+        assert builder.turn_round_fallbacks == [ranked]
+
+
+def test_two_linked_turn_rounds_on_one_side_raise() -> None:
+    """Two direct turn-rounds linked to each other are each decided alone: one
+    taking a CORRIDOR side onto the screen side of the other raises."""
+    _stem, ranked, partner = PARTNERED[1]
+    with pytest.MonkeyPatch.context() as mp:
+        builder = _f8404575_builder(mp, partner, ranked)
+        real_scope = builder.corridor_scope
+
+        def corridor_scope(entry_id: str, source_id: str) -> object:
+            if (entry_id, source_id) == ranked:
+                return None
+            return real_scope(entry_id, source_id)
+
+        mp.setattr(builder, "corridor_scope", corridor_scope)
+        assert set(builder.turn_rounds()) >= {ranked, partner}
+        with pytest.raises(RuntimeError, match="interleaving legs"):
+            port_order_plan_module.decide_ports(builder)
