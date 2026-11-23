@@ -1,0 +1,18 @@
+%%metro title: Two hidden bypasses open on their line's lane side
+%%metro style: dark
+%%metro line: line1 | Line 1 | #d0006f
+%%metro line: line2 | Line 2 | #f0ab00
+graph LR
+    subgraph s [Section]
+        step1[step1]
+        step2[step2]
+        step3[step3]
+        _skip
+        _skip2
+        step1 -->|line1,line2| step2
+        step2 -->|line1,line2| step3
+        step1 -->|line1| _skip
+        _skip -->|line1| step3
+        step1 -->|line1| _skip2
+        _skip2 -->|line1| step3
+    end

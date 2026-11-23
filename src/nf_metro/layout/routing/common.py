@@ -2802,7 +2802,9 @@ def bypass_bottom_y(
             # Target is in the bottommost row: route in the gap ABOVE it
             # rather than below the whole canvas (which would overshoot
             # and loop back up to the entry port).
-            upper_bottom = row_bottom_edge(graph, tgt_row - 1, default=0.0)
+            upper_bottom = row_bottom_edge(
+                graph, tgt_row - 1, default=graph.title_band_lift
+            )
             lower_top = row_top_edge(graph, tgt_row, default=upper_bottom)
             return held_in_reserved_band(
                 _center_inter_row_channel(

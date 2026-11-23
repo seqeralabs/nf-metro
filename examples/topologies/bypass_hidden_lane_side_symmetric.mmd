@@ -1,0 +1,17 @@
+%%metro title: Hidden bypass lane side (symmetric diamonds)
+%%metro style: dark
+%%metro line: line1 | Line 1 | #d0006f
+%%metro line: line2 | Line 2 | #f0ab00
+%%metro diamond_style: symmetric
+%%metro files: input1 | input | input1
+graph LR
+    input1[input1]
+    step1[step1]
+    step2[step2]
+    step3[step3]
+    _skip_step2
+    input1 -->|line1,line2| step1
+    step1 -->|line1,line2| step2
+    step2 -->|line1,line2| step3
+    step1 -->|line1| _skip_step2
+    _skip_step2 -->|line1| step3

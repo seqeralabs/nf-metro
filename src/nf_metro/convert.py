@@ -376,6 +376,149 @@ def _assign_sections(
     return assignment
 
 
+def _cyclic_members(graph: nx.DiGraph[str]) -> set[str]:
+    """Nodes of ``graph`` that lie on a cycle."""
+    return {
+        member
+        for component in nx.strongly_connected_components(graph)
+        if len(component) > 1
+        for member in component
+    }
+
+
+def _unit(sections: _SectionAssignment, nid: str, split_secs: set[str]) -> str:
+    sec = sections.node_section[nid]
+    return f"node:{nid}" if sec in split_secs else f"section:{sec}"
+
+
+def _unit_graph(
+    sections: _SectionAssignment, edges: list[tuple[str, str]], split_secs: set[str]
+) -> nx.DiGraph[str]:
+    """Graph of whole sections plus the individual processes of ``split_secs``.
+
+    Edge weight ``w`` is 1 where the edge crosses a section boundary, else 0.
+    """
+    node_section = sections.node_section
+    graph: nx.DiGraph[str] = nx.DiGraph()
+    graph.add_nodes_from(
+        sorted({_unit(sections, nid, split_secs) for nid in node_section})
+    )
+    for s, t in edges:
+        u, v = _unit(sections, s, split_secs), _unit(sections, t, split_secs)
+        if u != v:
+            graph.add_edge(u, v, w=int(node_section[s] != node_section[t]))
+    return graph
+
+
+def _cyclic_sections(
+    sections: _SectionAssignment, edges: list[tuple[str, str]], split_secs: set[str]
+) -> set[str]:
+    """Whole sections still on a cycle once ``split_secs`` are split apart."""
+    return {
+        unit.removeprefix("section:")
+        for unit in _cyclic_members(_unit_graph(sections, edges, split_secs))
+        if unit.startswith("section:")
+    }
+
+
+def _flow_depths(graph: nx.DiGraph[str], latest: bool) -> dict[str, int]:
+    """Longest-path depth of each unit, earliest or latest feasible.
+
+    Either choice makes depth strictly increase along every weight-1 edge and
+    never decrease along a weight-0 one.
+    """
+    order = list(nx.lexicographical_topological_sort(graph))
+    depth: dict[str, int] = {}
+    if not latest:
+        for unit in order:
+            depth[unit] = max(
+                (depth[p] + graph[p][unit]["w"] for p in graph.predecessors(unit)),
+                default=0,
+            )
+        return depth
+    height: dict[str, int] = {}
+    for unit in reversed(order):
+        height[unit] = max(
+            (height[s] + graph[unit][s]["w"] for s in graph.successors(unit)),
+            default=0,
+        )
+    top = max(height.values(), default=0)
+    return {unit: top - height[unit] for unit in order}
+
+
+def _split_cyclic_sections(
+    sections: _SectionAssignment, edges: list[tuple[str, str]], dag: _ParsedDag
+) -> _SectionAssignment:
+    """Split sections that form a cycle into acyclic groups by flow depth.
+
+    Unassigned processes share one section, and Nextflow flattens a parent
+    subworkflow's own processes into a subgraph beside its children's, so a
+    section can run both before and after another one. Sections are split
+    outermost first: the unassigned section, then subgraphs by nesting depth
+    of their full name, each tier only where a cycle remains. Sections not on
+    a cycle stay whole.
+
+    A split section's processes are grouped by flow depth, the longest path
+    counting one per section boundary crossed, so every inter-section edge
+    strictly increases depth and the result is acyclic. Earliest and latest
+    depths are both valid; whichever yields fewer groups is used. A split
+    unassigned section is named ``Main`` up to its last group, ``Reporting``;
+    a split subgraph keeps its name on every group.
+    """
+    if not _cyclic_sections(sections, edges, set()):
+        return sections
+
+    def tier(sec: str) -> int:
+        if sec.startswith("__"):
+            return 0
+        return 1 + dag.subgraphs[sec].full_name.count(":")
+
+    split_secs: set[str] = set()
+    for level in sorted({tier(sec) for sec in sections.names}):
+        split_secs |= {
+            sec
+            for sec in _cyclic_sections(sections, edges, split_secs)
+            if tier(sec) == level
+        }
+    unit_graph = _unit_graph(sections, edges, split_secs)
+
+    def group_count(depth: dict[str, int]) -> int:
+        return len(
+            {
+                (sec, depth[f"node:{nid}"])
+                for sec in split_secs
+                for nid in sections.nodes[sec]
+            }
+        )
+
+    depth = min(
+        (_flow_depths(unit_graph, latest) for latest in (False, True)),
+        key=group_count,
+    )
+
+    split = _SectionAssignment()
+    for sec, name in sections.names.items():
+        members = sections.nodes[sec]
+        if sec not in split_secs:
+            split.names[sec] = name
+            split.nodes[sec] = list(members)
+            for nid in members:
+                split.node_section[nid] = sec
+            continue
+        depths = sorted({depth[_unit(sections, nid, split_secs)] for nid in members})
+        for index, d in enumerate(depths):
+            key = f"{sec}__{index}"
+            if sec == "__reporting":
+                split.names[key] = "Reporting" if d == depths[-1] else "Main"
+            else:
+                split.names[key] = name
+            for nid in members:
+                if depth[_unit(sections, nid, split_secs)] == d:
+                    split.node_section[nid] = key
+                    split.nodes[key].append(nid)
+    return split
+
+
 def _classify_edges(
     edges: list[tuple[str, str]], node_section: dict[str, str]
 ) -> tuple[dict[str, list[tuple[str, str]]], list[tuple[str, str]]]:
@@ -491,6 +634,18 @@ def _sanitize_id(name: str) -> str:
     return re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_")
 
 
+def _allocate_unique_id(name: str, used: set[str], fallback: str) -> str:
+    """Sanitise a display name and claim an unused ID in its namespace."""
+    base = _sanitize_id(name) or fallback
+    candidate = base
+    suffix = 2
+    while candidate in used:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
 def _allocate_station_ids(
     section_order: list[str],
     section_node_order: dict[str, list[str]],
@@ -508,14 +663,7 @@ def _allocate_station_ids(
     station_ids: dict[str, str] = {}
     for sec_key in section_order:
         for nid in section_node_order.get(sec_key, []):
-            base = _sanitize_id(nodes[nid].label) or "node"
-            candidate = base
-            suffix = 2
-            while candidate in used:
-                candidate = f"{base}_{suffix}"
-                suffix += 1
-            used.add(candidate)
-            station_ids[nid] = candidate
+            station_ids[nid] = _allocate_unique_id(nodes[nid].label, used, "node")
     return station_ids
 
 
@@ -529,16 +677,14 @@ class _LineAssignment:
     ``main`` carries adjacent flow; ``bypass_lines`` keys a ``(src_sec,
     tgt_sec)`` section pair to its ``(id, name, color)``; ``spur`` (when
     present) carries dead-end branches. ``edge_line`` maps every emitted edge
-    to its line id, and ``main_inter_edges`` / ``bypass_groups`` partition the
-    inter-section edges for emission order.
+    to its line id; its insertion order (intra-section, adjacent, bypass, then
+    spur edges) is the emission order.
     """
 
     main: tuple[str, str, str]
     spur: tuple[str, str, str] | None
     bypass_lines: dict[tuple[str, str], tuple[str, str, str]]
     edge_line: dict[tuple[str, str], str]
-    main_inter_edges: list[tuple[str, str]]
-    bypass_groups: dict[tuple[str, str], list[tuple[str, str]]]
 
 
 def _assign_lines(
@@ -593,10 +739,15 @@ def _assign_lines(
     color_idx += 1
 
     bypass_lines: dict[tuple[str, str], tuple[str, str, str]] = {}
+    used_line_ids = {main_line_id, "spur"}
     for src_sec, tgt_sec in sorted(bypass_groups.keys()):
         src_name = _humanize_label(section_names[src_sec], abbreviate=False)
         tgt_name = _humanize_label(section_names[tgt_sec], abbreviate=False)
-        line_id = _sanitize_id(f"{section_names[src_sec]}_{section_names[tgt_sec]}")
+        line_id = _allocate_unique_id(
+            f"{section_names[src_sec]}_{section_names[tgt_sec]}",
+            used_line_ids,
+            "bypass",
+        )
         line_name = f"{src_name} - {tgt_name}"
         line_color = LINE_COLORS[color_idx % len(LINE_COLORS)]
         color_idx += 1
@@ -619,7 +770,7 @@ def _assign_lines(
         line_id = bypass_lines[(src_sec, tgt_sec)][0]
         for e in bp_edges:
             edge_line[e] = line_id
-    for e in spur_edges:
+    for e in sorted(spur_edges):
         if e not in edge_line:
             edge_line[e] = spur_line_id
 
@@ -628,8 +779,6 @@ def _assign_lines(
         spur=spur,
         bypass_lines=bypass_lines,
         edge_line=edge_line,
-        main_inter_edges=main_inter_edges,
-        bypass_groups=bypass_groups,
     )
 
 
@@ -640,11 +789,13 @@ def _infer_title(section_names: dict[str, str], section_order: list[str]) -> str
     """Derive a pipeline title from the section names."""
     if len(section_names) == 1 and "__pipeline" in section_names:
         return "Pipeline"
-    named_secs = [
-        _humanize_label(section_names[k])
-        for k in section_order
-        if not k.startswith("__")
-    ]
+    named_secs = list(
+        dict.fromkeys(
+            _humanize_label(section_names[k])
+            for k in section_order
+            if not k.startswith("__")
+        )
+    )
     if named_secs:
         return " / ".join(named_secs) + " Pipeline"
     return "Pipeline"
@@ -685,9 +836,10 @@ def _emit_mmd(
     out.append("")
     out.append("graph LR")
 
+    used_section_ids: set[str] = set()
     for sec_key in section_order:
         sec_name = section_names[sec_key]
-        sec_id = _sanitize_id(sec_name)
+        sec_id = _allocate_unique_id(sec_name, used_section_ids, "section")
         display = _humanize_label(sec_name, abbreviate=False)
         ordered_nodes = section_node_order.get(sec_key, [])
 
@@ -707,9 +859,8 @@ def _emit_mmd(
         out.append("    end")
         out.append("")
 
-    all_inter = lines.main_inter_edges[:]
-    for bp_edges in lines.bypass_groups.values():
-        all_inter.extend(bp_edges)
+    intra = {edge for sec_edges in intra_edges.values() for edge in sec_edges}
+    all_inter = [edge for edge in lines.edge_line if edge not in intra]
 
     if all_inter:
         out.append("    %% Inter-section edges")
@@ -804,7 +955,9 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
     edges = cycle_break.kept
     dropped_feedback = reconnected.self_loops + cycle_break.removed
 
-    sections = _assign_sections(kept_ids, dag, title)
+    sections = _split_cyclic_sections(
+        _assign_sections(kept_ids, dag, title), edges, dag
+    )
     section_order = _topological_order(
         list(sections.names.keys()), edges, sections.node_section
     )

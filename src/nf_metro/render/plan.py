@@ -69,6 +69,8 @@ class FrozenRecord:
                 return frozenset((*self.entry_ports, *self.exit_ports))
             if self.kind == "Section" and name == "draws_box":
                 return not (self.is_implicit or self.is_hidden)
+            if self.kind == "Section" and name == "has_badge":
+                return self.draws_box and self.number > 0
             raise AttributeError(name) from exc
 
 
@@ -200,6 +202,8 @@ class RenderPlan:
     logo_y: float
     logo_w: float
     logo_h: float
+    title_x: float
+    title_y: float
     legend_logo_size: tuple[float, float] | None
     manifest: FrozenMap | None
     debug: bool

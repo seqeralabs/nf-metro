@@ -1,0 +1,23 @@
+%%metro line: main | Main | #ff0000
+graph LR
+    subgraph first [First]
+        %%metro number: 0
+        a[A]
+    end
+
+    subgraph second [Second]
+        b[B]
+    end
+
+    subgraph third [""]
+        %%metro number: 0
+        c[C]
+    end
+
+    subgraph fourth [Fourth]
+        d[D]
+    end
+
+    a -->|main| b
+    a -->|main| c
+    c -->|main| d

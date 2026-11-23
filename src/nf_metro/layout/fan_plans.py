@@ -29,6 +29,7 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     point_to_polyline_distance,
     section_lane_sign,
+    section_lanes_follow_line_priority,
 )
 from nf_metro.layout.labels import tb_left_label_marker_pitch
 from nf_metro.layout.route_plan import (
@@ -54,7 +55,7 @@ from nf_metro.layout.route_plan import (
     fan_lane_seat_keys,
 )
 from nf_metro.parser.commitments import FlowDirection, is_flow_direction
-from nf_metro.parser.model import LineSpread, MetroGraph, PortSide
+from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Section
 from nf_metro.parser.route_topology import (
     AuthoredEdgeFact,
     BundleId,
@@ -359,19 +360,53 @@ def fan_lane_sign(
     they peel apart, so the side the bundle stacks them on is the side they
     must open toward: stating the other side orders the same two lines twice
     and swaps them between the fork and their lanes, and they cross on the
-    way.  Branches that all carry the same lines are concentric and state no
-    such order, so there the fan is free to open away from its feeder.
+    way.  Branches that nest inside one carrying all their lines and more state
+    the same order wherever the section stacks its lanes on line priority (see
+    :func:`_branches_nest_on_priority_lanes`).  Branches that all carry the same
+    lines are concentric and state no such order, so there the fan is free to
+    open away from its feeder.
     """
     section = graph.sections.get(layout_section_id or "")
-    line_sets = [set(branch.line_ids) for branch in branches]
-    partitions = any(
+    if section is None:
+        return fan_appearance_lane_sign(
+            graph, frame, layout_section_id, source_station_id
+        )
+    line_sets = _branch_line_sets(branches)
+    if _line_sets_partition(line_sets) or _branches_nest_on_priority_lanes(
+        graph, section, line_sets
+    ):
+        return section_lane_sign(section, tb_positive_fan)
+    return fan_appearance_lane_sign(graph, frame, layout_section_id, source_station_id)
+
+
+def _branch_line_sets(branches: Sequence[FanBranchPlan]) -> list[frozenset[str]]:
+    return [frozenset(branch.line_ids) for branch in branches]
+
+
+def _line_sets_partition(line_sets: Sequence[frozenset[str]]) -> bool:
+    """Whether any two of the fan's branches carry disjoint lines."""
+    return any(
         left.isdisjoint(right)
         for index, left in enumerate(line_sets)
         for right in line_sets[index + 1 :]
     )
-    if section is not None and partitions:
-        return section_lane_sign(section, tb_positive_fan)
-    return fan_appearance_lane_sign(graph, frame, layout_section_id, source_station_id)
+
+
+def _branches_nest_on_priority_lanes(
+    graph: MetroGraph, section: Section, line_sets: Sequence[frozenset[str]]
+) -> bool:
+    """Whether one branch strictly carries every other branch's lines, in lane order.
+
+    The lines the trunk branch carries beyond the others sit on their own
+    priority lanes, so each subset branch has a side to peel toward -- but only
+    while the section's lanes follow line priority.
+    """
+    if not section_lanes_follow_line_priority(graph, section):
+        return False
+    return any(
+        all(other < trunk for other in [*line_sets[:index], *line_sets[index + 1 :]])
+        for index, trunk in enumerate(line_sets)
+    )
 
 
 def fan_appearance_lane_sign(
@@ -2253,7 +2288,7 @@ def _recognise_fan(
     )
 
 
-def _seat_centered_symmetric_branches_by_line_rail(
+def _seat_symmetric_branches_by_line_rail(
     graph: MetroGraph,
     branch_plans: list[FanBranchPlan],
     appearance_policy: FanAppearancePolicy,
@@ -2261,24 +2296,39 @@ def _seat_centered_symmetric_branches_by_line_rail(
     layout_section_id: str | None,
     minimum_runway: float,
 ) -> list[FanBranchPlan]:
-    """Seat a centered symmetric fan's slots on each branch's line rail.
+    """Seat a symmetric fan's slots on each branch's line rail.
 
     A centered section's exclusive run rides its line's symmetric base rail --
     the line's index above, on, or below the trunk midline -- exactly as the
-    flat-graph track assignment seats it.  ``symmetric_lane_offsets`` yields the
-    slots ascending; branch-discovery order need not agree with line order, so
-    map the ascending slots onto the branches sorted by the screen side their
-    lines want (line rail scaled by the frame's lane sign).
-
-    Only a centered section is reseated; a ``diamond_style: symmetric`` fan keeps
-    its discovery-order seating.
+    flat-graph track assignment seats it.  A ``diamond_style: symmetric`` fan
+    whose branches nest on priority lanes seats each branch on the side the
+    section stacks its lines' lanes instead.
+    ``symmetric_lane_offsets`` yields the slots ascending; branch-discovery order
+    need not agree with line order, so map the ascending slots onto the branches
+    sorted by the screen side their lines want.  Any other
+    ``diamond_style: symmetric`` fan keeps its discovery-order seating.
     """
+    centered = graph.section_line_spread(layout_section_id) is LineSpread.CENTERED
+    section = graph.sections.get(layout_section_id or "")
+    line_sets = _branch_line_sets(branch_plans)
     if (
         appearance_policy is not FanAppearancePolicy.SYMMETRIC
         or appearance_lane_sign is None
-        or graph.section_line_spread(layout_section_id) is not LineSpread.CENTERED
+        or not (
+            centered
+            or (
+                section is not None
+                and _branches_nest_on_priority_lanes(graph, section, line_sets)
+            )
+        )
     ):
         return branch_plans
+    # A slot lands at ``appearance_lane_sign * lane_offset``.  The allocator's
+    # rails grow along the positive secondary axis, so a centered slot is scaled
+    # by that sign to land on its rail; for nested branches fan_lane_sign makes
+    # the appearance sign the section's lane sign, so an unscaled slot already
+    # lands on the side the lanes stack.
+    slot_sign = appearance_lane_sign if centered else 1.0
 
     # Same canonical rail order the flat-graph track allocator uses
     # (ordering.assign_tracks), so a sectioned fan seats its lines identically.
@@ -2292,7 +2342,7 @@ def _seat_centered_symmetric_branches_by_line_rail(
             if lid in line_index
         ]
         mean_rail = sum(rails) / len(rails) if rails else 0.0
-        return (mean_rail * appearance_lane_sign, branch.rank)
+        return (mean_rail * slot_sign, branch.rank)
 
     offsets = sorted(
         branch.lane_offset if branch.lane_offset is not None else 0.0
@@ -2596,7 +2646,7 @@ def _build_candidate(
         if frame is not None and reason is None
         else None
     )
-    branch_plans = _seat_centered_symmetric_branches_by_line_rail(
+    branch_plans = _seat_symmetric_branches_by_line_rail(
         graph,
         branch_plans,
         appearance_policy,

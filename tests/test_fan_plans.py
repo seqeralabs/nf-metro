@@ -1276,21 +1276,23 @@ def test_chained_fans_leave_the_trunk_between_them_to_local_layout() -> None:
     assert graph.stations[upstream.fork_station_id].y == pytest.approx(trunk.y)
 
 
-def test_a_symmetric_diamond_keeps_the_anchor_its_lane_order_disagrees_with() -> None:
-    """A centreline stated in two places is the diamond layout's to settle.
+def test_a_nested_symmetric_fan_seats_its_branches_on_their_lines_lanes() -> None:
+    """A symmetric fan whose trunk branch carries every other branch's lines.
 
-    The fan anchors its centreline on the exit port its trunk branch runs to,
-    and the lane order seats that branch a pitch off the centreline.  Under the
-    symmetric diamond the branches sit in slots balanced about the trunk, so
-    taking the branch's lane as the centreline would pull them off those slots:
-    the diamond layout keeps the frame.
+    Each single-line branch sits on the side its line's lane stacks and the
+    trunk branch takes the centre slot, so the centreline anchored on the fork
+    agrees with the trunk branch's lane and the fan owns the frame.
     """
     path = ROOT / "examples" / "topologies" / "paired_input_fan_branch_tree.mmd"
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph, validate=True)
     plan = next(item for item in graph.fan_plans if item.fork_station_id == "pairs_in")
 
-    assert plan.legacy_reason == "symmetric-diamond-layout-owns-the-anchor"
+    assert plan.owns_geometry
+    assert plan.legacy_reason is None
+    offsets = {branch.line_ids: branch.lane_offset for branch in plan.branches}
+    assert offsets[("track_a",)] < offsets[("track_a", "track_b")] == 0.0
+    assert offsets[("track_a", "track_b")] < offsets[("track_b",)]
     trunk_y = graph.stations["stage_a1"].y
     assert graph.stations["convert_a"].y < trunk_y < graph.stations["convert_b"].y
 

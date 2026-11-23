@@ -34,7 +34,7 @@ jobs:
       - name: Install nf-metro
         run: pip install .
 
-      - uses: ewels/rich-codex@f6d8165f6ab813603db81a49def997104f4fcd5a # v1.4.0
+      - uses: ewels/rich-codex@d5c72474b055aa19ab2e869547a61c874670614d # v1.5.0
         with:
           skip_python_setup: "true"
           # Each image is defined in the markdown that uses it; searching the

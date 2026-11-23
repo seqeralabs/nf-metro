@@ -343,6 +343,7 @@ from nf_metro.layout.phases.spacing import (  # noqa: F401
     _warn_if_pinned_x_spacing_crowds_labels,
 )
 from nf_metro.layout.routing.context import is_far_side_around_below_left_entry
+from nf_metro.layout.title_band import apply_title_band_lift
 from nf_metro.parser.model import (
     LayoutGeometryWarning,
     LineSpread,
@@ -564,31 +565,33 @@ def compute_layout(
     ):
         # Topology-blind bypass insertion (parse time) can miss a line drawn
         # through a marker it doesn't consume; the geometric pass re-lays out
-        # with bypass helpers for any such crossing it can cleanly fix.  The
-        # pre-bypass passes defer the final-geometry guards (the breeze-through
-        # guard and the closing "after final" checkpoint), so a crossing the
-        # re-lay would move clear of is collected rather than aborting on a
-        # transient layout state; the settled geometry is validated below, so a
-        # validate=True render asserts the exact geometry it draws.
+        # with bypass helpers for any such crossing it can cleanly fix.  Every
+        # pass defers the final-geometry guards (the breeze-through guard and
+        # the closing "after final" checkpoint), so a crossing the re-lay would
+        # move clear of is collected rather than aborting on a transient layout
+        # state; the settled geometry is validated below, so a validate=True
+        # render asserts the exact geometry it draws.
         from nf_metro.layout.geometric_bypass import apply_geometric_bypass
 
         graph._defer_final_guards = True
         graph._after_final_deferred = False
+        graph.title_band_lift = 0.0
         _layout_pass(validate)
-        changed = apply_geometric_bypass(graph, _layout_pass)
-        graph._defer_final_guards = False
-
         # Bypass helpers re-feed the bypassed section's height into downstream
         # placement, which lags by one pass, so a kept fix needs one more settling
-        # pass to reach its fixed point; that pass runs the deferred "after final"
-        # checkpoint on the settled geometry.  When the bypass changed nothing the
-        # first pass already holds the final geometry, so the deferred checkpoint
-        # runs against it directly -- but only when the first pass actually
-        # reached it (``_after_final_deferred``), so layout paths that never
-        # reach the checkpoint (rail, flat) are exempt.
-        if changed:
+        # pass to reach its fixed point.
+        if apply_geometric_bypass(graph, _layout_pass):
             _layout_pass(validate)
-        elif validate and graph._after_final_deferred:
+        graph._defer_final_guards = False
+
+        # Every placement decision above is taken against a canvas top at y=0,
+        # exactly as for a map with no title/logo band; the settled map then
+        # moves below the band in one translation, so the deferred "after
+        # final" checkpoint validates the geometry render draws.  Layout paths
+        # that never reach that checkpoint (``_after_final_deferred`` unset:
+        # rail, flat) are exempt from it.
+        apply_title_band_lift(graph)
+        if validate and graph._after_final_deferred:
             _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
 
         if validate and graph._final_route_guards_deferred:
@@ -2418,10 +2421,7 @@ def _finalize_layout(
     _snap(graph, "6.18a")
 
     if validate:
-        if graph._defer_final_guards:
-            graph._after_final_deferred = True
-        else:
-            _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
+        graph._after_final_deferred = True
 
 
 def _run_after_final_checkpoint(
@@ -2429,9 +2429,9 @@ def _run_after_final_checkpoint(
 ) -> None:
     """Run the closing ``after final`` validate checkpoint on the settled graph.
 
-    The single call site for the checkpoint's guard set: ``_finalize_layout``
-    runs it directly, and ``compute_layout`` re-runs it here once the
-    geometric-bypass cycle has settled the geometry a deferred pass skipped.
+    ``_finalize_layout`` only records that a validated pass reached the
+    checkpoint; ``compute_layout`` runs it once every pass has settled and the
+    title-band lift has moved the map to where render draws it.
     """
     run_validate_guards(
         graph,

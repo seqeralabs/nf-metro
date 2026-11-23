@@ -17,6 +17,9 @@ history.
 
 ### Added
 
+- `%%metro number: 0` hides a section's number badge and starts its title where
+  the badge would have been. Automatic numbering skips such a section, so the
+  remaining sections number from 1 as if it were absent (#2058).
 - Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
   but draws no box, title or number badge, mirroring hidden stations. Use it
   to place stations independently without a visible section. Existing maps
@@ -62,16 +65,51 @@ history.
 
 ### Fixed
 
+- Nextflow conversion preserves spur dependencies between subworkflows instead
+  of silently omitting those edges from the emitted map.
+- Nextflow conversion splits a section that runs both before and after another
+  one (top-level processes around a subworkflow become `Main` and `Reporting`;
+  a parent subworkflow's own processes are split around its child), instead of
+  emitting a map that fails with "Sections form a cycle".
+- A map with a `%%metro logo:` draws its title again. With the logo in the
+  legend the title sits top-left as usual; with a standalone logo
+  (`%%metro legend: none`, and every HTML output) the title sits beside the
+  logo. The title, or a standalone logo, starts at the leftmost ink the map
+  paints: a section box, a line, a label, the caption or the legend. The whole map,
+  rail-mode maps included, now moves down clear of a standalone logo instead of
+  running under it, laid out and routed exactly as it would be without one.
+  `logo_scale` sizes the standalone logo as well as the legend one.
+- A station sitting exactly midway between two grid rows snaps to the same
+  row wherever its row sits on the canvas, and stations tied together by a
+  line or a fan snap the same way, choosing the row that keeps their
+  connections level. A fan's branches keep their spacing, and lines
+  continuing between two neighbouring sections no longer kink.
 - Section number badges skip sections that draw no badge. A map mixing loose
   stations with subgraphs numbered its visible sections from 2.
 - A perpendicular (top or bottom) entry port fed through merges, or by
   feeders arriving along two different corridors, now gives each line the
   channel that matches its lane in the section, so the lines no longer cross
   or overlap inside the port's own turn.
+- Nextflow subworkflows with repeated short names get distinct section and
+  bypass line IDs, preserving each subworkflow's stations, section box and
+  bypass line.
+- `nf-metro info` now reports the section numbers the render draws, including
+  route renumbering and `%%metro number:` overrides, instead of the numbers
+  assigned at parse time. `--json` `sections[].number` is `null` for a section
+  with no badge: number 0, a hidden section, or the implicit section of a map
+  with no `subgraph` (#2058).
+- A line that skips a station through a hidden helper now opens its bypass on
+  the side its own lane sits, so the bypass no longer crosses the lines staying
+  on the trunk. This applies under both `diamond_style: straight` and
+  `diamond_style: symmetric`, in sections where at most one line enters.
+  Under `diamond_style: symmetric`, a fan whose branches nest (one branch
+  carries every line the others do) also seats each branch on its lines' lane
+  side, in sections where at most one line enters (#2170).
 - When two stations feed the same exit and one of them also fans into
   dead-end branches, a branch no longer sits on the other feeder's row.
   That feeder's exit run was drawn straight through the branch's marker
-  (and any file icon after it); the branch now peels below the exit rows.
+  (and any file icon after it); the branch now peels below the exit rows
+  (#2175).
 
 ## [2.1.0] — 2026-09-15
 

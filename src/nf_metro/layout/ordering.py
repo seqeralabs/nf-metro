@@ -37,6 +37,7 @@ def assign_tracks(
     terminal_nodes: frozenset[str] = frozenset(),
     exit_reaching: frozenset[str] = frozenset(),
     flow_horizontal: bool = True,
+    priority_lane_sign: float | None = None,
 ) -> dict[str, float]:
     """Assign each station a track using the track-per-line strategy.
 
@@ -61,6 +62,10 @@ def assign_tracks(
             is a horizontal row a level exit run would cross. A dead-end output
             tail peels below that row only then; a vertical (TB/BT) section's
             exit leaves perpendicular and its tail continues along the flow.
+        priority_lane_sign: Sign along the track axis toward which the section
+            stacks its lanes in line-priority order, or ``None`` when a seam may
+            impose another order.  Lets a bypass branch open toward its own
+            lines' lanes (see :func:`_bypass_lane_side`).
 
     Returns a dict mapping station_id -> track (float).
     """
@@ -174,6 +179,7 @@ def assign_tracks(
                     layer_idx=layer_idx if entry_top else -1,
                     graph=graph,
                     exit_reaching=exit_reaching,
+                    priority_lane_sign=priority_lane_sign,
                 )
                 for n in nodes:
                     layer_occupancy[layer_idx][n] = tracks[n]
@@ -808,6 +814,45 @@ def _trunk_fanout_node(nodes: list[str], graph: MetroGraph | None) -> str | None
     return None
 
 
+def _bypass_lane_side(
+    trunk: str,
+    branch: str,
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+    priority_lane_sign: float | None,
+) -> float:
+    """The side of *trunk*'s track a fan *branch* takes: ``+1.0`` or ``-1.0``.
+
+    A bypass -- a branch fed from the trunk's lone feeder that runs as a chain
+    back into the trunk downstream -- rides the fork's bundle until it peels
+    off, so it opens toward the side its lines stack on relative to the lines
+    staying on the trunk; the other side sends both its legs across them.  Any
+    other branch, a tie in line rank, or a section whose lanes may not follow
+    line priority takes the allocator's default ``+1.0``.
+    """
+    if priority_lane_sign is None:
+        return 1.0
+    feeders = set(G.predecessors(trunk))
+    if len(feeders) != 1 or set(G.predecessors(branch)) != feeders:
+        return 1.0
+    chain = _linear_chain_to_merge(branch, G)
+    if chain is None or chain[-1] not in nx.descendants(G, trunk):
+        return 1.0
+    branch_lines = set(graph.station_lines(branch))
+    staying = set(graph.station_lines(trunk)) - branch_lines
+    if not branch_lines or not staying:
+        return 1.0
+    rank = {lid: i for i, lid in enumerate(graph.lines)}
+
+    def mean_rank(lines: set[str]) -> float:
+        return sum(rank.get(lid, len(rank)) for lid in lines) / len(lines)
+
+    rank_gap = mean_rank(branch_lines) - mean_rank(staying)
+    if rank_gap == 0.0:
+        return 1.0
+    return priority_lane_sign if rank_gap > 0 else -priority_lane_sign
+
+
 def _phantom_trunk_node(nodes: list[str], graph: MetroGraph | None) -> str | None:
     """Return the lone entry-runway phantom in a fan-out group, if any.
 
@@ -942,6 +987,7 @@ def _place_fan_out(
     layer_idx: int = -1,
     graph: MetroGraph | None = None,
     exit_reaching: frozenset[str] = frozenset(),
+    priority_lane_sign: float | None = None,
 ) -> None:
     """Place multiple nodes in the same layer+line, centered around an anchor.
 
@@ -1019,8 +1065,8 @@ def _place_fan_out(
     # fan the real fan-in branches above it -- the phantom enters from the
     # section's left edge at the trunk track, so the merging branches read
     # cleanest dropping in from above (note this fans the OPPOSITE way to
-    # the line-superset trunk_node block below, which fans branches down).
-    # Keeps the trunk straight through the junction (#420).
+    # the line-superset trunk_node block below, which fans branches down by
+    # default).  Keeps the trunk straight through the junction (#420).
     phantom_trunk = _phantom_trunk_node(nodes, graph)
     if phantom_trunk is not None:
         tracks[phantom_trunk] = anchor
@@ -1124,14 +1170,19 @@ def _place_fan_out(
 
     # Trunk-anchored placement: when one node carries a strict superset
     # of every sibling's line set, it's the bundle trunk.  Pin it at
-    # anchor and fan the side branches below so the trunk stays straight
-    # through the junction.
+    # anchor and fan the side branches off it so the trunk stays straight
+    # through the junction: below, unless a branch is a bypass whose lines
+    # stack on the other side.
     trunk_node = _trunk_fanout_node(nodes, graph)
-    if trunk_node is not None:
+    if trunk_node is not None and graph is not None:
         tracks[trunk_node] = anchor
-        others = [n for n in nodes if n != trunk_node]
-        for i, node in enumerate(others, 1):
-            tracks[node] = anchor + i * fan_spacing
+        depth = {-1.0: 0, 1.0: 0}
+        for node in nodes:
+            if node == trunk_node:
+                continue
+            side = _bypass_lane_side(trunk_node, node, G, graph, priority_lane_sign)
+            depth[side] += 1
+            tracks[node] = anchor + side * depth[side] * fan_spacing
     elif use_asymmetric:
         # First node stays at anchor, others fan out below.
         tracks[nodes[0]] = anchor
