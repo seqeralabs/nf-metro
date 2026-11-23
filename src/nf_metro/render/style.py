@@ -326,6 +326,32 @@ class Theme:
     station_stroke_width: float = _field(
         doc="Station capsule outline width, px.", group="Stations"
     )
+    capsule_stroke: str = _field(
+        "",
+        doc="Station capsule and interchange outline that follows the viewer's "
+        "light or dark mode. Empty paints `station_stroke` in both modes.",
+        group="Stations",
+        color=True,
+        chrome=(
+            ("nf-metro-capsule", "stroke"),
+            ("nf-metro-capsule-outline", "stroke"),
+            ("nf-metro-capsule-outline", "fill"),
+        ),
+        css_var="--nfm-map-capsule-stroke",
+    )
+    capsule_fill: str = _field(
+        "",
+        doc="Station capsule and interchange inside that follows the viewer's "
+        "light or dark mode. Empty paints `station_fill` in both modes.",
+        group="Stations",
+        color=True,
+        chrome=(
+            ("nf-metro-capsule", "fill"),
+            ("nf-metro-capsule-core", "stroke"),
+            ("nf-metro-capsule-core", "fill"),
+        ),
+        css_var="--nfm-map-capsule-fill",
+    )
     station_radius: float = _field(
         STATION_RADIUS_APPROX, doc="Station capsule end radius, px.", group="Stations"
     )

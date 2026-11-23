@@ -333,8 +333,41 @@ def _ring_outlines(group: ET.Element) -> list[ET.Element]:
     ]
 
 
-def test_interchanges_are_rings(tube_svg):
-    star = _glyph_by_station(tube_svg, "g")["star"]
+def test_interchanges_are_bold_capsules(tube_svg):
+    star = _station_glyphs(tube_svg)["star"]
+    assert "nf-metro-capsule" in star.get("class").split()
+    assert float(star.get("rx")) == pytest.approx(float(star.get("width")) / 2)
+    assert float(star.get("stroke-width")) == pytest.approx(2.5)
+    assert star.get("stroke") == THEMES["london-tube-dark"].capsule_stroke
+    assert star.get("fill") == THEMES["london-tube-dark"].capsule_fill
+
+
+def test_capsules_switch_colour_with_the_mode(tube_svg):
+    svg = ET.tostring(tube_svg, encoding="unicode")
+    assert "stroke: var(--nfm-map-capsule-stroke, light-dark(#000000, #ffffff))" in svg
+    assert "fill: var(--nfm-map-capsule-fill, light-dark(#ffffff, #10141c))" in svg
+
+
+def test_default_capsules_keep_fixed_colours():
+    svg = render_string(_RNASEQ.read_text(), source_dir=str(_RNASEQ.parent))
+    assert "capsule" not in svg
+
+
+@pytest.fixture(scope="module")
+def tube_ring_svg(tmp_path_factory) -> ET.Element:
+    theme = tmp_path_factory.mktemp("ring") / "ring.yaml"
+    theme.write_text("name: r\nextends: london-tube\ninterchange_glyph: ring\n")
+    return ET.fromstring(
+        render_string(
+            _RNASEQ.read_text().replace("%%metro style: nfcore", ""),
+            theme=str(theme),
+            source_dir=str(_RNASEQ.parent),
+        )
+    )
+
+
+def test_ring_interchanges_are_one_ring_over_two_lines(tube_ring_svg):
+    star = _glyph_by_station(tube_ring_svg, "g")["star"]
     rings = _ring_outlines(star)
     assert len(rings) == 1
     assert float(rings[0].get("r")) == pytest.approx(4.0 + 1.0)
@@ -342,8 +375,8 @@ def test_interchanges_are_rings(tube_svg):
     assert rings[0].get("stroke") == THEMES["london-tube-dark"].ring_color
 
 
-def test_a_three_line_bundle_gets_a_chain_under_london_tube(tube_svg):
-    samtools = _glyph_by_station(tube_svg, "g")["samtools"]
+def test_ring_interchanges_chain_over_three_lines(tube_ring_svg):
+    samtools = _glyph_by_station(tube_ring_svg, "g")["samtools"]
     assert len(_ring_outlines(samtools)) == 2
 
 
@@ -356,8 +389,9 @@ def test_a_line_end_is_a_nub_by_default(tmp_path):
     root = _terminus_svg(tmp_path, "nub")
     fastq = _station_glyphs(root)["fastq_in"]
     assert fastq.get("rx") is None
-    assert fastq.get("fill") == "#ffffff"
-    assert fastq.get("stroke") == "#000000"
+    assert fastq.get("fill") == THEMES["london-tube-dark"].capsule_fill
+    assert fastq.get("stroke") == THEMES["london-tube-dark"].capsule_stroke
+    assert "nf-metro-capsule" in fastq.get("class").split()
 
 
 def _terminus_svg(tmp_path, glyph: str, mode: str = "dark") -> ET.Element:

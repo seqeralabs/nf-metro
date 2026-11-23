@@ -31,10 +31,13 @@ history.
   `nub` (the default square box), `bar` (a track-weight buffer-stop bar
   across the bundle, in a colour that follows the viewer's light or dark
   mode) or `ring`.
+- `capsule_stroke` and `capsule_fill` theme settings give station capsules
+  and interchanges colours that follow the viewer's light or dark mode.
 - `london-tube` built-in theme: a schematic transit look after the geometry of
   TfL's Line Diagram Standard, with track-weight station tabs, terminus bars,
-  bridged interchange rings, bundled lines edge to edge and a 30% grey for
-  inactive lines.
+  bold capsules at interchanges, bundled lines edge to edge and a 30% grey for
+  inactive lines. `interchange_glyph: ring` over it gives the standard's
+  interchange rings and bridged chains instead.
 - `%%metro number: 0` hides a section's number badge and starts its title where
   the badge would have been. Automatic numbering skips such a section, so the
   remaining sections number from 1 as if it were absent (#2058).

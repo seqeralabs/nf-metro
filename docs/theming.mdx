@@ -42,12 +42,12 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 
 `--theme` replaces the map's `%%metro style:` entirely.
 
-| Theme         | Look                                                                                                                              |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.                              |
-| `seqera`      | Seqera brand colors and Inter type.                                                                                               |
-| `london-tube` | A schematic transit look: square tabs for one-line stations, rings at interchanges, bundled lines edge to edge, unboxed sections. |
-| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                                             |
+| Theme         | Look                                                                                                                                      |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.                                      |
+| `seqera`      | Seqera brand colors and Inter type.                                                                                                       |
+| `london-tube` | A schematic transit look: square tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, unboxed sections. |
+| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                                                     |
 
 Add `-light` or `-dark` to `nfcore`, `seqera` or `london-tube` to pin the baked palette, for example `nfcore-light`.
 `dark` is also accepted for `nfcore`, and `light` for `transparent`.
@@ -64,7 +64,7 @@ This map takes the station glyphs, section style and fonts from `london-tube`, a
 Under both lies the `nfcore` base, which supplies anything neither sets.
 
 A built-in theme sets only the fields its file lists.
-`london-tube, nfcore` therefore keeps the `london-tube` station tabs and rings, because `nfcore` does not set `station_glyph` or `interchange_glyph`, but takes the `nfcore` colors.
+`london-tube, nfcore` therefore keeps the `london-tube` station tabs and capsules, because `nfcore` does not set `station_glyph` or `interchange_glyph`, but takes the `nfcore` colors.
 
 ## Writing your own theme
 
@@ -121,6 +121,7 @@ A station on several lines is an interchange.
 `interchange_glyph` picks how it is drawn:
 
 - `pill` (the default) draws one capsule across all its lines.
+  `capsule_stroke` and `capsule_fill` give the capsule colours that follow the viewer's light or dark mode; left empty, it takes `station_stroke` and `station_fill` in both modes.
 - `ring` draws a ring centred on the lines, with the centre left in the background color.
 
 With `ring`, `ring_max_lines` is the most lines on one track that a single ring covers, and `ring_overflow` decides what a wider bundle gets:
@@ -131,7 +132,8 @@ With `ring`, `ring_max_lines` is the most lines on one track that a single ring 
 
 So the three styles are: one standard-size ring (raise `ring_max_lines`), a bridged chain (`chain`), or one larger ring (`grow`).
 Lines on separate tracks, as at a cross-track `%%metro interchange:` or a rail-mode station, get separate rings joined by a dumbbell link.
-`london-tube` uses a single ring for two lines, a chain from three up, and a `bar` at every line end.
+`london-tube` draws a white capsule with a heavy black outline (a light outline round a dark capsule in dark mode) and a `bar` at every line end.
+The Line Diagram Standard's own idiom is rings, which a theme extending `london-tube` gets with `interchange_glyph: ring`: one ring for two lines, and a chain from three up.
 
 A line end shared by several lines follows `terminus_glyph` instead:
 
@@ -156,8 +158,9 @@ Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/n
   It sets every field the schema leaves without a default, so it is the template for a complete theme.
 - `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
 - `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
-  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width: an interchange ring has a 2-wide inside and a 0.5-wide outline, a chain of rings is bridged by a 0.5-wide strip, and lines on separate tracks are joined by a dumbbell link.
-  Rings also mark cross-track `%%metro interchange:` stations and multi-rail stations in rail mode.
+  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width.
+  Interchanges are bold capsules spanning the bundle, outlined at 2.5px on 4px lines.
+  Setting `interchange_glyph: ring` over it switches to the standard's rings: a 2-wide inside and a 0.5-wide outline, chains bridged by a 0.5-wide strip, and lines on separate tracks joined by a dumbbell link.
   The theme deliberately uses track-weight tabs rather than the standard's 0.66 square: a tab is 1 line width thick and reaches 1.5 past the line, so it reads as a continuation of the track, and the terminus bar matches it.
   Lines on a shared track are drawn edge to edge, as in the standard, so the theme sets no `track_gap`.
   Inactive lines are 30% grey.
@@ -169,9 +172,10 @@ name: london-tube
 station_glyph: tick
 station_tick_width: 1 # track-weight tabs
 station_tick_length: 1.5
-interchange_glyph: ring
-ring_max_lines: 2 # a chain from three lines up
+interchange_glyph: pill # ring for the standard's rings
+ring_max_lines: 2 # with ring: a chain from three lines up
 terminus_glyph: bar
+station_stroke_width: 2.5
 line_width: 4
 label_font_weight: normal
 section_stroke_dasharray: "6 4"
@@ -182,16 +186,16 @@ legend_stroke_width: 1.5
 light:
   background_color: "#ffffff"
   label_color: "#1c3f94"
-  ring_color: "#000000"
-  ring_fill: "#ffffff"
+  capsule_stroke: "#000000"
+  capsule_fill: "#ffffff"
   muted_line_color: "#b3b3b3"
   section_fill: transparent
   legend_stroke: "#000000"
 dark:
   background_color: "#10141c"
   label_color: "#dfe6ff"
-  ring_color: "#ffffff"
-  ring_fill: "#10141c"
+  capsule_stroke: "#ffffff"
+  capsule_fill: "#10141c"
   muted_line_color: "#585a60"
   section_fill: transparent
   legend_stroke: "#ffffff"
@@ -260,6 +264,8 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | `station_fill`         | colour                   | from `nfcore` | Station capsule fill.                                                                                                                                                                                                                                                                                                                       |
 | `station_stroke`       | colour                   | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                                                                                                                                                                     |
 | `station_stroke_width` | number                   | from `nfcore` | Station capsule outline width, px.                                                                                                                                                                                                                                                                                                          |
+| `capsule_stroke`       | colour                   | empty         | Station capsule and interchange outline that follows the viewer's light or dark mode. Empty paints `station_stroke` in both modes.                                                                                                                                                                                                          |
+| `capsule_fill`         | colour                   | empty         | Station capsule and interchange inside that follows the viewer's light or dark mode. Empty paints `station_fill` in both modes.                                                                                                                                                                                                             |
 | `station_radius`       | number                   | `5`           | Station capsule end radius, px.                                                                                                                                                                                                                                                                                                             |
 | `terminus_glyph`       | `nub` \| `bar` \| `ring` | `nub`         | How a line end shared by several lines is drawn. `nub` is a square-cornered box across the lines in the station colours; `bar` is a buffer-stop bar across the whole bundle, as thick as a tab and overhanging the outermost lines by a tab's length; `ring` draws the interchange glyph. A line end with one line follows `station_glyph`. |
 | `station_tick_width`   | number                   | `0.66`        | Thickness of a `tick` tab along its line, and of a terminus bar, in multiples of `line_width`.                                                                                                                                                                                                                                              |
@@ -309,8 +315,7 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Chrome colors and host overrides
 
-These colors also emit a CSS custom property, so a page that inlines the SVG can recolor them (see [`var()` for host overrides](#var-for-host-overrides-optional)).
-An empty value emits none.
+These colors also emit a CSS custom property, so a page that inlines the SVG can recolor them (see [`var()` for host overrides](#var-for-host-overrides-optional)). An empty value emits none.
 
 | Field                 | Custom property                 |
 | --------------------- | ------------------------------- |
@@ -327,11 +332,12 @@ An empty value emits none.
 | `ring_color`          | `--nfm-map-ring-color`          |
 | `ring_fill`           | `--nfm-map-ring-fill`           |
 | `terminus_bar_color`  | `--nfm-map-terminus-bar-color`  |
+| `capsule_stroke`      | `--nfm-map-capsule-stroke`      |
+| `capsule_fill`        | `--nfm-map-capsule-fill`        |
 
 ### Layout options
 
-A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`.
-A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
+A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`. A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
 
 {/* theme-field-reference:end */}
 

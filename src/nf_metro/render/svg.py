@@ -3314,6 +3314,25 @@ def _maybe_muted_class(name: str, muted: bool) -> str:
     return f"{cls} {_ns(_MUTED_CLASS)}" if muted else cls
 
 
+def _capsule_adapts(theme: Theme) -> bool:
+    """Whether *theme* gives station capsules colours that follow the mode."""
+    return bool(theme.capsule_stroke or theme.capsule_fill)
+
+
+def _capsule_paint(
+    theme: Theme, station_data: dict[str, str], muted: bool
+) -> dict[str, str]:
+    """Fill, outline and class of a station capsule or blank-terminus nub."""
+    paint = {
+        "fill": theme.capsule_fill or theme.station_fill,
+        "stroke": theme.capsule_stroke or theme.station_stroke,
+    }
+    if _capsule_adapts(theme):
+        capsule = _maybe_muted_class("nf-metro-capsule", muted)
+        paint["class_"] = f"{station_data['class_']} {capsule}"
+    return paint
+
+
 def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> None:
     """Inject CSS custom properties for chrome colors.
 
@@ -3377,6 +3396,15 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
             lines.append(
                 _rule("nf-metro-terminus-bar", f"fill: {muted_val}", _MUTED_CLASS)
             )
+        if _capsule_adapts(theme):
+            lines += [
+                _rule("nf-metro-capsule", f"stroke: {muted_val}", _MUTED_CLASS),
+                _rule(
+                    "nf-metro-capsule-outline",
+                    f"stroke: {muted_val}; fill: {muted_val}",
+                    _MUTED_CLASS,
+                ),
+            ]
         if theme.interchange_glyph == GLYPH_RING:
             lines += [
                 _rule("nf-metro-ring", f"stroke: {muted_val}", _MUTED_CLASS),
@@ -4624,7 +4652,7 @@ def _interchange_interior_fill(
     overriding the marker-fill exemption; otherwise it keeps the declared tint.
     """
     if fill_override is None:
-        return theme.station_fill
+        return theme.capsule_fill or theme.station_fill
     return theme.muted_line_color if muted else fill_override
 
 
@@ -4640,6 +4668,7 @@ def _draw_interchange_glyph(
     station_data: dict[str, str],
     data_station_id: str,
     muted: bool = False,
+    adaptive: bool = False,
 ) -> None:
     """Draw the metro interchange idiom: a knob on each used rail joined by a
     link bar spanning them (the classic metro / nf-core-sarek glyph), or under
@@ -4708,28 +4737,42 @@ def _draw_interchange_glyph(
                 )
             )
 
+    def _cls(name: str, layer: str) -> str:
+        if not adaptive:
+            return _ns(name)
+        if layer == "nf-metro-capsule-outline":
+            return f"{_ns(name)} {_maybe_muted_class(layer, muted)}"
+        return f"{_ns(name)} {_ns(layer)}"
+
+    outline_layer, core_layer = "nf-metro-capsule-outline", "nf-metro-capsule-core"
     _link_bar(
         (bar_half + sw) * 2,
         outline,
-        **{**station_data, "class_": _ns("nf-metro-rail-connector")},
+        **{**station_data, "class_": _cls("nf-metro-rail-connector", outline_layer)},
     )
     _knobs(
         knob_r + sw,
         outline,
         **{
-            "class_": _ns("nf-metro-rail-knob-outline"),
+            "class_": _cls("nf-metro-rail-knob-outline", outline_layer),
             "data-station-id": data_station_id,
         },
     )
     _link_bar(
         bar_half * 2,
         interior_fill,
-        **{**station_data, "class_": _ns("nf-metro-rail-connector-interior")},
+        **{
+            **station_data,
+            "class_": _cls("nf-metro-rail-connector-interior", core_layer),
+        },
     )
     _knobs(
         knob_r,
         interior_fill,
-        **{"class_": _ns("nf-metro-rail-knob"), "data-station-id": data_station_id},
+        **{
+            "class_": _cls("nf-metro-rail-knob", core_layer),
+            "data-station-id": data_station_id,
+        },
     )
 
 
@@ -4755,7 +4798,7 @@ def _render_rail_pill(
     outline = (
         marker_stroke_color(theme)
         if fill_override is not None
-        else theme.station_stroke
+        else theme.capsule_stroke or theme.station_stroke
     )
     # rail_used_ys is recorded parallel to the line-definition order (see
     # rail_mode._layout_section_rails); zip the knobs against that same order.  A
@@ -4773,6 +4816,7 @@ def _render_rail_pill(
         station_data=_station_data_attrs(graph, station),
         data_station_id=station.id,
         muted=muted,
+        adaptive=fill_override is None and _capsule_adapts(theme),
     )
 
 
@@ -4815,11 +4859,12 @@ def _render_interchange(
         outline=(
             marker_stroke_color(theme)
             if fill_override is not None
-            else theme.station_stroke
+            else theme.capsule_stroke or theme.station_stroke
         ),
         station_data=_station_data_attrs(graph, members[0]),
         data_station_id=ic.node_id,
         muted=muted,
+        adaptive=fill_override is None and _capsule_adapts(theme),
     )
 
 
@@ -4832,6 +4877,7 @@ def _draw_blank_terminus_nub(
     station_data: dict[str, str],
     theme: Theme,
     is_tb_vert: bool = False,
+    muted: bool = False,
 ) -> None:
     """Draw a blank terminus's unrounded nub (a sharp-cornered station rect)."""
     bx, by, bw, bh = _pill_box(station, r, min_off, max_off, is_tb_vert)
@@ -4841,10 +4887,8 @@ def _draw_blank_terminus_nub(
             by,
             bw,
             bh,
-            fill=theme.station_fill,
-            stroke=theme.station_stroke,
             stroke_width=theme.station_stroke_width,
-            **station_data,
+            **{**station_data, **_capsule_paint(theme, station_data, muted)},
         )
     )
 
@@ -4911,6 +4955,7 @@ def _muted_line_theme(theme: FrozenRecord) -> FrozenRecord:
     muted = theme.muted_line_color
     overrides: dict[str, Any] = {
         "station_stroke": muted,
+        "capsule_stroke": muted if theme.capsule_stroke else "",
         "marker_stroke": muted,
         "ring_color": muted,
         "terminus_stroke": muted,
@@ -5031,7 +5076,14 @@ def _render_station_into(
             t_min = min(used) - station.y
             t_max = max(used) - station.y
         _draw_blank_terminus_nub(
-            d, station, r, t_min, t_max, _station_data_attrs(graph, station), theme
+            d,
+            station,
+            r,
+            t_min,
+            t_max,
+            _station_data_attrs(graph, station),
+            theme,
+            muted=muted,
         )
         _append_terminus_icons(d, station, graph, theme, r, t_min, t_max, muted)
         return
@@ -5112,7 +5164,7 @@ def _render_station_into(
         pass
     elif station.is_blank_terminus:
         _draw_blank_terminus_nub(
-            d, station, r, min_off, max_off, station_data, theme, is_tb_vert
+            d, station, r, min_off, max_off, station_data, theme, is_tb_vert, muted
         )
     else:
         x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
@@ -5124,10 +5176,8 @@ def _render_station_into(
                 h,
                 rx=r,
                 ry=r,
-                fill=theme.station_fill,
-                stroke=theme.station_stroke,
                 stroke_width=theme.station_stroke_width,
-                **station_data,
+                **{**station_data, **_capsule_paint(theme, station_data, muted)},
             )
         )
 
