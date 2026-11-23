@@ -48,6 +48,7 @@ from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
     _label_bbox,
+    _label_ink_quad,
     place_labels,
 )
 from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
@@ -2433,9 +2434,22 @@ def _build_render_plan_scaled(
         max_y = max(max_y, legend_y + legend_h)
 
     # Standalone logo positioning (only when no legend to embed it in)
-    block_left = _drawn_section_left(graph)
-    if block_left is None:
-        block_left = padding
+    positive_fan = frozenset(tb_positive_fan_sections(graph))
+    block_left = _leftmost_ink(
+        graph,
+        theme,
+        routes=routes,
+        route_polylines=route_polylines,
+        station_offsets=station_offsets,
+        positive_fan=positive_fan,
+        labels=labels,
+        header_placements=header_placements,
+        group_bands=group_bands,
+        legend_left=legend_x if show_legend else None,
+        caption_left=_watermark_x_inset(bare, padding) if graph.caption else None,
+        debug=debug,
+    )
+    block_left = padding if block_left is None else max(block_left, 0.0)
     logo_x = 0.0
     logo_y = 0.0
     standalone_logo_box: tuple[float, float, float, float] | None = None
@@ -2482,7 +2496,6 @@ def _build_render_plan_scaled(
     svg_width = width or int(auto_width)
     svg_height = height or int(auto_height)
 
-    positive_fan = frozenset(tb_positive_fan_sections(graph))
     manifest = None
     if graph.embed_manifest:
         boxes: dict[str, dict[str, float]] = {}
@@ -2854,9 +2867,7 @@ def _emit_render_plan(
         )
 
     # Attribution watermark
-    watermark_x_inset = (
-        WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
-    )
+    watermark_x_inset = _watermark_x_inset(bare, padding)
     d.append(
         draw.Text(
             f"created with nf-metro {_version_string()}",
@@ -3017,12 +3028,73 @@ def _effective_logo_path(graph: MetroGraph, mode: str) -> str:
     return graph.logo_path
 
 
-def _drawn_section_left(graph: MetroGraph) -> float | None:
-    """Left edge of the leftmost section box the render draws, or ``None``."""
-    return min(
-        (section.bbox_x for section in graph.sections.values() if section.is_drawn_box),
-        default=None,
-    )
+def _watermark_x_inset(bare: bool, padding: float) -> float:
+    """Distance of the watermark and the caption from the canvas side edges."""
+    return WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
+
+
+def _leftmost_ink(
+    graph: MetroGraph,
+    theme: Theme,
+    *,
+    routes: list[RoutedPath],
+    route_polylines: Sequence[Sequence[tuple[float, float]]],
+    station_offsets: dict[tuple[str, str], float],
+    positive_fan: set[str] | frozenset[str],
+    labels: Sequence[LabelPlacement],
+    header_placements: dict[str, SectionHeaderPlacement],
+    group_bands: Sequence[_GroupBand],
+    legend_left: float | None,
+    caption_left: float | None,
+    debug: bool,
+) -> float | None:
+    """Smallest x the settled geometry paints, or ``None`` when it paints nothing.
+
+    Reads every drawn element but the map title, a standalone logo and the
+    attribution watermark: section boxes and headers, line strokes, station
+    markers, station labels, group captions, the caption and the legend.  A
+    stroke reaches half its width past its path, and a quadratic corner stays
+    inside the hull of its control points, so a polyline's vertices bound its
+    curves.  Terminus icons are held inside their section box by a layout
+    guard, so the box covers them.
+    """
+    reach: list[float] = []
+    for section in graph.sections.values():
+        if not section.is_drawn_box:
+            continue
+        reach.append(section.bbox_x - SECTION_STROKE_WIDTH / 2)
+        placement = header_placements[section.id]
+        if section.has_badge:
+            reach.append(placement.badge_cx - SECTION_NUM_CIRCLE_R_LARGE)
+        reach.append(
+            placement.keepout[0] if placement.label_rotation else placement.label_x
+        )
+    reach.extend(x - theme.line_width / 2 for line in route_polylines for x, _ in line)
+    if graph.directional:
+        for route in routes:
+            reach.extend(
+                x - _chevron_stroke_width(theme) / 2
+                for vertices in _route_chevrons(
+                    apply_route_offsets(route, station_offsets), theme
+                )
+                for x, _ in vertices
+            )
+    for station in _drawn_stations(graph, debug):
+        cx, _, width, _, _ = station_marker_box(
+            graph, theme, station, station_offsets, set(positive_fan)
+        )
+        reach.append(cx - width / 2 - theme.station_stroke_width / 2)
+    halo = max(theme.label_halo_width, 0.0) / 2
+    reach.extend(x - halo for label in labels for x, _ in _label_ink_quad(label))
+    caption_style = text_style(theme.label_font_size * GROUP_LABEL_FONT_SCALE, "bold")
+    for band in group_bands:
+        caption_width = DEFAULT_TEXT_METRICS.advance(
+            band.label, caption_style, TextRole.GROUP_CAPTION
+        )
+        reach.append(band.x_left - GROUP_LABEL_UNDERLINE_WIDTH / 2)
+        reach.append((band.x_left + band.x_right - caption_width) / 2)
+    reach.extend(x for x in (legend_left, caption_left) if x is not None)
+    return min(reach, default=None)
 
 
 def _title_origin(
@@ -3578,13 +3650,6 @@ def _render_directional_markers(
     are spaced by arc length and kept sparse and subtle by default, in the
     spirit of a one-way transit line's direction-of-travel arrows.
     """
-    size = theme.directional_marker_size
-    spacing = max(theme.directional_marker_spacing, 1.0)
-    opacity = theme.directional_marker_opacity
-    # A route shorter than one chevron carries no useful direction cue.
-    min_length = 2 * size
-    stroke_width = max(theme.line_width * 0.5, 1.0)
-
     for route in routes:
         pts = apply_route_offsets(route, station_offsets)
         if len(pts) < 2:
@@ -3594,18 +3659,33 @@ def _render_directional_markers(
             line, theme, inactive_line_ids, theme.directional_marker_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
-        for point, heading in _chevron_samples(pts, spacing, min_length):
+        for vertices in _route_chevrons(pts, theme):
             _draw_chevron(
                 d,
-                point,
-                heading,
+                vertices,
                 color,
-                size,
-                stroke_width,
-                opacity,
+                _chevron_stroke_width(theme),
+                theme.directional_marker_opacity,
                 class_name,
                 route.line_id,
             )
+
+
+def _chevron_stroke_width(theme: Theme) -> float:
+    return max(theme.line_width * 0.5, 1.0)
+
+
+def _route_chevrons(
+    pts: list[tuple[float, float]], theme: Theme
+) -> list[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]]:
+    """``(wing, apex, wing)`` of every chevron riding the polyline *pts*."""
+    size = theme.directional_marker_size
+    spacing = max(theme.directional_marker_spacing, 1.0)
+    # A route shorter than one chevron carries no useful direction cue.
+    return [
+        _chevron_vertices(point, heading, size)
+        for point, heading in _chevron_samples(pts, spacing, 2 * size)
+    ]
 
 
 def _chevron_samples(
@@ -3643,18 +3723,11 @@ def _chevron_samples(
     return samples
 
 
-def _draw_chevron(
-    d: draw.Drawing,
-    point: tuple[float, float],
-    heading: tuple[float, float],
-    color: str,
-    size: float,
-    stroke_width: float,
-    opacity: float,
-    class_name: str,
-    line_id: str,
-) -> None:
-    """Draw one open ``>`` chevron centred at *point*, apex along *heading*."""
+def _chevron_vertices(
+    point: tuple[float, float], heading: tuple[float, float], size: float
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """``(wing, apex, wing)`` of an open ``>`` chevron centred at *point*, apex
+    along *heading*."""
     px, py = point
     ux, uy = heading
     perp = (-uy, ux)
@@ -3662,7 +3735,20 @@ def _draw_chevron(
     back = (px - ux * size, py - uy * size)
     wing1 = (back[0] + perp[0] * size, back[1] + perp[1] * size)
     wing2 = (back[0] - perp[0] * size, back[1] - perp[1] * size)
+    return wing1, apex, wing2
 
+
+def _draw_chevron(
+    d: draw.Drawing,
+    vertices: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
+    color: str,
+    stroke_width: float,
+    opacity: float,
+    class_name: str,
+    line_id: str,
+) -> None:
+    """Draw one open ``>`` chevron through *vertices*."""
+    wing1, apex, wing2 = vertices
     path = draw.Path(
         stroke=color,
         stroke_width=stroke_width,

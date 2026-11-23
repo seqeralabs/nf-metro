@@ -45,9 +45,9 @@ def _plan(path: str) -> tuple[MetroGraph, RenderPlan]:
             "examples/topologies/lr_perp_top_entry_bottom_exit.mmd",
             9,
             8,
-            (550, 628),
+            (549, 628),
         ),
-        ("examples/rail_mode.mmd", 11, 32, (545, 965)),
+        ("examples/rail_mode.mmd", 11, 32, (544, 965)),
         ("examples/file_icons.mmd", 9, 8, (540, 419)),
     ],
 )

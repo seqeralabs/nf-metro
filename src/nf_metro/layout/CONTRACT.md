@@ -1575,8 +1575,10 @@ it: every pass, including the geometric-bypass settling pass, lays the map out
 against a canvas top at y=0, exactly as for a map with no band.
 
 Horizontally, render starts the title (or a standalone logo, with the title
-beside it) at the left edge of the leftmost drawn section box, read from the
-final settled boxes; a map with no drawn box falls back to the canvas padding.
+beside it) at the leftmost ink the settled geometry paints (section boxes and
+headers, line strokes, station markers and labels, group captions, the legend),
+clamped to the canvas; a map that paints nothing falls back to the canvas
+padding.
 
 - **Helper**: `apply_title_band_lift` (`layout/title_band.py`), called by
   `compute_layout` once the last pass has settled and before the deferred
