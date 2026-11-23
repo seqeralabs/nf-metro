@@ -1995,24 +1995,8 @@
     "note": "In _left_entry_gap_above_fits: a LEFT entry fed from a higher row always has a section above its row, so the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if lowest is not None and y > section_header_safe_cap(lowest):::#1": {
+  "inter_section_handlers.py::if lowest is not None and y > (cap := section_header_safe_cap(lowest)):::#1": {
     "note": "In _row_under_run_y: the arm caps a same-row under-run at the header badge of the lowest lower-row section in the columns after the source. tests/data/gate_witnesses/f8402075.mmd and tests/data/canvas_placement/f8403977.mmd run under their row with no lower-row section in those columns; a map whose next row starts within BYPASS_CLEARANCE plus the badge clearance under the run takes it, and no swept map has one.",
-    "status": "needs-review"
-  },
-  "inter_section_handlers.py::f.src_row is not None::#1": {
-    "note": "In _right_entry_below_channel_y: the check narrows the facts' optional source row for the same-row branch, sending an unresolved cell to the cross-row channel. Every swept wrap reaching the around-below channel has both ends in placed grid cells.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::and f.src_col is not None::#1": {
-    "note": "In _right_entry_below_channel_y: the check narrows the facts' optional source column for the same-row branch, sending an unresolved cell to the cross-row channel. Every swept wrap reaching the around-below channel has both ends in placed grid cells.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::and f.tgt_col is not None::#1": {
-    "note": "In _right_entry_below_channel_y: the check narrows the facts' optional target column for the same-row branch, sending an unresolved cell to the cross-row channel. Every swept wrap reaching the around-below channel has both ends in placed grid cells.",
-    "status": "defensive"
-  },
-  "inter_section_handlers.py::and f.src_col < f.tgt_col::#1": {
-    "note": "In _right_entry_below_channel_y: a same-row wrap reaches the around-below channel only as a RIGHT entry fed from the left, so its source column lies before the target's. A packed cell-mate feeding a RIGHT entry of its own cell would take the arm, and no swept map has one.",
     "status": "needs-review"
   }
 }
