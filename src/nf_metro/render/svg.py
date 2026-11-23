@@ -2446,9 +2446,8 @@ def _build_render_plan_scaled(
             route_polylines,
             route_curve_radii,
             dict(zip(edge_route_indices, bridge_breaks, strict=True)),
-            graph,
+            _invisible_stations(graph),
             theme,
-            SVG_CURVE_RADIUS,
         )
         if graph.directional
         else ()
@@ -3743,6 +3742,10 @@ _CORNER_ARC_CHORDS = 32
 _TRACK_TOL = 0.01
 # Directions whose dot product is at least this run along one carrier line.
 _TRACK_HEADING_COS = 1.0 - 1e-8
+# Arc lengths (px) this close to a piece or stretch boundary lie on it.
+_ARC_EPS = 1e-9
+# A stretch ending this close to its route's end reaches that end.
+_ROUTE_END_TOL = 1e-6
 
 
 @dataclass
@@ -3750,7 +3753,6 @@ class _RouteTrack:
     """One route's drawn stroke, measured by arc length from its start."""
 
     index: int
-    line_id: str
     source: str
     target: str
     pieces: list[_DrawnPiece]
@@ -3765,7 +3767,7 @@ class _RouteTrack:
             self.pieces, self.profiles, self.starts, strict=True
         ):
             length = profile[-1][0]
-            if length <= 0 or arc > start + length + 1e-9:
+            if length <= 0 or arc > start + length + _ARC_EPS:
                 continue
             local = max(arc - start, 0.0)
             arcs = [a for a, _ in profile]
@@ -3798,6 +3800,42 @@ class _Stretch:
         return end - start
 
 
+class _PieceSlot(NamedTuple):
+    """Where a piece lies: a corner's index, or a carrier's with its ``s`` span."""
+
+    corner: bool
+    where: int
+    s0: float = 0.0
+    s1: float = 0.0
+
+
+class _AtomKey(NamedTuple):
+    """The ink an atom paints: a corner, or the carrier span above cut ``cut``."""
+
+    corner: bool
+    where: int
+    cut: int
+
+
+class _Atom(NamedTuple):
+    key: _AtomKey
+    start: float
+    end: float
+
+
+class _CoverRun(NamedTuple):
+    """Consecutive atoms of one route that share a covering set."""
+
+    routes: frozenset[int]
+    first: _AtomKey
+    start: float
+    end: float
+
+
+# (track, piece, 0 for the piece's start or 1 for its end)
+_CutKey = tuple[int, int, int]
+
+
 def _carrier_of(
     carriers: list[tuple[tuple[float, float], tuple[float, float]]],
     piece: _DrawnPiece,
@@ -3824,6 +3862,116 @@ def _same_corner(a: _DrawnPiece, b: _DrawnPiece) -> bool:
     )
 
 
+def _index_pieces(
+    tracks: Sequence[_RouteTrack],
+) -> tuple[dict[tuple[int, int], _PieceSlot], dict[int, list[tuple[float, _CutKey]]]]:
+    """Each piece's carrier or corner, and the endpoints that may cut a carrier."""
+    carriers: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    corners: list[_DrawnPiece] = []
+    slots: dict[tuple[int, int], _PieceSlot] = {}
+    marks: dict[int, list[tuple[float, _CutKey]]] = {}
+    for ti, track in enumerate(tracks):
+        for pi, (piece, profile) in enumerate(
+            zip(track.pieces, track.profiles, strict=True)
+        ):
+            if profile[-1][0] <= _ARC_EPS:
+                continue
+            if piece.control is not None:
+                same = (c for c, rep in enumerate(corners) if _same_corner(rep, piece))
+                if (found := next(same, None)) is None:
+                    corners.append(piece)
+                    found = len(corners) - 1
+                slots[ti, pi] = _PieceSlot(True, found)
+                continue
+            k = _carrier_of(carriers, piece)
+            (ox, oy), (vx, vy) = carriers[k]
+            s0, s1 = (
+                (x - ox) * vx + (y - oy) * vy for x, y in (piece.start, piece.end)
+            )
+            slots[ti, pi] = _PieceSlot(False, k, s0, s1)
+            marks.setdefault(k, []).extend([(s0, (ti, pi, 0)), (s1, (ti, pi, 1))])
+    return slots, marks
+
+
+def _assign_cuts(
+    marks: Mapping[int, list[tuple[float, _CutKey]]],
+) -> tuple[dict[_CutKey, int], dict[int, list[float]]]:
+    """Merge endpoints within tolerance into cuts; each endpoint's cut index."""
+    cut_of: dict[_CutKey, int] = {}
+    cuts: dict[int, list[float]] = {}
+    for k, found in marks.items():
+        reps = cuts.setdefault(k, [])
+        for s, owner in sorted(found):
+            if not reps or s > reps[-1] + _TRACK_TOL:
+                reps.append(s)
+            cut_of[owner] = len(reps) - 1
+    return cut_of, cuts
+
+
+def _track_atoms(
+    tracks: Sequence[_RouteTrack],
+    slots: Mapping[tuple[int, int], _PieceSlot],
+    cut_of: Mapping[_CutKey, int],
+    cuts: Mapping[int, list[float]],
+) -> list[list[_Atom]]:
+    """Each route's pieces split at the cuts of its carriers, in arc order."""
+    atoms_of: list[list[_Atom]] = []
+    for ti, track in enumerate(tracks):
+        atoms: list[_Atom] = []
+        for pi, (profile, start) in enumerate(
+            zip(track.profiles, track.starts, strict=True)
+        ):
+            slot = slots.get((ti, pi))
+            if slot is None:
+                continue
+            length = profile[-1][0]
+            if slot.corner:
+                atoms.append(
+                    _Atom(_AtomKey(True, slot.where, 0), start, start + length)
+                )
+                continue
+            lo, hi = cut_of[ti, pi, 0], cut_of[ti, pi, 1]
+            at = cuts[slot.where]
+            scale = length / (slot.s1 - slot.s0) if slot.s1 > slot.s0 else 0.0
+            for c in range(lo, hi):
+                a = start if c == lo else start + (at[c] - slot.s0) * scale
+                b = (
+                    start + length
+                    if c + 1 == hi
+                    else start + (at[c + 1] - slot.s0) * scale
+                )
+                atoms.append(_Atom(_AtomKey(False, slot.where, c), a, b))
+        atoms_of.append(atoms)
+    return atoms_of
+
+
+def _group_stretches(
+    tracks: Sequence[_RouteTrack], atoms_of: Sequence[Sequence[_Atom]]
+) -> list[_Stretch]:
+    """Merge each route's consecutive atoms of one covering set into stretches."""
+    members: dict[_AtomKey, set[int]] = {}
+    for track, atoms in zip(tracks, atoms_of, strict=True):
+        for atom in atoms:
+            members.setdefault(atom.key, set()).add(track.index)
+    cover = {key: frozenset(routes) for key, routes in members.items()}
+
+    grouped: dict[tuple[tuple[int, ...], _AtomKey], dict[int, tuple[float, float]]] = {}
+    for track, atoms in zip(tracks, atoms_of, strict=True):
+        runs: list[_CoverRun] = []
+        for atom in atoms:
+            routes = cover[atom.key]
+            if runs and runs[-1].routes == routes:
+                runs[-1] = runs[-1]._replace(end=atom.end)
+            else:
+                runs.append(_CoverRun(routes, atom.key, atom.start, atom.end))
+        for run in runs:
+            key = (tuple(sorted(run.routes)), run.first)
+            grouped.setdefault(key, {})[track.index] = (run.start, run.end)
+    stretches = [_Stretch(dict(sorted(spans.items()))) for spans in grouped.values()]
+    stretches.sort(key=lambda s: (s.owner, s.spans[s.owner][0]))
+    return stretches
+
+
 def _line_stretches(tracks: Sequence[_RouteTrack]) -> list[_Stretch]:
     """Split one line's routes into stretches of drawn ink with a common cover.
 
@@ -3832,93 +3980,13 @@ def _line_stretches(tracks: Sequence[_RouteTrack]) -> list[_Stretch]:
     covering each atom are then known, and a route's consecutive atoms with
     the same cover form one stretch.
     """
-    carriers: list[tuple[tuple[float, float], tuple[float, float]]] = []
-    corners: list[_DrawnPiece] = []
-    # (track position, piece position) -> ("L", carrier, s0, s1) | ("Q", corner)
-    slots: dict[tuple[int, int], tuple[Any, ...]] = {}
-    marks: dict[int, list[tuple[float, tuple[int, int, int]]]] = {}
-    for ti, track in enumerate(tracks):
-        for pi, (piece, profile) in enumerate(
-            zip(track.pieces, track.profiles, strict=True)
-        ):
-            if profile[-1][0] <= 1e-9:
-                continue
-            if piece.control is None:
-                k = _carrier_of(carriers, piece)
-                (ox, oy), (vx, vy) = carriers[k]
-                s0, s1 = (
-                    (px - ox) * vx + (py - oy) * vy
-                    for px, py in (piece.start, piece.end)
-                )
-                slots[ti, pi] = ("L", k, s0, s1)
-                marks.setdefault(k, []).extend([(s0, (ti, pi, 0)), (s1, (ti, pi, 1))])
-            else:
-                for c, rep in enumerate(corners):
-                    if _same_corner(rep, piece):
-                        break
-                else:
-                    corners.append(piece)
-                    c = len(corners) - 1
-                slots[ti, pi] = ("Q", c)
-
-    # Positions along a carrier within tolerance of each other are one cut.
-    cut_of: dict[tuple[int, int, int], int] = {}
-    cuts: dict[int, list[float]] = {}
-    for k, found in marks.items():
-        found.sort()
-        reps = cuts.setdefault(k, [])
-        for s, owner in found:
-            if not reps or s > reps[-1] + _TRACK_TOL:
-                reps.append(s)
-            cut_of[owner] = len(reps) - 1
-
-    cover: dict[tuple[Any, ...], set[int]] = {}
-    atoms_of: list[list[tuple[tuple[Any, ...], float, float]]] = []
-    for ti, track in enumerate(tracks):
-        atoms: list[tuple[tuple[Any, ...], float, float]] = []
-        for pi, (profile, start) in enumerate(
-            zip(track.profiles, track.starts, strict=True)
-        ):
-            slot = slots.get((ti, pi))
-            if slot is None:
-                continue
-            length = profile[-1][0]
-            if slot[0] == "Q":
-                atoms.append((slot, start, start + length))
-                continue
-            _, k, s0, s1 = slot
-            lo, hi = cut_of[ti, pi, 0], cut_of[ti, pi, 1]
-            scale = length / (s1 - s0) if s1 > s0 else 0.0
-            for c in range(lo, hi):
-                a = start if c == lo else start + (cuts[k][c] - s0) * scale
-                b = (
-                    start + length
-                    if c + 1 == hi
-                    else start + (cuts[k][c + 1] - s0) * scale
-                )
-                atoms.append((("L", k, c), a, b))
-        atoms_of.append(atoms)
-        for key, _, _ in atoms:
-            cover.setdefault(key, set()).add(track.index)
-
-    grouped: dict[tuple[Any, ...], dict[int, tuple[float, float]]] = {}
-    for track, atoms in zip(tracks, atoms_of, strict=True):
-        runs: list[list[Any]] = []
-        for key, a, b in atoms:
-            routes = frozenset(cover[key])
-            if runs and runs[-1][0] == routes:
-                runs[-1][3] = b
-            else:
-                runs.append([routes, key, a, b])
-        for routes, key, a, b in runs:
-            grouped.setdefault((tuple(sorted(routes)), key), {})[track.index] = (a, b)
-    stretches = [_Stretch(dict(sorted(spans.items()))) for spans in grouped.values()]
-    stretches.sort(key=lambda s: (s.owner, s.spans[s.owner][0]))
-    return stretches
+    slots, marks = _index_pieces(tracks)
+    cut_of, cuts = _assign_cuts(marks)
+    return _group_stretches(tracks, _track_atoms(tracks, slots, cut_of, cuts))
 
 
 def _seamless(
-    ending: _Stretch, starting: _Stretch, tracks: Mapping[int, _RouteTrack]
+    ending: _Stretch, starting: _Stretch, tracks: Sequence[_RouteTrack]
 ) -> bool:
     """Whether *ending*'s far end and *starting*'s near end are one drawn point.
 
@@ -3933,9 +4001,32 @@ def _seamless(
     return math.dist(tp, hp) <= _TRACK_TOL and tx * hx + ty * hy >= _TRACK_HEADING_COS
 
 
+def _stretches_at_stations(
+    stretches: Sequence[_Stretch], tracks: Sequence[_RouteTrack], *, ending: bool
+) -> dict[str, list[int]]:
+    """Stretch indices that end (or start) at a station, by that station.
+
+    A stretch counts only when every route covering it ends (or starts) there.
+    """
+    found: dict[str, list[int]] = {}
+    for index, stretch in enumerate(stretches):
+        members = [tracks[r] for r in stretch.spans]
+        if ending:
+            reaches = all(
+                stretch.spans[t.index][1] >= t.total - _ROUTE_END_TOL for t in members
+            )
+            stations = {t.target for t in members}
+        else:
+            reaches = all(stretch.spans[t.index][0] <= _ROUTE_END_TOL for t in members)
+            stations = {t.source for t in members}
+        if reaches and len(stations) == 1:
+            found.setdefault(next(iter(stations)), []).append(index)
+    return found
+
+
 def _joined_runs(
     stretches: Sequence[_Stretch],
-    tracks: Mapping[int, _RouteTrack],
+    tracks: Sequence[_RouteTrack],
     invisible: frozenset[str],
 ) -> list[list[_Stretch]]:
     """Chain stretches end to end through a line's invisible port or junction.
@@ -3945,25 +4036,14 @@ def _joined_runs(
     two meet at one point with one heading. Every other stretch begins and
     ends its own run.
     """
-    ending: dict[str, list[int]] = {}
-    starting: dict[str, list[int]] = {}
-    for index, stretch in enumerate(stretches):
-        members = [tracks[r] for r in stretch.spans]
-        if all(stretch.spans[t.index][1] >= t.total - 1e-6 for t in members) and (
-            len({t.target for t in members}) == 1
-        ):
-            ending.setdefault(members[0].target, []).append(index)
-        if all(stretch.spans[t.index][0] <= 1e-6 for t in members) and (
-            len({t.source for t in members}) == 1
-        ):
-            starting.setdefault(members[0].source, []).append(index)
+    ending = _stretches_at_stations(stretches, tracks, ending=True)
+    starting = _stretches_at_stations(stretches, tracks, ending=False)
     follows: dict[int, int] = {}
     for station, tails in ending.items():
         heads = starting.get(station, [])
         if station in invisible and len(tails) == 1 and len(heads) == 1:
-            a, b = tails[0], heads[0]
-            if a != b and _seamless(stretches[a], stretches[b], tracks):
-                follows[a] = b
+            if _seamless(stretches[tails[0]], stretches[heads[0]], tracks):
+                follows[tails[0]] = heads[0]
     continued = set(follows.values())
     runs: list[list[_Stretch]] = []
     seen: set[int] = set()
@@ -3979,13 +4059,24 @@ def _joined_runs(
     return runs
 
 
+class _Placed(NamedTuple):
+    """A chevron on a run: its position, stretch, owning route and pose."""
+
+    position: float
+    stretch: int
+    owner: int
+    arc: float
+    point: tuple[float, float]
+    heading: tuple[float, float]
+
+
 class _Run:
     """A joined run: its stretches laid end to end on one arc-length axis."""
 
     def __init__(
         self,
         stretches: Sequence[_Stretch],
-        tracks: Mapping[int, _RouteTrack],
+        tracks: Sequence[_RouteTrack],
         reach: float,
     ) -> None:
         self.stretches = list(stretches)
@@ -4023,7 +4114,7 @@ class _Run:
             for index, (stretch, offset) in enumerate(
                 zip(self.stretches, self.offsets, strict=True)
             ):
-                if target <= offset + stretch.length + 1e-9:
+                if target <= offset + stretch.length + _ARC_EPS:
                     arc = stretch.spans[stretch.owner][0] + target - offset
                     if (sample := self.tracks[stretch.owner].at(arc)) is not None:
                         found.append(
@@ -4033,15 +4124,109 @@ class _Run:
         return found
 
 
-class _Placed(NamedTuple):
-    """A chevron on a run: its position, stretch, owning route and pose."""
+def _route_tracks(
+    polylines: Sequence[Sequence[tuple[float, float]]],
+    radii: Sequence[Sequence[float] | None],
+    routes: Sequence[RoutedPath],
+    breaks_by_route: Mapping[int, Sequence[BridgeBreak]],
+) -> list[_RouteTrack]:
+    """Each route's drawn pieces with arc-length bookkeeping, in route order."""
+    tracks: list[_RouteTrack] = []
+    for index, (route, pts, route_radii) in enumerate(
+        zip(routes, polylines, radii, strict=True)
+    ):
+        pieces = _drawn_pieces(pts, route_radii)
+        profiles = [_arc_profile(piece) for piece in pieces]
+        lengths = [profile[-1][0] for profile in profiles]
+        tracks.append(
+            _RouteTrack(
+                index,
+                route.edge.source,
+                route.edge.target,
+                pieces,
+                profiles,
+                [sum(lengths[:i]) for i in range(len(lengths))],
+                _gap_spans(pieces, profiles, breaks_by_route.get(index, ())),
+                sum(lengths),
+            )
+        )
+    return tracks
 
-    position: float
-    stretch: int
-    owner: int
-    arc: float
-    point: tuple[float, float]
-    heading: tuple[float, float]
+
+def _line_placements(
+    runs: Sequence[_Run], spacing: float, reach: float, min_length: float
+) -> list[_Placed]:
+    """Every chevron of one line: each run's even set, then cues for bare stretches.
+
+    A stretch the set skips takes a chevron at its middle, longest first, when
+    it is long enough for its routes (half a spacing once they are cued by a
+    chevron on one of their runs, else one chevron long), keeps half a spacing
+    along its run from the run's chevrons, clears the ink of every same-line
+    chevron, and is not in a bridge gap.
+    """
+    on_runs = []
+    for run in runs:
+        count = int(run.length // spacing)
+        start = (run.length - (count - 1) * spacing) / 2
+        on_runs.append(run.place(start + i * spacing for i in range(count)))
+    cued = {
+        route
+        for run, on_run in zip(runs, on_runs, strict=True)
+        if on_run
+        for route in run.routes
+    }
+    bare = sorted(
+        (
+            (run_index, index)
+            for run_index, run in enumerate(runs)
+            for index in range(len(run.stretches))
+            if all(p.stretch != index for p in on_runs[run_index])
+        ),
+        key=lambda c: -runs[c[0]].stretches[c[1]].length,
+    )
+    half = spacing / 2
+    # Same-line chevrons closer than 2*reach would overpaint each other, as at a
+    # crossing.
+    ink_clear = 2 * reach
+    for run_index, index in bare:
+        run, on_run = runs[run_index], on_runs[run_index]
+        stretch = run.stretches[index]
+        if stretch.length < (half if cued.issuperset(stretch.spans) else min_length):
+            continue
+        middle = run.offsets[index] + stretch.length / 2
+        if any(abs(p.position - middle) < half - _ARC_EPS for p in on_run):
+            continue
+        for chevron in run.place([middle]):
+            if all(
+                math.dist(chevron.point, other.point) >= ink_clear
+                for others in on_runs
+                for other in others
+            ):
+                on_run.append(chevron)
+                cued |= run.routes
+    return [chevron for on_run in on_runs for chevron in on_run]
+
+
+def _by_owner(
+    placed: Sequence[_Placed], count: int, size: float
+) -> tuple[tuple[ChevronVertices, ...], ...]:
+    """Chevron vertices on each of *count* routes, in arc order along the route."""
+    buckets: list[list[tuple[float, ChevronVertices]]] = [[] for _ in range(count)]
+    for chevron in placed:
+        vertices = _chevron_vertices(chevron.point, chevron.heading, size)
+        buckets[chevron.owner].append((chevron.arc, vertices))
+    return tuple(
+        tuple(vertices for _, vertices in sorted(bucket, key=lambda p: p[0]))
+        for bucket in buckets
+    )
+
+
+def _invisible_stations(graph: MetroGraph) -> frozenset[str]:
+    """Ports and junctions: stations a line passes through without a marker."""
+    return frozenset(
+        {sid for sid, station in graph.stations.items() if station.is_port}
+        | graph.junction_ids
+    )
 
 
 def _directional_chevrons(
@@ -4049,125 +4234,34 @@ def _directional_chevrons(
     polylines: Sequence[Sequence[tuple[float, float]]],
     radii: Sequence[Sequence[float] | None],
     breaks_by_route: Mapping[int, Sequence[BridgeBreak]],
-    graph: MetroGraph,
+    invisible: frozenset[str],
     theme: Theme,
-    curve_radius: float = SVG_CURVE_RADIUS,
 ) -> tuple[tuple[ChevronVertices, ...], ...]:
     """Each route's chevrons, riding its stroke exactly as it is drawn.
 
     *polylines* and *radii* are the drawn route geometry, one entry per route;
     *breaks_by_route* holds each bridged route's gaps by that route index.
-
-    A line's routes can paint the same ink, so one evenly spaced set of
-    chevrons is laid along each joined run of that ink rather than one set per
-    route. A run is centred on its own length and carries
-    ``floor(length / spacing)`` chevrons, each placed on the lowest-indexed
-    route covering that part. A stretch of at least half a spacing that none
-    of them lands on gets one at its middle, unless that is within half a
-    spacing of another on its run or within chevron-ink distance of any other
-    chevron of the line. A run that still carries none gets one at
-    the middle of its longest stretch when that is at least one chevron long.
+    Same-line routes that paint the same ink share one set of chevrons, so no
+    two chevrons of a line sit closer than half a spacing along a run.
     """
     size = theme.directional_marker_size
     spacing = max(theme.directional_marker_spacing, 1.0)
     reach = size + _chevron_stroke_width(theme) / 2
+    # A route shorter than one chevron carries no useful direction cue.
     min_length = 2 * size
-    invisible = frozenset(
-        {sid for sid, station in graph.stations.items() if station.is_port}
-        | graph.junction_ids
-    )
 
-    tracks: dict[int, _RouteTrack] = {}
+    tracks = _route_tracks(polylines, radii, routes, breaks_by_route)
     by_line: dict[str, list[_RouteTrack]] = {}
-    for index, (route, pts, route_radii) in enumerate(
-        zip(routes, polylines, radii, strict=True)
-    ):
-        pieces = _drawn_pieces(pts, route_radii, curve_radius)
-        profiles = [_arc_profile(piece) for piece in pieces]
-        lengths = [profile[-1][0] for profile in profiles]
-        track = _RouteTrack(
-            index,
-            route.line_id,
-            route.edge.source,
-            route.edge.target,
-            pieces,
-            profiles,
-            [sum(lengths[:i]) for i in range(len(lengths))],
-            _gap_spans(pieces, profiles, breaks_by_route.get(index, ())),
-            sum(lengths),
-        )
-        tracks[index] = track
+    for route, track in zip(routes, tracks, strict=True):
         by_line.setdefault(route.line_id, []).append(track)
-
-    placed: dict[int, list[tuple[float, ChevronVertices]]] = {
-        index: [] for index in tracks
-    }
+    placed: list[_Placed] = []
     for line_tracks in by_line.values():
         runs = [
             _Run(chain, tracks, reach)
             for chain in _joined_runs(_line_stretches(line_tracks), tracks, invisible)
         ]
-        found: list[list[_Placed]] = []
-        for run in runs:
-            count = int(run.length // spacing)
-            start = (run.length - (count - 1) * spacing) / 2
-            found.append(run.place(start + i * spacing for i in range(count)))
-        # A stretch left bare between a run's positions, or beside a break, is
-        # long enough to want a cue of its own: one chevron at its middle, kept
-        # at least half a spacing from every other chevron on the run, and clear
-        # of the ink of any same-line chevron, such as at a crossing.
-        half = spacing / 2
-        ink_clear = 2 * reach
-        for run, on_run in zip(runs, found, strict=True):
-            bare_stretches = sorted(
-                (
-                    index
-                    for index, stretch in enumerate(run.stretches)
-                    if stretch.length >= half
-                    and all(p.stretch != index for p in on_run)
-                ),
-                key=lambda index: -run.stretches[index].length,
-            )
-            for index in bare_stretches:
-                middle = run.offsets[index] + run.stretches[index].length / 2
-                if not all(abs(p.position - middle) >= half - 1e-9 for p in on_run):
-                    continue
-                for chevron in run.place([middle]):
-                    if all(
-                        math.dist(chevron.point, other.point) >= ink_clear
-                        for others in found
-                        for other in others
-                    ):
-                        on_run.append(chevron)
-        covered = {
-            route for run, on_run in zip(runs, found) if on_run for route in run.routes
-        }
-        bare = [run for run, on_run in zip(runs, found, strict=True) if not on_run]
-        # Longest first, so the middle of the longest stretch carries a route's
-        # direction cue, and a route in several bare runs is cued once.
-        bare.sort(key=lambda run: -max(s.length for s in run.stretches))
-        for run in bare:
-            if run.routes <= covered:
-                continue
-            longest = max(run.stretches, key=lambda s: s.length)
-            if longest.length < min_length:
-                continue
-            on_stretch = _Run([longest], tracks, reach).place([longest.length / 2])
-            if on_stretch:
-                found.append(on_stretch)
-                covered |= run.routes
-        for on_run in found:
-            for chevron in on_run:
-                placed[chevron.owner].append(
-                    (
-                        chevron.arc,
-                        _chevron_vertices(chevron.point, chevron.heading, size),
-                    )
-                )
-    return tuple(
-        tuple(vertices for _, vertices in sorted(placed[index], key=lambda p: p[0]))
-        for index in range(len(tracks))
-    )
+        placed.extend(_line_placements(runs, spacing, reach, min_length))
+    return _by_owner(placed, len(tracks), size)
 
 
 def _gap_spans(

@@ -10,13 +10,12 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.render.svg import render_svg
 from nf_metro.render.validate import (
-    _CHEVRON_CENTRE_TOL,
     StrokeTrace,
-    _point_segment_distance,
-    _runs_along,
     check_chevrons_on_stroke,
+    chevron_arc_on_trace,
     parse_chevrons,
     parse_route_strokes,
+    stroke_arcs,
 )
 from nf_metro.themes import NFCORE_DARK_THEME
 
@@ -128,24 +127,23 @@ PUBLISHED_DIRECTIONAL = sorted(
 )
 
 _JOIN_TOL = 0.01
+# Looser than the render plan's own heading tolerance: the stroke read back from
+# the SVG flattens each corner into chords, so end headings are chord
+# directions, not exact tangents.
 _JOIN_HEADING_COS = 0.9999
 
 
 class _Trace:
-    """A drawn stroke with the arc length at the start of each chord."""
+    """A drawn stroke without degenerate chords, with its length and end poses."""
 
     def __init__(self, trace: StrokeTrace) -> None:
+        self.stroke = StrokeTrace(
+            trace.line_id,
+            [(a, b) for a, b in trace.chords if math.dist(a, b) > 1e-9],
+            trace.gaps,
+        )
         self.line_id = trace.line_id
-        self.chords = [(a, b) for a, b in trace.chords if math.dist(a, b) > 1e-9]
-        self.starts: list[float] = []
-        travelled = 0.0
-        pen = self.chords[0][0]
-        for a, b in self.chords:
-            travelled += math.dist(pen, a)
-            self.starts.append(travelled)
-            travelled += math.dist(a, b)
-            pen = b
-        self.length = travelled
+        self.length = stroke_arcs(self.stroke)[1]
 
     @staticmethod
     def _unit(a, b):
@@ -154,26 +152,16 @@ class _Trace:
 
     @property
     def head(self):
-        return self.chords[0][0], self._unit(*self.chords[0])
+        chord = self.stroke.chords[0]
+        return chord[0], self._unit(*chord)
 
     @property
     def tail(self):
-        return self.chords[-1][1], self._unit(*self.chords[-1])
+        chord = self.stroke.chords[-1]
+        return chord[1], self._unit(*chord)
 
     def arc_of(self, centre, heading) -> float | None:
-        """Arc position of a chevron lying on this stroke, else None."""
-        best: tuple[float, float] | None = None
-        for (a, b), start in zip(self.chords, self.starts, strict=True):
-            distance = _point_segment_distance(centre, a, b)
-            if distance > _CHEVRON_CENTRE_TOL or not _runs_along(heading, a, b):
-                continue
-            length = math.dist(a, b)
-            along = (
-                (centre[0] - a[0]) * (b[0] - a[0]) + (centre[1] - a[1]) * (b[1] - a[1])
-            ) / length
-            if best is None or distance < best[0]:
-                best = (distance, start + min(max(along, 0.0), length))
-        return None if best is None else best[1]
+        return chevron_arc_on_trace(self.stroke, centre, heading)
 
 
 def _joins(traces: list[_Trace]) -> dict[int, int]:
