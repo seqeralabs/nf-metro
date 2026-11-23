@@ -96,6 +96,7 @@ from nf_metro.layout.routing.corners import (
     concentric_corner_radius,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
+    concentric_turn_radius,
     corner_radius,
     resolve_curve_radii,
     resolve_curve_radius_at,
@@ -1180,6 +1181,115 @@ def _rederive_semantic_end_corners(
                 )
                 member.route.record_concentric_corner(
                     radius_index, offset, reference_radius
+                )
+
+
+class _BundleTurn(NamedTuple):
+    route: RoutedPath
+    rank: int
+    points: list[tuple[float, float]]
+    incoming: tuple[float, float]
+    outgoing: tuple[float, float]
+
+
+def _unit(a: tuple[float, float], b: tuple[float, float]) -> tuple[float, float] | None:
+    length = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+    if length <= COORD_TOLERANCE:
+        return None
+    return ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+
+
+def _rederive_concentric_bundle_turns(
+    routes: list[RoutedPath],
+    curve_radius: float,
+    station_offsets: Mapping[tuple[str, str], float],
+) -> None:
+    """Size every bundle's non-right-angle turns about one shared centre.
+
+    The 90-degree cohorts are sized by :func:`_rederive_semantic_end_corners`
+    and the bundle builders. This sizes the remaining turns - any corner with
+    a diagonal leg - the same way: corners that are wholesale translations of
+    one another along their turn's bisector form a cohort, the cohort's
+    innermost line keeps its radius, and every other line takes
+    :func:`concentric_turn_radius` from its displacement, so parallel lanes
+    turn as nested arcs instead of identical curves shifted sideways. A lone
+    line's corner is never part of a cohort and keeps the base radius.
+    """
+    cohorts: defaultdict[
+        tuple[tuple[float, float], tuple[float, float]], list[_BundleTurn]
+    ] = defaultdict(list)
+    for route in routes:
+        if len(route.points) < 3:
+            continue
+        points = apply_route_offsets(route, station_offsets)
+        for rank in range(1, len(points) - 1):
+            if is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1]):
+                continue
+            incoming = _unit(points[rank - 1], points[rank])
+            outgoing = _unit(points[rank], points[rank + 1])
+            if incoming is None or outgoing is None:
+                continue
+            cross = incoming[0] * outgoing[1] - incoming[1] * outgoing[0]
+            if abs(cross) <= COORD_TOLERANCE_FINE:
+                continue
+            if planner_owns_segment_or_boundary(route, rank):
+                continue
+            key = (
+                (round(incoming[0], 3), round(incoming[1], 3)),
+                (round(outgoing[0], 3), round(outgoing[1], 3)),
+            )
+            cohorts[key].append(_BundleTurn(route, rank, points, incoming, outgoing))
+
+    def wholesale_pair(a: _BundleTurn, b: _BundleTurn) -> bool:
+        return wholesale_corner_translation(
+            a.points[a.rank], b.points[b.rank], a.incoming, a.outgoing
+        )
+
+    for cohort in cohorts.values():
+        pending = set(range(len(cohort)))
+        while pending:
+            first = pending.pop()
+            component = {first}
+            frontier = [first]
+            while frontier:
+                member_index = frontier.pop()
+                for candidate in list(pending):
+                    if wholesale_pair(cohort[candidate], cohort[member_index]):
+                        pending.remove(candidate)
+                        component.add(candidate)
+                        frontier.append(candidate)
+            if len(component) < 2:
+                continue
+            members = [cohort[index] for index in sorted(component)]
+            turn_in, turn_out = members[0].incoming, members[0].outgoing
+            outward = (turn_in[0] - turn_out[0], turn_in[1] - turn_out[1])
+
+            def depth(member: _BundleTurn) -> float:
+                vertex = member.points[member.rank]
+                return vertex[0] * outward[0] + vertex[1] * outward[1]
+
+            inner = min(members, key=depth)
+            inner_vertex = inner.points[inner.rank]
+            inner_radii = inner.route.curve_radii
+            reference = (
+                inner_radii[inner.rank - 1]
+                if inner_radii and inner.rank - 1 < len(inner_radii)
+                else curve_radius
+            )
+            for member in members:
+                vertex = member.points[member.rank]
+                radii = member.route.curve_radii
+                if radii is None or len(radii) != len(member.points) - 2:
+                    radii = (radii or []) + [curve_radius] * (
+                        len(member.points) - 2 - len(radii or [])
+                    )
+                    member.route.curve_radii = radii
+                radii[member.rank - 1] = concentric_turn_radius(
+                    member.points[member.rank - 1],
+                    vertex,
+                    member.points[member.rank + 1],
+                    (vertex[0] - inner_vertex[0], vertex[1] - inner_vertex[1]),
+                    reference,
                 )
 
 
