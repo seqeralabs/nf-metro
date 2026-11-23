@@ -1998,5 +1998,9 @@
   "inter_section_handlers.py::if lowest is not None and y > (cap := section_header_safe_cap(lowest)):::#1": {
     "note": "In _row_under_run_y: the arm caps a same-row under-run at the highest header badge among the lower-row sections in the columns after the source. tests/data/gate_witnesses/f8402075.mmd and tests/data/canvas_placement/f8403977.mmd run under their row with no lower-row section in those columns; a map whose next row starts within BYPASS_CLEARANCE plus the badge clearance under the run takes it, and no swept map has one.",
     "status": "needs-review"
+  },
+  "inter_section_handlers.py::if src_sec is None or tgt_sec is None:::#2": {
+    "note": "_bypass_split_face reads the section of every branch of a bypass group or junction fan; a fan junction and the port or junction it feeds always resolve to a section, so the unresolved-section return never fires on the corpus.",
+    "status": "defensive"
   }
 }

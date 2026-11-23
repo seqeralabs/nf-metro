@@ -9,7 +9,7 @@ The claim space is documented in ``docs/dev/inter_section_dispatch.mdx``.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import cached_property
@@ -48,6 +48,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     section_bbox_span,
     section_column_span,
+    section_row_span,
 )
 from nf_metro.layout.lane_plan import (
     approach_source,
@@ -3720,6 +3721,7 @@ def _bypass_geometry(
                 ctx.offset_step,
                 anchor_section_id=src_sec_id,
                 anchor_side=PortSide.RIGHT,
+                split_face=_gap1_split_face(f, horizontal),
             )
             gap1_limit = sx + ctx.curve_radius
             if gap1_base - (g1_n - 1) * ctx.offset_step < gap1_limit:
@@ -3745,6 +3747,7 @@ def _bypass_geometry(
                 ctx.offset_step,
                 anchor_section_id=src_sec_id,
                 anchor_side=PortSide.LEFT,
+                split_face=_gap1_split_face(f, horizontal),
             )
             gap1_limit = sx - ctx.curve_radius
             if gap1_base + (g1_n - 1) * ctx.offset_step > gap1_limit:
@@ -3885,11 +3888,11 @@ def _bypass_geometry(
                     )
     else:
         # Same-row bypass past an intervening section whose box is wider than
-        # its grid cell: the neighbour cell sits empty, so the gap query bounds
-        # the descent channel at the canvas origin and it can land inside that
-        # box.  Push gap1 toward the source end of the route and gap2 toward the
-        # target end, so the long below-row traverse, not the descent, passes
-        # the box.  The current leg X seeds the bound that pins each push.
+        # its grid cell: a channel placed from the grid columns can land inside
+        # that box where a neighbour cell sits empty.  Push gap1 toward the
+        # source end of the route and gap2 toward the target end, so the long
+        # below-row traverse, not the descent, passes the box.  The current leg
+        # X seeds the bound that pins each push.
         if horizontal is Direction.L:
             g1_left, g1_right, g2_left, g2_right = gap1_x, None, None, gap2_x
         else:
@@ -4566,7 +4569,10 @@ def _l_shape_fan_source_turn(
     turn_direction = vertical_direction(ty - sy)
     _rank, size = fan
     half_width = (size - 1) * ctx.offset_step / 2
-    axis_x = sx + run_direction.sign * (ctx.curve_radius + half_width)
+    if _fan_split_face(ctx, src, run_direction) is not None:
+        axis_x = _fan_corner_x(ctx, src, size, run_direction)
+    else:
+        axis_x = sx + run_direction.sign * (ctx.curve_radius + half_width)
     axis_x = clear_channel_of_section_edge(
         ctx.graph,
         axis_x,
@@ -5914,17 +5920,27 @@ def _perp_entry_l_geometry(
             sorted(leaving(lid) for lid in ctx.graph.station_lines(edge.source))
         )
         if not straight_drop:
-            lx0 = sx + lead.sign * outer_lane_radius(
-                pos_i + 1, ctx.curve_radius, ctx.offset_step
-            )
+            riser = segment_direction((sx, sy), (sx, mid_y)) or lead
+            if _fan_split_face(ctx, src, lead) is not None:
+                # The member draws its riser off the centreline by its source
+                # offset, so the centreline sits that far back from the lane
+                # the fan's shared column gives this branch.
+                lx0 = (
+                    _fan_corner_x(ctx, src, pos_n, lead)
+                    + l_shape_stagger(pos_i, pos_n, riser, ctx.offset_step)
+                    - right_normal_axis_sign(riser) * leaving(edge.line_id)
+                )
+            else:
+                lx0 = sx + lead.sign * outer_lane_radius(
+                    pos_i + 1, ctx.curve_radius, ctx.offset_step
+                )
+                if lead is Direction.R:
+                    lx0 = _v1_corner_x(ctx, src, sx, lx0)
             # The riser's lanes take radii growing from the innermost lane of
             # the turn at the base radius, so every corner rounds in full once
             # that lane stands a base radius clear of the junction.
-            riser = segment_direction((sx, sy), (sx, mid_y)) or lead
             inward = -lead.sign * right_normal_axis_sign(riser)
             stand_off = ctx.curve_radius + max(inward * a for a in fan_source_offsets)
-            if lead is Direction.R:
-                lx0 = _v1_corner_x(ctx, src, sx, lx0)
 
     # Where the entry lands each line on its own lane, the centreline lands on
     # the reference line's, so the bundle tapers to the section's spread.
@@ -6401,8 +6417,91 @@ def _fan_corner_x(
         ctx.offset_step,
         anchor_section_id=src_sec.id if src_sec is not None else None,
         anchor_side=PortSide.RIGHT if rightward else PortSide.LEFT,
+        split_face=_fan_split_face(ctx, src, horizontal),
     )
     return max(stand_off, slot) if rightward else min(stand_off, slot)
+
+
+def _bypass_split_face(
+    graph: MetroGraph,
+    branches: Iterable[tuple[Station, Station]],
+    col: int | None,
+    row: int | None,
+    travel: Direction,
+) -> float | None:
+    """Near face of the section a bundle leaving grid cell (*col*, *row*)
+    along *travel* stays in its row up to, or ``None``.
+
+    An occupied next column bounds an ordinary two-sided gap the bundle centres
+    in, so only an empty one gives a face.  The *branches* turn as one bundle,
+    so the face is the nearest across all of them, and a branch whose target
+    lies short of the bypassed section holds the bundle back to that target.
+    """
+    sign = travel.sign
+    if col is None or row is None or _sections_in_col(graph, col + int(sign), row):
+        return None
+
+    def faces(sec: Section) -> tuple[float, float]:
+        """*sec*'s near and far faces along *travel*."""
+        lo, hi = section_bbox_span(sec, "x")
+        return (lo, hi) if sign > 0 else (hi, lo)
+
+    starts: list[float] = []
+    targets: list[float] = []
+    obstacles: list[float] = []
+    for src, tgt in branches:
+        src_sec = resolve_section(graph, src, prefer_upstream=False)
+        tgt_sec = resolve_section(graph, tgt, prefer_upstream=False)
+        if src_sec is None or tgt_sec is None:
+            return None
+        start = faces(src_sec)[1]
+        starts.append(start)
+        targets.append(faces(tgt_sec)[0])
+        obstacles += [
+            near
+            for sec in graph.sections.values()
+            for near, far in [faces(sec)]
+            if sign * (far - near) > 0
+            and sec is not src_sec
+            and sec is not tgt_sec
+            and grid_spans_overlap(section_row_span(sec), (row, row))
+            and sign * (far - start) > 0
+            and sign * (tgt.x - near) > 0
+        ]
+    if not obstacles:
+        return None
+    face = min([*obstacles, *targets], key=lambda x: sign * x)
+    if any(sign * (face - start) <= 0 for start in starts):
+        return None
+    return face
+
+
+def _fan_split_face(ctx: _RoutingCtx, src: Station, travel: Direction) -> float | None:
+    """:func:`_bypass_split_face` of every branch of junction *src*'s fan."""
+    graph = ctx.graph
+    branches = (
+        (src, graph.station_for_edge_target(ctx.edge_by_key[key]))
+        for key in ctx.junction_fan_info
+        if key[0] == src.id
+    )
+    return _bypass_split_face(
+        graph, branches, *_resolve_section_colrow(graph, src), travel
+    )
+
+
+def _gap1_split_face(f: _InterFacts, travel: Direction) -> float | None:
+    """:func:`_bypass_split_face` of the bypasses sharing *f*'s source-side
+    channel: those leaving the same column and row the same way, which
+    :func:`_compute_bypass_gap_indices` stacks around one base."""
+    ctx, graph = f.ctx, f.graph
+    branches = (
+        (src, tgt)
+        for key in ctx.bypass_gap_idx
+        for src, tgt in [graph.edge_endpoints(ctx.edge_by_key[key])]
+        if _resolve_section_colrow(graph, src) == (f.src_col, f.src_row)
+        and (tgt.x - src.x > 0) == (travel.sign > 0)
+    )
+    return _bypass_split_face(graph, branches, f.src_col, f.src_row, travel)
 
 
 def fan_corner_offsets(
@@ -7414,7 +7513,17 @@ def _right_entry_over_top_geometry(
     # above bbox_y), not merely the box edge.
     section_top = ep_section.bbox_y if ep_section else min(sy, ey)
     channel_y = section_top - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
+    mid_sy = sy + src_center
+    offset = next(off for _member, line_id, off in members if line_id == edge.line_id)
     lead_x = sx + ctx.curve_radius + ctx.offset_step
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    if fan is not None and _fan_split_face(ctx, src, Direction.R) is not None:
+        rise = _leg_direction((sx, mid_sy), (sx, channel_y))
+        lead_x = (
+            _fan_corner_x(ctx, src, fan[1], Direction.R)
+            + l_shape_stagger(*fan, rise, ctx.offset_step)
+            - offset * right_normal_axis_sign(rise)
+        )
     descent_x = (
         section_right + ctx.curve_radius + ctx.offset_step + SECTION_ROUTE_CLEARANCE
     )
@@ -7444,8 +7553,6 @@ def _right_entry_over_top_geometry(
             channel_y, crossed_bottom + INTER_ROW_EDGE_CLEARANCE + fan_reach
         )
 
-    mid_sy = sy + src_center
-    offset = next(off for _member, line_id, off in members if line_id == edge.line_id)
     turn_direction = _leg_direction((lead_x, mid_sy), (lead_x, channel_y))
     # Both channels are placed from the grid edges to hand, which under-states
     # what their own corridors' reservations charge them; travel each bundle onto

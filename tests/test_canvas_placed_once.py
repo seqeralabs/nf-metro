@@ -128,6 +128,15 @@ STRESS_MAPS: tuple[tuple[str, dict[str, object]], ...] = (
     ),
     ("f8400369.mmd", {"line_order": "span", "center_ports": False}),
     ("f8400846.mmd", {"stroke_scale": 0.6}),
+    ("bypass_split_lr_fan.mmd", {}),
+    ("bypass_split_lr_single.mmd", {}),
+    ("bypass_split_lr_fan_beyond.mmd", {}),
+    ("bypass_split_lr_fan_target_before.mmd", {}),
+    ("bypass_split_rl_fan_beyond.mmd", {}),
+    ("bypass_split_rl_fan_target_before.mmd", {}),
+    ("bypass_split_lr_fan_top_beyond.mmd", {}),
+    ("bypass_split_lr_fan_top_under.mmd", {}),
+    ("bypass_split_rl_fan_top_under.mmd", {}),
 )
 
 PACKED_CELL_OPTIONS: dict[str, object] = {
