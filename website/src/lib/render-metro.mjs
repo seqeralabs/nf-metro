@@ -115,6 +115,16 @@ function findMmdFiles(dir, recursive = true) {
   return results;
 }
 
+function findSnakemakeRulegraphs(dir) {
+  try {
+    return readdirSync(dir)
+      .filter((name) => name.endsWith(".rulegraph.dot"))
+      .map((name) => join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Compute the cache key for a given (mode, source) pair.
  * Must stay in sync with the hash in renderMetroFile.
@@ -189,7 +199,7 @@ function prewarmMetroCache() {
     return;
   }
 
-  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
+  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, from_snakemake:boolean, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
   const jobs = [];
 
   function addJob(file, mode) {
@@ -204,6 +214,7 @@ function prewarmMetroCache() {
         output: cacheFile,
         debug: mode.includes("d"),
         from_nextflow: mode.includes("n"),
+        from_snakemake: mode.includes("s"),
         no_self_color_scheme: true,
         no_chrome_css: mode.includes("c"),
         layout_options: layoutOptions,
@@ -231,6 +242,11 @@ function prewarmMetroCache() {
   // tests/fixtures/nextflow/**/*.mmd → nextflow
   for (const file of findMmdFiles(join(fixturesDir, "nextflow"), true)) {
     addJob(file, "n");
+  }
+
+  // tests/fixtures/snakemake/*.rulegraph.dot → snakemake
+  for (const file of findSnakemakeRulegraphs(join(fixturesDir, "snakemake"))) {
+    addJob(file, "s");
   }
 
   // OG image sources → chrome-less, for OG image rasterization
@@ -268,7 +284,7 @@ function prewarmMetroCache() {
 /**
  * Render a committed `.mmd` file to inline SVG markup.
  * @param {string} file  Absolute path to the source `.mmd`.
- * @param {{ debug?: boolean, fromNextflow?: boolean, chromeCss?: boolean, animate?: boolean }} [opts]
+ * @param {{ debug?: boolean, fromNextflow?: boolean, fromSnakemake?: boolean, chromeCss?: boolean, animate?: boolean }} [opts]
  *   `chromeCss: false` bakes concrete colours instead of the `--nfm-*` custom
  *   properties `<Metro>` relies on for live host recoloring - use this for
  *   standalone raster export (e.g. OG images), never for inline embeds.
@@ -278,10 +294,16 @@ function prewarmMetroCache() {
  */
 export function renderMetroFile(
   file,
-  { debug = false, fromNextflow = false, chromeCss = true, animate = false } = {},
+  {
+    debug = false,
+    fromNextflow = false,
+    fromSnakemake = false,
+    chromeCss = true,
+    animate = false,
+  } = {},
 ) {
   const source = readFileSync(file, "utf-8");
-  const mode = `${debug ? "d" : ""}${fromNextflow ? "n" : ""}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
+  const mode = `${debug ? "d" : ""}${fromNextflow ? "n" : ""}${fromSnakemake ? "s" : ""}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
   const hash = cacheHash(source, mode);
   const cacheFile = join(CACHE_DIR, `${hash}.svg`);
 
@@ -304,6 +326,7 @@ export function renderMetroFile(
   ];
   if (debug) args.push("--debug");
   if (fromNextflow) args.push("--from-nextflow");
+  if (fromSnakemake) args.push("--from-snakemake");
   if (!chromeCss) args.push("--no-chrome-css");
   if (animate) args.push("--animate");
 
@@ -345,6 +368,7 @@ export const BINARY_FORMATS = /** @type {const} */ (["png", "gif", "webp", "mp4"
  *   format: "png"|"gif"|"webp"|"mp4"|"webm",
  *   debug?: boolean,
  *   fromNextflow?: boolean,
+ *   fromSnakemake?: boolean,
  *   animate?: boolean,
  *   duration?: number,
  *   fps?: number,
@@ -359,6 +383,7 @@ export function renderMetroBinary(file, opts) {
     format,
     debug = false,
     fromNextflow = false,
+    fromSnakemake = false,
     animate = false,
     duration,
     fps,
@@ -371,6 +396,7 @@ export function renderMetroBinary(file, opts) {
     format,
     debug ? "d" : "",
     fromNextflow ? "n" : "",
+    fromSnakemake ? "s" : "",
     animate ? "a" : "",
     duration ?? "",
     fps ?? "",
@@ -397,6 +423,7 @@ export function renderMetroBinary(file, opts) {
     ];
     if (debug) args.push("--debug");
     if (fromNextflow) args.push("--from-nextflow");
+    if (fromSnakemake) args.push("--from-snakemake");
     if (animate) args.push("--animate");
     if (duration != null) args.push("--duration", String(duration));
     if (fps != null) args.push("--fps", String(fps));
@@ -429,13 +456,15 @@ export function metroVitePlugin() {
     },
     load(id) {
       const [file, query = ""] = id.split("?");
-      if (!file.endsWith(".mmd")) return;
       const params = new URLSearchParams(query);
       if (!params.has("metro")) return;
+      const fromSnakemake = params.has("snakemake");
+      if (!file.endsWith(fromSnakemake ? ".dot" : ".mmd")) return;
       const svg = renderMetroFile(file, {
         debug: params.has("debug"),
         animate: params.has("animate"),
         fromNextflow: params.has("nextflow"),
+        fromSnakemake,
       });
       return { code: `export default ${JSON.stringify(svg)};`, map: null };
     },

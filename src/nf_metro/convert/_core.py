@@ -1,10 +1,10 @@
-"""Convert Nextflow -with-dag mermaid output to nf-metro .mmd format.
+"""Format-neutral back end shared by the workflow-DAG converters.
 
-Nextflow's ``-with-dag file.mmd`` produces a ``flowchart TB`` mermaid graph
-with channel sources, operator nodes, and process nodes organized into
-subworkflow subgraphs. This module parses that format, drops non-process
-nodes, reconnects edges, maps subworkflows to sections, detects bypass
-lines, and emits a ``graph LR`` nf-metro .mmd file.
+Each front end (``nextflow``, ``snakemake``) parses its tool's export into a
+:class:`_ParsedDag` and picks the nodes worth keeping as stations;
+:func:`dag_to_mmd` does the rest: reconnects edges around dropped nodes,
+breaks cycles, maps groups to sections, assigns main/bypass/spur lines, and
+emits a ``graph LR`` nf-metro ``.mmd`` file.
 """
 
 from __future__ import annotations
@@ -64,22 +64,30 @@ class FeedbackEdgesDroppedWarning(UserWarning):
         self.connections = connections
 
 
+class ExperimentalInputWarning(UserWarning):
+    """Warns that the input format's converter is experimental.
+
+    Its output may change between releases, and complex workflows are likely
+    to need hand-editing of the converted ``.mmd``.
+    """
+
+
 # ---------------------------------------------------------------------------
-# Internal data model for the Nextflow DAG
+# Format-neutral intermediate DAG, filled by each front end
 # ---------------------------------------------------------------------------
 @dataclass
-class _NfNode:
-    """A node parsed from the Nextflow mermaid DAG."""
+class _DagNode:
+    """A node parsed from a workflow manager's DAG export."""
 
     id: str
     label: str
-    shape: str  # "stadium" (process), "square" (value/channel), "circle" (operator)
+    shape: str  # front-end specific, e.g. Nextflow "stadium" (process) vs "circle"
     subgraph: str | None = None  # named subgraph, None if outside or in " "
 
 
 @dataclass
-class _NfSubgraph:
-    """A subgraph parsed from the Nextflow mermaid DAG."""
+class _DagGroup:
+    """A named node group (a Nextflow subworkflow) that becomes a section."""
 
     full_name: str  # e.g. "NFCORE_RNASEQ:RNASEQ:PREPROCESS"
     short_name: str  # e.g. "PREPROCESS" (from [SHORT_NAME])
@@ -88,144 +96,11 @@ class _NfSubgraph:
 
 @dataclass
 class _ParsedDag:
-    """Intermediate representation of a parsed Nextflow DAG."""
+    """Intermediate representation of a parsed workflow DAG."""
 
-    nodes: dict[str, _NfNode] = field(default_factory=dict)
+    nodes: dict[str, _DagNode] = field(default_factory=dict)
     edges: list[tuple[str, str]] = field(default_factory=list)
-    subgraphs: dict[str, _NfSubgraph] = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# Regex patterns for Nextflow mermaid format
-# ---------------------------------------------------------------------------
-
-# subgraph "FULL_NAME [SHORT_NAME]" or subgraph " "
-_NF_SUBGRAPH = re.compile(
-    r'^subgraph\s+"([^"]+)"'
-    r"(?:\s*\[([^\]]+)\])?\s*$"
-)
-
-# Also handle unquoted: subgraph " "
-_NF_SUBGRAPH_SPACE = re.compile(r'^subgraph\s+" "\s*$')
-
-# Stadium node: v1(["LABEL"]) or v1([LABEL]).
-# Nextflow <= 22 emitted quoted labels; 23+ emits unquoted ones.
-_NF_STADIUM = re.compile(r'^(v\d+)\(\["?([^"\]]*?)"?\]\)\s*$')
-
-# Square bracket node: v1["LABEL"] or v1[LABEL] (same quoting drift).
-_NF_SQUARE = re.compile(r'^(v\d+)\["?([^"\]]*?)"?\]\s*$')
-
-# Circle node: v1(( )) or v1(( label ))
-_NF_CIRCLE = re.compile(r"^(v\d+)\(\(\s*(.*?)\s*\)\)\s*$")
-
-# Edge: v1 --> v2
-_NF_EDGE = re.compile(r"^(v\d+)\s*-->\s*(v\d+)\s*$")
-
-# flowchart header
-_NF_FLOWCHART = re.compile(r"^flowchart\s+", re.IGNORECASE)
-
-
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
-def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
-    """Parse a Nextflow ``-with-dag`` mermaid file into an intermediate DAG."""
-    dag = _ParsedDag()
-    lines = text.strip().split("\n")
-
-    current_subgraph: str | None = None  # key into dag.subgraphs, or None
-    subgraph_counter = 0
-
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        # flowchart header
-        if _NF_FLOWCHART.match(line):
-            continue
-
-        # subgraph end
-        if line == "end":
-            current_subgraph = None
-            continue
-
-        # subgraph start (quoted)
-        m = _NF_SUBGRAPH.match(line)
-        if m:
-            full_name = m.group(1).strip()
-            # Extract short name from "FULL [SHORT]" pattern
-            short_name = m.group(2).strip() if m.group(2) else full_name
-            # Also try extracting from the full_name itself if it has [SHORT]
-            bracket_m = re.search(r"\[([^\]]+)\]", full_name)
-            if bracket_m:
-                short_name = bracket_m.group(1).strip()
-                full_name = full_name[: bracket_m.start()].strip()
-
-            # Skip space-only subgraphs (channel containers)
-            if not full_name.strip() or full_name.strip() == " ":
-                current_subgraph = None
-                continue
-
-            sg_key = f"sg_{subgraph_counter}"
-            subgraph_counter += 1
-            dag.subgraphs[sg_key] = _NfSubgraph(
-                full_name=full_name, short_name=short_name
-            )
-            current_subgraph = sg_key
-            continue
-
-        # Also match subgraph " " (space-only, no bracket content)
-        if _NF_SUBGRAPH_SPACE.match(line):
-            current_subgraph = None
-            continue
-
-        # Stadium node (process)
-        m = _NF_STADIUM.match(line)
-        if m:
-            node = _NfNode(id=m.group(1), label=m.group(2), shape="stadium")
-            if current_subgraph:
-                node.subgraph = current_subgraph
-                dag.subgraphs[current_subgraph].node_ids.append(node.id)
-            dag.nodes[node.id] = node
-            continue
-
-        # Square bracket node (value/channel)
-        m = _NF_SQUARE.match(line)
-        if m:
-            node = _NfNode(id=m.group(1), label=m.group(2), shape="square")
-            if current_subgraph:
-                node.subgraph = current_subgraph
-            dag.nodes[node.id] = node
-            continue
-
-        # Circle node (operator)
-        m = _NF_CIRCLE.match(line)
-        if m:
-            node = _NfNode(id=m.group(1), label=m.group(2), shape="circle")
-            if current_subgraph:
-                node.subgraph = current_subgraph
-            dag.nodes[node.id] = node
-            continue
-
-        # Edge
-        m = _NF_EDGE.match(line)
-        if m:
-            dag.edges.append((m.group(1), m.group(2)))
-            continue
-
-    return dag
-
-
-def process_node_labels(text: str) -> list[str]:
-    """Labels of the process nodes in a Nextflow ``-with-dag`` flowchart.
-
-    Nextflow renders processes as stadium nodes; channel and operator nodes are
-    excluded. Deduplicated and sorted. Used by the live-progress check-mapping
-    linter to learn which processes a pipeline actually runs.
-    """
-    dag = _parse_nextflow_mermaid(text)
-    return sorted({n.label for n in dag.nodes.values() if n.shape == "stadium"})
+    subgraphs: dict[str, _DagGroup] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -649,11 +524,11 @@ def _allocate_unique_id(name: str, used: set[str], fallback: str) -> str:
 def _allocate_station_ids(
     section_order: list[str],
     section_node_order: dict[str, list[str]],
-    nodes: dict[str, _NfNode],
+    nodes: dict[str, _DagNode],
 ) -> dict[str, str]:
     """Assign a unique station ID to every kept Nextflow node.
 
-    Two `_NfNode`s can share a label (e.g. `SAMTOOLS_SORT` reused across
+    Two `_DagNode`s can share a label (e.g. `SAMTOOLS_SORT` reused across
     several subworkflows). Sanitising the label alone collapses them onto
     one station ID, producing duplicate declarations and self-loop edges
     that crash layout. Walk sections in topological order and suffix
@@ -809,7 +684,7 @@ def _emit_mmd(
     intra_edges: dict[str, list[tuple[str, str]]],
     lines: _LineAssignment,
     station_ids: dict[str, str],
-    nodes: dict[str, _NfNode],
+    nodes: dict[str, _DagNode],
     dropped_feedback: list[tuple[str, str]] | None = None,
 ) -> str:
     """Assemble the nf-metro ``.mmd`` text from the resolved layout.
@@ -895,7 +770,7 @@ def _format_feedback_pair(
 
 
 def _warn_feedback_edges_dropped(
-    dropped: list[tuple[str, str]], nodes: dict[str, _NfNode]
+    dropped: list[tuple[str, str]], nodes: dict[str, _DagNode]
 ) -> None:
     """Report the back edges removed to make the process graph acyclic."""
 
@@ -913,40 +788,24 @@ def _warn_feedback_edges_dropped(
             "%% comment block.",
             connections,
         ),
-        stacklevel=3,
+        stacklevel=4,
     )
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-def convert_nextflow_dag(text: str, title: str = "") -> str:
-    """Convert a Nextflow ``-with-dag`` mermaid file to nf-metro ``.mmd`` format.
+def dag_to_mmd(dag: _ParsedDag, kept_ids: set[str], title: str = "") -> str:
+    """Convert a parsed DAG to nf-metro ``.mmd`` text, keeping only *kept_ids*.
 
-    Parameters
-    ----------
-    text:
-        Contents of a ``.mmd`` file produced by ``nextflow -with-dag file.mmd``.
-    title:
-        Optional pipeline title. If empty, inferred from subgraph names.
-
-    Returns
-    -------
-    str
-        nf-metro ``.mmd`` text ready for ``nf-metro render``.
+    Edges that ran through dropped nodes are reconnected between the kept
+    nodes they linked. Kept nodes inside a named group become that group's
+    section; the rest share one synthesised section.
 
     Warns
     -----
     FeedbackEdgesDroppedWarning
-        When the pipeline's process graph loops. nf-metro's layout engine
-        requires a DAG, so a deterministic set of back edges is removed; the
-        warning and a trailing ``%%`` comment block in the output both name
-        them.
+        When the kept graph loops. nf-metro's layout engine requires a DAG, so
+        a deterministic set of back edges is removed; the warning and a
+        trailing ``%%`` comment block in the output both name them.
     """
-    dag = _parse_nextflow_mermaid(text)
-
-    # Keep process (stadium) nodes, drop everything else
-    kept_ids = {nid for nid, node in dag.nodes.items() if node.shape == "stadium"}
     if not kept_ids:
         return "%%metro title: Empty Pipeline\n\ngraph LR\n"
 
@@ -993,9 +852,3 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
         dag.nodes,
         dropped_feedback,
     )
-
-
-def is_nextflow_dag(text: str) -> bool:
-    """Check whether text looks like a Nextflow ``-with-dag`` mermaid file."""
-    stripped = text.strip()
-    return stripped.startswith("flowchart ")

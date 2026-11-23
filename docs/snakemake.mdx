@@ -1,0 +1,101 @@
+---
+title: "Convert a Snakemake rule graph into a metro map"
+description: Convert the rule graph or job DAG that Snakemake prints into an nf-metro map. Experimental.
+---
+
+import Metro from "@components/Metro.astro";
+
+nf-metro converts the rule graph or job DAG that Snakemake prints into a metro map.
+
+:::caution[Experimental]
+Snakemake input is experimental.
+The converted map can change between releases, and every conversion prints a warning that says so.
+The converter has been tested on small workflows only.
+For a real workflow, expect to edit the converted `.mmd` by hand.
+:::
+
+## Get the graph from Snakemake
+
+Snakemake prints its workflow graph without running any jobs:
+
+```bash
+snakemake --rulegraph > rules.dot
+```
+
+nf-metro accepts all four forms of this output:
+
+- `--rulegraph` (one node per rule) or `--dag` (one node per job). A rule that runs many jobs still becomes one station.
+- DOT (the default) or `--rulegraph mermaid-js`.
+
+## Direct rendering
+
+Convert and render in one step with the `--from-snakemake` flag:
+
+```bash
+nf-metro render rules.dot -o workflow.svg --from-snakemake
+```
+
+### A short workflow
+
+A five-rule workflow, plus the usual `all` target rule:
+
+```python title="Snakefile"
+rule all:
+    input: "multiqc/report.html"
+
+rule fastqc:      # reads/{sample}.fq.gz -> fastqc/{sample}.zip
+rule trim_reads:  # reads/{sample}.fq.gz -> trimmed/{sample}.fq.gz
+rule align:       # trimmed reads + genome.fa -> aligned/{sample}.bam
+rule sort_bam:    # aligned/{sample}.bam -> sorted/{sample}.bam
+rule multiqc:     # every fastqc zip and sorted BAM -> multiqc/report.html
+```
+
+<Metro
+  src="tests/fixtures/snakemake/flat_pipeline.rulegraph.dot"
+  fromSnakemake
+  mmd={false}
+/>
+
+Each rule becomes a station, and each dependency between two rules becomes a connection.
+The converter drops the `all` rule, because it only collects the final outputs.
+It drops `all` only when no other rule uses its outputs.
+
+### Variant calling (diamond pattern)
+
+Two variant callers read the same alignment and meet again at BCFtools Stats:
+
+```python title="Snakefile"
+rule bwa_mem:              # reads + genome.fa -> aligned/{sample}.bam
+rule samtools_index:       # aligned/{sample}.bam -> aligned/{sample}.bam.bai
+rule gatk_haplotypecaller: # BAM + BAI + genome.fa -> calls/gatk/{sample}.vcf
+rule deepvariant:          # BAM + BAI + genome.fa -> calls/deepvariant/{sample}.vcf
+rule bcftools_stats:       # both VCFs -> stats/{sample}.txt
+```
+
+<Metro
+  src="tests/fixtures/snakemake/variant_calling.rulegraph.dot"
+  fromSnakemake
+  mmd={false}
+/>
+
+## Limits
+
+Snakemake's graph output contains rules and dependencies only:
+
+- **One section.** The output has no grouping (job `group:` directives do not appear in it), so every rule goes into one section. nf-metro folds a long section onto more rows.
+- **One line.** All connections go on one `main` line. To show separate analysis routes, add lines by hand.
+- **Rule names as labels.** The converter turns `bwa_mem` into Bwa Mem, and shortens long names.
+
+## Hand-tune the output
+
+Convert to a `.mmd` file, edit it, then render it:
+
+```bash
+nf-metro convert rules.dot -o workflow.mmd --title "My Workflow"
+# edit workflow.mmd: add sections, lines, and better labels
+nf-metro render workflow.mmd -o workflow.svg
+```
+
+`nf-metro convert` detects Snakemake input automatically.
+To set the format yourself, use `--from snakemake`.
+See the [guide](/nf-metro/guide/) for the directives you can add.

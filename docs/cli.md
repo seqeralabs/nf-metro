@@ -9,7 +9,7 @@ nf-metro ships eleven commands.
 | ------------------------------------------ | -------------------------------------------------------------- |
 | [`render`](#nf-metro-render)               | Render one or more `.mmd` files to SVG or interactive HTML     |
 | [`render-many`](#nf-metro-render-many)     | Render a JSON manifest of render jobs in one process           |
-| [`convert`](#nf-metro-convert)             | Convert a Nextflow `-with-dag` Mermaid file to nf-metro format |
+| [`convert`](#nf-metro-convert)             | Convert a Nextflow or Snakemake DAG export to nf-metro format  |
 | [`validate`](#nf-metro-validate)           | Check a `.mmd` file for errors without producing output        |
 | [`info`](#nf-metro-info)                   | Show what nf-metro parsed and derived from a map               |
 | [`explain`](#nf-metro-explain)             | Show _why_ the layout engine made each decision                |
@@ -72,6 +72,7 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 | `-o`, `--output PATH`                                                | `%%metro output:`, else `<input>.<format>` | Output file path (only valid with a single `INPUT_FILE`). Repeat it to write several formats from one run: `-o map.svg -o map.png`. With no `-o`, the map's `%%metro output:` directive supplies the path(s), each with its own [per-output overrides](#per-output-render-overrides); with neither, the sibling `<input>.<format>`                                                                                           |
 | `--format [svg\|html\|png\|gif\|webp\|mp4\|webm]`                    | inferred from `--output`, else `svg`       | Output format: `svg`, `png`, `html` for an interactive self-contained page, or `gif`/`webp`/`mp4`/`webm` for a [looping video](#looping-video-of-the-animation). `-o map.png` selects PNG on its own                                                                                                                                                                                                                         |
 | `--from-nextflow`                                                    | off                                        | Convert Nextflow `-with-dag` Mermaid input before rendering                                                                                                                                                                                                                                                                                                                                                                  |
+| `--from-snakemake`                                                   | off                                        | Experimental. Convert Snakemake `--rulegraph` or `--dag` output (DOT or mermaid-js) before rendering                                                                                                                                                                                                                                                                                                                         |
 | `--debug / --no-debug`                                               | off                                        | Show the debug overlay (ports, hidden stations, edge waypoints)                                                                                                                                                                                                                                                                                                                                                              |
 | `--reject-output-outside-source / --no-reject-output-outside-source` | off                                        | Refuse a `%%metro output:` declaration that resolves outside the pipeline repository holding the `.mmd` (an absolute path, or a `..` escape past the repo root), or into its `.git/`, instead of writing there. Outside a git working tree the boundary falls back to the `.mmd`'s own directory. Never applies to an explicit `-o`. Meant for rendering a map you didn't author, e.g. a CI job rendering a fork PR's `.mmd` |
 
@@ -313,6 +314,7 @@ Each job is an object with the required `input` and `output` keys, plus any subs
 | `line_spread`          | `"bundle"`, `"centered"`, or `"rails"`                                                                                                                                       |
 | `legend`               | Legend position keyword or coordinate                                                                                                                                        |
 | `from_nextflow`        | Convert from a Nextflow DAG first (default `false`)                                                                                                                          |
+| `from_snakemake`       | Convert from a Snakemake rule graph or job DAG first (default `false`). Experimental                                                                                         |
 | `title`                | Pipeline title override                                                                                                                                                      |
 | `responsive`           | Emit viewBox-only SVG (default `false`)                                                                                                                                      |
 | `embed_font`           | Inline the Inter `@font-face` subset (default `false`)                                                                                                                       |
@@ -343,19 +345,20 @@ Each job is an object with the required `input` and `output` keys, plus any subs
 
 ## `nf-metro convert`
 
-Convert a Nextflow `-with-dag` Mermaid file to nf-metro `.mmd` format.
+Convert a Nextflow `-with-dag` Mermaid file, or the output of `snakemake --rulegraph` or `--dag` (experimental), to nf-metro `.mmd` format.
 Render the output with `nf-metro render`, or hand-tune it first.
 
 ```bash frame="terminal"
 nf-metro convert [OPTIONS] INPUT_FILE
 ```
 
-| Option                | Default | Description                             |
-| --------------------- | ------- | --------------------------------------- |
-| `-o`, `--output PATH` | stdout  | Output `.mmd` file path                 |
-| `--title TEXT`        | none    | Pipeline title for the converted output |
+| Option                         | Default                 | Description                                                                       |
+| ------------------------------ | ----------------------- | --------------------------------------------------------------------------------- |
+| `-o`, `--output PATH`          | stdout                  | Output `.mmd` file path                                                           |
+| `--title TEXT`                 | none                    | Pipeline title for the converted output                                           |
+| `--from [nextflow\|snakemake]` | detected from the input | Workflow manager that wrote `INPUT_FILE`. The Snakemake converter is experimental |
 
-See [Importing from Nextflow](/nf-metro/nextflow/) for details and examples.
+See [Importing from Nextflow](/nf-metro/nextflow/) and [Importing from Snakemake](/nf-metro/snakemake/) for details and examples.
 
 ## `nf-metro validate`
 

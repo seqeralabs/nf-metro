@@ -66,6 +66,7 @@ def _skip_render(mmd_path: Path) -> bool:
 
 EXAMPLES_DIR = project_root / "examples"
 NEXTFLOW_FIXTURES_DIR = project_root / "tests" / "fixtures" / "nextflow"
+SNAKEMAKE_FIXTURES_DIR = project_root / "tests" / "fixtures" / "snakemake"
 TEST_FIXTURES_DIR = project_root / "tests" / "fixtures"
 GUIDE_DIR = project_root / "examples" / "guide"
 # Markdown content lives in the repo-root docs/ dir (the Astro site in website/
@@ -219,7 +220,7 @@ def render_mmd(
     *,
     debug: bool = DEBUG_RENDERS,
     self_color_scheme: bool = True,
-    from_nextflow: bool = False,
+    input_format: str | None = None,
 ) -> str:
     """Parse, layout, and render a .mmd file to SVG; write it and return it.
 
@@ -236,7 +237,7 @@ def render_mmd(
     text = mmd_path.read_text()
     graph = prepare_graph(
         text,
-        from_nextflow=from_nextflow,
+        input_format=input_format,
         source_dir=str(mmd_path.resolve().parent),
     )
     graph.embed_manifest = False
@@ -258,7 +259,7 @@ def render_mmd(
             "src": mmd_path.resolve().relative_to(project_root).as_posix(),
             "debug": debug,
             "self_color_scheme": self_color_scheme,
-            "from_nextflow": from_nextflow,
+            "input_format": input_format,
         }
     return svg_str
 
@@ -454,7 +455,7 @@ def render_nextflow_examples() -> None:
             _manifest[svg_path.name] = section
             continue
         try:
-            render_mmd(mmd_path, svg_path, from_nextflow=True)
+            render_mmd(mmd_path, svg_path, input_format="nextflow")
             _manifest[svg_path.name] = section
             print(f"  nf_{mmd_path.stem}: OK")
         except Exception as e:
@@ -476,6 +477,34 @@ def render_nextflow_examples() -> None:
                 print(f"  {entry['output']}: OK")
             except Exception as e:
                 print(f"  {entry['output']}: FAIL - {e}")
+
+    print()
+
+
+def render_snakemake_examples() -> None:
+    """Render Snakemake rule-graph fixtures to docs/assets/renders/.
+
+    Each workflow's ``--dag`` and mermaid-js exports convert to the same map as
+    its DOT ``--rulegraph`` (``tests/test_convert_snakemake.py``), so only the
+    rule graph is rendered.
+    """
+    RENDERS_DIR.mkdir(parents=True, exist_ok=True)
+    section = "Snakemake Conversions (experimental)"
+    print("Snakemake examples:")
+
+    for dot_path in sorted(SNAKEMAKE_FIXTURES_DIR.glob("*.rulegraph.dot")):
+        name = f"smk_{dot_path.name.removesuffix('.rulegraph.dot')}"
+        svg_path = RENDERS_DIR / f"{name}.svg"
+        if _skip_render(dot_path):
+            _manifest[svg_path.name] = section
+            continue
+        try:
+            render_mmd(dot_path, svg_path, input_format="snakemake")
+            _manifest[svg_path.name] = section
+            print(f"  {name}: OK")
+        except Exception as e:
+            print(f"  {name}: FAIL - {e}")
+            _drop(name, str(e))
 
     print()
 
@@ -568,6 +597,7 @@ if __name__ == "__main__":
         _seed_from_base()
     render_guide_examples()
     render_nextflow_examples()
+    render_snakemake_examples()
     build_pipelines_page()
     render_test_fixtures()
     build_gallery()

@@ -1,0 +1,51 @@
+---
+title: DAG
+---
+flowchart TB
+	id0[all]
+	id1[multiqc]
+	id2[fastqc - sample: s1]
+	id3[fastqc - sample: s2]
+	id4[bcftools_stats]
+	id5[gatk_haplotypecaller]
+	id6[bwa_mem - sample: s1]
+	id7[samtools_index]
+	id8[deepvariant]
+	id9[bcftools_stats]
+	id10[gatk_haplotypecaller]
+	id11[bwa_mem - sample: s2]
+	id12[samtools_index]
+	id13[deepvariant]
+	style id0 fill:#D95757,stroke-width:2px,color:#333333
+	style id1 fill:#57D9D9,stroke-width:2px,color:#333333
+	style id2 fill:#57D957,stroke-width:2px,color:#333333
+	style id3 fill:#57D957,stroke-width:2px,color:#333333
+	style id4 fill:#D99857,stroke-width:2px,color:#333333
+	style id5 fill:#57D998,stroke-width:2px,color:#333333
+	style id6 fill:#D9D957,stroke-width:2px,color:#333333
+	style id7 fill:#5798D9,stroke-width:2px,color:#333333
+	style id8 fill:#98D957,stroke-width:2px,color:#333333
+	style id9 fill:#D99857,stroke-width:2px,color:#333333
+	style id10 fill:#57D998,stroke-width:2px,color:#333333
+	style id11 fill:#D9D957,stroke-width:2px,color:#333333
+	style id12 fill:#5798D9,stroke-width:2px,color:#333333
+	style id13 fill:#98D957,stroke-width:2px,color:#333333
+	id1 --> id0
+	id2 --> id1
+	id3 --> id1
+	id4 --> id1
+	id9 --> id1
+	id5 --> id4
+	id8 --> id4
+	id6 --> id5
+	id7 --> id5
+	id6 --> id7
+	id6 --> id8
+	id7 --> id8
+	id10 --> id9
+	id13 --> id9
+	id11 --> id10
+	id12 --> id10
+	id11 --> id12
+	id11 --> id13
+	id12 --> id13

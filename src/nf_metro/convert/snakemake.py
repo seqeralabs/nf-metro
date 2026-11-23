@@ -1,0 +1,116 @@
+"""Snakemake front end (experimental): parse ``--rulegraph`` / ``--dag`` output.
+
+Snakemake prints its workflow graph with ``snakemake --rulegraph`` (one node
+per rule) or ``--dag`` (one node per job), in DOT (the default) or with
+``mermaid-js``. All four exports convert to the same map: job nodes collapse
+onto their rule, so a rule appears as one station however many jobs it runs.
+
+The graph export carries no grouping, so every rule lands in one section. The
+``all`` target rule only gathers inputs and is dropped.
+"""
+
+from __future__ import annotations
+
+import re
+import warnings
+
+from nf_metro.convert._core import (
+    ExperimentalInputWarning,
+    _DagNode,
+    _ParsedDag,
+    dag_to_mmd,
+)
+
+_DOT_HEADER = re.compile(r"^\s*digraph\s+snakemake_dag\b")
+_DOT_NODE = re.compile(r'^\s*(\d+)\s*\[\s*label\s*=\s*"((?:[^"\\]|\\.)*)"')
+_DOT_EDGE = re.compile(r"^\s*(\d+)\s*->\s*(\d+)\s*;?\s*$")
+
+_MERMAID_FLOWCHART = re.compile(r"^\s*flowchart\s+", re.IGNORECASE | re.MULTILINE)
+_MERMAID_NODE = re.compile(r"^\s*(id\d+)\[(.*)\]\s*$")
+_MERMAID_EDGE = re.compile(r"^\s*(id\d+)\s*-->\s*(id\d+)\s*$")
+
+# Rule names are Python identifiers; a job label appends its wildcards after
+# them (``fastqc\nsample: s1`` in DOT, ``fastqc - sample: s1`` in mermaid-js).
+_RULE_NAME = re.compile(r"[A-Za-z_]\w*")
+
+_TARGET_RULE = "all"
+
+
+def _rule_name(label: str) -> str:
+    m = _RULE_NAME.match(label.strip())
+    return m.group(0) if m else label.strip()
+
+
+def _parse_lines(
+    text: str, node_re: re.Pattern[str], edge_re: re.Pattern[str]
+) -> _ParsedDag:
+    """Collect rule nodes and rule-to-rule edges from one export's lines."""
+    dag = _ParsedDag()
+    job_rule: dict[str, str] = {}
+    rule_node: dict[str, str] = {}
+    seen_edges: set[tuple[str, str]] = set()
+
+    for line in text.splitlines():
+        m = node_re.match(line)
+        if m:
+            rule = _rule_name(m.group(2))
+            if rule not in rule_node:
+                nid = f"r{len(rule_node):04d}"
+                rule_node[rule] = nid
+                dag.nodes[nid] = _DagNode(id=nid, label=rule, shape="rule")
+            job_rule[m.group(1)] = rule_node[rule]
+            continue
+        m = edge_re.match(line)
+        if m and m.group(1) in job_rule and m.group(2) in job_rule:
+            edge = (job_rule[m.group(1)], job_rule[m.group(2)])
+            # Two jobs of one rule chained together are not a rule-level loop.
+            if edge[0] != edge[1] and edge not in seen_edges:
+                seen_edges.add(edge)
+                dag.edges.append(edge)
+    return dag
+
+
+def _parse_snakemake(text: str) -> _ParsedDag:
+    if _DOT_HEADER.search(text):
+        return _parse_lines(text, _DOT_NODE, _DOT_EDGE)
+    return _parse_lines(text, _MERMAID_NODE, _MERMAID_EDGE)
+
+
+def is_snakemake_dag(text: str) -> bool:
+    """Check whether text looks like Snakemake ``--rulegraph``/``--dag`` output."""
+    if _DOT_HEADER.search(text):
+        return True
+    return bool(
+        _MERMAID_FLOWCHART.search(text)
+        and any(_MERMAID_NODE.match(line) for line in text.splitlines())
+    )
+
+
+def convert_snakemake_dag(text: str, title: str = "") -> str:
+    """Convert Snakemake ``--rulegraph`` or ``--dag`` output to nf-metro ``.mmd``.
+
+    Accepts the DOT and ``mermaid-js`` forms of either export.
+
+    Warns
+    -----
+    ExperimentalInputWarning
+        Always: the Snakemake converter is experimental.
+    FeedbackEdgesDroppedWarning
+        When the rule graph loops (see :func:`dag_to_mmd`).
+    """
+    warnings.warn(
+        ExperimentalInputWarning(
+            "Snakemake input is experimental: the converted map may change "
+            "between releases, and complex workflows are likely to need "
+            "hand-editing of the converted .mmd."
+        ),
+        stacklevel=2,
+    )
+    dag = _parse_snakemake(text)
+    successors = {src for src, _ in dag.edges}
+    kept_ids = {
+        nid
+        for nid, node in dag.nodes.items()
+        if not (node.label == _TARGET_RULE and nid not in successors)
+    }
+    return dag_to_mmd(dag, kept_ids, title)
