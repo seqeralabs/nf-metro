@@ -65,6 +65,12 @@ history.
 
 ### Fixed
 
+- A source that feeds a station adding a second line stays on that station's
+  row when other sources share its column. The other sources sit one row to
+  either side and the added line's branch one row off, whichever source is
+  declared first, instead of the trunk's first station dropping a row and the
+  branch landing two rows down
+  ([#2193](https://github.com/seqeralabs/nf-metro/issues/2193)).
 - Two source stations in one column no longer put an unrelated line through a
   branch station. When one source sends a line off onto its own branch, the
   other source sits clear of the lane that branch takes, whichever line is

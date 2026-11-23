@@ -1,0 +1,19 @@
+%%metro title: Root Fan Trunk Feeder Row
+%%metro line: main | Main | #2db572
+%%metro line: qc | QC | #0570b0
+graph LR
+    subgraph analysis [Analysis]
+        %%metro direction: LR
+        genome[Genome]
+        reads[Reads]
+        trim[Trim]
+        align[Align]
+        fastqc[FastQC]
+        report[Report]
+        genome -->|main| report
+        reads -->|main| trim
+        trim -->|main| align
+        align -->|main| report
+        trim -->|qc| fastqc
+        fastqc -->|qc| report
+    end
