@@ -14,18 +14,11 @@ _START = "{/* theme-field-reference:start */}"
 _END = "{/* theme-field-reference:end */}"
 
 
-def _normalise(markdown: str) -> list[list[str]]:
-    rows = []
-    for line in markdown.strip().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if re.fullmatch(r"\|[\s\-:|]+\|", line):
-            rows.append(["---"])
-            continue
-        cells = re.split(r"(?<!\\)\|", line.strip("|"))
-        rows.append([" ".join(cell.split()) for cell in cells])
-    return rows
+def _normalise(markdown: str) -> str:
+    """Drop the padding and line wrapping that prettier and the sentence
+    formatter add, keeping every word and cell."""
+    text = re.sub(r"-{3,}", "---", markdown)
+    return " ".join(text.split())
 
 
 def _documented_reference() -> str:

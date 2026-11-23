@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import textwrap
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -309,40 +310,117 @@ def _labels(root: ET.Element) -> dict[str, tuple[float, float]]:
     }
 
 
-def test_ticks_point_at_their_labels(tube_svg):
-    glyphs = _station_glyphs(tube_svg)
-    labels = _labels(tube_svg)
-    ticks = {
-        sid: el
-        for sid, el in glyphs.items()
-        if len(el.get("data-station-lines", "").split(",")) == 1
-        and sid in labels
-        and el.get("rx") is None
+def _glyph_by_station(root: ET.Element, tag: str) -> dict[str, ET.Element]:
+    return {
+        el.get("data-station-id"): el
+        for el in root.iter(f"{_SVG_NS}{tag}")
+        if "nf-metro-station" in (el.get("class") or "").split()
     }
-    assert {"rsem", "hisat2_align", "bowtie2_align"} <= set(ticks)
-    for sid, tick in ticks.items():
-        y, h = float(tick.get("y")), float(tick.get("height"))
-        x, w = float(tick.get("x")), float(tick.get("width"))
-        label_x, label_y = labels[sid]
-        if h > w:
-            line_y = y if label_y > y + h / 2 else y + h
-            assert (label_y > line_y) == (y >= line_y - 0.01), sid
-        else:
-            line_x = x if label_x > x + w / 2 else x + w
-            assert (label_x > line_x) == (x >= line_x - 0.01), sid
 
 
-def test_ticks_take_their_line_colour(tube_svg):
-    glyphs = _station_glyphs(tube_svg)
-    assert glyphs["rsem"].get("fill") == "#0570b0"
+def test_one_line_stations_are_square_tabs_in_their_line_colour(tube_svg):
+    rsem = _station_glyphs(tube_svg)["rsem"]
+    side = 0.66 * 4.0
+    assert float(rsem.get("width")) == pytest.approx(side)
+    assert float(rsem.get("height")) == pytest.approx(side)
+    assert rsem.get("fill") == "#0570b0"
 
 
-def test_interchanges_are_outlined_capsules(tube_svg):
-    star = _station_glyphs(tube_svg)["star"]
-    assert star.get("fill") == "#ffffff"
-    assert star.get("stroke") == "#000000"
-    assert float(star.get("stroke-width")) == 2.5
-    assert star.get("rx") is not None
+def test_interchanges_are_rings(tube_svg):
+    star = _glyph_by_station(tube_svg, "g")["star"]
+    rings = list(star.iter(f"{_SVG_NS}circle"))
+    assert len(rings) == 1
+    assert float(rings[0].get("r")) == pytest.approx(4.0 + 1.0)
+    assert float(rings[0].get("stroke-width")) == pytest.approx(2.0)
+    assert rings[0].get("stroke") == THEMES["london-tube-dark"].ring_color
+
+
+def test_a_six_line_terminus_is_a_bridged_ring_chain(tube_svg):
+    fastq = _glyph_by_station(tube_svg, "g")["fastq_in"]
+    assert len(list(fastq.iter(f"{_SVG_NS}circle"))) == 3
+    assert [
+        el
+        for el in fastq.iter(f"{_SVG_NS}rect")
+        if "nf-metro-ring-bridge" in (el.get("class") or "")
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Tab, terminus bar and ring geometry, in multiples of the line width
+# ---------------------------------------------------------------------------
+
+
+class _At:
+    def __init__(self, x: float, y: float) -> None:
+        self.x, self.y = x, y
+
+
+_LW = 4.0
+_GEOM = replace(NFCORE_LIGHT_THEME, line_width=_LW)
+
+
+@pytest.mark.parametrize("label_below", [True, False])
+def test_tab_is_a_square_on_the_label_side_of_the_line(label_below):
+    from nf_metro.render.svg import station_tab_box
+
+    label = (100.0, 60.0 if label_below else 40.0)
+    x, y, w, h = station_tab_box(_At(100.0, 50.0), 50.0, _GEOM, False, label)
+    side = 0.66 * _LW
+    assert (w, h) == pytest.approx((side, side))
+    assert x + w / 2 == pytest.approx(100.0)
+    if label_below:
+        assert y == pytest.approx(50.0 + _LW / 2)
+    else:
+        assert y + h == pytest.approx(50.0 - _LW / 2)
+
+
+def test_tab_in_a_vertical_section_faces_its_label_sideways():
+    from nf_metro.render.svg import station_tab_box
+
+    x, y, w, h = station_tab_box(_At(100.0, 50.0), 100.0, _GEOM, True, (80.0, 50.0))
+    assert x + w == pytest.approx(100.0 - _LW / 2)
+    assert y + h / 2 == pytest.approx(50.0)
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+def test_terminus_bar_crosses_the_line_end_and_overhangs_both_sides(vertical):
+    from nf_metro.render.svg import terminus_bar_box
+
+    axis = 100.0 if vertical else 50.0
+    x, y, w, h = terminus_bar_box(_At(100.0, 50.0), axis, _GEOM, vertical)
+    thick, across = 0.66 * _LW, _LW + 2 * 0.66 * _LW
+    if vertical:
+        assert (w, h) == pytest.approx((across, thick))
+        assert x + w / 2 == pytest.approx(axis)
+    else:
+        assert (w, h) == pytest.approx((thick, across))
+        assert y + h / 2 == pytest.approx(axis)
+
+
+@pytest.mark.parametrize(
+    "lines,rings",
+    [(2, 1), (3, 1), (4, 3), (6, 3), (8, 4)],
+)
+def test_ring_chain_length_follows_bundle_width(lines, rings):
+    from nf_metro.render.svg import ring_centre_offsets
+
+    span = (lines - 1) * _LW
+    centres = ring_centre_offsets(-span / 2, span / 2, _GEOM)
+    assert len(centres) == rings
+    if rings > 1:
+        assert centres[0] == pytest.approx(-span / 2)
+        assert centres[-1] == pytest.approx(span / 2)
+        gaps = {round(b - a, 6) for a, b in zip(centres, centres[1:])}
+        assert max(gaps) <= (2 * 1.0 + 0.5) * _LW + 1e-6
+
+
+def test_ring_geometry_scales_with_line_width():
+    from nf_metro.render.svg import ring_centre_offsets
+
+    wide = replace(_GEOM, line_width=2 * _LW)
+    assert len(ring_centre_offsets(0.0, 4 * _LW, _GEOM)) == len(
+        ring_centre_offsets(0.0, 8 * _LW, wide)
+    )
 
 
 def test_sections_are_unboxed_with_plain_uppercase_titles(tube_svg):
@@ -427,3 +505,10 @@ def test_every_chrome_binding_reaches_the_stylesheet():
     svg = render_string(_MMD, theme="london-tube")
     for binding in chrome_bindings():
         assert binding.css_var in svg, binding.css_var
+
+
+def test_inactive_lines_take_the_theme_muted_grey():
+    svg = render_string(
+        _MMD, theme="london-tube", mode="light", inactive_line_ids=frozenset({"alt"})
+    )
+    assert 'stroke="#b3b3b3"' in svg

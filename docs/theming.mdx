@@ -42,12 +42,12 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 
 `--theme` replaces the map's `%%metro style:` entirely.
 
-| Theme         | Look                                                                                                    |
-| ------------- | ------------------------------------------------------------------------------------------------------- |
-| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.    |
-| `seqera`      | Seqera brand colors and Inter type.                                                                     |
-| `london-tube` | A schematic transit look: ticks for one-line stations, outlined interchange capsules, unboxed sections. |
-| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                   |
+| Theme         | Look                                                                                                                              |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.                              |
+| `seqera`      | Seqera brand colors and Inter type.                                                                                               |
+| `london-tube` | A schematic transit look: square tabs for one-line stations, rings at interchanges, bundled lines edge to edge, unboxed sections. |
+| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                                             |
 
 Add `-light` or `-dark` to `nfcore`, `seqera` or `london-tube` to pin the baked palette, for example `nfcore-light`.
 The older names `dark` (for `nfcore`) and `light` (for `transparent`) are still accepted.
@@ -64,7 +64,7 @@ This map takes the station glyphs, section style and fonts from `london-tube`, a
 Under both lies the `nfcore` base, which supplies anything neither sets.
 
 A built-in theme sets only the fields its file lists.
-`london-tube, nfcore` therefore keeps the `london-tube` station ticks, because `nfcore` does not set `station_glyph`, but takes the `nfcore` colors.
+`london-tube, nfcore` therefore keeps the `london-tube` station tabs and rings, because `nfcore` does not set `station_glyph` or `interchange_glyph`, but takes the `nfcore` colors.
 
 ## Writing your own theme
 
@@ -128,15 +128,16 @@ Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/n
   It sets every field the schema leaves without a default, so it is the template for a complete theme.
 - `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
 - `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
+  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width: a station tab is 0.66 line widths square, a terminus bar is 0.66 thick and overhangs the line by 0.66 each side, and an interchange ring has a 2-wide inside and a 0.5-wide outline.
+  Lines on a shared track are drawn edge to edge, as in the standard, so the theme sets no `track_gap`.
+  Inactive lines are 30% grey.
 - `transparent.yaml` sets `fixed_mode: dark` and `background_color: none`, for maps embedded on a page that supplies its own background.
 
 ```yaml title="london_tube.yaml (abridged)"
 name: london-tube
 
 station_glyph: tick
-station_fill: "#ffffff"
-station_stroke: "#000000"
-station_stroke_width: 2.5
+interchange_glyph: ring
 line_width: 4
 label_font_weight: normal
 section_stroke_dasharray: "6 4"
@@ -147,11 +148,17 @@ legend_stroke_width: 1.5
 light:
   background_color: "#ffffff"
   label_color: "#1c3f94"
+  ring_color: "#000000"
+  ring_fill: "#ffffff"
+  muted_line_color: "#b3b3b3"
   section_fill: transparent
   legend_stroke: "#000000"
 dark:
   background_color: "#10141c"
   label_color: "#dfe6ff"
+  ring_color: "#ffffff"
+  ring_fill: "#10141c"
+  muted_line_color: "#585a60"
   section_fill: transparent
   legend_stroke: "#ffffff"
 ```
@@ -207,16 +214,22 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Stations
 
-| Field                  | Value            | Default       | Effect                                                                                                                                                                                     |
-| ---------------------- | ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `marker_stroke`        | colour           | empty         | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                               |
-| `marker_open_fill`     | colour           | empty         | Inside of `open` markers. Empty takes the background, or white on a transparent canvas.                                                                                                    |
-| `station_glyph`        | `pill` \| `tick` | `pill`        | `pill` draws every station as a capsule across its lines. `tick` draws a station on one line as a bar in the line's colour, pointing at its label, and keeps the capsule for interchanges. |
-| `station_fill`         | colour           | from `nfcore` | Station capsule fill.                                                                                                                                                                      |
-| `station_stroke`       | colour           | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                    |
-| `station_stroke_width` | number           | from `nfcore` | Station capsule outline width, px.                                                                                                                                                         |
-| `station_radius`       | number           | `5`           | Station capsule end radius, px.                                                                                                                                                            |
-| `station_tick_length`  | number           | `6`           | How far a `tick` reaches past the edge of its line, px.                                                                                                                                    |
+| Field                  | Value            | Default       | Effect                                                                                                                                                                                                        |
+| ---------------------- | ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `marker_stroke`        | colour           | empty         | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                                                  |
+| `marker_open_fill`     | colour           | empty         | Inside of `open` markers. Empty takes the background, or white on a transparent canvas.                                                                                                                       |
+| `ring_color`           | colour           | empty         | Interchange ring outline when `interchange_glyph` is `ring`. Empty takes `station_stroke`.                                                                                                                    |
+| `ring_fill`            | colour           | empty         | Inside of interchange rings and the strip bridging a chain of them. Empty takes the background, or white on a transparent canvas.                                                                             |
+| `station_glyph`        | `pill` \| `tick` | `pill`        | How a station on one line is drawn. `pill` draws a capsule. `tick` draws a square tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.                |
+| `interchange_glyph`    | `pill` \| `ring` | `pill`        | How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one. |
+| `station_fill`         | colour           | from `nfcore` | Station capsule fill.                                                                                                                                                                                         |
+| `station_stroke`       | colour           | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                                       |
+| `station_stroke_width` | number           | from `nfcore` | Station capsule outline width, px.                                                                                                                                                                            |
+| `station_radius`       | number           | `5`           | Station capsule end radius, px.                                                                                                                                                                               |
+| `station_tick_size`    | number           | `0.66`        | Side of a `tick` tab, and the thickness and overhang of a terminus bar, in multiples of `line_width`.                                                                                                         |
+| `ring_inner_diameter`  | number           | `2`           | Inside diameter of an interchange ring, in multiples of `line_width`.                                                                                                                                         |
+| `ring_stroke_width`    | number           | `0.5`         | Interchange ring outline width, in multiples of `line_width`.                                                                                                                                                 |
+| `ring_bridge_width`    | number           | `0.5`         | Width of the strip bridging a chain of rings, in multiples of `line_width`.                                                                                                                                   |
 
 ### Lines
 
@@ -255,11 +268,10 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | `animation_balls_per_line`    | whole number | `1`       | Balls travelling along each route. |
 | `animation_speed`             | number       | `80`      | Ball speed, px per second.         |
 
-{/* theme-field-reference:end */}
-
 ### Chrome colors and host overrides
 
-These colors also emit a CSS custom property, so a page that inlines the SVG can recolor them (see [`var()` for host overrides](#var-for-host-overrides-optional)):
+These colors also emit a CSS custom property, so a page that inlines the SVG can recolor them (see [`var()` for host overrides](#var-for-host-overrides-optional)).
+An empty value emits none.
 
 | Field                 | Custom property                 |
 | --------------------- | ------------------------------- |
@@ -273,11 +285,15 @@ These colors also emit a CSS custom property, so a page that inlines the SVG can
 | `legend_stroke`       | `--nfm-map-legend-stroke`       |
 | `legend_text_color`   | `--nfm-map-legend-text-color`   |
 | `marker_stroke`       | `--nfm-map-marker-stroke`       |
+| `ring_color`          | `--nfm-map-ring-color`          |
+| `ring_fill`           | `--nfm-map-ring-fill`           |
 
 ### Layout options
 
 A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`.
 A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
+
+{/* theme-field-reference:end */}
 
 ## Light and dark in one SVG
 

@@ -4860,6 +4860,7 @@ def _muted_line_theme(theme: FrozenRecord) -> FrozenRecord:
     overrides: dict[str, Any] = {
         "station_stroke": muted,
         "marker_stroke": muted,
+        "ring_color": muted,
         "terminus_stroke": muted,
         "terminus_font_color": muted,
         "label_color": muted,
@@ -5054,23 +5055,28 @@ def _render_station_into(
 
     x, y, w, h = _pill_box(station, r, min_off, max_off, is_tb_vert)
 
-    # Blank terminus stations get an unrounded nub; everything else a pill.
-    if station.is_blank_terminus:
-        _draw_blank_terminus_nub(
-            d, station, r, min_off, max_off, station_data, theme, is_tb_vert
-        )
-    elif (
-        theme.station_glyph == "tick"
-        and not station.is_terminus
-        and len(lines := graph.station_lines(station.id)) == 1
-    ):
+    lines = graph.station_lines(station.id)
+    if theme.station_glyph == "tick" and len(lines) == 1:
         color = effective_line_color(
             graph.lines.get(lines[0]),
             theme,
             frozenset(lines) if muted else frozenset(),
         )
-        _draw_station_tick(
-            d, station, theme, color, min_off, is_tb_vert, label_point, station_data
+        line_axis = station.x + min_off if is_tb_vert else station.y + min_off
+        box = (
+            terminus_bar_box(station, line_axis, theme, is_tb_vert)
+            if station.is_terminus
+            else station_tab_box(station, line_axis, theme, is_tb_vert, label_point)
+        )
+        d.append(draw.Rectangle(*box, fill=color, **station_data))
+    elif theme.interchange_glyph == "ring" and len(lines) >= 2:
+        _draw_interchange_rings(
+            d, station, theme, min_off, max_off, is_tb_vert, station_data, muted
+        )
+    # Blank terminus stations get an unrounded nub; everything else a pill.
+    elif station.is_blank_terminus:
+        _draw_blank_terminus_nub(
+            d, station, r, min_off, max_off, station_data, theme, is_tb_vert
         )
     else:
         d.append(
@@ -5092,35 +5098,113 @@ def _render_station_into(
         _append_terminus_icons(d, station, graph, theme, r, min_off, max_off, muted)
 
 
-def _draw_station_tick(
+def station_tab_box(
+    station: Station,
+    line_axis: float,
+    theme: Theme,
+    is_tb_vert: bool,
+    label_point: tuple[float, float] | None,
+) -> tuple[float, float, float, float]:
+    """``(x, y, w, h)`` of a one-line station's square tab.
+
+    The tab is ``station_tick_size`` line widths square and sits on the edge
+    of the line facing the station's label. *line_axis* is the line's centre
+    across the flow (its y for LR/RL, its x for TB/BT). With no label to face
+    it sits above (LR/RL) or left (TB/BT).
+    """
+    lw = theme.line_width
+    side = theme.station_tick_size * lw
+    if is_tb_vert:
+        forward = label_point is not None and label_point[0] > line_axis
+        x = line_axis + lw / 2 if forward else line_axis - lw / 2 - side
+        return x, station.y - side / 2, side, side
+    forward = label_point is not None and label_point[1] > line_axis
+    y = line_axis + lw / 2 if forward else line_axis - lw / 2 - side
+    return station.x - side / 2, y, side, side
+
+
+def terminus_bar_box(
+    station: Station, line_axis: float, theme: Theme, is_tb_vert: bool
+) -> tuple[float, float, float, float]:
+    """``(x, y, w, h)`` of the bar across a one-line terminus (a buffer stop).
+
+    ``station_tick_size`` line widths thick along the line, and overhanging
+    the line by the same amount on each side.
+    """
+    lw = theme.line_width
+    size = theme.station_tick_size * lw
+    across = lw + 2 * size
+    if is_tb_vert:
+        return line_axis - across / 2, station.y - size / 2, across, size
+    return station.x - size / 2, line_axis - across / 2, size, across
+
+
+def ring_centre_offsets(min_off: float, max_off: float, theme: Theme) -> list[float]:
+    """Offsets across the bundle of the interchange rings for a station.
+
+    One ring, centred on the bundle, while the bundle is no wider than the
+    ring (two or three lines on one track at the default sizes); otherwise a
+    chain from the outermost line to the other, each ring's outer edge
+    reaching no further than the inner edge of the next.
+    """
+    lw = theme.line_width
+    inner = theme.ring_inner_diameter * lw / 2
+    stroke = theme.ring_stroke_width * lw
+    span = max_off - min_off
+    if span + lw <= 2 * (inner + stroke) + COORD_TOLERANCE_FINE:
+        return [(min_off + max_off) / 2]
+    count = math.ceil(span / (2 * inner + stroke) - COORD_TOLERANCE_FINE) + 1
+    step = span / (count - 1)
+    return [min_off + k * step for k in range(count)]
+
+
+def _draw_interchange_rings(
     d: draw.Group | draw.Drawing,
     station: Station,
     theme: Theme,
-    color: str,
-    offset: float,
+    min_off: float,
+    max_off: float,
     is_tb_vert: bool,
-    label_point: tuple[float, float] | None,
     station_data: dict[str, str],
+    muted: bool,
 ) -> None:
-    """Draw a one-line station as a bar off its line, towards its label.
-
-    The bar starts on the line's centre and reaches ``station_tick_length``
-    past the stroke's edge. With no label to point at it hangs up (LR/RL) or
-    left (TB/BT).
-    """
-    half = theme.line_width / 2
-    reach = half + theme.station_tick_length
-    if is_tb_vert:
-        line_x = station.x + offset
-        forward = label_point is not None and label_point[0] > line_x
-        x = line_x if forward else line_x - reach
-        box = (x, station.y - half, reach, theme.line_width)
-    else:
-        line_y = station.y + offset
-        forward = label_point is not None and label_point[1] > line_y
-        y = line_y if forward else line_y - reach
-        box = (station.x - half, y, theme.line_width, reach)
-    d.append(draw.Rectangle(*box, fill=color, **station_data))
+    """Draw an interchange as a ring, or a bridged chain of rings, on its lines."""
+    lw = theme.line_width
+    inner = theme.ring_inner_diameter * lw / 2
+    stroke = theme.ring_stroke_width * lw
+    background = theme.background_color
+    fill = theme.ring_fill or (
+        background if background and background != "none" else "#ffffff"
+    )
+    color = theme.ring_color or theme.station_stroke
+    ring_class = {} if muted else {"class_": _ns("nf-metro-ring")}
+    bridge_class = {} if muted else {"class_": _ns("nf-metro-ring-bridge")}
+    group = draw.Group(**station_data)
+    centres = [
+        (station.x + off, station.y) if is_tb_vert else (station.x, station.y + off)
+        for off in ring_centre_offsets(min_off, max_off, theme)
+    ]
+    for cx, cy in centres:
+        group.append(
+            draw.Circle(
+                cx,
+                cy,
+                inner + stroke / 2,
+                fill=fill,
+                stroke=color,
+                stroke_width=stroke,
+                **ring_class,
+            )
+        )
+    if len(centres) > 1:
+        half = theme.ring_bridge_width * lw / 2
+        (x0, y0), (x1, y1) = centres[0], centres[-1]
+        if is_tb_vert:
+            box = (x0, y0 - half, x1 - x0, 2 * half)
+        else:
+            box = (x0 - half, y0, 2 * half, y1 - y0)
+        group.append(draw.Rectangle(*box, fill=fill, **bridge_class))
+    d.append(group)
 
 
 def caption_aware_icon_step(

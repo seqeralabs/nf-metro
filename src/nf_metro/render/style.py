@@ -236,13 +236,40 @@ class Theme:
         group="Stations",
         color=True,
     )
+    ring_color: str = _field(
+        "",
+        doc="Interchange ring outline when `interchange_glyph` is `ring`. Empty "
+        "takes `station_stroke`.",
+        group="Stations",
+        color=True,
+        chrome=(("nf-metro-ring", "stroke"),),
+        css_var="--nfm-map-ring-color",
+    )
+    ring_fill: str = _field(
+        "",
+        doc="Inside of interchange rings and the strip bridging a chain of "
+        "them. Empty takes the background, or white on a transparent canvas.",
+        group="Stations",
+        color=True,
+        chrome=(("nf-metro-ring", "fill"), ("nf-metro-ring-bridge", "fill")),
+        css_var="--nfm-map-ring-fill",
+    )
     station_glyph: str = _field(
         "pill",
-        doc="`pill` draws every station as a capsule across its lines. `tick` "
-        "draws a station on one line as a bar in the line's colour, pointing "
-        "at its label, and keeps the capsule for interchanges.",
+        doc="How a station on one line is drawn. `pill` draws a capsule. "
+        "`tick` draws a square tab in the line's colour on the label's side, "
+        "and a bar across the line's end (a buffer stop) at a terminus.",
         group="Stations",
         choices=("pill", "tick"),
+    )
+    interchange_glyph: str = _field(
+        "pill",
+        doc="How a station on several lines is drawn. `pill` draws a capsule "
+        "across them. `ring` draws one ring centred on the lines, or a chain "
+        "of touching rings bridged by a strip when the lines are too wide for "
+        "one.",
+        group="Stations",
+        choices=("pill", "ring"),
     )
     station_fill: str = _field(
         doc="Station capsule fill.", group="Stations", color=True
@@ -258,9 +285,26 @@ class Theme:
     station_radius: float = _field(
         STATION_RADIUS_APPROX, doc="Station capsule end radius, px.", group="Stations"
     )
-    station_tick_length: float = _field(
-        6.0,
-        doc="How far a `tick` reaches past the edge of its line, px.",
+    station_tick_size: float = _field(
+        0.66,
+        doc="Side of a `tick` tab, and the thickness and overhang of a "
+        "terminus bar, in multiples of `line_width`.",
+        group="Stations",
+    )
+    ring_inner_diameter: float = _field(
+        2.0,
+        doc="Inside diameter of an interchange ring, in multiples of `line_width`.",
+        group="Stations",
+    )
+    ring_stroke_width: float = _field(
+        0.5,
+        doc="Interchange ring outline width, in multiples of `line_width`.",
+        group="Stations",
+    )
+    ring_bridge_width: float = _field(
+        0.5,
+        doc="Width of the strip bridging a chain of rings, in multiples of "
+        "`line_width`.",
         group="Stations",
     )
 

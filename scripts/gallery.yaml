@@ -23,8 +23,9 @@ gallery:
     category: Feature Showcase
     description:
       "The rnaseq map under the built-in `london-tube` theme (`%%metro style: london-tube`):
-      ticks for stations on one line, outlined capsules for interchanges, unboxed sections and
-      a humanist sans. Themes stack left to right (`%%metro style: nfcore, london-tube`) and
+      square tabs for stations on one line, a bar at each line end, rings at interchanges,
+      bundled lines edge to edge, unboxed sections and a humanist sans, after the geometry of
+      TfL's Line Diagram Standard. Themes stack left to right (`%%metro style: nfcore, london-tube`) and
       can be [user-defined YAML files](/nf-metro/theming/)."
   - id: directional_flow
     source_dir: examples
