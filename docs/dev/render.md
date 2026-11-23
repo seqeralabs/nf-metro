@@ -179,24 +179,46 @@ CSS `offset-path` and `@keyframes` move each circle along its line.
 The timeline advances but the motion is never sampled, and every ball freezes at its path start.
 CSS `offset-path` animates whether the SVG is opened standalone, referenced from `<img>`, or inlined.
 
-Each metro line gets one ball.
-Every ball is synchronized to the same cycle duration, `max_dur`, chosen so the slowest ball finishes exactly one lap per cycle.
-Through a three-stop `@keyframes`, a shorter line covers its path in the first `move_frac` of the cycle and holds at the terminus for the rest.
-No ball restarts while another is mid-track.
+A dot is one route through a line's graph: a full path from a root of the line to a sink.
+`animation_waves.py` decides which routes dots take, and `animate.py` times them.
+
+**Waves.** Dots leave in waves.
+At each fork, the branches are grouped by where they first rejoin, ranked by a stable topological order of the line.
+Branches that rejoin take turns: each wave sends one dot down one of them, and the next wave moves to the next, so every alternative gets an equal share.
+Each distinct rejoin node is one turn-taking level with its own counter, and groups that rejoin only further downstream nest as one alternative of a later level.
+Groups that never rejoin are cloned: every one of them gets a dot in every wave.
+A virtual root joins the real roots of the line, so roots that merge take turns and roots that never merge each start a dot.
+A tree whose forks never rejoin therefore sends exactly one dot down every root-to-leaf path in every wave.
+
+A round is the number of waves after which every counter is back at zero together, or, when that takes more than twelve waves, the number that uses every edge of the line at least once.
+
+**Cycle and loop.** The cycle is the at-speed travel time of the longest route any sent wave takes, including routes that cross a gap in the drawn geometry as several pieces.
+The loop is a whole number of cycles: the largest round of any line, capped at `floor(60s / cycle)` and at least one.
+A single cycle longer than 60 seconds is its own loop.
+Each line sends the smallest multiple of its round that fills the loop, times `animation_balls_per_line`, with departures spread evenly over the loop.
+Every rotation starts from its first alternative at the top of the loop, so the loop seam is exact.
+
+**One dot.** A dot departs, travels its route at the theme speed, holds at the terminus, and is hidden once it has been visible for one cycle.
+The hide is rounded up to the CSS keyframe precision, so a dot may linger at its terminus a few milliseconds past its cycle but never vanishes before it, and the loop never shows fewer dots than are alive at a wave boundary.
+When a route is split into pieces, each later piece departs as the one before arrives, and only the last piece holds.
+A dot visible for the whole loop needs no hide, and uses the plain three-stop `@keyframes` with a terminus hold.
+In a longer loop a dot's `@keyframes` also step its opacity to zero when its life ends, and its negative `animation-delay` places the start of the animation at the dot's departure.
 
 ### Raster frames of the animation (`video.py`)
 
 No rasterizer evaluates CSS, so a GIF or MP4 of the map cannot be "the animated SVG, rendered at time _t_": resvg would park every ball at its path start.
 `video.py` draws the frames instead.
 
-`build_animation_timeline` returns the same motion paths `render_animation` drives, each one flattened to a polyline with cumulative arc lengths, plus the cycle duration and the per-track `move_frac`.
-Sampling a ball at a moment of the cycle is then the browser's own arithmetic: `distance_frac` reads the keyframes the CSS would have written, and `point_at` walks the polyline by distance the way `offset-distance` does.
+`build_animation_timeline` is the single source for both outputs.
+It returns the cycle, the loop, and a `Dot` for every ball: its flattened track, departure, lifetime, and `move_frac`.
+Seconds and keyframe percentages are rounded inside the timeline to the precision the CSS writes, so `render_animation` and `ball_positions` read the same numbers.
+Sampling a ball at a moment of the loop is then the browser's own arithmetic: the dot's age says whether it is still visible and how far along the track it is, and `point_at` walks the polyline by distance the way `offset-distance` does.
 
 To keep the picture identical, the SVG is emitted once with `animation_frame_slot` set.
 `render_animation` then writes `FRAME_SLOT`, a comment, where the balls and their `@keyframes` would go, and each frame substitutes that comment for its own static `<circle>` elements.
 The slot sits at the balls' place in the drawing order, so a frame stacks them behind the station markers exactly as the animation does, and the whole map is laid out and emitted once for the entire loop.
 
-The sequence covers `[0, 1)` of one cycle, stopping a frame short of repeating frame 0, so the loop wraps without a stutter.
+The sequence covers `[0, 1)` of one loop, stopping a frame short of repeating frame 0, so the loop wraps without a stutter.
 
 All four containers are muxed by PyAV, which ships FFmpeg in its own wheels, so no encoder has to be found on `PATH`.
 Frames reach the encoder one at a time, which is why a long loop never exists all at once.
@@ -233,22 +255,23 @@ It is then selectable through `%%metro style: <brand>` and `%%metro mode: <mode>
 
 ## Module map
 
-| Module              | Responsibility                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan.py`           | Immutable `RenderPlan` data and conversion helpers                                                                                    |
-| `svg.py`            | `render_svg`, plan construction, SVG output, and drawing passes                                                                       |
-| `bridges.py`        | `compute_bridges` - detects genuine non-merging crossings and returns `BridgeBreak` gap spans. Drawing is in `svg.py`                 |
-| `html.py`           | `render_html` - standalone HTML page and inline embed snippet around the SVG                                                          |
-| `manifest.py`       | nf-metro adapter for the embedded-manifest standard. `build_manifest`, `manifest_metadata_svg`                                        |
-| `validate.py`       | `validate_render` - render-geometry guards that read the drawn SVG (markers, route ink, label ink) as their own oracle                |
-| `animate.py`        | `render_animation` - animated balls via CSS `offset-path` + `@keyframes`; `build_animation_timeline` - the same paths, sampleable     |
-| `video.py`          | `write_animation` - a looping GIF/WebP/MP4/WebM of the animation, one rasterized frame per moment of the cycle, muxed through PyAV    |
-| `style.py`          | `Theme` dataclass                                                                                                                     |
-| `legend.py`         | `render_legend`, `compute_legend_dimensions`                                                                                          |
-| `icons.py`          | `render_file_icon`, `render_files_icon`, `render_folder_icon`                                                                         |
-| `driver.py`         | `get_driver_js` - the versioned `attachMetroMap` embed driver shared by the standalone page and the inline snippet                    |
-| `font_embed.py`     | `embed_font` (inline an Inter subset as base64 `@font-face`) and `text_to_paths` (convert `<text>` to `<path>`) for font-portable SVG |
-| `ns.py`             | `ns`, `class_prefix_context`, `adaptive_logo_mask_ids` - SVG class-namespace helpers shared across render modules                     |
-| `path_geometry.py`  | render-time path geometry derived from the frozen route decisions                                                                     |
-| `section_header.py` | `resolve_section_header_placement` - keeps a section's number badge and title clear of routes without moving a route                  |
-| `constants.py`      | render magic numbers (canvas padding, legend sizing, animation params, debug overlay). Theme-dependent values remain in `style.py`    |
+| Module               | Responsibility                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan.py`            | Immutable `RenderPlan` data and conversion helpers                                                                                    |
+| `svg.py`             | `render_svg`, plan construction, SVG output, and drawing passes                                                                       |
+| `bridges.py`         | `compute_bridges` - detects genuine non-merging crossings and returns `BridgeBreak` gap spans. Drawing is in `svg.py`                 |
+| `html.py`            | `render_html` - standalone HTML page and inline embed snippet around the SVG                                                          |
+| `manifest.py`        | nf-metro adapter for the embedded-manifest standard. `build_manifest`, `manifest_metadata_svg`                                        |
+| `validate.py`        | `validate_render` - render-geometry guards that read the drawn SVG (markers, route ink, label ink) as their own oracle                |
+| `animate.py`         | `render_animation` - animated dots via CSS `offset-path` + `@keyframes`; `build_animation_timeline` - the same dots, sampleable       |
+| `animation_waves.py` | which routes the dots of a line take, wave by wave (turn-taking at rejoining forks, cloning elsewhere)                                |
+| `video.py`           | `write_animation` - a looping GIF/WebP/MP4/WebM of the animation, one rasterized frame per moment of the loop, muxed through PyAV     |
+| `style.py`           | `Theme` dataclass                                                                                                                     |
+| `legend.py`          | `render_legend`, `compute_legend_dimensions`                                                                                          |
+| `icons.py`           | `render_file_icon`, `render_files_icon`, `render_folder_icon`                                                                         |
+| `driver.py`          | `get_driver_js` - the versioned `attachMetroMap` embed driver shared by the standalone page and the inline snippet                    |
+| `font_embed.py`      | `embed_font` (inline an Inter subset as base64 `@font-face`) and `text_to_paths` (convert `<text>` to `<path>`) for font-portable SVG |
+| `ns.py`              | `ns`, `class_prefix_context`, `adaptive_logo_mask_ids` - SVG class-namespace helpers shared across render modules                     |
+| `path_geometry.py`   | render-time path geometry derived from the frozen route decisions                                                                     |
+| `section_header.py`  | `resolve_section_header_placement` - keeps a section's number badge and title clear of routes without moving a route                  |
+| `constants.py`       | render magic numbers (canvas padding, legend sizing, animation params, debug overlay). Theme-dependent values remain in `style.py`    |
