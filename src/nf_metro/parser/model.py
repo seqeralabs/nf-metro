@@ -456,10 +456,11 @@ class Section:
     # and cascades through the off-track ``layer_push`` to shift the downstream
     # subtree along.  Empty (a no-op) for every layout that draws no such strike.
     off_track_lead_extra: dict[str, int] = field(default_factory=dict)
-    # Lines pinned to one end of the section's lane order (-1 first lane, +1
-    # last), set by track assignment for a line that joins the bundle from one
-    # side of the trunk, so it reaches its lane without crossing the bundle.
-    lane_ends: dict[str, int] = field(default_factory=dict)
+    # Lines pinned to an end of the section's lane order, set by track
+    # assignment for a line that joins the bundle from one side of the trunk:
+    # negative pins toward the first lane, positive toward the last, and a
+    # larger magnitude pins further out.
+    lane_ends: dict[str, float] = field(default_factory=dict)
 
 
 class UnresolvedEndpointError(NfMetroError, ValueError):

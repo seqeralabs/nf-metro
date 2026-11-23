@@ -1286,26 +1286,81 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
 def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
     """Move each line a section pins (``Section.lane_ends``) to that lane end.
 
-    Lines are pinned only where the lanes follow line priority, so the rest
-    keep their priority order between the pinned ends.  A section sharing a flat
-    frame with a neighbour is left alone: re-slotting it would slope the lines
-    running level across the boundary.
+    The section is re-slotted with its pinned lines at the ends of its priority
+    order.  A flat-frame member keeps the lanes of the lines it shares across
+    the frame, so its new order is shifted to hold them; when no single shift
+    holds them all, the section keeps its order.  Compact sections allot lanes
+    per station, so each station's pinned lines step past that station's other
+    lines instead.
     """
-    if ctx.compact:
-        return
-    component_size = Counter(ctx.frame_roots.values())
-    pinned = {
-        sec_id: section.lane_ends
-        for sec_id, section in ctx.graph.sections.items()
-        if section.lane_ends
-        and component_size[ctx.frame_roots.get(sec_id, sec_id)] <= 1
-    }
-    for sec_id, ends in pinned.items():
-        order = sorted(
-            _section_present_line_set(ctx, sec_id),
-            key=lambda lid: (ends.get(lid, 0), ctx.line_priority.get(lid, 0)),
+    roots = ctx.frame_roots
+    for sec_id, section in ctx.graph.sections.items():
+        ends = section.lane_ends
+        if not ends:
+            continue
+        if ctx.compact:
+            for sid in section.station_ids:
+                ctx.offsets.update(_stepped_pinned_lanes(ctx, sec_id, [sid], ends))
+            continue
+        present = _section_present_line_set(ctx, sec_id)
+        target = _section_order_offsets(
+            ctx,
+            sec_id,
+            sorted(
+                present,
+                key=lambda lid: (ends.get(lid, 0.0), ctx.line_priority.get(lid, 0)),
+            ),
         )
-        _apply_section_line_order(ctx, sec_id, order)
+        root = roots.get(sec_id, sec_id)
+        shared = {
+            lid
+            for other in ctx.graph.sections
+            if other != sec_id and roots.get(other, other) == root
+            for lid in _section_present_line_set(ctx, other)
+        } & present
+        shifts = {
+            round(ctx.offsets.get(key, 0.0) - off, 1)
+            for key, off in target.items()
+            if key[1] in shared
+        }
+        if len(shifts) > 1:
+            continue
+        shift = shifts.pop() if shifts else 0.0
+        ctx.offsets.update({key: off + shift for key, off in target.items()})
+
+
+def _stepped_pinned_lanes(
+    ctx: _OffsetCtx, sec_id: str, stations: list[str], ends: dict[str, float]
+) -> dict[tuple[str, str], float]:
+    """Offsets that step *stations*' pinned lines past their other lines' lanes.
+
+    Lines pinned toward the first lane stack beyond the first held lane, those
+    toward the last beyond the last, each pinned further out landing further
+    out.
+    """
+    lane: dict[str, float] = {}
+    for sid in stations:
+        for lid in ctx.graph.station_lines(sid):
+            lane.setdefault(lid, ctx.offsets.get((sid, lid), 0.0))
+    held = [off for lid, off in lane.items() if lid not in ends]
+    if not held:
+        return {}
+    toward_first = 1.0 if _stores_reflected(ctx, sec_id) else -1.0
+    first_edge = max(held) if toward_first > 0 else min(held)
+    last_edge = min(held) if toward_first > 0 else max(held)
+    pinned = sorted((ends[lid], lid) for lid in lane if lid in ends)
+    firsts = [lid for pin, lid in reversed(pinned) if pin < 0]
+    lasts = [lid for pin, lid in pinned if pin > 0]
+    for k, lid in enumerate(firsts, start=1):
+        lane[lid] = first_edge + toward_first * k * ctx.offset_step
+    for k, lid in enumerate(lasts, start=1):
+        lane[lid] = last_edge - toward_first * k * ctx.offset_step
+    return {
+        (sid, lid): lane[lid]
+        for sid in stations
+        for lid in ctx.graph.station_lines(sid)
+        if lid in ends
+    }
 
 
 def _entry_fed_in_section(graph: MetroGraph, sid: str, lid: str, sec_id: str) -> bool:
@@ -5443,9 +5498,9 @@ def compute_station_offsets(
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
        sections and applies reconvergence ordering (non-compact only).
-    2a. **Lane ends** - moves each line track assignment pinned to one end
-       of its section's lane order (``Section.lane_ends``) onto that end
-       (non-compact only).
+    2a. **Lane ends** - steps each line track assignment pinned to an end of
+       its section's lane order (``Section.lane_ends``) past the section's
+       other lanes on that end.
     2b. **Exit-only line reordering** - a line that originates at a
        multi-line station and exits to a port above takes the top slot,
        so it crosses nothing on the way out (non-compact LR/RL).
