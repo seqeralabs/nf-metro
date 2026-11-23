@@ -199,6 +199,7 @@ Each line sends the smallest multiple of its round that fills the loop, times `a
 Every rotation starts from its first alternative at the top of the loop, so the loop seam is exact.
 
 **One dot.** A dot departs, travels its route at the theme speed, holds at the terminus, and is hidden once it has been visible for one cycle.
+The hide is rounded up to the CSS keyframe precision, so a dot may linger at its terminus a few milliseconds past its cycle but never vanishes before it, and the loop never shows fewer dots than are alive at a wave boundary.
 When a route is split into pieces, each later piece departs as the one before arrives, and only the last piece holds.
 A loop of exactly one cycle needs no hide, and its dots use the plain three-stop `@keyframes` with a terminus hold.
 In a longer loop a dot's `@keyframes` also step its opacity to zero when its life ends, and its negative `animation-delay` places the start of the animation at the dot's departure.

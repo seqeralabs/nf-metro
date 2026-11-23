@@ -9,6 +9,7 @@ the emitted duration, delay and keyframe stops the way a browser does.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import subprocess
@@ -123,7 +124,7 @@ class _CssDot:
 
     def state_at(self, t: float) -> tuple[bool, tuple[float, float]]:
         """Return (visible, centre) *t* seconds into the page's life."""
-        progress = round(((t - self.delay) % self.duration) / self.duration, 9)
+        progress = round((t - self.delay) / self.duration, 9) % 1.0
         index = max(
             i for i, (position, _, _) in enumerate(self.stops) if position <= progress
         )
@@ -134,7 +135,7 @@ class _CssDot:
             u = (progress - p0) / (p1 - p0)
             distance = d0 + (d1 - d0) * u
             opacity = None if o0 is None else o0 + (o1 - o0) * u  # type: ignore[operator]
-        visible = opacity is None or opacity > 0.5
+        visible = opacity is None or opacity > 0
         return visible, _sample(self.points, self.distances, distance)
 
 
@@ -371,6 +372,59 @@ def test_every_dot_is_visible_for_exactly_one_cycle():
     assert all(d.depart >= 0 and d.depart < timeline.loop for d in timeline.dots)
     for dot in timeline.dots:
         assert dot.lifetime == pytest.approx(timeline.cycle, abs=0.011)
+
+
+# --- no dot vanishes early ---------------------------------------------------
+
+
+def _boundary_phases(timeline) -> list[float]:
+    """Every departure and end of life, with one CSS quantum either side."""
+    quantum = timeline.loop * 1e-4
+    instants = set()
+    for dot in timeline.dots:
+        for edge in (dot.depart, dot.depart + dot.lifetime):
+            for shift in (-quantum, 0.0, quantum):
+                instants.add(round((edge + shift) % timeline.loop, 6))
+    return sorted(instants)
+
+
+def _alive_at(timeline, now: float) -> int:
+    """Dots whose exact lifetime covers *now* (half-open)."""
+    return sum(
+        1
+        for dot in timeline.dots
+        if round((now - dot.depart) % timeline.loop, 6) < round(dot.lifetime, 6)
+        or dot.lifetime >= timeline.loop
+    )
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [FIXTURES / "fork_rejoin_vs_branch_3.mmd", EXAMPLES_DIR / "rnaseq_sections.mmd"],
+    ids=["repro3", "hero"],
+)
+def test_no_dot_vanishes_before_its_lifetime_ends(fixture: Path):
+    """Rounding the hide may leave a dot lingering at its terminus a moment
+    past its lifetime, never take it away early: at every departure, every end
+    of life and a quantum either side, at least the dots alive are drawn."""
+    timeline = _timeline(fixture)
+    short = []
+    for now in _boundary_phases(timeline):
+        phase = now / timeline.loop
+        # The frame clock reaches a boundary with float noise either way.
+        for sampled in (phase, math.nextafter(phase, 0), math.nextafter(phase, 2)):
+            shown = len(timeline.ball_positions(sampled))
+            if shown < _alive_at(timeline, now):
+                short.append((now, shown, _alive_at(timeline, now)))
+    assert not short, short[:5]
+
+
+def test_a_cycle_boundary_of_the_rejoin_repro_still_shows_its_dots():
+    timeline = _timeline(FIXTURES / "fork_rejoin_vs_branch_3.mmd")
+    steady = len(timeline.ball_positions(0.5 / 3 + 0.01))
+    assert steady == 2
+    for k in range(1, 3):
+        assert len(timeline.ball_positions(k / 3)) >= steady
 
 
 # --- determinism -----------------------------------------------------------

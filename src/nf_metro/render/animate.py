@@ -124,12 +124,14 @@ class Dot:
         """Return the (travel end, hidden from) fractions of *loop* the CSS
         keyframes are written with; ``None`` when the dot is never hidden.
 
-        The dot is shown on ``[0, hidden_from)`` of its own animation, hidden
-        no later than its lifetime ends.  The travel ends at a keyframe
-        distinct from, and before, the last one shown.
+        The dot is shown on ``[0, hidden_from)`` of its own animation: it may
+        linger at its terminus up to two keyframe steps past its lifetime
+        (the last step being the fade to nothing) but is never hidden before
+        it ends.  The travel ends at a keyframe distinct from, and before, the
+        last one fully shown.
         """
         step = _PERCENT_STEP
-        hidden_from = math.floor(self.lifetime / loop / step + 1e-9) * step
+        hidden_from = (math.ceil(self.lifetime / loop / step - 1e-9) + 1) * step
         if hidden_from >= 1.0 - step / 2:
             return self.move_frac, None
         last_shown = round(hidden_from - step, _PERCENT_DECIMALS)
@@ -165,8 +167,9 @@ class AnimationTimeline:
         centres: list[tuple[float, float]] = []
         for dot in self.dots:
             travel, hidden_from = dot.stops(self.loop)
-            # Rounded so a dot due to vanish exactly now is not kept by float noise.
-            age = round(((now - dot.depart) / self.loop) % 1.0, 9)
+            # Rounded before wrapping so a departure that lands on this instant
+            # is not read as the end of the previous lap by float noise.
+            age = round((now - dot.depart) / self.loop, 9) % 1.0
             if hidden_from is not None and age >= hidden_from:
                 continue
             if _fills_the_cycle(travel):
