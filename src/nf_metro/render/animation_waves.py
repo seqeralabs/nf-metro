@@ -4,8 +4,8 @@ A *route* is a full path from a root of the line to one of its sinks, and a
 *wave* is the set of routes dots are sent down together.  Where a fork's
 branches rejoin downstream the dots take turns: each wave sends one dot down
 one alternative and the next wave moves on to the next, so every alternative
-gets an equal share instead of one dot per path.  Where branches never rejoin
-there is nothing to share and every branch gets a dot in every wave.
+gets an equal share.  Where branches never rejoin there is nothing to share and
+every branch gets a dot in every wave.
 
 Branches are grouped by where they first meet again (ranked by a stable
 topological order).  Branches meeting at the same node form one turn-taking
@@ -101,7 +101,10 @@ class LineWaves:
 
 
 def plan_line_waves(edges: list[Edge]) -> LineWaves | None:
-    """Plan the dot waves of one line's *edges*; ``None`` if it has no root."""
+    """Plan the dot waves of one line's *edges*; ``None`` if it has no root.
+
+    The line must be acyclic; a cycle raises ``networkx.NetworkXUnfeasible``.
+    """
     unique: dict[tuple[str, str], Edge] = {}
     for edge in edges:
         unique.setdefault((edge.source, edge.target), edge)
@@ -113,7 +116,6 @@ def plan_line_waves(edges: list[Edge]) -> LineWaves | None:
     children: dict[str, list[_Leg]] = {_VIRTUAL_ROOT: [_Leg(r, None) for r in roots]}
     for (source, target), edge in unique.items():
         children.setdefault(source, []).append(_Leg(target, edge))
-    children = _without_back_edges(children)
 
     graph: nx.DiGraph[str] = nx.DiGraph()
     for node, legs in children.items():
@@ -142,37 +144,6 @@ def plan_line_waves(edges: list[Edge]) -> LineWaves | None:
     )
     plan = LineWaves(forks, tuple(turn_sizes), kept, 1)
     return replace(plan, round_waves=_round_waves(plan))
-
-
-def _without_back_edges(
-    children: dict[str, list[_Leg]],
-) -> dict[str, list[_Leg]]:
-    """Drop the edges that close a cycle, so every line is a DAG."""
-    done: set[str] = set()
-    on_path = [_VIRTUAL_ROOT]
-    on_path_set = {_VIRTUAL_ROOT}
-    resume = [0]
-    kept: dict[str, list[_Leg]] = {}
-
-    while on_path:
-        node = on_path[-1]
-        legs = children.get(node, ())
-        if resume[-1] == len(legs):
-            on_path.pop()
-            on_path_set.discard(node)
-            resume.pop()
-            done.add(node)
-            continue
-        leg = legs[resume[-1]]
-        resume[-1] += 1
-        if leg.target in on_path_set:
-            continue
-        kept.setdefault(node, []).append(leg)
-        if leg.target not in done:
-            on_path.append(leg.target)
-            on_path_set.add(leg.target)
-            resume.append(0)
-    return kept
 
 
 def _group_branches(
@@ -232,4 +203,4 @@ def _round_waves(plan: LineWaves) -> int:
             unused.difference_update((e.source, e.target) for e in route)
         if not unused:
             return count
-    return _COVER_LIMIT
+    raise RuntimeError(f"waves did not cover every edge within {_COVER_LIMIT} waves")

@@ -258,7 +258,7 @@ nf-metro render pipeline.mmd -o pipeline.gif --duration 12 --fps 20
 The loop runs one full animation loop and stops a frame short of repeating it, so it wraps with no stutter.
 Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the loop that frame represents, and drawn behind the station markers as it is there.
 
-`--duration` compresses (or stretches) the map's own loop into a set number of seconds; leaving it off keeps the balls at exactly the speed the SVG moves them, which for a large pipeline can be a 40-second loop.
+`--duration` compresses (or stretches) the map's own loop into a set number of seconds; leaving it off keeps the balls at exactly the speed the SVG moves them, which makes the loop up to 60 seconds, or longer when one cycle alone exceeds that.
 `--fps` sets the frame rate.
 `--scale` and `--raster-width` size the frames as they size a PNG, except that a video defaults to natural size where a still doubles.
 

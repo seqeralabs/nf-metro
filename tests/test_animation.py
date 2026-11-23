@@ -15,7 +15,7 @@ import pytest
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.render.animate import _build_line_motion_paths
+from nf_metro.render.animate import build_animation_timeline
 from nf_metro.render.svg import render_svg
 from nf_metro.themes import THEMES
 
@@ -44,7 +44,8 @@ def _build(fixture: Path):
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    motion_paths = _build_line_motion_paths(graph, routes, offsets)
+    timeline = build_animation_timeline(graph, routes, offsets, THEMES["nfcore"])
+    motion_paths = sorted({(d.line_id, d.track.d_attr) for d in timeline.dots})
     return graph, routes, offsets, motion_paths
 
 

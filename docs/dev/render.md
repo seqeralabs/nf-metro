@@ -184,7 +184,7 @@ A dot is one route through a line's graph: a full path from a root of the line t
 
 **Waves.** Dots leave in waves.
 At each fork, the branches are grouped by where they first rejoin, ranked by a stable topological order of the line.
-Branches that rejoin take turns: each wave sends one dot down one of them, and the next wave moves to the next, so every alternative gets an equal share instead of one dot per path.
+Branches that rejoin take turns: each wave sends one dot down one of them, and the next wave moves to the next, so every alternative gets an equal share.
 Each distinct rejoin node is one turn-taking level with its own counter, and groups that rejoin only further downstream nest as one alternative of a later level.
 Groups that never rejoin are cloned: every one of them gets a dot in every wave.
 A virtual root joins the real roots of the line, so roots that merge take turns and roots that never merge each start a dot.
@@ -201,7 +201,7 @@ Every rotation starts from its first alternative at the top of the loop, so the 
 **One dot.** A dot departs, travels its route at the theme speed, holds at the terminus, and is hidden once it has been visible for one cycle.
 The hide is rounded up to the CSS keyframe precision, so a dot may linger at its terminus a few milliseconds past its cycle but never vanishes before it, and the loop never shows fewer dots than are alive at a wave boundary.
 When a route is split into pieces, each later piece departs as the one before arrives, and only the last piece holds.
-A loop of exactly one cycle needs no hide, and its dots use the plain three-stop `@keyframes` with a terminus hold.
+A dot visible for the whole loop needs no hide, and uses the plain three-stop `@keyframes` with a terminus hold.
 In a longer loop a dot's `@keyframes` also step its opacity to zero when its life ends, and its negative `animation-delay` places the start of the animation at the dot's departure.
 
 ### Raster frames of the animation (`video.py`)

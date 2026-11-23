@@ -354,58 +354,85 @@ def test_the_css_and_the_sampled_timeline_place_every_dot_alike(fixture: Path):
 
 
 @pytest.mark.parametrize("fixture", TIMELINE_FIXTURES, ids=_ids(TIMELINE_FIXTURES))
-def test_the_loop_is_bounded_and_seamless(fixture: Path):
+def test_the_loop_is_bounded_and_its_waves_repeat_evenly(fixture: Path):
     timeline = _timeline(fixture)
     assert timeline.loop <= max(timeline.cycle, 60.0) + 1e-9
     assert timeline.loop >= timeline.cycle - 1e-9
 
-    start = sorted(timeline.ball_positions(0.0))
-    seam = sorted(timeline.ball_positions(1.0))
-    assert len(start) == len(seam)
-    for (x0, y0), (x1, y1) in zip(start, seam):
-        assert (x0, y0) == pytest.approx((x1, y1))
+    by_line: dict[str, set[float]] = {}
+    for dot in timeline.dots:
+        by_line.setdefault(dot.line_id, set()).add(dot.depart)
+    for line_id, departs in by_line.items():
+        waves = sorted(departs)
+        # Evenly spaced across the whole loop, the wrap-around gap included,
+        # so the pattern repeats exactly at the seam.
+        spacing = timeline.loop / len(waves)
+        assert waves[0] == 0.0
+        gaps = [b - a for a, b in zip(waves, waves[1:])]
+        gaps.append(timeline.loop - waves[-1])
+        assert gaps == pytest.approx([spacing] * len(waves), abs=0.011), line_id
+        assert len(waves) % _plan(fixture, line_id).round_waves == 0, line_id
 
 
 # --- no dot vanishes early ---------------------------------------------------
 
 
-def _boundary_phases(timeline) -> list[float]:
-    """Every departure and end of life, with one CSS quantum either side."""
-    quantum = timeline.loop * 1e-4
-    instants = set()
-    for dot in timeline.dots:
-        for edge in (dot.depart, dot.depart + dot.lifetime):
-            for shift in (-quantum, 0.0, quantum):
-                instants.add(round((edge + shift) % timeline.loop, 6))
-    return sorted(instants)
-
-
-def _alive_at(timeline, now: float) -> int:
-    """Dots whose exact lifetime covers *now* (half-open)."""
+def _drawn_near(timeline, now: float, point: tuple[float, float], tol: float) -> int:
+    """How many dots are drawn within *tol* of *point* *now* seconds in."""
+    phase = now % timeline.loop / timeline.loop
     return sum(
         1
-        for dot in timeline.dots
-        if round((now - dot.depart) % timeline.loop, 6) < round(dot.lifetime, 6)
-        or dot.lifetime >= timeline.loop
+        for x, y in timeline.ball_positions(phase)
+        if abs(x - point[0]) <= tol and abs(y - point[1]) <= tol
     )
 
 
 @pytest.mark.parametrize("fixture", BOUNDARY_FIXTURES, ids=["repro3", "hero"])
 def test_no_dot_vanishes_before_its_lifetime_ends(fixture: Path):
     """Rounding the hide may leave a dot lingering at its terminus a moment
-    past its lifetime, never take it away early: at every departure, every end
-    of life and a quantum either side, at least the dots alive are drawn."""
+    past its lifetime, never take it away early.  A departing dot is drawn at
+    its start the instant it leaves, and a dot about to end is still drawn at
+    its terminus."""
     timeline = _timeline(fixture)
-    short = []
-    for now in _boundary_phases(timeline):
-        phase = now / timeline.loop
-        alive = _alive_at(timeline, now)
-        # The frame clock reaches a boundary with float noise either way.
+    quantum = timeline.loop * 1e-4
+    starting: dict[float, Counter] = {}
+    ending: dict[tuple[float, float], Counter] = {}
+    for dot in timeline.dots:
+        start = dot.track.point_at(0.0)
+        starting.setdefault(dot.depart, Counter())[
+            (round(start[0], 2), round(start[1], 2))
+        ] += 1
+        if dot.lifetime >= timeline.loop:
+            continue
+        end = dot.track.point_at(1.0)
+        # One margin inside the CSS quantum and one far tighter, so a hide
+        # rounded down by less than half a quantum is caught as well.
+        for margin in (quantum / 2, quantum * 1e-3):
+            at = (dot.depart + dot.lifetime - margin) % timeline.loop
+            ending.setdefault((round(at, 9), margin), Counter())[
+                (round(end[0], 2), round(end[1], 2))
+            ] += 1
+
+    missing = []
+    for depart, points in starting.items():
+        phase = depart / timeline.loop
+        # The frame clock reaches a departure with float noise either way.
         for sampled in (phase, math.nextafter(phase, 0), math.nextafter(phase, 2)):
-            shown = len(timeline.ball_positions(sampled))
-            if shown < alive:
-                short.append((now, shown, alive))
-    assert not short, short[:5]
+            for point, wanted in points.items():
+                drawn = sum(
+                    1
+                    for x, y in timeline.ball_positions(sampled)
+                    if abs(x - point[0]) <= 0.01 and abs(y - point[1]) <= 0.01
+                )
+                if drawn < wanted:
+                    missing.append(("start", depart, point, drawn, wanted))
+    for (at, _), points in ending.items():
+        for point, wanted in points.items():
+            # A dot cut short of its terminus by a quantum sits a fraction of
+            # a pixel before it.
+            if _drawn_near(timeline, at, point, 0.5) < wanted:
+                missing.append(("end", at, point, wanted))
+    assert not missing, missing[:5]
 
 
 def test_the_rejoin_repro_shows_each_dot_for_one_cycle_through_every_cycle_boundary():

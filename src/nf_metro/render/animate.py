@@ -606,29 +606,6 @@ def _visibility_keyframes(
     return name
 
 
-def _build_line_motion_paths(
-    graph: MetroGraph,
-    routes: list[RoutedPath],
-    station_offsets: dict[tuple[str, str], float],
-    curve_radius: float = ANIMATION_CURVE_RADIUS,
-) -> list[tuple[str, str]]:
-    """Return the distinct motion paths dots travel, as (line_id, d_attr) pairs.
-
-    These are the paths of one round of each line's waves -- every route its
-    dots take, with a line_id appearing once per path.
-    """
-    paths: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for line in _plan_lines(graph, routes, station_offsets):
-        for wave in line.plan.waves(line.plan.round_waves):
-            for route in wave:
-                for d_attr in _route_pieces(line, route, curve_radius):
-                    if (line.line_id, d_attr) not in seen:
-                        seen.add((line.line_id, d_attr))
-                        paths.append((line.line_id, d_attr))
-    return paths
-
-
 def _chain_edge_points(
     edges: list[Edge],
     route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]],
