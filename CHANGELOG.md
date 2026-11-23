@@ -105,6 +105,10 @@ history.
   Under `diamond_style: symmetric`, a fan whose branches nest (one branch
   carries every line the others do) also seats each branch on its lines' lane
   side, in sections where at most one line enters (#2170).
+- `--directional` chevrons sit on their line's drawn stroke and point along it
+  through rounded corners; a chevron that would land in a bridge gap is
+  omitted. `--validate` and `validate-svg --geometry` report a chevron that
+  leaves its stroke (#2177).
 
 ## [2.1.0] — 2026-09-15
 

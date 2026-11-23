@@ -10,6 +10,7 @@ __all__ = [
     "render_svg",
 ]
 
+import bisect
 import copy
 import hashlib
 import html
@@ -230,6 +231,7 @@ from nf_metro.render.ns import ns as _ns
 from nf_metro.render.path_geometry import materialize_source_turnout_paths
 from nf_metro.render.plan import (
     _RENDER_GRAPH_EXCLUDED_FIELDS,
+    ChevronVertices,
     FrozenGraph,
     FrozenMap,
     FrozenRecord,
@@ -859,6 +861,7 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "bare": "published.bare",
     "draws_standalone_title": "published.draws_standalone_title",
     "inactive_line_ids": "inactive_line_ids",
+    "directional_chevrons": "directional_chevrons",
 }
 
 
@@ -2437,11 +2440,21 @@ def _build_render_plan_scaled(
 
     # Standalone logo positioning (only when no legend to embed it in)
     positive_fan = frozenset(tb_positive_fan_sections(graph))
+    directional_chevrons = (
+        _directional_chevrons(
+            route_polylines,
+            route_curve_radii,
+            dict(zip(edge_route_indices, bridge_breaks, strict=True)),
+            theme,
+        )
+        if graph.directional
+        else ()
+    )
     block_left = _leftmost_ink(
         graph,
         theme,
-        routes=routes,
         route_polylines=route_polylines,
+        directional_chevrons=directional_chevrons,
         station_offsets=station_offsets,
         positive_fan=positive_fan,
         labels=labels,
@@ -2645,6 +2658,7 @@ def _build_render_plan_scaled(
         bare=published_geometry.bare,
         draws_standalone_title=published_geometry.draws_standalone_title,
         inactive_line_ids=inactive_line_ids,
+        directional_chevrons=directional_chevrons,
     ), route_plan
 
 
@@ -2818,7 +2832,7 @@ def _emit_render_plan(
     # Directional chevrons ride on top of the lines but behind stations.
     if graph.directional:
         _render_directional_markers(
-            d, graph, routes, station_offsets, theme, inactive_line_ids
+            d, graph, routes, plan.directional_chevrons, theme, inactive_line_ids
         )
 
     # Animation (after edges, before stations so balls travel behind station markers)
@@ -3039,8 +3053,8 @@ def _leftmost_ink(
     graph: MetroGraph,
     theme: Theme,
     *,
-    routes: list[RoutedPath],
     route_polylines: Sequence[Sequence[tuple[float, float]]],
+    directional_chevrons: Sequence[Sequence[ChevronVertices]],
     station_offsets: dict[tuple[str, str], float],
     positive_fan: set[str] | frozenset[str],
     labels: Sequence[LabelPlacement],
@@ -3072,15 +3086,12 @@ def _leftmost_ink(
             placement.keepout[0] if placement.label_rotation else placement.label_x
         )
     reach.extend(x - theme.line_width / 2 for line in route_polylines for x, _ in line)
-    if graph.directional:
-        for route in routes:
-            reach.extend(
-                x - _chevron_stroke_width(theme) / 2
-                for vertices in _route_chevrons(
-                    apply_route_offsets(route, station_offsets), theme
-                )
-                for x, _ in vertices
-            )
+    reach.extend(
+        x - _chevron_stroke_width(theme) / 2
+        for chevrons in directional_chevrons
+        for vertices in chevrons
+        for x, _ in vertices
+    )
     fan_sections = set(positive_fan)
     for station in _drawn_stations(graph, debug):
         cx, _, width, _, _ = station_marker_box(
@@ -3557,6 +3568,60 @@ def _render_first_class_sections(
         )
 
 
+class _DrawnPiece(NamedTuple):
+    """One piece of a route's stroke, in drawing order.
+
+    A straight run has ``control`` None and lies on polyline leg ``leg``; a
+    corner is the quadratic from ``start`` through ``control`` (its vertex) to
+    ``end``, has no ``leg``, and carries ``curved`` from
+    :class:`~nf_metro.layout.routing.corners.CornerTangent`.
+    """
+
+    start: tuple[float, float]
+    end: tuple[float, float]
+    control: tuple[float, float] | None = None
+    curved: bool = True
+    leg: int | None = None
+
+
+def _drawn_pieces(
+    pts: Sequence[tuple[float, float]],
+    radii: Sequence[float] | None,
+    curve_radius: float = SVG_CURVE_RADIUS,
+) -> list[_DrawnPiece]:
+    """The straight runs and rounded corners a route's stroke is drawn as.
+
+    Runs and corners alternate, starting and ending with a run; each corner
+    meets its neighbouring runs at the shared
+    :func:`~nf_metro.layout.routing.corners.curve_tangents` points.  A route
+    of fewer than two points has no pieces.
+    """
+    pts = list(pts)
+    resolved = resolve_curve_radii(
+        pts, None if radii is None else list(radii), default_radius=curve_radius
+    )
+    tangents = curve_tangents(pts, resolved)
+    starts = [*pts[:1], *(tan.after for tan in tangents)]
+    ends = [*(tan.before for tan in tangents), *pts[-1:]]
+    pieces: list[_DrawnPiece] = []
+    for leg, (start, end) in enumerate(zip(starts, ends[: len(pts) - 1])):
+        pieces.append(_DrawnPiece(start, end, leg=leg))
+        pieces.extend(
+            _DrawnPiece(tan.before, tan.after, tan.corner, tan.curved)
+            for tan in tangents[leg : leg + 1]
+        )
+    return pieces
+
+
+def _run_breaks(piece: _DrawnPiece, breaks: Sequence[BridgeBreak]) -> list[BridgeBreak]:
+    """The bridge breaks on straight run *piece*, in drawing order."""
+    sx, sy = piece.start
+    return sorted(
+        (bk for bk in breaks if bk.seg_index == piece.leg),
+        key=lambda bk: (bk.cut_a[0] - sx) ** 2 + (bk.cut_a[1] - sy) ** 2,
+    )
+
+
 def _render_edges(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -3621,48 +3686,34 @@ def _render_edges(
                 **style_kw,
             )
             path.M(*pts[0])
-
-            resolved = resolve_curve_radii(
-                pts, route_radii, default_radius=curve_radius
-            )
-            before, after, curved = _curve_tangents(pts, resolved)
-
-            for i in range(1, len(pts) - 1):
-                if curved[i]:
-                    path.L(*before[i])
-                    path.Q(pts[i][0], pts[i][1], *after[i])
-                else:
-                    path.L(*pts[i])
-
-            path.L(*pts[-1])
+            for piece in _drawn_pieces(pts, route_radii, curve_radius):
+                if piece.control is None:
+                    path.L(*piece.end)
+                elif piece.curved:
+                    path.Q(*piece.control, *piece.end)
             d.append(path)
 
 
 def _render_directional_markers(
     d: draw.Drawing,
     graph: MetroGraph,
-    routes: list[RoutedPath],
-    station_offsets: dict[tuple[str, str], float],
+    routes: Sequence[RoutedPath],
+    route_chevrons: Sequence[Sequence[ChevronVertices]],
     theme: Theme,
     inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
-    """Draw static chevrons along each route, pointing source to target.
+    """Draw each route's static chevrons, pointing source to target.
 
-    The flow direction is the order of the routed point sequence, so each
-    chevron simply rides the polyline at the local segment direction. Markers
-    are spaced by arc length and kept sparse and subtle by default, in the
-    spirit of a one-way transit line's direction-of-travel arrows.
+    Kept sparse and subtle by default, in the spirit of a one-way transit
+    line's direction-of-travel arrows.
     """
-    for route in routes:
-        pts = apply_route_offsets(route, station_offsets)
-        if len(pts) < 2:
-            continue
+    for route, chevrons in zip(routes, route_chevrons, strict=True):
         line = graph.lines.get(route.line_id)
         color = effective_line_color(
             line, theme, inactive_line_ids, theme.directional_marker_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
-        for vertices in _route_chevrons(pts, theme):
+        for vertices in chevrons:
             _draw_chevron(
                 d,
                 vertices,
@@ -3678,49 +3729,150 @@ def _chevron_stroke_width(theme: Theme) -> float:
     return max(theme.line_width * 0.5, 1.0)
 
 
+# Chords per quadratic corner when measuring its arc length; the chevron is
+# then placed on the exact curve, so this bounds only the spacing error.
+_CORNER_ARC_CHORDS = 32
+
+
+def _directional_chevrons(
+    polylines: Sequence[Sequence[tuple[float, float]]],
+    radii: Sequence[Sequence[float] | None],
+    breaks_by_route: Mapping[int, Sequence[BridgeBreak]],
+    theme: Theme,
+) -> tuple[tuple[ChevronVertices, ...], ...]:
+    """Each route's chevrons, riding its stroke exactly as it is drawn.
+
+    *polylines* and *radii* are the drawn route geometry, one entry per route;
+    *breaks_by_route* holds each bridged route's gaps by that route index.
+    """
+    return tuple(
+        _route_chevrons(
+            _drawn_pieces(pts, route_radii), breaks_by_route.get(index, ()), theme
+        )
+        for index, (pts, route_radii) in enumerate(zip(polylines, radii, strict=True))
+    )
+
+
 def _route_chevrons(
-    pts: list[tuple[float, float]], theme: Theme
-) -> list[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]]:
-    """``(wing, apex, wing)`` of every chevron riding the polyline *pts*."""
+    pieces: Sequence[_DrawnPiece],
+    breaks: Sequence[BridgeBreak],
+    theme: Theme,
+) -> tuple[ChevronVertices, ...]:
+    """``(wing, apex, wing)`` of every chevron riding the drawn *pieces*.
+
+    A chevron whose ink would reach into a bridge gap is dropped: it would
+    paint its line across the over-line the gap reveals.
+    """
     size = theme.directional_marker_size
     spacing = max(theme.directional_marker_spacing, 1.0)
-    # A route shorter than one chevron carries no useful direction cue.
-    return [
-        _chevron_vertices(point, heading, size)
-        for point, heading in _chevron_samples(pts, spacing, 2 * size)
+    reach = size + _chevron_stroke_width(theme) / 2
+    profiles = [_arc_profile(piece) for piece in pieces]
+    blocked = [
+        (lo - reach, hi + reach) for lo, hi in _gap_spans(pieces, profiles, breaks)
     ]
+    # A route shorter than one chevron carries no useful direction cue.
+    return tuple(
+        _chevron_vertices(point, heading, size)
+        for point, heading in _chevron_samples(
+            pieces, profiles, spacing, 2 * size, blocked
+        )
+    )
+
+
+def _gap_spans(
+    pieces: Sequence[_DrawnPiece],
+    profiles: Sequence[Sequence[tuple[float, float]]],
+    breaks: Sequence[BridgeBreak],
+) -> list[tuple[float, float]]:
+    """Arc-length interval of each bridge gap along the drawn *pieces*."""
+    spans: list[tuple[float, float]] = []
+    travelled = 0.0
+    for piece, profile in zip(pieces, profiles, strict=True):
+        length = profile[-1][0]
+        if piece.leg is not None and length > 0:
+            (sx, sy), (ex, ey) = piece.start, piece.end
+            ux, uy = (ex - sx) / length, (ey - sy) / length
+            for bk in _run_breaks(piece, breaks):
+                cuts = [
+                    travelled + (cx - sx) * ux + (cy - sy) * uy
+                    for cx, cy in (bk.cut_a, bk.cut_b)
+                ]
+                spans.append((min(cuts), max(cuts)))
+        travelled += length
+    return spans
+
+
+def _arc_profile(piece: _DrawnPiece) -> list[tuple[float, float]]:
+    """``(arc length, curve parameter)`` stations from a piece's start to end."""
+    if piece.control is None:
+        return [(0.0, 0.0), (math.dist(piece.start, piece.end), 1.0)]
+    profile = [(0.0, 0.0)]
+    prev = piece.start
+    for k in range(1, _CORNER_ARC_CHORDS + 1):
+        t = k / _CORNER_ARC_CHORDS
+        point, _ = _piece_at(piece, t)
+        profile.append((profile[-1][0] + math.dist(prev, point), t))
+        prev = point
+    return profile
+
+
+def _piece_at(
+    piece: _DrawnPiece, t: float
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Point and (unnormalised) forward tangent of *piece* at parameter *t*."""
+    (ax, ay), (bx, by) = piece.start, piece.end
+    if piece.control is None:
+        return (ax + (bx - ax) * t, ay + (by - ay) * t), (bx - ax, by - ay)
+    cx, cy = piece.control
+    s = 1.0 - t
+    point = (
+        s * s * ax + 2 * s * t * cx + t * t * bx,
+        s * s * ay + 2 * s * t * cy + t * t * by,
+    )
+    return point, (s * (cx - ax) + t * (bx - cx), s * (cy - ay) + t * (by - cy))
 
 
 def _chevron_samples(
-    pts: list[tuple[float, float]], spacing: float, min_length: float
+    pieces: Sequence[_DrawnPiece],
+    profiles: Sequence[Sequence[tuple[float, float]]],
+    spacing: float,
+    min_length: float,
+    blocked: Sequence[tuple[float, float]] = (),
 ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-    """Sample (point, unit-heading) pairs evenly along a polyline.
+    """Sample (point, unit-heading) pairs evenly along the drawn *pieces*.
 
-    Chevrons are centred on the polyline so a route reads symmetrically. A
-    route between ``min_length`` and ``spacing`` in length carries a single
-    chevron at its midpoint.
+    Positions are spaced by drawn arc length, measured on each piece's
+    *profiles* entry from :func:`_arc_profile`. A position inside any
+    *blocked* arc-length interval is dropped, not moved.
     """
-    segments = [
-        (a, b, length)
-        for a, b in zip(pts, pts[1:])
-        if (length := math.hypot(b[0] - a[0], b[1] - a[1])) > 0
-    ]
-    total = sum(length for _, _, length in segments)
+    total = sum(profile[-1][0] for profile in profiles)
     if total < min_length:
         return []
 
     count = max(1, int(total // spacing))
     start = (total - (count - 1) * spacing) / 2
+    targets = [
+        target
+        for target in (start + i * spacing for i in range(count))
+        if not any(lo <= target <= hi for lo, hi in blocked)
+    ]
 
     samples: list[tuple[tuple[float, float], tuple[float, float]]] = []
-    targets = [start + i * spacing for i in range(count)]
     travelled = 0.0
     ti = 0
-    for (ax, ay), (bx, by), length in segments:
-        ux, uy = (bx - ax) / length, (by - ay) / length
-        while ti < len(targets) and targets[ti] <= travelled + length:
-            offset = targets[ti] - travelled
-            samples.append(((ax + ux * offset, ay + uy * offset), (ux, uy)))
+    for piece, profile in zip(pieces, profiles, strict=True):
+        arcs = [arc for arc, _ in profile]
+        length = arcs[-1]
+        while ti < len(targets) and targets[ti] <= travelled + length and length > 0:
+            local = targets[ti] - travelled
+            k = min(max(bisect.bisect_left(arcs, local), 1), len(profile) - 1)
+            (arc0, t0), (arc1, t1) = profile[k - 1], profile[k]
+            t = t0 + (t1 - t0) * ((local - arc0) / (arc1 - arc0) if arc1 > arc0 else 0)
+            point, (dx, dy) = _piece_at(piece, t)
+            # Only the apex of a corner that doubles straight back has no
+            # tangent; it has no direction of travel to mark either.
+            if norm := math.hypot(dx, dy):
+                samples.append((point, (dx / norm, dy / norm)))
             ti += 1
         travelled += length
     return samples
@@ -3767,29 +3919,6 @@ def _draw_chevron(
     d.append(path)
 
 
-def _curve_tangents(
-    pts: list[tuple[float, float]], resolved: list[float]
-) -> tuple[
-    dict[int, tuple[float, float]], dict[int, tuple[float, float]], dict[int, bool]
-]:
-    """Curve entry/exit points for each interior vertex.
-
-    Returns ``(before, after, curved)`` keyed by vertex index ``i`` in
-    ``1..len(pts)-2``: ``before[i]``/``after[i]`` are the points where the
-    smoothing curve leaves and rejoins the polyline; ``curved[i]`` is False
-    for a degenerate corner (zero-length neighbour), where both collapse to
-    the vertex itself.
-    """
-    before: dict[int, tuple[float, float]] = {}
-    after: dict[int, tuple[float, float]] = {}
-    curved: dict[int, bool] = {}
-    for i, tan in enumerate(curve_tangents(pts, resolved), start=1):
-        before[i] = tan.before
-        after[i] = tan.after
-        curved[i] = tan.curved
-    return before, after, curved
-
-
 def _render_bridged_edge(
     d: draw.Drawing,
     pts: list[tuple[float, float]],
@@ -3808,10 +3937,6 @@ def _render_bridged_edge(
     straight run carrying a crossing, the pen lifts across a small gap so the
     over-line reads as passing over the top.
     """
-    resolved = resolve_curve_radii(pts, curve_radii, default_radius=curve_radius)
-    m = len(pts) - 1
-    before, after, _ = _curve_tangents(pts, resolved)
-
     path = draw.Path(
         stroke=color,
         stroke_width=theme.line_width,
@@ -3823,21 +3948,14 @@ def _render_bridged_edge(
         **style_kw,
     )
     path.M(*pts[0])
-    for s in range(m):
-        run_start = pts[0] if s == 0 else after[s]
-        run_end = pts[m] if s + 1 == m else before[s + 1]
-        seg_breaks = sorted(
-            (bk for bk in breaks if bk.seg_index == s),
-            key=lambda bk: (
-                (bk.cut_a[0] - run_start[0]) ** 2 + (bk.cut_a[1] - run_start[1]) ** 2
-            ),
-        )
-        for bk in seg_breaks:
+    for piece in _drawn_pieces(pts, curve_radii, curve_radius):
+        if piece.control is not None:
+            path.Q(*piece.control, *piece.end)
+            continue
+        for bk in _run_breaks(piece, breaks):
             path.L(*bk.cut_a)
             path.M(*bk.cut_b)
-        path.L(*run_end)
-        if s + 1 <= m - 1:
-            path.Q(pts[s + 1][0], pts[s + 1][1], *after[s + 1])
+        path.L(*piece.end)
     d.append(path)
 
 
