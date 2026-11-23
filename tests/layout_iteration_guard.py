@@ -219,6 +219,7 @@ PLACEMENT_MODULES = frozenset(
         "phase_state.py",
         "rail_mode.py",
         "section_placement.py",
+        "title_band.py",
     }
 )
 
