@@ -92,12 +92,12 @@ try {
 const XML_PROLOG_RE = /^<\?xml.*?\?>\s*/;
 
 /**
- * Recursively collect .mmd files under `dir`.
+ * Collect files ending in `suffix` under `dir`, recursing by default.
  * @param {string} dir
  * @param {boolean} recursive  When false, only top-level files are returned.
  * @returns {string[]} Absolute paths.
  */
-function findMmdFiles(dir, recursive = true, suffix = ".mmd") {
+function findFiles(dir, recursive = true, suffix = ".mmd") {
   const results = [];
   let entries;
   try {
@@ -109,7 +109,7 @@ function findMmdFiles(dir, recursive = true, suffix = ".mmd") {
     if (entry.isFile() && entry.name.endsWith(suffix)) {
       results.push(join(dir, entry.name));
     } else if (recursive && entry.isDirectory()) {
-      results.push(...findMmdFiles(join(dir, entry.name), true, suffix));
+      results.push(...findFiles(join(dir, entry.name), true, suffix));
     }
   }
   return results;
@@ -118,11 +118,25 @@ function findMmdFiles(dir, recursive = true, suffix = ".mmd") {
 /**
  * DAG formats `nf-metro render` converts on the way in, keyed by the
  * `inputFormat` the render helpers take. `letter` joins the cache mode
- * string; `ext` is the source extension the Vite plugin loads.
+ * string; `ext` is the source extension the Vite plugin loads; `lang` is the
+ * source's highlighting language; `fixtures` lists the directory under
+ * tests/fixtures/ and the suffix whose files the build pre-warms.
  */
 export const INPUT_FORMATS = {
-  nextflow: { letter: "n", flag: "--from-nextflow", ext: ".mmd" },
-  snakemake: { letter: "s", flag: "--from-snakemake", ext: ".dot" },
+  nextflow: {
+    letter: "n",
+    flag: "--from-nextflow",
+    ext: ".mmd",
+    lang: "metro",
+    fixtures: { dir: "nextflow", suffix: ".mmd", recursive: true },
+  },
+  snakemake: {
+    letter: "s",
+    flag: "--from-snakemake",
+    ext: ".dot",
+    lang: "dot",
+    fixtures: { dir: "snakemake", suffix: ".rulegraph.dot", recursive: false },
+  },
 };
 
 /**
@@ -225,7 +239,7 @@ function prewarmMetroCache() {
   // examples/**/*.mmd → plain; examples/ and examples/guide/ → also debug, animate
   const examplesDir = join(REPO_ROOT, "examples");
   const examplesGuideDir = join(examplesDir, "guide");
-  for (const file of findMmdFiles(examplesDir, true)) {
+  for (const file of findFiles(examplesDir, true)) {
     addJob(file, "");
     if (dirname(file) === examplesDir || dirname(file) === examplesGuideDir) {
       addJob(file, "d");
@@ -235,18 +249,15 @@ function prewarmMetroCache() {
 
   // tests/fixtures/*.mmd (top-level only) → plain
   const fixturesDir = join(REPO_ROOT, "tests", "fixtures");
-  for (const file of findMmdFiles(fixturesDir, false)) {
+  for (const file of findFiles(fixturesDir, false)) {
     addJob(file, "");
   }
 
-  // tests/fixtures/nextflow/**/*.mmd → nextflow
-  for (const file of findMmdFiles(join(fixturesDir, "nextflow"), true)) {
-    addJob(file, "n");
-  }
-
-  // tests/fixtures/snakemake/*.rulegraph.dot → snakemake
-  for (const file of findMmdFiles(join(fixturesDir, "snakemake"), false, ".rulegraph.dot")) {
-    addJob(file, "s");
+  // DAG-export fixtures → converted with their format's flag
+  for (const { letter, fixtures } of Object.values(INPUT_FORMATS)) {
+    for (const file of findFiles(join(fixturesDir, fixtures.dir), fixtures.recursive, fixtures.suffix)) {
+      addJob(file, letter);
+    }
   }
 
   // OG image sources → chrome-less, for OG image rasterization

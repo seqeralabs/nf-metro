@@ -277,7 +277,7 @@ const codeTitle = title ?? src;
             <summary>Mermaid source</summary>
             <Code
               code={source}
-              lang={fromSnakemake ? "dot" : "metro"}
+              lang={inputFormat ? INPUT_FORMATS[inputFormat].lang : "metro"}
               title={codeTitle}
               meta={inputFormat ? undefined : 'playground="metro"'}
             />

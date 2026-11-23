@@ -204,7 +204,7 @@ def _break_cycles(nodes: set[str], edges: list[tuple[str, str]]) -> _CycleBreak:
 # ---------------------------------------------------------------------------
 @dataclass
 class _SectionAssignment:
-    """Mapping of kept process nodes to sections.
+    """Mapping of kept nodes to sections.
 
     The three fields are mutually consistent views of the same grouping:
     ``node_section[nid]`` is the section key for node ``nid``, ``names[key]``
@@ -220,10 +220,10 @@ class _SectionAssignment:
 def _assign_sections(
     kept_ids: set[str], dag: ParsedDag, title: str
 ) -> _SectionAssignment:
-    """Group kept process nodes into sections.
+    """Group kept nodes into sections.
 
-    Processes inside a named subgraph are assigned to that subgraph's section.
-    Processes outside any subgraph go into a synthesised section: ``__pipeline``
+    Nodes inside a named subgraph are assigned to that subgraph's section.
+    Nodes outside any subgraph go into a synthesised section: ``__pipeline``
     (named after the title) when there are no subgraphs at all, otherwise
     ``__reporting``.
     """
@@ -269,7 +269,7 @@ def _unit(sections: _SectionAssignment, nid: str, split_secs: set[str]) -> str:
 def _unit_graph(
     sections: _SectionAssignment, edges: list[tuple[str, str]], split_secs: set[str]
 ) -> nx.DiGraph[str]:
-    """Graph of whole sections plus the individual processes of ``split_secs``.
+    """Graph of whole sections plus the individual nodes of ``split_secs``.
 
     Edge weight ``w`` is 1 where the edge crosses a section boundary, else 0.
     """
@@ -326,14 +326,14 @@ def _split_cyclic_sections(
 ) -> _SectionAssignment:
     """Split sections that form a cycle into acyclic groups by flow depth.
 
-    Unassigned processes share one section, and Nextflow flattens a parent
+    Unassigned nodes share one section, and Nextflow flattens a parent
     subworkflow's own processes into a subgraph beside its children's, so a
     section can run both before and after another one. Sections are split
     outermost first: the unassigned section, then subgraphs by nesting depth
     of their full name, each tier only where a cycle remains. Sections not on
     a cycle stay whole.
 
-    A split section's processes are grouped by flow depth, the longest path
+    A split section's nodes are grouped by flow depth, the longest path
     counting one per section boundary crossed, so every inter-section edge
     strictly increases depth and the result is acyclic. Earliest and latest
     depths are both valid; whichever yields fewer groups is used. A split
@@ -502,7 +502,7 @@ def _humanize_label(name: str, abbreviate: bool = True) -> str:
 
 
 def _sanitize_id(name: str) -> str:
-    """Convert a process/section name to a valid nf-metro station ID.
+    """Convert a node or section name to a valid nf-metro station ID.
 
     Lowercase, replace non-alphanumeric with underscore.
     """
@@ -573,7 +573,7 @@ def _assign_lines(
 ) -> _LineAssignment:
     """Build metro lines and map each edge to its line.
 
-    Dead-end processes (mid-pipeline processes with no successors, excluding
+    Dead-end nodes (mid-pipeline nodes with no successors, excluding
     the last section) branch off onto a ``spur`` line. Inter-section edges
     spanning two or more sections become per-pair ``bypass`` lines; adjacent
     inter-section edges stay on ``main``.
@@ -761,8 +761,8 @@ def _format_feedback_pair(
 ) -> str:
     """Render one removed connection, naming a self-loop as such.
 
-    ``describe(node) -> describe(node)`` reads as though two processes were
-    involved, so a process that feeds itself is spelled out instead.
+    ``describe(node) -> describe(node)`` reads as though two nodes were
+    involved, so a node that feeds itself is spelled out instead.
     """
     if source == target:
         return f"{describe(source)} -> itself"

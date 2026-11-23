@@ -30,7 +30,7 @@ InputFormat = Literal["nextflow", "snakemake"]
 
 INPUT_FORMATS: tuple[InputFormat, ...] = get_args(InputFormat)
 
-_CONVERTERS: dict[str, Callable[[str, str], str]] = {
+_CONVERTERS: dict[InputFormat, Callable[[str, str], str]] = {
     "nextflow": convert_nextflow_dag,
     "snakemake": convert_snakemake_dag,
 }
@@ -50,7 +50,7 @@ def detect_input_format(text: str) -> InputFormat | None:
     return None
 
 
-def convert_dag(text: str, input_format: str, title: str = "") -> str:
+def convert_dag(text: str, input_format: InputFormat, title: str = "") -> str:
     """Convert a DAG export in *input_format* to nf-metro ``.mmd`` text."""
     converter = _CONVERTERS.get(input_format)
     if converter is None:

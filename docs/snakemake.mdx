@@ -24,7 +24,7 @@ snakemake --rulegraph > rules.dot
 
 nf-metro accepts all four forms of this output:
 
-- `--rulegraph` (one node per rule) or `--dag` (one node per job). A rule that runs many jobs still becomes one station.
+- `--rulegraph` (one node per rule) or `--dag` (one node per job). A rule that runs many jobs becomes one station.
 - DOT (the default) or `--rulegraph mermaid-js`.
 
 ## Direct rendering

@@ -71,10 +71,10 @@ def _parse_snakemake(text: str) -> ParsedDag:
             continue
         m = edge_re.match(line)
         if m and m.group(1) in job_rule and m.group(2) in job_rule:
-            edge = (job_rule[m.group(1)], job_rule[m.group(2)])
+            src, dst = job_rule[m.group(1)], job_rule[m.group(2)]
             # Two jobs of one rule chained together are not a rule-level loop.
-            if edge[0] != edge[1]:
-                dag.edges.append(edge)
+            if src != dst:
+                dag.edges.append((src, dst))
     return dag
 
 
@@ -104,10 +104,10 @@ def convert_snakemake_dag(text: str, title: str = "") -> str:
         stacklevel=2,
     )
     dag = _parse_snakemake(text)
-    successors = {src for src, _ in dag.edges}
+    has_outgoing = {src for src, _ in dag.edges}
     kept_ids = {
         nid
         for nid, node in dag.nodes.items()
-        if not (node.label == _TARGET_RULE and nid not in successors)
+        if not (node.label == _TARGET_RULE and nid not in has_outgoing)
     }
     return dag_to_mmd(dag, kept_ids, title)

@@ -1683,15 +1683,14 @@ def convert(
 
     text = input_file.read_text()
 
+    input_format = input_format or detect_input_format(text)
     if input_format is None:
-        input_format = detect_input_format(text)
-        if input_format is None:
-            click.echo(
-                "Warning: could not recognise the input as a Nextflow or "
-                "Snakemake DAG; converting it as Nextflow. Pass --from to choose.",
-                err=True,
-            )
-            input_format = "nextflow"
+        click.echo(
+            "Warning: could not recognise the input as a Nextflow or "
+            "Snakemake DAG; converting it as Nextflow. Pass --from to choose.",
+            err=True,
+        )
+        input_format = "nextflow"
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

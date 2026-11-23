@@ -129,6 +129,13 @@ def test_a_rule_level_loop_is_reported_as_feedback():
         _convert(dot)
 
 
+@pytest.mark.parametrize("export", ["rulegraph.dot", "rulegraph.mermaid"])
+def test_rendering_an_unconverted_export_points_at_the_snakemake_flag(export):
+    text = (FIXTURES / f"flat_pipeline.{export}").read_text()
+    with pytest.raises(ValueError, match="--from-snakemake"):
+        parse_metro_mermaid(text)
+
+
 def test_title_is_applied():
     mmd = _convert((FIXTURES / "flat_pipeline.rulegraph.dot").read_text(), "Demo")
     assert mmd.startswith("%%metro title: Demo\n")
