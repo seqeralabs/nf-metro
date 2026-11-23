@@ -363,7 +363,9 @@ def _content_origin(
     A map with no boxes has no such frame, and is never moved for one either,
     so its content edge is the canvas padding.  Station markers and labels
     reach past a bare station's coordinate, so reading one as an edge would
-    place a decoration inside the content it frames.
+    place a decoration inside the content it frames.  This therefore reads
+    station coordinates on purpose, unlike :func:`_leftmost_ink`, which reads
+    the ink actually painted.
     """
     boxes = [section for section in graph.sections.values() if section.bbox_w > 0]
     if not boxes:
@@ -3079,9 +3081,10 @@ def _leftmost_ink(
                 )
                 for x, _ in vertices
             )
+    fan_sections = set(positive_fan)
     for station in _drawn_stations(graph, debug):
         cx, _, width, _, _ = station_marker_box(
-            graph, theme, station, station_offsets, set(positive_fan)
+            graph, theme, station, station_offsets, fan_sections
         )
         reach.append(cx - width / 2 - theme.station_stroke_width / 2)
     halo = max(theme.label_halo_width, 0.0) / 2
@@ -3726,8 +3729,7 @@ def _chevron_samples(
 def _chevron_vertices(
     point: tuple[float, float], heading: tuple[float, float], size: float
 ) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
-    """``(wing, apex, wing)`` of an open ``>`` chevron centred at *point*, apex
-    along *heading*."""
+    """``(wing, apex, wing)`` of an open chevron at *point* pointing along *heading*."""
     px, py = point
     ux, uy = heading
     perp = (-uy, ux)

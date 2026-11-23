@@ -75,10 +75,10 @@ history.
   legend the title sits top-left as usual; with a standalone logo
   (`%%metro legend: none`, and every HTML output) the title sits beside the
   logo. The title, or a standalone logo, starts at the leftmost ink the map
-  paints: a section box, a line, a label or the legend. The whole map, rail-mode maps included, now moves down
-  clear of a standalone logo instead of running under it, laid out and routed
-  exactly as it would be without one. `logo_scale` sizes the standalone logo as well as
-  the legend one.
+  paints: a section box, a line, a label or the legend. The whole map,
+  rail-mode maps included, now moves down clear of a standalone logo instead of
+  running under it, laid out and routed exactly as it would be without one.
+  `logo_scale` sizes the standalone logo as well as the legend one.
 - A station sitting exactly midway between two grid rows snaps to the same
   row wherever its row sits on the canvas, and stations tied together by a
   line or a fan snap the same way, choosing the row that keeps their

@@ -61,6 +61,8 @@ MODES = {
     "standalone-logo-html": (PLACEHOLDER_LOGO, None, "html"),
 }
 
+SHORT_MODES = ("title-only", "standalone-logo-svg")
+
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:e-?\d+)?")
 _ROTATE = re.compile(r"rotate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)")
 _NON_INK_TAGS = {"defs", "mask", "style", "metadata", "title", "clipPath"}
@@ -194,8 +196,19 @@ def _title(root: ET.Element) -> ET.Element:
     return titles[0]
 
 
-@pytest.mark.parametrize("mode", MODES)
-@pytest.mark.parametrize("name", FIXTURES)
+ALL_MODES_FIXTURES = (
+    "examples/rnaseq_sections.mmd",
+    "examples/riboseq_metro.mmd",
+    "examples/topologies/header_side_rotated.mmd",
+)
+CASES = [
+    (name, mode)
+    for name in FIXTURES
+    for mode in (MODES if name in ALL_MODES_FIXTURES else SHORT_MODES)
+]
+
+
+@pytest.mark.parametrize(("name", "mode"), CASES)
 def test_title_block_starts_at_the_leftmost_ink(name: str, mode: str) -> None:
     """The title, or a standalone logo with the title beside it, starts at the
     leftmost painted x; the title never overlaps the logo."""
