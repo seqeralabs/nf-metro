@@ -83,6 +83,7 @@ class DagNode:
     label: str
     shape: str  # set by the front end, e.g. Nextflow "stadium" for a process
     subgraph: str | None = None  # named subgraph, None if outside or in " "
+    display: str | None = None  # station label as-is; unset humanises ``label``
 
 
 @dataclass
@@ -480,6 +481,10 @@ def _topological_order(
 _MAX_LABEL_LEN = 16
 
 
+def _display_label(node: DagNode) -> str:
+    return node.display or _humanize_label(node.label)
+
+
 def _humanize_label(name: str, abbreviate: bool = True) -> str:
     """Convert UPPER_SNAKE_CASE to Title Case, optionally abbreviating.
 
@@ -721,7 +726,7 @@ def _emit_mmd(
         out.append(f"    subgraph {sec_id} [{display}]")
 
         for nid in ordered_nodes:
-            label = _humanize_label(nodes[nid].label)
+            label = _display_label(nodes[nid])
             out.append(f"        {station_ids[nid]}([{label}])")
 
         sec_edges = intra_edges.get(sec_key, [])
@@ -748,7 +753,7 @@ def _emit_mmd(
         out.extend(f"    {line}" for line in FEEDBACK_COMMENT_HEADER)
 
         def describe(node: str) -> str:
-            return f"{station_ids[node]} ({_humanize_label(nodes[node].label)})"
+            return f"{station_ids[node]} ({_display_label(nodes[node])})"
 
         for src, tgt in dropped_feedback:
             out.append(f"    %%   {_format_feedback_pair(src, tgt, describe)}")
@@ -775,7 +780,7 @@ def _warn_feedback_edges_dropped(
     """Report the back edges removed to make the kept graph acyclic."""
 
     def describe(node: str) -> str:
-        return _humanize_label(nodes[node].label)
+        return _display_label(nodes[node])
 
     connections = tuple(
         _format_feedback_pair(src, tgt, describe) for src, tgt in dropped

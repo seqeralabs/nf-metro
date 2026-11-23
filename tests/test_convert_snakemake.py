@@ -79,13 +79,27 @@ def test_rules_become_stations_and_the_all_target_is_dropped():
         ("fastqc", "multiqc"),
         ("bcftools_stats", "multiqc"),
         ("bwa_mem", "samtools_index"),
-        ("bwa_mem", "gatk_haplotypecaller"),
-        ("bwa_mem", "deepvariant"),
         ("samtools_index", "gatk_haplotypecaller"),
         ("samtools_index", "deepvariant"),
         ("gatk_haplotypecaller", "bcftools_stats"),
         ("deepvariant", "bcftools_stats"),
     }
+
+
+def test_an_edge_that_a_longer_path_covers_is_dropped():
+    dot = (
+        "digraph snakemake_dag {\n"
+        '\t0[label = "align", color = "0 0 0", style="rounded"];\n'
+        '\t1[label = "index", color = "0 0 0", style="rounded"];\n'
+        '\t2[label = "call", color = "0 0 0", style="rounded"];\n'
+        "\t0 -> 1\n\t1 -> 2\n\t0 -> 2\n}\n"
+    )
+    assert _edges(_convert(dot)) == {("align", "index"), ("index", "call")}
+
+
+def test_rule_names_are_not_shortened():
+    mmd = _convert((FIXTURES / "variant_calling.rulegraph.dot").read_text())
+    assert "([Gatk Haplotypecaller])" in mmd
 
 
 def test_every_rule_shares_one_section():
@@ -220,7 +234,7 @@ class TestCli:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "Gatk Haplotypeca" in out.read_text()
+        assert "Gatk Haplotypecaller" in out.read_text()
 
     def test_render_rejects_both_from_flags(self, tmp_path):
         result = CliRunner().invoke(

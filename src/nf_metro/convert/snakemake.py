@@ -6,7 +6,8 @@ per rule) or ``--dag`` (one node per job), in DOT (the default) or with
 onto their rule, so a rule appears as one station however many jobs it runs.
 
 The graph export carries no grouping, so every rule lands in one section. The
-``all`` target rule only gathers inputs and is dropped.
+``all`` target rule only gathers inputs and is dropped. Rule names are used in
+full as station labels.
 """
 
 from __future__ import annotations
@@ -14,12 +15,16 @@ from __future__ import annotations
 import re
 import warnings
 
+import networkx as nx
+
 from nf_metro.convert._core import (
     DagNode,
     ExperimentalInputWarning,
     ParsedDag,
+    _humanize_label,
     dag_to_mmd,
 )
+from nf_metro.graph_views import directed_graph
 
 _DOT_HEADER = re.compile(r"^\s*digraph\s+snakemake_dag\b")
 _DOT_NODE = re.compile(r'^\s*(\d+)\s*\[\s*label\s*=\s*"((?:[^"\\]|\\.)*)"')
@@ -66,7 +71,12 @@ def _parse_snakemake(text: str) -> ParsedDag:
             if rule not in rule_node:
                 nid = f"r{len(rule_node):04d}"
                 rule_node[rule] = nid
-                dag.nodes[nid] = DagNode(id=nid, label=rule, shape="rule")
+                dag.nodes[nid] = DagNode(
+                    id=nid,
+                    label=rule,
+                    shape="rule",
+                    display=_humanize_label(rule, abbreviate=False),
+                )
             job_rule[m.group(1)] = rule_node[rule]
             continue
         m = edge_re.match(line)
@@ -76,6 +86,21 @@ def _parse_snakemake(text: str) -> ParsedDag:
             if src != dst:
                 dag.edges.append((src, dst))
     return dag
+
+
+def _drop_shortcut_edges(dag: ParsedDag) -> None:
+    """Drop each edge ``a -> c`` that a longer path ``a -> ... -> c`` covers.
+
+    A rule graph links a rule to every rule it reads from, so a rule that reads
+    both an early output and a later one gets an edge past the rules between.
+    On a one-line map that edge would be drawn on top of the longer path. A
+    looping graph is left whole; :func:`dag_to_mmd` breaks the loop.
+    """
+    graph = directed_graph(dag.nodes, dag.edges)
+    if not nx.is_directed_acyclic_graph(graph):
+        return
+    reduced = nx.transitive_reduction(graph)
+    dag.edges = [edge for edge in dag.edges if reduced.has_edge(*edge)]
 
 
 def is_snakemake_dag(text: str) -> bool:
@@ -104,6 +129,7 @@ def convert_snakemake_dag(text: str, title: str = "") -> str:
         stacklevel=2,
     )
     dag = _parse_snakemake(text)
+    _drop_shortcut_edges(dag)
     has_outgoing = {src for src, _ in dag.edges}
     kept_ids = {
         nid

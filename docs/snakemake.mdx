@@ -84,7 +84,8 @@ Snakemake's graph output contains rules and dependencies only:
 
 - **One section.** The output has no grouping (job `group:` directives do not appear in it), so every rule goes into one section. nf-metro folds a long section onto more rows.
 - **One line.** All connections go on one `main` line. To show separate analysis routes, add lines by hand.
-- **Rule names as labels.** The converter turns `bwa_mem` into Bwa Mem, and shortens long names.
+- **Rule names as labels.** The converter turns `bwa_mem` into Bwa Mem.
+- **No shortcut connections.** When a rule reads from both an earlier rule and a rule in between, only the path through the rule in between is drawn. The direct dependency would otherwise run on top of that path.
 
 ## Hand-tune the output
 
