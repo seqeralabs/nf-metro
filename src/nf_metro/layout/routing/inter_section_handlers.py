@@ -6417,25 +6417,24 @@ def _bypass_split_face(
     branches: Iterable[tuple[Station, Station]],
     col: int | None,
     row: int | None,
-    horizontal: Direction,
+    travel: Direction,
 ) -> float | None:
     """Near face of the section a bundle leaving grid cell (*col*, *row*)
-    travelling *horizontal* stays in its row up to, or ``None``.
+    along *travel* stays in its row up to, or ``None``.
 
     An occupied next column bounds an ordinary two-sided gap the bundle centres
     in, so only an empty one gives a face.  The *branches* turn as one bundle,
     so the face is the nearest across all of them, and a branch whose target
     lies short of the bypassed section holds the bundle back to that target.
     """
-    sign = horizontal.sign
+    sign = travel.sign
     if col is None or row is None or _sections_in_col(graph, col + int(sign), row):
         return None
 
-    def near(sec: Section) -> float:
-        return sec.bbox_x if sign > 0 else sec.bbox_x + sec.bbox_w
-
-    def far(sec: Section) -> float:
-        return sec.bbox_x + sec.bbox_w if sign > 0 else sec.bbox_x
+    def faces(sec: Section) -> tuple[float, float]:
+        """*sec*'s near and far faces along *travel*."""
+        lo, hi = section_bbox_span(sec, "x")
+        return (lo, hi) if sign > 0 else (hi, lo)
 
     starts: list[float] = []
     targets: list[float] = []
@@ -6445,18 +6444,19 @@ def _bypass_split_face(
         tgt_sec = resolve_section(graph, tgt, prefer_upstream=False)
         if src_sec is None or tgt_sec is None:
             return None
-        start = far(src_sec)
+        start = faces(src_sec)[1]
         starts.append(start)
-        targets.append(near(tgt_sec))
+        targets.append(faces(tgt_sec)[0])
         obstacles += [
-            near(sec)
+            near
             for sec in graph.sections.values()
-            if sec.bbox_w > 0
+            for near, far in [faces(sec)]
+            if sign * (far - near) > 0
             and sec is not src_sec
             and sec is not tgt_sec
             and grid_spans_overlap(section_row_span(sec), (row, row))
-            and sign * (far(sec) - start) > 0
-            and sign * (tgt.x - near(sec)) > 0
+            and sign * (far - start) > 0
+            and sign * (tgt.x - near) > 0
         ]
     if not obstacles:
         return None
@@ -6466,9 +6466,7 @@ def _bypass_split_face(
     return face
 
 
-def _fan_split_face(
-    ctx: _RoutingCtx, src: Station, horizontal: Direction
-) -> float | None:
+def _fan_split_face(ctx: _RoutingCtx, src: Station, travel: Direction) -> float | None:
     """:func:`_bypass_split_face` of every branch of junction *src*'s fan."""
     graph = ctx.graph
     branches = (
@@ -6477,11 +6475,11 @@ def _fan_split_face(
         if key[0] == src.id
     )
     return _bypass_split_face(
-        graph, branches, *_resolve_section_colrow(graph, src), horizontal
+        graph, branches, *_resolve_section_colrow(graph, src), travel
     )
 
 
-def _gap1_split_face(f: _InterFacts, horizontal: Direction) -> float | None:
+def _gap1_split_face(f: _InterFacts, travel: Direction) -> float | None:
     """:func:`_bypass_split_face` of the bypasses sharing *f*'s source-side
     channel: those leaving the same column and row the same way, which
     :func:`_compute_bypass_gap_indices` stacks around one base."""
@@ -6491,9 +6489,9 @@ def _gap1_split_face(f: _InterFacts, horizontal: Direction) -> float | None:
         for key in ctx.bypass_gap_idx
         for src, tgt in [graph.edge_endpoints(ctx.edge_by_key[key])]
         if _resolve_section_colrow(graph, src) == (f.src_col, f.src_row)
-        and horizontal_direction(tgt.x - src.x) is horizontal
+        and (tgt.x - src.x > 0) == (travel.sign > 0)
     )
-    return _bypass_split_face(graph, branches, f.src_col, f.src_row, horizontal)
+    return _bypass_split_face(graph, branches, f.src_col, f.src_row, travel)
 
 
 def fan_corner_offsets(
@@ -7510,7 +7508,7 @@ def _right_entry_over_top_geometry(
     lead_x = sx + ctx.curve_radius + ctx.offset_step
     fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
     if fan is not None and _fan_split_face(ctx, src, Direction.R) is not None:
-        rise = vertical_direction(channel_y - mid_sy)
+        rise = _leg_direction((sx, mid_sy), (sx, channel_y))
         lead_x = (
             _fan_corner_x(ctx, src, fan[1], Direction.R)
             + l_shape_stagger(*fan, rise, ctx.offset_step)
