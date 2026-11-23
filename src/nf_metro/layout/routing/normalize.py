@@ -6274,6 +6274,7 @@ def _gap_channel_base(
     offset_step: float,
     anchor_section_id: str | None = None,
     anchor_side: PortSide | None = None,
+    split_face: float | None = None,
 ) -> float:
     """Centred midline x for a bundle of *n* lines in gap ``(lo, lo+1)``.
 
@@ -6299,6 +6300,12 @@ def _gap_channel_base(
     lower edge in that row: :func:`row_local_gap_bundle_midpoint` seats the
     channel against the upper column's real edge, the box it descends beside,
     rather than centring it on a span reaching back to the coordinate origin.
+
+    *split_face* is the near face of the section a bundle leaving through
+    such a one-sided gap stays in its row up to (see
+    ``inter_section_handlers._bypass_split_face``): the bundle seats
+    :data:`EDGE_TO_BUNDLE_CLEARANCE` off it on the *anchor_side* travel side,
+    beside the box it goes round rather than against the source.
     """
     width = max(0, n - 1) * offset_step
     edges = None
@@ -6308,6 +6315,9 @@ def _gap_channel_base(
         off_grid = off_grid_gap_bundle_midpoint(graph, lo, row, width)
         if off_grid is not None:
             return off_grid
+        if split_face is not None and anchor_side is not None:
+            reach = EDGE_TO_BUNDLE_CLEARANCE + width / 2
+            return split_face + (reach if anchor_side is PortSide.LEFT else -reach)
         row_local = row_local_gap_bundle_midpoint(graph, lo, row, width)
         if row_local is not None:
             return row_local
