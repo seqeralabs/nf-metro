@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from nf_metro.api import _resolve_input_format, render_string
-from nf_metro.cli import cli
+from nf_metro.cli import SNAKEMAKE_QUIPS, cli
 from nf_metro.convert import (
     ExperimentalInputWarning,
     FeedbackEdgesDroppedWarning,
@@ -198,6 +198,32 @@ class TestCli:
         assert "Snakemake input is experimental" in result.output
         assert "Converted 5 rules, 1 sections -> " in result.output
         assert "multiqc" in out.read_text()
+
+    @pytest.mark.parametrize("command", ["convert", "render"])
+    def test_snakemake_runs_print_one_quip(self, command, tmp_path):
+        args = [command, str(FIXTURES / "flat_pipeline.rulegraph.dot")]
+        if command == "render":
+            args.append("--from-snakemake")
+        args += [
+            "-o",
+            str(tmp_path / ("out.mmd" if command == "convert" else "out.svg")),
+        ]
+        result = CliRunner().invoke(cli, args)
+        assert result.exit_code == 0, result.output
+        assert sum(quip in result.output for quip in SNAKEMAKE_QUIPS) == 1
+
+    def test_nextflow_runs_print_no_quip(self, tmp_path):
+        result = CliRunner().invoke(
+            cli,
+            [
+                "convert",
+                str(NEXTFLOW_FIXTURES / "flat_pipeline.mmd"),
+                "-o",
+                str(tmp_path / "out.mmd"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert not any(quip in result.output for quip in SNAKEMAKE_QUIPS)
 
     def test_convert_honours_explicit_from(self, tmp_path):
         out = tmp_path / "out.mmd"

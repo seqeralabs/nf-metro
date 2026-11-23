@@ -7,6 +7,7 @@ import dataclasses
 import json
 import math
 import os
+import random
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
@@ -945,6 +946,8 @@ def render(
     input_format = _input_format_from_flags(
         from_nextflow=from_nextflow, from_snakemake=from_snakemake
     )
+    if input_format == "snakemake":
+        _echo_snakemake_quip()
 
     def _job_layout_opts(overrides: Mapping[str, object]) -> dict[str, object]:
         """The run's layout options with this output's own `animate` folded in.
@@ -1180,6 +1183,23 @@ def _print_render_result(sources: list[Path], paths: list[Path]) -> None:
         "outputs": [str(path) for path in paths],
     }
     echo_yaml("\n".join(to_yaml(document)))
+
+
+# A deliberate easter egg: Snakemake runs of the CLI get one light-hearted
+# progress line, picked at random. The Python API prints nothing.
+SNAKEMAKE_QUIPS = (
+    "Convincing user that Nextflow is better than Snakemake...",
+    "Snakes on a train...",
+    "Converting rules into processes (old habits)...",
+    "Teaching the snake to ride the metro...",
+    "Politely not mentioning channels...",
+    "Checking whether this workflow has met nf-core yet...",
+    "Reticulating splines... wrong snake, sorry.",
+)
+
+
+def _echo_snakemake_quip() -> None:
+    console.print(f"[dim italic]{random.choice(SNAKEMAKE_QUIPS)}[/]")
 
 
 def _input_format_from_flags(
@@ -1691,6 +1711,8 @@ def convert(
             err=True,
         )
         input_format = "nextflow"
+    if input_format == "snakemake":
+        _echo_snakemake_quip()
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
