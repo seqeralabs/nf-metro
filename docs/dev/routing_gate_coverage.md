@@ -716,7 +716,7 @@ Gates with an un-exercised arm:
 | 1028 | `if _v_segment_crosses_other_section(graph, dx, src.y, tgt.y, exclude):` | `->L1029` |  |
 | 1069 | `if route is not None:` | `->L1071` |  |
 | 1273 | `if route is not None:` | `->L1287` |  |
-| 1391 | `if lowest is not None and y > (cap := section_header_safe_cap(lowest)):` | `->L1392` | **needs-review** -- In _row_under_run_y: the arm caps a same-row under-run at the header badge of the lowest lower-row section in the columns after the source. tests/data/gate_witnesses/f8402075.mmd and tests/data/canvas_placement/f8403977.mmd run under their row with no lower-row section in those columns; a map whose next row starts within BYPASS_CLEARANCE plus the badge clearance under the run takes it, and no swept map has one. |
+| 1391 | `if lowest is not None and y > (cap := section_header_safe_cap(lowest)):` | `->L1392` | **needs-review** -- In _row_under_run_y: the arm caps a same-row under-run at the highest header badge among the lower-row sections in the columns after the source. tests/data/gate_witnesses/f8402075.mmd and tests/data/canvas_placement/f8403977.mmd run under their row with no lower-row section in those columns; a map whose next row starts within BYPASS_CLEARANCE plus the badge clearance under the run takes it, and no swept map has one. |
 | 1461 | `if _corridor_is_viable(ctx, src, tgt):` | `->L1462` | **needs-review** -- Reachable only via a defective render (inter-row corridor grazes the source section); see #722. |
 | 1482 | `if kind is _LeftEntryRoute.CORRIDOR:` | `->L1483` |  |
 | 1509 | `if target_port is None:` | `->L1510` |  |

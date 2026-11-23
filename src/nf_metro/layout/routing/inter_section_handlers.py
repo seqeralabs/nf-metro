@@ -1368,8 +1368,8 @@ def _row_under_run_y(
 ) -> float:
     """The channel of a run under grid row *row* from *src_col* to *tgt_col*:
     ``BYPASS_CLEARANCE`` below the row's sections in those columns, clear of the
-    lowest header badge in lower rows past *src_col* (halfway to it where the gap
-    cannot hold both), then held in the reserved gap band."""
+    highest header badge among lower-row sections past *src_col* (halfway to
+    it where the gap cannot hold both), then held in the reserved gap band."""
     placed = [s for s in graph.sections.values() if s.bbox_w > 0]
     row_bottom = max(
         s.bbox_y + s.bbox_h

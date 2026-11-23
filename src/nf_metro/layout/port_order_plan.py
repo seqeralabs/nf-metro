@@ -47,8 +47,8 @@ traverse.  Detour and room read each box's lateral faces no further than the
 section padding beyond its content, so the bundle clearance later sizers add for
 the planned lanes cannot change the ranking.
 Two same-axis U-turns sharing a line, running opposite ways over overlapping
-spans of one band, are linked when their legs interleave; nested loops nest
-concentrically and constrain nothing.  Linked bypass U-turns are decided
+spans of one band, are linked when their legs interleave; nested loops need
+not cross, so they constrain nothing.  Linked bypass U-turns are decided
 together, never on one screen side nor on that of a linked direct turn-round,
 which keeps the side it takes alone.  A group no assignment separates takes
 the turn-round side throughout; a plan in which two linked U-turns share a
