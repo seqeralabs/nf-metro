@@ -360,10 +360,12 @@ _GEOM = replace(NFCORE_LIGHT_THEME, line_width=_LW)
 
 @pytest.mark.parametrize("label_below", [True, False])
 def test_tab_sits_on_the_label_side_of_the_line(label_below):
-    from nf_metro.render.svg import station_tab_box
+    from nf_metro.render.svg import _Bundle, station_tab_box
 
     label = (100.0, 60.0 if label_below else 40.0)
-    x, y, w, h = station_tab_box(_At(100.0, 50.0), 50.0, _GEOM, False, label)
+    x, y, w, h = station_tab_box(
+        _Bundle(_At(100.0, 50.0), 0.0, 0.0, False), _GEOM, label
+    )
     assert (w, h) == pytest.approx((0.66 * _LW, 0.66 * _LW))
     assert x + w / 2 == pytest.approx(100.0)
     if label_below:
@@ -373,28 +375,32 @@ def test_tab_sits_on_the_label_side_of_the_line(label_below):
 
 
 def test_tab_width_and_length_are_separate_multiples_of_the_line():
-    from nf_metro.render.svg import station_tab_box
+    from nf_metro.render.svg import _Bundle, station_tab_box
 
     theme = replace(_GEOM, station_tick_width=1.0, station_tick_length=1.5)
-    _, _, w, h = station_tab_box(_At(100.0, 50.0), 50.0, theme, False, None)
+    _, _, w, h = station_tab_box(
+        _Bundle(_At(100.0, 50.0), 0.0, 0.0, False), theme, None
+    )
     assert (w, h) == pytest.approx((1.0 * _LW, 1.5 * _LW))
 
 
 def test_tab_in_a_vertical_section_faces_its_label_sideways():
-    from nf_metro.render.svg import station_tab_box
+    from nf_metro.render.svg import _Bundle, station_tab_box
 
-    x, y, w, h = station_tab_box(_At(100.0, 50.0), 100.0, _GEOM, True, (80.0, 50.0))
+    x, y, w, h = station_tab_box(
+        _Bundle(_At(100.0, 50.0), 0.0, 0.0, True), _GEOM, (80.0, 50.0)
+    )
     assert x + w == pytest.approx(100.0 - _LW / 2)
     assert y + h / 2 == pytest.approx(50.0)
 
 
 @pytest.mark.parametrize("vertical", [False, True])
 def test_terminus_bar_crosses_the_line_end_and_overhangs_both_sides(vertical):
-    from nf_metro.render.svg import terminus_bar_box
+    from nf_metro.render.svg import _Bundle, terminus_bar_box
 
     theme = replace(_GEOM, station_tick_width=1.0, station_tick_length=1.5)
     axis = 100.0 if vertical else 50.0
-    x, y, w, h = terminus_bar_box(_At(100.0, 50.0), axis, theme, vertical)
+    x, y, w, h = terminus_bar_box(_Bundle(_At(100.0, 50.0), 0.0, 0.0, vertical), theme)
     thick, across = 1.0 * _LW, _LW + 2 * 1.5 * _LW
     if vertical:
         assert (w, h) == pytest.approx((across, thick))

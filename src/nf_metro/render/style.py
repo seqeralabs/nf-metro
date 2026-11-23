@@ -263,7 +263,7 @@ class Theme:
         "takes `station_stroke`.",
         group="Stations",
         color=True,
-        chrome=(("nf-metro-ring", "stroke"),),
+        chrome=(("nf-metro-ring", "stroke"), ("nf-metro-ring-link", "fill")),
         css_var="--nfm-map-ring-color",
         fallback="station_stroke",
         emit_if=("interchange_glyph", GLYPH_RING),

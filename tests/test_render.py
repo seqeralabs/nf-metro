@@ -14,7 +14,7 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import ICON_TYPE_FILES, Station
 from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO, ICON_NAME_GAP
 from nf_metro.render.svg import (
-    _label_halo_color,
+    _label_halo_color_for,
     _terminus_icon_centers,
     _terminus_icon_centers_for,
     _terminus_icon_flow_sign,
@@ -26,6 +26,12 @@ from nf_metro.themes import (
     SEQERA_LIGHT_THEME,
     TRANSPARENT_THEME,
 )
+
+
+def _halo(theme):
+    return _label_halo_color_for(
+        theme.label_halo_width, theme.label_halo_color, theme.background_color
+    )
 
 
 def _render_simple():
@@ -1351,28 +1357,26 @@ def test_standalone_nodes_render_as_unlinked_labels():
 
 
 def test_label_halo_color_resolves_to_opaque_background():
-    color = _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_color=""))
+    color = _halo(replace(NFCORE_DARK_THEME, label_halo_color=""))
     assert color == NFCORE_DARK_THEME.background_color
 
 
 def test_label_halo_color_resolves_to_white_on_transparent_theme():
-    color = _label_halo_color(replace(TRANSPARENT_THEME, label_halo_color=""))
+    color = _halo(replace(TRANSPARENT_THEME, label_halo_color=""))
     assert color == "#ffffff"
 
 
 def test_label_halo_color_honours_explicit_colour():
-    color = _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_color="#123456"))
+    color = _halo(replace(NFCORE_DARK_THEME, label_halo_color="#123456"))
     assert color == "#123456"
 
 
 def test_label_halo_disabled_by_zero_width():
-    assert _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_width=0.0)) is None
+    assert _halo(replace(NFCORE_DARK_THEME, label_halo_width=0.0)) is None
 
 
 def test_label_halo_disabled_by_none_colour():
-    assert (
-        _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_color="none")) is None
-    )
+    assert _halo(replace(NFCORE_DARK_THEME, label_halo_color="none")) is None
 
 
 def test_label_halo_emits_aria_hidden_backing_copy():
@@ -1398,7 +1402,7 @@ def test_label_halo_emits_aria_hidden_backing_copy():
 
     # The halo is a stroked knockout: it must paint the resolved halo colour on
     # both fill and stroke at the theme width, and sit under the visible glyph.
-    resolved = _label_halo_color(NFCORE_DARK_THEME)
+    resolved = _halo(NFCORE_DARK_THEME)
     assert halo[0].get("stroke") == halo[0].get("fill") == resolved
     assert float(halo[0].get("stroke-width")) == NFCORE_DARK_THEME.label_halo_width
     assert texts.index(halo[0]) < texts.index(fill[0]), (
