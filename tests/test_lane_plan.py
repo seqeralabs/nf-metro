@@ -2013,6 +2013,40 @@ def test_linked_bypass_u_turns_take_opposite_screen_sides(path: Path) -> None:
     assert shared == []
 
 
+@pytest.mark.parametrize(
+    "turn", [None, *TURNS], ids=lambda t: "r0" if t is None else t.name
+)
+def test_a_corridor_linked_to_a_turn_round_follows_it(turn: _Turn | None) -> None:
+    """A bypass U-turn linked to a direct turn-round partner takes the
+    screen side opposite it, so its CORRIDOR side follows the partner's
+    turn-round convention through every turn: a reflection keeps both sides
+    rather than flipping the CORRIDOR one.
+
+    In f8404063 the bypass U-turn's left corridor is the shorter, but the
+    partner's turn-round loop takes that screen side, so the record holds the
+    right one; every turn of the placement plans the same pair."""
+    ranked = ("sec3__entry_left_3", "sec2__exit_left_1")
+    partner = ("sec2__entry_right_2", "sec0__exit_right_0")
+    path = ROOT / "tests" / "data" / "canvas_placement" / "f8404063.mmd"
+    graph = _laid_out(path).graph
+    assert graph is not None
+    if turn is not None:
+        graph = _turned(graph, turn)
+    plan, planner = _planned(graph)
+    approaches = plan.port_orders.approaches
+    assert (approaches[partner].side, approaches[partner].rule) == (
+        1,
+        SideRule.TURN_ROUND,
+    )
+    assert (approaches[ranked].side, approaches[ranked].rule) == (1, SideRule.CORRIDOR)
+    builder = planner.builder
+    hop = builder.corridor_hop(ranked)
+    assert hop is not None and hop.held is None
+    assert port_order_plan_module._runs_opposite(hop, builder.turn_rounds()[partner])
+    if turn is None:
+        assert hop.left.detour < hop.right.detour
+
+
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_a_fan_carrier_keeps_its_slot(path: Path) -> None:
     """Every section station a fan plan carries holds the carrier's slot."""
