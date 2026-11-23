@@ -65,6 +65,11 @@ history.
 
 ### Fixed
 
+- Two source stations in one column no longer put an unrelated line through a
+  branch station. When one source sends a line off onto its own branch, the
+  other source sits clear of the lane that branch takes, whichever line is
+  declared first, instead of running its line flat through the branch's marker
+  ([#2192](https://github.com/seqeralabs/nf-metro/issues/2192)).
 - Nextflow conversion preserves spur dependencies between subworkflows instead
   of silently omitting those edges from the emitted map.
 - Nextflow conversion splits a section that runs both before and after another
