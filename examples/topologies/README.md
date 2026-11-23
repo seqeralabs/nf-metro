@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 321 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 322 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -337,7 +337,7 @@ A single-row long-read variant-calling map. The annotation section carries only 
 
 ## Regression Catalogue
 
-The 210 fixtures below are targeted regression guards: each was added to pin a
+The 211 fixtures below are targeted regression guards: each was added to pin a
 specific routing or layout fix and is not individually gallery-illustrated.
 They participate in the full topology validation suite (`pytest
 tests/test_topology_validation.py`) alongside the illustrated fixtures
@@ -630,18 +630,19 @@ python scripts/list_topology_fixtures.py
 
 ### Exit lanes and exit-turn frames
 
-| Fixture                                      | What it tests                                                                                                   |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `exit_lane_settlement_without_crossings.mmd` | Five lines through one settling source - the exit lane frame settles with no crossings to resolve               |
-| `exit_lane_swap_shared_exit_port.mmd`        | The same five-line arrangement where two lanes swap through the shared exit port                                |
-| `exit_turn_frame_filters.mmd`                | A three-line seam source, target and side branch - the filters that decide which turns join one exit-turn frame |
-| `external_owner_exit_lane_frame.mmd`         | An exit lane frame with an owner outside it, fed by a vertical prelude section                                  |
-| `multi_frame_exit_lane_settlement.mmd`       | Fourteen sections and twelve lines forming several independent exit lane frames that settle separately          |
-| `target_lane_transition.mmd`                 | A lane transition taken on the target side of the seam rather than at the source exit                           |
-| `plan_owned_distinct_lane_separation.mmd`    | Seven RL sections sharing one source - planned lane separation is enforced for distinct lines                   |
-| `aligner_row_pinned_continuation.mmd`        | Sibling aligner sections stacked evenly over a pinned continuation                                              |
-| `aligner_row_terminator_lane_gap.mmd`        | The same aligner row where a sibling line does not exit - its lane leaves no phantom gap at the exit port       |
-| `single_line_dual_source_stacked_exit.mmd`   | One line leaving a section from two sources stacked in a column - the exit anchors on the feeder row            |
+| Fixture                                      | What it tests                                                                                                                                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exit_lane_settlement_without_crossings.mmd` | Five lines through one settling source - the exit lane frame settles with no crossings to resolve                                                                                                                    |
+| `exit_lane_swap_shared_exit_port.mmd`        | The same five-line arrangement where two lanes swap through the shared exit port                                                                                                                                     |
+| `exit_turn_frame_filters.mmd`                | A three-line seam source, target and side branch - the filters that decide which turns join one exit-turn frame                                                                                                      |
+| `external_owner_exit_lane_frame.mmd`         | An exit lane frame with an owner outside it, fed by a vertical prelude section                                                                                                                                       |
+| `multi_frame_exit_lane_settlement.mmd`       | Fourteen sections and twelve lines forming several independent exit lane frames that settle separately                                                                                                               |
+| `target_lane_transition.mmd`                 | A lane transition taken on the target side of the seam rather than at the source exit                                                                                                                                |
+| `plan_owned_distinct_lane_separation.mmd`    | Seven RL sections sharing one source - planned lane separation is enforced for distinct lines                                                                                                                        |
+| `aligner_row_pinned_continuation.mmd`        | Sibling aligner sections stacked evenly over a pinned continuation                                                                                                                                                   |
+| `aligner_row_terminator_lane_gap.mmd`        | The same aligner row where a sibling line does not exit - its lane leaves no phantom gap at the exit port                                                                                                            |
+| `single_line_dual_source_stacked_exit.mmd`   | One line leaving a section from two sources stacked in a column - the exit anchors on the feeder row                                                                                                                 |
+| `exit_row_sibling_branches.mmd`              | Two stations feeding one right exit, one of them fanning into two dead-end branches - each branch peels below both exit rows instead of sitting on the other feeder's row, where its exit run would cross the marker |
 
 ### Inter-row corridors and drop channels
 

@@ -120,6 +120,11 @@ history.
   least half a spacing that the set skips gets a chevron at its middle,
   provided that stays half a spacing from the set's neighbours and clear of
   other chevrons of the line.
+- When two stations feed the same exit and one of them also fans into
+  dead-end branches, a branch no longer sits on the other feeder's row.
+  That feeder's exit run was drawn straight through the branch's marker
+  (and any file icon after it); the branch now peels below the exit rows
+  (#2175).
 
 ## [2.1.0] — 2026-09-15
 
