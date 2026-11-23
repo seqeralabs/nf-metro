@@ -78,7 +78,10 @@ def test_a_short_line_holds_at_its_terminus_for_the_rest_of_its_lifetime() -> No
     )
 
     positions = [timeline.ball_positions(phase)[0] for phase in (0.25, 0.5, 0.9)]
-    assert positions == pytest.approx([(50.0, 0.0), (100.0, 0.0), (100.0, 0.0)])
+    expected = [(50.0, 0.0), (100.0, 0.0), (100.0, 0.0)]
+    assert [c for p in positions for c in p] == pytest.approx(
+        [c for p in expected for c in p]
+    )
 
 
 def test_dots_on_one_track_are_spread_by_their_departures() -> None:
