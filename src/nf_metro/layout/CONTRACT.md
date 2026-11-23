@@ -1621,8 +1621,9 @@ through the record's draw accessors (`planned_offsets` in
   `_InterFacts`, and the invariants `check_exit_inherits_entry_bundle_order`,
   `check_merge_port_approach_side` and
   `check_convergence_shallow_feeder_concentric` (which exempts the pairs a
-  recorded crossing exchanges at the entry), and the
-  `_guard_corridor_fed_solo_rides_trunk` guard (a fan seam's lane).
+  recorded crossing exchanges at the entry), the
+  `_guard_corridor_fed_solo_rides_trunk` guard (a fan seam's lane), and the
+  render chokepoint's U-turn pass-through check (`_u_turn_pass_through`).
   `RECORD_USES` in
   `tests/test_lane_plan.py` names each one.
 - **Related tests**: `tests/test_lane_plan.py`,

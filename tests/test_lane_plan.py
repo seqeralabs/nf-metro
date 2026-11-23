@@ -1021,7 +1021,13 @@ def _src_modules() -> Iterator[tuple[str, ast.Module]]:
 # and the graph field's type.
 RECORD_USES = {
     "layout/engine.py": {"seal_lane_plan", "start_layout"},
-    "layout/phases/guards.py": {"LANE_PLAN_STAGE", "fan_seam_lane"},
+    "layout/phases/guards.py": {
+        "ApproachKind",
+        "LANE_PLAN_STAGE",
+        "approach_source",
+        "fan_seam_lane",
+        "recorded_lane_plan",
+    },
     "layout/routing/offsets.py": {
         "Approach",
         "approach_source",
