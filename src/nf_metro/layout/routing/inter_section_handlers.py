@@ -87,6 +87,7 @@ from nf_metro.layout.routing.common import (
     gap_above_row,
     gap_lo_for_x,
     header_corridor_y,
+    held_in_reserved_gap_band,
     horizontal_direction,
     inter_column_channel_x,
     inter_row_channel_y,
@@ -105,6 +106,7 @@ from nf_metro.layout.routing.common import (
     right_normal_axis_sign,
     row_bottom_edge,
     row_top_edge,
+    section_header_safe_cap,
     section_header_top,
     section_ids_of_stations,
     section_lies_before,
@@ -150,6 +152,7 @@ from nf_metro.layout.routing.perp import (
 from nf_metro.layout.routing.reserved_bands import (
     EdgeKey,
     ReservedBand,
+    ReservedBands,
     corridor_clearance_band,
     held_in_reserved_band,
     seat_bundle_in_claimed_bands,
@@ -1354,9 +1357,65 @@ def _right_entry_cross_row_channel_y(f: _InterFacts) -> float | None:
     return _right_entry_below_channel_y(f)
 
 
+def _row_under_run_y(
+    graph: MetroGraph,
+    row: int,
+    passed: tuple[int, int],
+    capped: tuple[int, int],
+    reserved: ReservedBands | None,
+) -> float:
+    """The channel of a run along the gap under grid row *row*:
+    ``BYPASS_CLEARANCE`` below every section spanning the row whose columns
+    meet the *passed* range, capped clear of the lowest header badge of the
+    sections in lower rows whose columns meet the *capped* range, or halfway
+    to that badge where the gap cannot hold both clearances, then held in the
+    band reserved for the gap."""
+    placed = [s for s in graph.sections.values() if s.bbox_w > 0]
+
+    def meets(section: Section, cols: tuple[int, int]) -> bool:
+        last = section.grid_col + section.grid_col_span - 1
+        return section.grid_col <= cols[1] and cols[0] <= last
+
+    row_bottom = max(
+        s.bbox_y + s.bbox_h
+        for s in placed
+        if s.grid_row <= row < s.grid_row + s.grid_row_span and meets(s, passed)
+    )
+    y = row_bottom + BYPASS_CLEARANCE
+    lowest = min(
+        (s for s in placed if s.grid_row > row and meets(s, capped)),
+        key=section_header_top,
+        default=None,
+    )
+    if lowest is not None and y > section_header_safe_cap(lowest):
+        cap = section_header_safe_cap(lowest)
+        y = cap if cap >= row_bottom else (row_bottom + section_header_top(lowest)) / 2
+    return held_in_reserved_gap_band(graph, y, reserved)
+
+
 def _right_entry_below_channel_y(f: _InterFacts) -> float:
-    """The around-below channel of a RIGHT-entry wrap: below every section in
-    the column range, the target row included."""
+    """The around-below channel of a RIGHT-entry wrap.
+
+    A same-row wrap from the left runs in the gap under its own row
+    (:func:`_row_under_run_y`).  The lead turns down beyond the exit's lateral
+    within the source's column, so the channel clears the source box with the
+    rest of the row; the traverse passes under only the columns after the
+    source, so only their lower-row badges cap it.  Any other wrap runs below
+    every section in the column range, the target row included."""
+    if (
+        f.src_row is not None
+        and f.src_row == f.tgt_row
+        and f.src_col is not None
+        and f.tgt_col is not None
+        and f.src_col < f.tgt_col
+    ):
+        return _row_under_run_y(
+            f.graph,
+            f.src_row,
+            (f.src_col, f.tgt_col),
+            (f.src_col + 1, f.tgt_col),
+            f.ctx.reserved_bands.rows,
+        )
     src_col = f.src_col if f.src_col is not None else 0
     tgt_col = f.tgt_col if f.tgt_col is not None else src_col
     return bypass_bottom_y(

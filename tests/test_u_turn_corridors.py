@@ -16,9 +16,11 @@ import pytest
 
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
+import nf_metro.layout.routing.exit_turns as exit_turns_module
+import nf_metro.layout.routing.inter_section_handlers as handlers_module
 import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph
-from nf_metro.layout.constants import SAME_Y_TOLERANCE
+from nf_metro.layout.constants import BYPASS_CLEARANCE, SAME_Y_TOLERANCE
 from nf_metro.layout.port_order_plan import (
     _CORRIDOR_CLEAR,
     Approach,
@@ -32,7 +34,11 @@ from nf_metro.layout.port_order_plan import (
     approach_source,
     port_travel,
 )
-from nf_metro.layout.routing.common import RoutedPath, right_normal_axis_sign
+from nf_metro.layout.routing.common import (
+    RoutedPath,
+    right_normal_axis_sign,
+    section_header_safe_cap,
+)
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.svg import build_render_plan
 from nf_metro.themes import resolve_theme
@@ -629,3 +635,89 @@ def test_two_linked_turn_rounds_on_one_side_raise() -> None:
         assert set(builder.turn_rounds()) >= {ranked, partner}
         with pytest.raises(RuntimeError, match="interleaving legs"):
             port_order_plan_module.decide_ports(builder)
+
+
+# Same-row RIGHT-entry loops recorded round below: (map, connector).
+SAME_ROW_UNDER: tuple[tuple[str, _Key], ...] = (
+    ("f8402075", ("sec2__entry_right_4", "sec1__exit_right_1")),
+    ("f8403977", ("sec2__entry_right_3", "sec1__exit_right_0")),
+)
+
+
+def _below_channels(path: Path, key: _Key) -> set[float]:
+    """Every around-below channel routing and the exit-turn planner read for
+    *key*'s connector while *path* renders."""
+    seen: set[float] = set()
+    real = handlers_module._right_entry_below_channel_y
+
+    def spy(facts: handlers_module._InterFacts) -> float:
+        value = real(facts)
+        if facts.edge.target == key[0]:
+            seen.add(value)
+        return value
+
+    with pytest.MonkeyPatch.context() as mp, warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        mp.setattr(handlers_module, "_right_entry_below_channel_y", spy)
+        mp.setattr(exit_turns_module, "_right_entry_below_channel_y", spy)
+        graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+        build_render_plan(graph, resolve_theme(None, graph))
+    return seen
+
+
+@pytest.mark.parametrize(
+    ("stem", "key"), SAME_ROW_UNDER, ids=[stem for stem, _key in SAME_ROW_UNDER]
+)
+def test_same_row_right_under_run_stays_in_row_gap(stem: str, key: _Key) -> None:
+    """A same-row loop into a RIGHT entry recorded round below traverses the
+    gap under its own row, above every lower-row box in the hop's columns:
+    clear of every box of the row it passes under and of the header of every
+    lower-row box it passes over, in the one channel the exit-turn planner and
+    routing both read."""
+    path = CANVAS_DATA / f"{stem}.mmd"
+    laid = _laid(path)
+    graph = laid.drawn
+    assert _screen(graph, key) == "below"
+    depths, (x0, x1) = _traverse_depths(laid, key)
+    source = graph.sections[graph.ports[key[1]].section_id]
+    target = graph.sections[graph.ports[key[0]].section_id]
+    lower_tops = [
+        s.bbox_y
+        for s in graph.sections.values()
+        if s.bbox_w > 0
+        and s.grid_row > source.grid_row
+        and s.grid_col <= target.grid_col
+        and source.grid_col <= s.grid_col + s.grid_col_span - 1
+    ]
+    assert lower_tops
+    assert max(depths) < min(lower_tops)
+    for section in graph.sections.values():
+        if section.bbox_w <= 0 or not (
+            section.bbox_x < x1 and x0 < section.bbox_x + section.bbox_w
+        ):
+            continue
+        if section.grid_row == source.grid_row:
+            bottom = section.bbox_y + section.bbox_h
+            assert min(depths) >= bottom + BYPASS_CLEARANCE, section.id
+        elif section.grid_row > source.grid_row:
+            assert max(depths) <= section_header_safe_cap(section), section.id
+    assert _below_channels(path, key) == {min(depths)}
+
+
+def test_a_row_under_run_reads_every_column_a_section_spans() -> None:
+    """The under-run reads a section by every column it spans: a lower-row
+    box reaching into the capped columns caps the run, and a row box
+    reaching into the passed columns lifts its floor."""
+    under = handlers_module._row_under_run_y
+    graph = copy.deepcopy(_laid(CANVAS_DATA / "f8402075.mmd").drawn)
+    export, gather = graph.sections["sec2"], graph.sections["sec1"]
+    report, vcf = graph.sections["sec4"], graph.sections["sec0"]
+    floor = max(s.bbox_y + s.bbox_h for s in (export, gather))
+    assert under(graph, 0, (1, 2), (2, 2), None) == floor + BYPASS_CLEARANCE
+    report.grid_col_span = 2
+    assert under(graph, 0, (1, 2), (2, 2), None) == section_header_safe_cap(report)
+    report.grid_col_span = 1
+    vcf.grid_col_span = 2
+    vcf_floor = vcf.bbox_y + vcf.bbox_h
+    assert vcf_floor > floor
+    assert under(graph, 0, (1, 2), (2, 2), None) == vcf_floor + BYPASS_CLEARANCE
