@@ -423,9 +423,13 @@ def test_terminus_bar_crosses_the_line_end_and_overhangs_both_sides(vertical):
         assert y + h / 2 == pytest.approx(axis)
 
 
+_STEP = (2 * 1.0 + 0.5) * _LW
+_OUTER = (1.0 + 0.5) * _LW
+
+
 @pytest.mark.parametrize(
     "lines,max_lines,rings",
-    [(2, 3, 1), (3, 3, 1), (4, 3, 3), (6, 3, 3), (8, 3, 4), (2, 2, 1), (3, 2, 2)],
+    [(2, 3, 1), (3, 3, 1), (4, 3, 2), (6, 3, 3), (10, 3, 4), (2, 2, 1), (3, 2, 2)],
 )
 def test_ring_chain_length_follows_bundle_width(lines, max_lines, rings):
     from nf_metro.render.svg import ring_layout
@@ -435,11 +439,37 @@ def test_ring_chain_length_follows_bundle_width(lines, max_lines, rings):
     layout = ring_layout(-span / 2, span / 2, lines, theme)
     assert len(layout.centres) == rings
     assert layout.inner == pytest.approx(_LW)
-    if rings > 1:
-        assert layout.centres[0] == pytest.approx(-span / 2)
-        assert layout.centres[-1] == pytest.approx(span / 2)
-        gaps = [b - a for a, b in zip(layout.centres, layout.centres[1:])]
-        assert max(gaps) <= (2 * 1.0 + 0.5) * _LW + 1e-6
+
+
+@pytest.mark.parametrize("lines,rings", [(3, 2), (6, 3), (10, 4)])
+def test_chain_rings_sit_one_natural_step_apart_and_cover_the_bundle(lines, rings):
+    from nf_metro.render.svg import ring_layout
+
+    theme = replace(_GEOM, ring_max_lines=2)
+    lo, hi = 7.0, 7.0 + (lines - 1) * _LW
+    centres = ring_layout(lo, hi, lines, theme).centres
+    assert len(centres) == rings
+    assert [b - a for a, b in zip(centres, centres[1:])] == [pytest.approx(_STEP)] * (
+        rings - 1
+    )
+    assert (centres[0] + centres[-1]) / 2 == pytest.approx((lo + hi) / 2)
+    assert centres[0] - _OUTER <= lo - _LW / 2 + 1e-9
+    assert centres[-1] + _OUTER >= hi + _LW / 2 - 1e-9
+
+
+def test_every_chain_has_the_same_neck():
+    import math
+
+    from nf_metro.render.svg import ring_layout
+
+    theme = replace(_GEOM, ring_max_lines=2)
+    necks = set()
+    for lines in (3, 4, 6, 10):
+        centres = ring_layout(0.0, (lines - 1) * _LW, lines, theme).centres
+        for a, b in zip(centres, centres[1:]):
+            half_gap = (b - a) / 2
+            necks.add(round(math.sqrt(_OUTER**2 - half_gap**2), 9))
+    assert len(necks) == 1
 
 
 def test_grow_widens_one_ring_over_the_bundle():

@@ -125,7 +125,8 @@ A station on several lines is an interchange.
 
 With `ring`, `ring_max_lines` is the most lines on one track that a single ring covers, and `ring_overflow` decides what a wider bundle gets:
 
-- `chain` draws a row of rings from the outermost line to the other, each touching the next, with a strip in the ring fill cut through the outlines where they meet so the centres join into one shape.
+- `chain` draws the fewest rings that cover the bundle, centred on it, each ring's outer edge meeting the next ring's inner edge, with a strip in the ring fill cut through the outlines where they meet so the centres join into one shape.
+  The spacing never changes, so every chain has the same neck, and a chain can reach a little past the outermost lines.
 - `grow` draws one ring whose inside widens to cover the whole bundle.
 
 So the three styles are: one standard-size ring (raise `ring_max_lines`), a bridged chain (`chain`), or one larger ring (`grow`).

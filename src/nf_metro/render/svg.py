@@ -5211,22 +5211,26 @@ def ring_layout(lo: float, hi: float, lines: int, theme: Theme) -> RingLayout:
     """The rings for *lines* lines on one track, spanning *lo* to *hi*.
 
     Up to ``ring_max_lines`` lines get one ring of ``ring_inner_diameter``
-    centred on them. A wider bundle gets, under ``ring_overflow: chain``, a
-    chain from the outermost line to the other, each ring's outer edge reaching
-    no further than the next one's inner edge; under ``grow``, one ring whose
-    inside widens to cover the bundle.
+    centred on them. A wider bundle gets, under ``ring_overflow: chain``, the
+    fewest rings (at least two) that cover the bundle's outer edges, centred on
+    the bundle and spaced so each ring's outer edge meets the next one's inner
+    edge. That spacing never changes, so every chain has the same neck, and a
+    chain may reach a little past the outermost lines. Under ``grow`` the
+    bundle gets one ring whose inside widens to cover it.
     """
     lw = theme.line_width
     inner = theme.ring_inner_diameter * lw / 2
     stroke = theme.ring_stroke_width * lw
     span = hi - lo
+    mid = (lo + hi) / 2
     if lines <= theme.ring_max_lines or span <= COORD_TOLERANCE_FINE:
-        return RingLayout([(lo + hi) / 2], inner)
+        return RingLayout([mid], inner)
     if theme.ring_overflow == RING_GROW:
-        return RingLayout([(lo + hi) / 2], max(inner, (span + lw) / 2))
-    count = max(2, math.ceil(span / (2 * inner + stroke) - COORD_TOLERANCE_FINE) + 1)
-    step = span / (count - 1)
-    return RingLayout([lo + k * step for k in range(count)], inner)
+        return RingLayout([mid], max(inner, (span + lw) / 2))
+    step = 2 * inner + stroke
+    outer = inner + stroke
+    count = max(2, math.ceil((span + lw - 2 * outer) / step - COORD_TOLERANCE_FINE) + 1)
+    return RingLayout([mid + (k - (count - 1) / 2) * step for k in range(count)], inner)
 
 
 def ring_groups(positions: Sequence[float], theme: Theme) -> list[RingLayout]:
