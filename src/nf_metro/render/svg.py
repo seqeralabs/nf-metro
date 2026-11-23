@@ -111,6 +111,8 @@ from nf_metro.layout.routing import (
 )
 from nf_metro.layout.routing.convergences import ConvergenceInvariantError
 from nf_metro.layout.routing.corners import (
+    corner_arc_at,
+    corner_arc_controls,
     curve_tangents,
     resolve_curve_radii,
 )
@@ -3107,8 +3109,8 @@ def _leftmost_ink(
     attribution watermark and the debug overlay: section boxes and headers,
     line strokes, station markers, station labels, group captions, the caption
     and the legend.  A stroke reaches half its width past its path, and a
-    quadratic corner stays inside the hull of its control points, so a
-    polyline's vertices bound its curves.  Terminus icons are held inside their
+    rounded corner stays inside the triangle of its tangent points and vertex,
+    so a polyline's vertices bound its curves.  Terminus icons are held inside their
     section box by a layout guard, so the box covers them.
     """
     reach: list[float] = []
@@ -3590,8 +3592,8 @@ class _DrawnPiece(NamedTuple):
     """One piece of a route's stroke, in drawing order.
 
     A straight run has ``control`` None and lies on polyline leg ``leg``; a
-    corner is the quadratic from ``start`` through ``control`` (its vertex) to
-    ``end``, has no ``leg``, and carries ``curved`` from
+    corner is the circular arc from ``start`` to ``end`` tangent to the legs
+    meeting at ``control`` (its vertex), has no ``leg``, and carries ``curved`` from
     :class:`~nf_metro.layout.routing.corners.CornerTangent`.
     """
 
@@ -3711,7 +3713,7 @@ def _render_edges(
                 if piece.control is None:
                     path.L(*piece.end)
                 elif piece.curved:
-                    path.Q(*piece.control, *piece.end)
+                    _draw_corner(path, piece)
             d.append(path)
 
 
@@ -3753,7 +3755,7 @@ def _chevron_stroke_width(theme: Theme) -> float:
     return max(theme.line_width * 0.5, 1.0)
 
 
-# Chords per quadratic corner when measuring its arc length; the chevron is
+# Chords per rounded corner when measuring its arc length; the chevron is
 # then placed on the exact curve, so this bounds only the spacing error.
 _CORNER_ARC_CHORDS = 32
 
@@ -4330,13 +4332,14 @@ def _piece_at(
     (ax, ay), (bx, by) = piece.start, piece.end
     if piece.control is None:
         return (ax + (bx - ax) * t, ay + (by - ay) * t), (bx - ax, by - ay)
-    cx, cy = piece.control
-    s = 1.0 - t
-    point = (
-        s * s * ax + 2 * s * t * cx + t * t * bx,
-        s * s * ay + 2 * s * t * cy + t * t * by,
-    )
-    return point, (s * (cx - ax) + t * (bx - cx), s * (cy - ay) + t * (by - cy))
+    return corner_arc_at(piece.start, piece.control, piece.end, t)
+
+
+def _draw_corner(path: draw.Path, piece: _DrawnPiece) -> None:
+    """Append *piece*'s rounded corner to *path* as the arc it bends around."""
+    assert piece.control is not None
+    c1, c2 = corner_arc_controls(piece.start, piece.control, piece.end)
+    path.C(*c1, *c2, *piece.end)
 
 
 def _chevron_vertices(
@@ -4411,7 +4414,7 @@ def _render_bridged_edge(
     path.M(*pts[0])
     for piece in _drawn_pieces(pts, curve_radii, curve_radius):
         if piece.control is not None:
-            path.Q(*piece.control, *piece.end)
+            _draw_corner(path, piece)
             continue
         for bk in _run_breaks(piece, breaks):
             path.L(*bk.cut_a)

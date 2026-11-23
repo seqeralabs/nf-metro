@@ -245,6 +245,83 @@ def curve_tangents(
     return tangents
 
 
+def corner_arc_controls(
+    before: tuple[float, float],
+    corner: tuple[float, float],
+    after: tuple[float, float],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Cubic control points that draw a rounded corner as a circular arc.
+
+    The arc leaves the incoming leg at *before* and rejoins the outgoing leg at
+    *after*, both a tangent arm from *corner*. A circular arc of deflection
+    ``phi`` drawn as one cubic puts each control point ``4/3 * tan(phi / 4)``
+    radii along its tangent, which is ``k = 4/3 * tan(phi / 4) / tan(phi / 2)``
+    of the tangent arm; the radial error is under 0.03% of the radius up to a
+    right angle. Concentric lanes drawn this way stay parallel through the
+    turn, which a quadratic through *corner* does not. As ``phi`` tends to zero
+    ``k`` tends to 2/3, the cubic form of that quadratic.
+    """
+    d_in = (corner[0] - before[0], corner[1] - before[1])
+    d_out = (after[0] - corner[0], after[1] - corner[1])
+    len_in = math.hypot(*d_in)
+    len_out = math.hypot(*d_out)
+    if len_in <= 0.0 or len_out <= 0.0:
+        return before, after
+    cos_phi = (d_in[0] * d_out[0] + d_in[1] * d_out[1]) / (len_in * len_out)
+    phi = math.acos(max(-1.0, min(1.0, cos_phi)))
+    k = 4.0 / 3.0 * math.tan(phi / 4) / math.tan(phi / 2) if phi > 1e-6 else 2.0 / 3.0
+    return (
+        (before[0] + d_in[0] * k, before[1] + d_in[1] * k),
+        (after[0] - d_out[0] * k, after[1] - d_out[1] * k),
+    )
+
+
+def corner_arc_at(
+    before: tuple[float, float],
+    corner: tuple[float, float],
+    after: tuple[float, float],
+    t: float,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Point and (unnormalised) forward tangent of the drawn corner arc at *t*."""
+    c1, c2 = corner_arc_controls(before, corner, after)
+    s = 1.0 - t
+    point = (
+        s**3 * before[0]
+        + 3 * s * s * t * c1[0]
+        + 3 * s * t * t * c2[0]
+        + t**3 * after[0],
+        s**3 * before[1]
+        + 3 * s * s * t * c1[1]
+        + 3 * s * t * t * c2[1]
+        + t**3 * after[1],
+    )
+    tangent = (
+        s * s * (c1[0] - before[0])
+        + 2 * s * t * (c2[0] - c1[0])
+        + t * t * (after[0] - c2[0]),
+        s * s * (c1[1] - before[1])
+        + 2 * s * t * (c2[1] - c1[1])
+        + t * t * (after[1] - c2[1]),
+    )
+    return point, tangent
+
+
+def corner_from_arc(
+    before: tuple[float, float],
+    c1: tuple[float, float],
+    c2: tuple[float, float],
+    after: tuple[float, float],
+) -> tuple[float, float]:
+    """The corner vertex a drawn arc was built around: where its tangents meet."""
+    d1 = (c1[0] - before[0], c1[1] - before[1])
+    d2 = (after[0] - c2[0], after[1] - c2[1])
+    denom = d1[0] * d2[1] - d1[1] * d2[0]
+    if abs(denom) <= 1e-12:
+        return ((c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2)
+    t = ((after[0] - before[0]) * d2[1] - (after[1] - before[1]) * d2[0]) / denom
+    return (before[0] + d1[0] * t, before[1] + d1[1] * t)
+
+
 def reversed_offset(offset: float, max_offset: float) -> float:
     """Flip a line's offset within a bundle.
 

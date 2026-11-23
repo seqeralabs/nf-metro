@@ -60,14 +60,14 @@ def _gap(inner, inner_arm, outer, outer_arm) -> float:
     )
 
 
-@pytest.mark.parametrize("turn_degrees", [45.0, 61.0, 90.0])
+@pytest.mark.parametrize("turn_degrees", [45.0, 61.0, 90.0, 120.0, 135.0])
 def test_adjacent_lanes_share_a_centre_at_any_turn(turn_degrees):
     inner, outer, outer_arm = _pair(turn_degrees)
     assert outer_arm > 10.0
     assert _centre(inner, 10.0) == pytest.approx(_centre(outer, outer_arm), abs=1e-6)
 
 
-@pytest.mark.parametrize("turn_degrees", [45.0, 61.0])
+@pytest.mark.parametrize("turn_degrees", [45.0, 61.0, 90.0, 120.0, 135.0])
 def test_adjacent_lanes_stay_touching_through_a_diagonal_turn(turn_degrees):
     inner, outer, outer_arm = _pair(turn_degrees)
     assert _gap(inner, 10.0, outer, outer_arm) <= 0.1

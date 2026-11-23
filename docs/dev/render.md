@@ -69,7 +69,7 @@ Animation uses the same offset paths.
 `emit_render_plan` draws in layers:
 
 1. **Section boxes.** Rounded rectangles with optional section labels and tick marks for group labels.
-2. **Edges.** Polylines from `RoutedPath.points`, with quadratic Bézier curves at corners, whose radius `routing/corners.py` computes.
+2. **Edges.** Polylines from `RoutedPath.points`, with rounded corners drawn as circular arcs (cubic Bézier circle approximations, `corner_arc_controls` in `routing/corners.py`) between the tangent points that file computes. Concentric lanes stay exactly one lane step apart at every turn angle.
    Where `compute_bridges` identifies a non-merging crossing, `_render_bridged_edge` draws the under-route with a gap (see [Bridges](#bridges-bridgespy)).
 3. **Station markers.** Pill-shaped rectangles, or circles and squares for alternative marker styles.
    Rail-mode interchange stations span several rails and are drawn by `_render_rail_pill`.
@@ -163,7 +163,7 @@ It then runs four checks:
 - **offset-collapse** flags two distinct lines drawn flush where the offset plan placed them at least one `OFFSET_STEP` apart.
   Lines assigned to the same slot may share a track by design.
 - **chevron-off-stroke** flags a `--directional` chevron whose centre is off its own line's painted centreline, or whose heading departs from that stroke's downstream tangent, or whose ink reaches into one of its line's bridge gaps.
-  The stroke is read back with its quadratic corners, so a chevron inside a rounded corner is measured against the curve.
+  The stroke is read back with its rounded corners, so a chevron inside a rounded corner is measured against the curve.
 
 The label, marker and chevron checks need only the SVG, and they run in `validate-svg --geometry` and `render --validate`.
 The offset check also needs the original `RenderPlan`.

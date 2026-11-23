@@ -56,6 +56,12 @@ history.
   now turn about one shared centre, so a bundle on a diagonal turn keeps its
   lines touching instead of opening a thin gap between them. Maps with
   diagonal bundle turns redraw those curves slightly.
+- Rounded corners draw as circular arcs (cubic Bézier circle
+  approximations) where they were quadratic curves, with the same tangent
+  points and radii. Parallel lines turning together stay exactly one stroke
+  apart through the whole turn at every angle, closing the thin seam that a
+  right-angle bundle turn showed between touching lines. Every rounded corner
+  on every map redraws very slightly fuller.
 - The transparent embed theme is named `transparent`; `light` is an accepted
   alias. `nf-metro info` reports `style: transparent` for a map written with
   `style: light`.

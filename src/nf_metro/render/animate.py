@@ -26,7 +26,12 @@ from nf_metro.layout.routing.common import (
     point_on_polyline,
     segment_direction,
 )
-from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
+from nf_metro.layout.routing.corners import (
+    corner_arc_controls,
+    corner_from_arc,
+    curve_tangents,
+    resolve_curve_radii,
+)
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.animation_waves import LineWaves, Route, plan_line_waves
 from nf_metro.render.constants import (
@@ -64,7 +69,7 @@ def _seconds(value: float) -> float:
     return round(value, _SECONDS_DECIMALS)
 
 
-# Segments each quadratic corner is flattened into when sampling a ball's
+# Segments each rounded corner is flattened into when sampling a ball's
 # position for a raster frame.  The corners are ~10px arcs, so eight chords
 # put the sampled point within a small fraction of a pixel of the drawn curve.
 _CURVE_FLATTEN_STEPS = 8
@@ -80,7 +85,7 @@ FRAME_SLOT = "<!--nf-metro-animation-frame-->"
 class BallTrack:
     """The geometry one dot travels: its drawn ``d`` and the flattened polyline.
 
-    ``points``/``distances`` are the polyline the quadratic corners flatten to
+    ``points``/``distances`` are the polyline the rounded corners flatten to
     and its cumulative arc length, which :meth:`point_at` samples the way a
     browser samples ``offset-distance``.
     """
@@ -506,13 +511,13 @@ def _route_pieces(line: _LineRoutes, route: Route, curve_radius: float) -> list[
 def _flatten_path(
     d_attr: str,
 ) -> tuple[tuple[tuple[float, float], ...], tuple[float, ...]]:
-    """Flatten an M/L/Q path to a polyline and its cumulative arc lengths.
+    """Flatten an M/L/C path to a polyline and its cumulative arc lengths.
 
     :func:`_compute_path_length` stays the authority on a track's *duration*
     (changing it would retime every animated map); a sampled position needs
     the curve walked rather than approximated by its chord.
     """
-    tokens = re.findall(r"[MLQ]|[-+]?\d*\.?\d+", d_attr)
+    tokens = re.findall(r"[MLC]|[-+]?\d*\.?\d+", d_attr)
     points: list[tuple[float, float]] = []
 
     def push(point: tuple[float, float]) -> None:
@@ -533,20 +538,27 @@ def _flatten_path(
             cx, cy = float(tokens[i + 1]), float(tokens[i + 2])
             push((cx, cy))
             i += 3
-        elif token == "Q":
-            qcx, qcy = float(tokens[i + 1]), float(tokens[i + 2])
-            ex, ey = float(tokens[i + 3]), float(tokens[i + 4])
+        elif token == "C":
+            c1 = (float(tokens[i + 1]), float(tokens[i + 2]))
+            c2 = (float(tokens[i + 3]), float(tokens[i + 4]))
+            end = (float(tokens[i + 5]), float(tokens[i + 6]))
             for step in range(1, _CURVE_FLATTEN_STEPS + 1):
                 t = step / _CURVE_FLATTEN_STEPS
                 u = 1.0 - t
                 push(
                     (
-                        u * u * cx + 2 * u * t * qcx + t * t * ex,
-                        u * u * cy + 2 * u * t * qcy + t * t * ey,
+                        u**3 * cx
+                        + 3 * u * u * t * c1[0]
+                        + 3 * u * t * t * c2[0]
+                        + t**3 * end[0],
+                        u**3 * cy
+                        + 3 * u * u * t * c1[1]
+                        + 3 * u * t * t * c2[1]
+                        + t**3 * end[1],
                     )
                 )
-            cx, cy = ex, ey
-            i += 5
+            cx, cy = end
+            i += 7
         else:
             i += 1
 
@@ -733,9 +745,10 @@ def _points_to_svg_path(
 
     for tan in curve_tangents(pts, resolved):
         if tan.curved:
+            c1, c2 = corner_arc_controls(tan.before, tan.corner, tan.after)
             parts.append(
                 f"L {tan.before[0]:.2f} {tan.before[1]:.2f} "
-                f"Q {tan.corner[0]:.2f} {tan.corner[1]:.2f} "
+                f"C {c1[0]:.2f} {c1[1]:.2f} {c2[0]:.2f} {c2[1]:.2f} "
                 f"{tan.after[0]:.2f} {tan.after[1]:.2f}"
             )
         else:
@@ -749,11 +762,13 @@ def _points_to_svg_path(
 def _compute_path_length(d_attr: str) -> float:
     """Approximate the length of an SVG path from its commands.
 
-    Parses M, L, and Q commands and sums segment lengths.
-    For Q (quadratic Bezier), approximates with the chord length.
+    Parses M, L, and C commands and sums segment lengths. A C corner is
+    measured as the mean of its chord and the two tangent arms through the
+    corner vertex its tangents meet at, so a track's duration depends only on
+    its waypoints and radii.
     """
     # Extract all numbers from the path
-    tokens = re.findall(r"[MLQ]|[-+]?\d*\.?\d+", d_attr)
+    tokens = re.findall(r"[MLC]|[-+]?\d*\.?\d+", d_attr)
 
     total = 0.0
     cx, cy = 0.0, 0.0  # current position
@@ -771,20 +786,18 @@ def _compute_path_length(d_attr: str) -> float:
             total += math.hypot(nx - cx, ny - cy)
             cx, cy = nx, ny
             i += 3
-        elif token == "Q":
-            # Q cx cy ex ey - approximate with control point polygon
-            qcx = float(tokens[i + 1])
-            qcy = float(tokens[i + 2])
-            ex = float(tokens[i + 3])
-            ey = float(tokens[i + 4])
-            # Sum of legs through control point (overestimates slightly)
+        elif token == "C":
+            c1 = (float(tokens[i + 1]), float(tokens[i + 2]))
+            c2 = (float(tokens[i + 3]), float(tokens[i + 4]))
+            ex = float(tokens[i + 5])
+            ey = float(tokens[i + 6])
+            qcx, qcy = corner_from_arc((cx, cy), c1, c2, (ex, ey))
             leg1 = math.hypot(qcx - cx, qcy - cy)
             leg2 = math.hypot(ex - qcx, ey - qcy)
             chord = math.hypot(ex - cx, ey - cy)
-            # Average of chord and polygon for a decent approximation
             total += (chord + leg1 + leg2) / 2
             cx, cy = ex, ey
-            i += 5
+            i += 7
         else:
             i += 1
 

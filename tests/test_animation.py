@@ -50,15 +50,15 @@ def _build(fixture: Path):
 
 
 _NUMBER = r"-?\d+(?:\.\d+)?"
-_TOKEN_RE = re.compile(rf"[MLQ]|{_NUMBER}")
+_TOKEN_RE = re.compile(rf"[MLC]|{_NUMBER}")
 
 
 def _parse_motion_path(d_attr: str) -> list[tuple[str, list[tuple[float, float]]]]:
     """Parse an SVG motion path 'd' attribute into segments.
 
     Returns a list of (command, points) where command is one of 'M', 'L',
-    'Q' and points is the segment's coordinate tuples.  The 'Q' segment
-    keeps the (control, end) pair.
+    'C' and points is the segment's coordinate tuples.  The 'C' segment
+    keeps its (control1, control2, end) triple.
     """
     tokens = _TOKEN_RE.findall(d_attr)
     out: list[tuple[str, list[tuple[float, float]]]] = []
@@ -70,13 +70,12 @@ def _parse_motion_path(d_attr: str) -> list[tuple[str, list[tuple[float, float]]
             y = float(tokens[i + 2])
             out.append((tok, [(x, y)]))
             i += 3
-        elif tok == "Q":
-            cx = float(tokens[i + 1])
-            cy = float(tokens[i + 2])
-            ex = float(tokens[i + 3])
-            ey = float(tokens[i + 4])
-            out.append(("Q", [(cx, cy), (ex, ey)]))
-            i += 5
+        elif tok == "C":
+            nums = [float(t) for t in tokens[i + 1 : i + 7]]
+            out.append(
+                ("C", [(nums[0], nums[1]), (nums[2], nums[3]), (nums[4], nums[5])])
+            )
+            i += 7
         else:
             i += 1
     return out
@@ -85,14 +84,12 @@ def _parse_motion_path(d_attr: str) -> list[tuple[str, list[tuple[float, float]]
 def _end_point(segment: tuple[str, list[tuple[float, float]]]) -> tuple[float, float]:
     """Return the on-curve endpoint of a parsed segment."""
     cmd, pts = segment
-    if cmd == "Q":
-        return pts[1]
-    return pts[0]
+    return pts[-1]
 
 
 @pytest.mark.parametrize("fixture", ANIMATION_FIXTURES, ids=ANIMATION_FIXTURE_IDS)
 def test_motion_path_segments_lie_on_rendered_geometry(fixture: Path):
-    """Every L/Q segment of every motion path must coincide with a
+    """Every L/C segment of every motion path must coincide with a
     rendered metro-line segment of the same line."""
     from nf_metro.layout.routing.common import point_on_polyline
     from nf_metro.render.svg import apply_route_offsets
@@ -136,16 +133,16 @@ def test_motion_path_segments_lie_on_rendered_geometry(fixture: Path):
             if cmd == "L":
                 if not _segment_covered(prev_end, end, line_id):
                     offences.append(f"L {prev_end} -> {end} on line {line_id!r}")
-            elif cmd == "Q":
-                # Curve smoothing at a station corner: accept if either the
-                # control leg or the chord lies on the rendered polyline.
+            elif cmd == "C":
+                # A rounded corner's first control point lies on its incoming
+                # leg: accept if that leg or the chord is on the polyline.
                 control = pts[0]
                 if not (
                     _segment_covered(prev_end, control, line_id)
                     or _segment_covered(prev_end, end, line_id)
                 ):
                     offences.append(
-                        f"Q {prev_end} -> {control} -> {end} on line {line_id!r}"
+                        f"C {prev_end} -> {control} -> {end} on line {line_id!r}"
                     )
             prev_end = end
 
