@@ -4064,7 +4064,8 @@ def _directional_chevrons(
     ``floor(length / spacing)`` chevrons, each placed on the lowest-indexed
     route covering that part. A stretch of at least half a spacing that none
     of them lands on gets one at its middle, unless that is within half a
-    spacing of another on its run. A run that still carries none gets one at
+    spacing of another on its run or within chevron-ink distance of any other
+    chevron of the line. A run that still carries none gets one at
     the middle of its longest stretch when that is at least one chevron long.
     """
     size = theme.directional_marker_size
@@ -4113,8 +4114,10 @@ def _directional_chevrons(
             found.append(run.place(start + i * spacing for i in range(count)))
         # A stretch left bare between a run's positions, or beside a break, is
         # long enough to want a cue of its own: one chevron at its middle, kept
-        # at least half a spacing from every other chevron on the run.
+        # at least half a spacing from every other chevron on the run, and clear
+        # of the ink of any same-line chevron, such as at a crossing.
         half = spacing / 2
+        ink_clear = 2 * reach
         for run, on_run in zip(runs, found, strict=True):
             bare_stretches = sorted(
                 (
@@ -4127,8 +4130,15 @@ def _directional_chevrons(
             )
             for index in bare_stretches:
                 middle = run.offsets[index] + run.stretches[index].length / 2
-                if all(abs(p.position - middle) >= half - 1e-9 for p in on_run):
-                    on_run.extend(run.place([middle]))
+                if not all(abs(p.position - middle) >= half - 1e-9 for p in on_run):
+                    continue
+                for chevron in run.place([middle]):
+                    if all(
+                        math.dist(chevron.point, other.point) >= ink_clear
+                        for others in found
+                        for other in others
+                    ):
+                        on_run.append(chevron)
         covered = {
             route for run, on_run in zip(runs, found) if on_run for route in run.routes
         }
