@@ -10,6 +10,7 @@ __all__ = [
     "render_svg",
 ]
 
+import bisect
 import copy
 import hashlib
 import html
@@ -28,6 +29,8 @@ import drawsvg as draw
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
+    LOGO_HEIGHT,
+    LOGO_Y_STANDALONE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
@@ -47,6 +50,7 @@ from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
     _label_bbox,
+    _label_ink_quad,
     place_labels,
 )
 from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
@@ -197,7 +201,6 @@ from nf_metro.render.constants import (
     LEGEND_GAP,
     LEGEND_INSET,
     LEGEND_ROUTE_CLEARANCE,
-    LOGO_Y_STANDALONE,
     MARKER_PILL_LENGTH_RATIO,
     RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
@@ -209,7 +212,10 @@ from nf_metro.render.constants import (
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
+    TEXT_VCENTER_EM,
+    TITLE_ASCENT_RATIO,
     TITLE_CANVAS_SAFETY_MARGIN,
+    TITLE_LOGO_GAP,
     WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
@@ -242,6 +248,7 @@ from nf_metro.render.ns import ns as _ns
 from nf_metro.render.path_geometry import materialize_source_turnout_paths
 from nf_metro.render.plan import (
     _RENDER_GRAPH_EXCLUDED_FIELDS,
+    ChevronVertices,
     FrozenGraph,
     FrozenMap,
     FrozenRecord,
@@ -365,7 +372,9 @@ def _content_origin(
     A map with no boxes has no such frame, and is never moved for one either,
     so its content edge is the canvas padding.  Station markers and labels
     reach past a bare station's coordinate, so reading one as an edge would
-    place a decoration inside the content it frames.
+    place a decoration inside the content it frames.  This therefore reads
+    station coordinates on purpose, unlike :func:`_leftmost_ink`, which reads
+    the ink actually painted.
     """
     boxes = [section for section in graph.sections.values() if section.bbox_w > 0]
     if not boxes:
@@ -392,6 +401,9 @@ def _canvas_placement(
     first box, a bundle rising over the top of one -- is seated on the line the
     layout seats a first section against (:data:`CANVAS_ORIGIN_MARGIN`).
 
+    The top margin is measured from the map's own canvas top
+    (``graph.title_band_lift``), which sits below any title/logo band.
+
     A shortfall under :data:`SAME_COORD_TOLERANCE` is nothing a viewer can
     resolve, so the map does not move for one.
     """
@@ -399,9 +411,12 @@ def _canvas_placement(
     if not boxes:
         return 0.0, 0.0
     ink_x, ink_y = _drawn_ink_origin(graph, route_polylines, debug)
+    top = graph.title_band_lift
     shortfall = (
         _outboard_shortfall(min(s.bbox_x for s in boxes), ink_x, margins[0]),
-        _outboard_shortfall(min(s.bbox_y for s in boxes), ink_y, margins[1]),
+        _outboard_shortfall(
+            min(s.bbox_y for s in boxes) - top, ink_y - top, margins[1]
+        ),
     )
     if max(shortfall) <= SAME_COORD_TOLERANCE:
         return 0.0, 0.0
@@ -800,6 +815,8 @@ class _FinalPublishedGeometry(FinalCanvasGeometry):
     logo_y: float
     logo_w: float
     logo_h: float
+    title_x: float
+    title_y: float
     legend_logo_size: tuple[float, float] | None
     manifest: Mapping[str, object] | None
     debug: bool
@@ -841,6 +858,8 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "logo_y": "published.logo_y",
     "logo_w": "published.logo_w",
     "logo_h": "published.logo_h",
+    "title_x": "published.title_x",
+    "title_y": "published.title_y",
     "legend_logo_size": "published.legend_logo_size",
     "manifest": "published.manifest",
     "debug": "published.debug",
@@ -848,6 +867,7 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "bare": "published.bare",
     "draws_standalone_title": "published.draws_standalone_title",
     "inactive_line_ids": "inactive_line_ids",
+    "directional_chevrons": "directional_chevrons",
 }
 
 
@@ -2844,9 +2864,7 @@ def _build_render_plan_scaled(
     # Whether this render draws the map title as standalone chrome: the one
     # predicate that both the canvas-sizing term and the title-draw block read,
     # so the two cannot drift and reintroduce a clipped or unmeasured title.
-    draws_standalone_title = (
-        not bare and bool(graph.title) and not logo_in_legend and not show_logo
-    )
+    draws_standalone_title = not bare and bool(graph.title)
 
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
         graph,
@@ -2868,14 +2886,44 @@ def _build_render_plan_scaled(
         max_y = max(max_y, legend_y + legend_h)
 
     # Standalone logo positioning (only when no legend to embed it in)
+    positive_fan = frozenset(tb_positive_fan_sections(graph))
+    directional_chevrons = (
+        _directional_chevrons(
+            routes,
+            route_polylines,
+            route_curve_radii,
+            dict(zip(edge_route_indices, bridge_breaks, strict=True)),
+            _invisible_stations(graph),
+            theme,
+        )
+        if graph.directional
+        else ()
+    )
+    block_left = _leftmost_ink(
+        graph,
+        theme,
+        route_polylines=route_polylines,
+        directional_chevrons=directional_chevrons,
+        station_offsets=station_offsets,
+        positive_fan=positive_fan,
+        labels=labels,
+        header_placements=header_placements,
+        group_bands=group_bands,
+        legend_left=legend_x if show_legend else None,
+        caption_left=_watermark_x_inset(bare, padding) if graph.caption else None,
+        debug=debug,
+    )
+    block_left = padding if block_left is None else max(block_left, 0.0)
     logo_x = 0.0
     logo_y = 0.0
+    standalone_logo_box: tuple[float, float, float, float] | None = None
     if show_logo and not show_legend:
         logo_w *= graph.logo_scale
         logo_h *= graph.logo_scale
-        logo_x = padding
+        logo_x = block_left
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
+        standalone_logo_box = (logo_x, logo_y, logo_w, logo_h)
 
     # Right margin: one padding width in full mode; none in bare mode so the
     # canvas hugs the content.  Bottom margin is always just enough room for
@@ -2883,9 +2931,12 @@ def _build_render_plan_scaled(
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
 
-    # The title is authored text drawn at x=padding but never folded into the
-    # content extent, so a title wider than the map is clipped at the right
-    # edge.  Grow the canvas to its true glyph advance plus a small margin.
+    title_x, title_y = _title_origin(
+        block_left, theme.title_font_size, standalone_logo_box
+    )
+
+    # Content bounds ignore the title, so a title wider than the map would be
+    # clipped at the right edge: grow the canvas to its true glyph advance.
     if draws_standalone_title:
         title_advance = DEFAULT_TEXT_METRICS.advance(
             graph.title,
@@ -2893,7 +2944,7 @@ def _build_render_plan_scaled(
             TextRole.TITLE,
         )
         auto_width = max(
-            auto_width, padding + title_advance + TITLE_CANVAS_SAFETY_MARGIN
+            auto_width, title_x + title_advance + TITLE_CANVAS_SAFETY_MARGIN
         )
 
     # A relocated header may sit past the box; let it use the margins already
@@ -2909,7 +2960,6 @@ def _build_render_plan_scaled(
     svg_width = width or int(auto_width)
     svg_height = height or int(auto_height)
 
-    positive_fan = frozenset(tb_positive_fan_sections(graph))
     manifest = None
     if graph.embed_manifest:
         boxes: dict[str, dict[str, float]] = {}
@@ -2962,6 +3012,8 @@ def _build_render_plan_scaled(
         logo_y=logo_y,
         logo_w=logo_w,
         logo_h=logo_h,
+        title_x=title_x,
+        title_y=title_y,
         legend_logo_size=legend_logo_size,
         manifest=manifest,
         debug=debug,
@@ -3042,6 +3094,8 @@ def _build_render_plan_scaled(
         logo_y=published_geometry.logo_y,
         logo_w=published_geometry.logo_w,
         logo_h=published_geometry.logo_h,
+        title_x=published_geometry.title_x,
+        title_y=published_geometry.title_y,
         legend_logo_size=published_geometry.legend_logo_size,
         manifest=(
             freeze_render_value(published_geometry.manifest)
@@ -3053,6 +3107,7 @@ def _build_render_plan_scaled(
         bare=published_geometry.bare,
         draws_standalone_title=published_geometry.draws_standalone_title,
         inactive_line_ids=inactive_line_ids,
+        directional_chevrons=directional_chevrons,
     ), route_plan
 
 
@@ -3175,7 +3230,12 @@ def _emit_render_plan(
 
     # Title / Logo (omitted in bare mode; standalone logo only when not in legend)
     if not bare:
-        if show_logo and not logo_in_legend:
+        standalone_logo_box = (
+            (logo_x, logo_y, logo_w, logo_h)
+            if show_logo and not logo_in_legend
+            else None
+        )
+        if standalone_logo_box is not None:
             if adaptive_logo:
                 _render_adaptive_logo(
                     d,
@@ -3188,13 +3248,13 @@ def _emit_render_plan(
                 )
             else:
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
-        elif plan.draws_standalone_title:
+        if plan.draws_standalone_title:
             d.append(
                 draw.Text(
                     graph.title,
                     theme.title_font_size,
-                    padding,
-                    title_baseline_y(theme.title_font_size),
+                    plan.title_x,
+                    plan.title_y,
                     fill=theme.title_color,
                     font_family=theme.label_font_family,
                     font_weight="bold",
@@ -3221,7 +3281,7 @@ def _emit_render_plan(
     # Directional chevrons ride on top of the lines but behind stations.
     if graph.directional:
         _render_directional_markers(
-            d, graph, routes, station_offsets, theme, inactive_line_ids
+            d, graph, routes, plan.directional_chevrons, theme, inactive_line_ids
         )
 
     # Animation (after edges, before stations so balls travel behind station markers)
@@ -3272,9 +3332,7 @@ def _emit_render_plan(
         )
 
     # Attribution watermark
-    watermark_x_inset = (
-        WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
-    )
+    watermark_x_inset = _watermark_x_inset(bare, padding)
     d.append(
         draw.Text(
             f"created with nf-metro {_version_string()}",
@@ -3435,6 +3493,94 @@ def _effective_logo_path(graph: MetroGraph, mode: str) -> str:
     return graph.logo_path
 
 
+def _watermark_x_inset(bare: bool, padding: float) -> float:
+    """Distance of the watermark and the caption from the canvas side edges."""
+    return WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
+
+
+def _leftmost_ink(
+    graph: MetroGraph,
+    theme: Theme,
+    *,
+    route_polylines: Sequence[Sequence[tuple[float, float]]],
+    directional_chevrons: Sequence[Sequence[ChevronVertices]],
+    station_offsets: dict[tuple[str, str], float],
+    positive_fan: set[str] | frozenset[str],
+    labels: Sequence[LabelPlacement],
+    header_placements: dict[str, SectionHeaderPlacement],
+    group_bands: Sequence[_GroupBand],
+    legend_left: float | None,
+    caption_left: float | None,
+    debug: bool,
+) -> float | None:
+    """Smallest x the settled geometry paints, or ``None`` when it paints nothing.
+
+    Reads every drawn element but the map title, a standalone logo, the
+    attribution watermark and the debug overlay: section boxes and headers,
+    line strokes, station markers, station labels, group captions, the caption
+    and the legend.  A stroke reaches half its width past its path, and a
+    quadratic corner stays inside the hull of its control points, so a
+    polyline's vertices bound its curves.  Terminus icons are held inside their
+    section box by a layout guard, so the box covers them.
+    """
+    reach: list[float] = []
+    for section in graph.sections.values():
+        if not section.is_drawn_box:
+            continue
+        reach.append(section.bbox_x - SECTION_STROKE_WIDTH / 2)
+        placement = header_placements[section.id]
+        if section.has_badge:
+            reach.append(placement.badge_cx - SECTION_NUM_CIRCLE_R_LARGE)
+        reach.append(
+            placement.keepout[0] if placement.label_rotation else placement.label_x
+        )
+    reach.extend(x - theme.line_width / 2 for line in route_polylines for x, _ in line)
+    reach.extend(
+        x - _chevron_stroke_width(theme) / 2
+        for chevrons in directional_chevrons
+        for vertices in chevrons
+        for x, _ in vertices
+    )
+    fan_sections = set(positive_fan)
+    for station in _drawn_stations(graph, debug):
+        cx, _, width, _, _ = station_marker_box(
+            graph, theme, station, station_offsets, fan_sections
+        )
+        reach.append(cx - width / 2 - theme.station_stroke_width / 2)
+    halo = max(theme.label_halo_width, 0.0) / 2
+    reach.extend(x - halo for label in labels for x, _ in _label_ink_quad(label))
+    caption_style = text_style(theme.label_font_size * GROUP_LABEL_FONT_SCALE, "bold")
+    for band in group_bands:
+        caption_width = DEFAULT_TEXT_METRICS.advance(
+            band.label, caption_style, TextRole.GROUP_CAPTION
+        )
+        reach.append(band.x_left - GROUP_LABEL_UNDERLINE_WIDTH / 2)
+        reach.append((band.x_left + band.x_right - caption_width) / 2)
+    reach.extend(x for x in (legend_left, caption_left) if x is not None)
+    return min(reach, default=None)
+
+
+def _title_origin(
+    left: float,
+    title_font_size: float,
+    standalone_logo: tuple[float, float, float, float] | None,
+) -> tuple[float, float]:
+    """``(x, baseline_y)`` of the map title.
+
+    Top-left at ``left`` on its own; beside a standalone logo (given as
+    ``(x, y, w, h)``) it sits to the logo's right, vertically centred on it,
+    with its baseline kept low enough that the glyphs never rise off the top.
+    """
+    if standalone_logo is None:
+        return left, title_baseline_y(title_font_size)
+    logo_x, logo_y, logo_w, logo_h = standalone_logo
+    centred = logo_y + logo_h / 2 + title_font_size * TEXT_VCENTER_EM
+    return (
+        logo_x + logo_w + TITLE_LOGO_GAP,
+        max(centred, title_font_size * TITLE_ASCENT_RATIO),
+    )
+
+
 def _is_adaptive_mode(graph: MetroGraph) -> bool:
     """True when the %%metro logo: directive used pipe syntax (one or both variants)."""
     return bool(graph.logo_path_light) or bool(graph.logo_path_dark)
@@ -3483,7 +3629,7 @@ def _resolve_logo(
 
 def compute_logo_dimensions(
     logo_path: str,
-    logo_height: float = 80.0,
+    logo_height: float = LOGO_HEIGHT,
 ) -> tuple[float, float]:
     """Compute logo display dimensions preserving aspect ratio."""
     img = open_logo_image(logo_path)
@@ -3760,6 +3906,43 @@ def _guard_section_headers_hold_the_reserved_band(
         )
 
 
+def _draw_section_badge(
+    d: draw.Drawing,
+    section: Section,
+    placement: SectionHeaderPlacement,
+    theme: Theme,
+) -> None:
+    """Draw the section's number badge; an unnumbered section draws none."""
+    if not section.has_badge:
+        return
+    d.append(
+        draw.Circle(
+            placement.badge_cx,
+            placement.badge_cy,
+            SECTION_NUM_CIRCLE_R_LARGE,
+            fill=theme.station_stroke,
+            **{
+                "class": _ns("nf-metro-section-num-circle"),
+                "data-section-id": section.id,
+            },
+        )
+    )
+    d.append(
+        draw.Text(
+            str(section.number),
+            SECTION_NUM_FONT_SIZE,
+            placement.badge_cx,
+            placement.badge_cy,
+            fill=theme.station_fill,
+            font_family=theme.label_font_family,
+            font_weight="bold",
+            text_anchor="middle",
+            dy=TEXT_VCENTER_DY,
+            **{"data-section-id": section.id},
+        )
+    )
+
+
 def _render_first_class_sections(
     d: draw.Drawing,
     graph: MetroGraph,
@@ -3801,32 +3984,7 @@ def _render_first_class_sections(
         # otherwise cross it; the resolver never moves a route to do so.
         placement = header_placements[section.id]
 
-        d.append(
-            draw.Circle(
-                placement.badge_cx,
-                placement.badge_cy,
-                SECTION_NUM_CIRCLE_R_LARGE,
-                fill=theme.station_stroke,
-                **{
-                    "class": _ns("nf-metro-section-num-circle"),
-                    "data-section-id": section.id,
-                },
-            )
-        )
-        d.append(
-            draw.Text(
-                str(section.number),
-                SECTION_NUM_FONT_SIZE,
-                placement.badge_cx,
-                placement.badge_cy,
-                fill=theme.station_fill,
-                font_family=theme.label_font_family,
-                font_weight="bold",
-                text_anchor="middle",
-                dy=TEXT_VCENTER_DY,
-                **{"data-section-id": section.id},
-            )
-        )
+        _draw_section_badge(d, section, placement, theme)
 
         label_kwargs: dict[str, object] = {
             "class": _ns("nf-metro-section-label"),
@@ -3857,6 +4015,60 @@ def _render_first_class_sections(
                 **label_kwargs,
             )
         )
+
+
+class _DrawnPiece(NamedTuple):
+    """One piece of a route's stroke, in drawing order.
+
+    A straight run has ``control`` None and lies on polyline leg ``leg``; a
+    corner is the quadratic from ``start`` through ``control`` (its vertex) to
+    ``end``, has no ``leg``, and carries ``curved`` from
+    :class:`~nf_metro.layout.routing.corners.CornerTangent`.
+    """
+
+    start: tuple[float, float]
+    end: tuple[float, float]
+    control: tuple[float, float] | None = None
+    curved: bool = True
+    leg: int | None = None
+
+
+def _drawn_pieces(
+    pts: Sequence[tuple[float, float]],
+    radii: Sequence[float] | None,
+    curve_radius: float = SVG_CURVE_RADIUS,
+) -> list[_DrawnPiece]:
+    """The straight runs and rounded corners a route's stroke is drawn as.
+
+    Runs and corners alternate, starting and ending with a run; each corner
+    meets its neighbouring runs at the shared
+    :func:`~nf_metro.layout.routing.corners.curve_tangents` points.  A route
+    of fewer than two points has no pieces.
+    """
+    pts = list(pts)
+    resolved = resolve_curve_radii(
+        pts, None if radii is None else list(radii), default_radius=curve_radius
+    )
+    tangents = curve_tangents(pts, resolved)
+    starts = [*pts[:1], *(tan.after for tan in tangents)]
+    ends = [*(tan.before for tan in tangents), *pts[-1:]]
+    pieces: list[_DrawnPiece] = []
+    for leg, (start, end) in enumerate(zip(starts, ends[: len(pts) - 1])):
+        pieces.append(_DrawnPiece(start, end, leg=leg))
+        pieces.extend(
+            _DrawnPiece(tan.before, tan.after, tan.corner, tan.curved)
+            for tan in tangents[leg : leg + 1]
+        )
+    return pieces
+
+
+def _run_breaks(piece: _DrawnPiece, breaks: Sequence[BridgeBreak]) -> list[BridgeBreak]:
+    """The bridge breaks on straight run *piece*, in drawing order."""
+    sx, sy = piece.start
+    return sorted(
+        (bk for bk in breaks if bk.seg_index == piece.leg),
+        key=lambda bk: (bk.cut_a[0] - sx) ** 2 + (bk.cut_a[1] - sy) ** 2,
+    )
 
 
 def _render_edges(
@@ -3923,115 +4135,639 @@ def _render_edges(
                 **style_kw,
             )
             path.M(*pts[0])
-
-            resolved = resolve_curve_radii(
-                pts, route_radii, default_radius=curve_radius
-            )
-            before, after, curved = _curve_tangents(pts, resolved)
-
-            for i in range(1, len(pts) - 1):
-                if curved[i]:
-                    path.L(*before[i])
-                    path.Q(pts[i][0], pts[i][1], *after[i])
-                else:
-                    path.L(*pts[i])
-
-            path.L(*pts[-1])
+            for piece in _drawn_pieces(pts, route_radii, curve_radius):
+                if piece.control is None:
+                    path.L(*piece.end)
+                elif piece.curved:
+                    path.Q(*piece.control, *piece.end)
             d.append(path)
 
 
 def _render_directional_markers(
     d: draw.Drawing,
     graph: MetroGraph,
-    routes: list[RoutedPath],
-    station_offsets: dict[tuple[str, str], float],
+    routes: Sequence[RoutedPath],
+    route_chevrons: Sequence[Sequence[ChevronVertices]],
     theme: Theme,
     inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
-    """Draw static chevrons along each route, pointing source to target.
+    """Draw each route's static chevrons, pointing source to target.
 
-    The flow direction is the order of the routed point sequence, so each
-    chevron simply rides the polyline at the local segment direction. Markers
-    are spaced by arc length and kept sparse and subtle by default, in the
-    spirit of a one-way transit line's direction-of-travel arrows.
+    Kept sparse and subtle by default, in the spirit of a one-way transit
+    line's direction-of-travel arrows.
     """
-    size = theme.directional_marker_size
-    spacing = max(theme.directional_marker_spacing, 1.0)
-    opacity = theme.directional_marker_opacity
-    # A route shorter than one chevron carries no useful direction cue.
-    min_length = 2 * size
-    stroke_width = max(theme.line_width * 0.5, 1.0)
-
-    for route in routes:
-        pts = apply_route_offsets(route, station_offsets)
-        if len(pts) < 2:
-            continue
+    for route, chevrons in zip(routes, route_chevrons, strict=True):
         line = graph.lines.get(route.line_id)
         color = effective_line_color(
             line, theme, inactive_line_ids, theme.directional_marker_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
-        for point, heading in _chevron_samples(pts, spacing, min_length):
+        for vertices in chevrons:
             _draw_chevron(
                 d,
-                point,
-                heading,
+                vertices,
                 color,
-                size,
-                stroke_width,
-                opacity,
+                _chevron_stroke_width(theme),
+                theme.directional_marker_opacity,
                 class_name,
                 route.line_id,
             )
 
 
-def _chevron_samples(
-    pts: list[tuple[float, float]], spacing: float, min_length: float
-) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-    """Sample (point, unit-heading) pairs evenly along a polyline.
+def _chevron_stroke_width(theme: Theme) -> float:
+    return max(theme.line_width * 0.5, 1.0)
 
-    Chevrons are centred on the polyline so a route reads symmetrically. A
-    route between ``min_length`` and ``spacing`` in length carries a single
-    chevron at its midpoint.
+
+# Chords per quadratic corner when measuring its arc length; the chevron is
+# then placed on the exact curve, so this bounds only the spacing error.
+_CORNER_ARC_CHORDS = 32
+
+
+# Positions and offsets (px) closer than this are one point of one drawn
+# track: same-line strokes that share ink are laid down from identical
+# coordinates, so anything wider apart is a distinct stroke.
+_TRACK_TOL = 0.01
+# Directions whose dot product is at least this run along one carrier line.
+_TRACK_HEADING_COS = 1.0 - 1e-8
+# Arc lengths (px) this close to a piece or stretch boundary lie on it.
+_ARC_EPS = 1e-9
+# A stretch ending this close to its route's end reaches that end.
+_ROUTE_END_TOL = 1e-6
+
+
+@dataclass
+class _RouteTrack:
+    """One route's drawn stroke, measured by arc length from its start."""
+
+    index: int
+    source: str
+    target: str
+    pieces: list[_DrawnPiece]
+    profiles: list[list[tuple[float, float]]]
+    starts: list[float]
+    gaps: list[tuple[float, float]]
+    total: float
+
+    def at(self, arc: float) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """Point and unit heading at *arc*; None at a corner apex with no tangent."""
+        for piece, profile, start in zip(
+            self.pieces, self.profiles, self.starts, strict=True
+        ):
+            length = profile[-1][0]
+            if length <= 0 or arc > start + length + _ARC_EPS:
+                continue
+            local = max(arc - start, 0.0)
+            arcs = [a for a, _ in profile]
+            k = min(max(bisect.bisect_left(arcs, local), 1), len(profile) - 1)
+            (arc0, t0), (arc1, t1) = profile[k - 1], profile[k]
+            t = t0 + (t1 - t0) * ((local - arc0) / (arc1 - arc0) if arc1 > arc0 else 0)
+            point, (dx, dy) = _piece_at(piece, t)
+            norm = math.hypot(dx, dy)
+            return (point, (dx / norm, dy / norm)) if norm else None
+        return None
+
+
+@dataclass
+class _Stretch:
+    """A drawn run covered by one fixed set of a line's routes.
+
+    ``spans`` maps each covering route index, ascending, to the arc interval
+    that run occupies on that route; every one of them paints the same ink.
     """
-    segments = [
-        (a, b, length)
-        for a, b in zip(pts, pts[1:])
-        if (length := math.hypot(b[0] - a[0], b[1] - a[1])) > 0
-    ]
-    total = sum(length for _, _, length in segments)
-    if total < min_length:
-        return []
 
-    count = max(1, int(total // spacing))
-    start = (total - (count - 1) * spacing) / 2
+    spans: dict[int, tuple[float, float]]
 
-    samples: list[tuple[tuple[float, float], tuple[float, float]]] = []
-    targets = [start + i * spacing for i in range(count)]
+    @property
+    def owner(self) -> int:
+        return next(iter(self.spans))
+
+    @property
+    def length(self) -> float:
+        start, end = self.spans[self.owner]
+        return end - start
+
+
+class _PieceSlot(NamedTuple):
+    """Where a piece lies: a corner's index, or a carrier's with its ``s`` span."""
+
+    corner: bool
+    where: int
+    s0: float = 0.0
+    s1: float = 0.0
+
+
+class _AtomKey(NamedTuple):
+    """The ink an atom paints: a corner, or the carrier span above cut ``cut``."""
+
+    corner: bool
+    where: int
+    cut: int
+
+
+class _Atom(NamedTuple):
+    key: _AtomKey
+    start: float
+    end: float
+
+
+class _CoverRun(NamedTuple):
+    """Consecutive atoms of one route that share a covering set."""
+
+    routes: frozenset[int]
+    first: _AtomKey
+    start: float
+    end: float
+
+
+# (track, piece, 0 for the piece's start or 1 for its end)
+_CutKey = tuple[int, int, int]
+
+
+def _carrier_of(
+    carriers: list[tuple[tuple[float, float], tuple[float, float]]],
+    piece: _DrawnPiece,
+) -> int:
+    """Index of the line carrying straight *piece*, adding one when none does."""
+    length = math.dist(piece.start, piece.end)
+    ux = (piece.end[0] - piece.start[0]) / length
+    uy = (piece.end[1] - piece.start[1]) / length
+    for k, ((ox, oy), (vx, vy)) in enumerate(carriers):
+        if ux * vx + uy * vy >= _TRACK_HEADING_COS and all(
+            abs((px - ox) * vy - (py - oy) * vx) <= _TRACK_TOL
+            for px, py in (piece.start, piece.end)
+        ):
+            return k
+    carriers.append((piece.start, (ux, uy)))
+    return len(carriers) - 1
+
+
+def _same_corner(a: _DrawnPiece, b: _DrawnPiece) -> bool:
+    assert a.control is not None and b.control is not None
+    return all(
+        math.dist(p, q) <= _TRACK_TOL
+        for p, q in ((a.start, b.start), (a.control, b.control), (a.end, b.end))
+    )
+
+
+def _index_pieces(
+    tracks: Sequence[_RouteTrack],
+) -> tuple[dict[tuple[int, int], _PieceSlot], dict[int, list[tuple[float, _CutKey]]]]:
+    """Each piece's carrier or corner, and the endpoints that may cut a carrier."""
+    carriers: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    corners: list[_DrawnPiece] = []
+    slots: dict[tuple[int, int], _PieceSlot] = {}
+    marks: dict[int, list[tuple[float, _CutKey]]] = {}
+    for ti, track in enumerate(tracks):
+        for pi, (piece, profile) in enumerate(
+            zip(track.pieces, track.profiles, strict=True)
+        ):
+            if profile[-1][0] <= _ARC_EPS:
+                continue
+            if piece.control is not None:
+                same = (c for c, rep in enumerate(corners) if _same_corner(rep, piece))
+                if (found := next(same, None)) is None:
+                    corners.append(piece)
+                    found = len(corners) - 1
+                slots[ti, pi] = _PieceSlot(True, found)
+                continue
+            k = _carrier_of(carriers, piece)
+            (ox, oy), (vx, vy) = carriers[k]
+            s0, s1 = (
+                (x - ox) * vx + (y - oy) * vy for x, y in (piece.start, piece.end)
+            )
+            slots[ti, pi] = _PieceSlot(False, k, s0, s1)
+            marks.setdefault(k, []).extend([(s0, (ti, pi, 0)), (s1, (ti, pi, 1))])
+    return slots, marks
+
+
+def _assign_cuts(
+    marks: Mapping[int, list[tuple[float, _CutKey]]],
+) -> tuple[dict[_CutKey, int], dict[int, list[float]]]:
+    """Merge endpoints within tolerance into cuts; each endpoint's cut index."""
+    cut_of: dict[_CutKey, int] = {}
+    cuts: dict[int, list[float]] = {}
+    for k, found in marks.items():
+        reps = cuts.setdefault(k, [])
+        for s, owner in sorted(found):
+            if not reps or s > reps[-1] + _TRACK_TOL:
+                reps.append(s)
+            cut_of[owner] = len(reps) - 1
+    return cut_of, cuts
+
+
+def _track_atoms(
+    tracks: Sequence[_RouteTrack],
+    slots: Mapping[tuple[int, int], _PieceSlot],
+    cut_of: Mapping[_CutKey, int],
+    cuts: Mapping[int, list[float]],
+) -> list[list[_Atom]]:
+    """Each route's pieces split at the cuts of its carriers, in arc order."""
+    atoms_of: list[list[_Atom]] = []
+    for ti, track in enumerate(tracks):
+        atoms: list[_Atom] = []
+        for pi, (profile, start) in enumerate(
+            zip(track.profiles, track.starts, strict=True)
+        ):
+            slot = slots.get((ti, pi))
+            if slot is None:
+                continue
+            length = profile[-1][0]
+            if slot.corner:
+                atoms.append(
+                    _Atom(_AtomKey(True, slot.where, 0), start, start + length)
+                )
+                continue
+            lo, hi = cut_of[ti, pi, 0], cut_of[ti, pi, 1]
+            at = cuts[slot.where]
+            scale = length / (slot.s1 - slot.s0) if slot.s1 > slot.s0 else 0.0
+            for c in range(lo, hi):
+                a = start if c == lo else start + (at[c] - slot.s0) * scale
+                b = (
+                    start + length
+                    if c + 1 == hi
+                    else start + (at[c + 1] - slot.s0) * scale
+                )
+                atoms.append(_Atom(_AtomKey(False, slot.where, c), a, b))
+        atoms_of.append(atoms)
+    return atoms_of
+
+
+def _group_stretches(
+    tracks: Sequence[_RouteTrack], atoms_of: Sequence[Sequence[_Atom]]
+) -> list[_Stretch]:
+    """Merge each route's consecutive atoms of one covering set into stretches."""
+    members: dict[_AtomKey, set[int]] = {}
+    for track, atoms in zip(tracks, atoms_of, strict=True):
+        for atom in atoms:
+            members.setdefault(atom.key, set()).add(track.index)
+    cover = {key: frozenset(routes) for key, routes in members.items()}
+
+    grouped: dict[tuple[tuple[int, ...], _AtomKey], dict[int, tuple[float, float]]] = {}
+    for track, atoms in zip(tracks, atoms_of, strict=True):
+        runs: list[_CoverRun] = []
+        for atom in atoms:
+            routes = cover[atom.key]
+            if runs and runs[-1].routes == routes:
+                runs[-1] = runs[-1]._replace(end=atom.end)
+            else:
+                runs.append(_CoverRun(routes, atom.key, atom.start, atom.end))
+        for run in runs:
+            key = (tuple(sorted(run.routes)), run.first)
+            grouped.setdefault(key, {})[track.index] = (run.start, run.end)
+    stretches = [_Stretch(dict(sorted(spans.items()))) for spans in grouped.values()]
+    stretches.sort(key=lambda s: (s.owner, s.spans[s.owner][0]))
+    return stretches
+
+
+def _line_stretches(tracks: Sequence[_RouteTrack]) -> list[_Stretch]:
+    """Split one line's routes into stretches of drawn ink with a common cover.
+
+    Straight pieces on one carrier line are cut at every other piece's
+    endpoints into atoms, and corners match by their geometry; the routes
+    covering each atom are then known, and a route's consecutive atoms with
+    the same cover form one stretch.
+    """
+    slots, marks = _index_pieces(tracks)
+    cut_of, cuts = _assign_cuts(marks)
+    return _group_stretches(tracks, _track_atoms(tracks, slots, cut_of, cuts))
+
+
+def _seamless(
+    ending: _Stretch, starting: _Stretch, tracks: Sequence[_RouteTrack]
+) -> bool:
+    """Whether *ending*'s far end and *starting*'s near end are one drawn point.
+
+    They must also share a heading, so the joined run reads as one straight or
+    smoothly curving stroke rather than a jog or a turn.
+    """
+    tail = tracks[ending.owner].at(ending.spans[ending.owner][1])
+    head = tracks[starting.owner].at(starting.spans[starting.owner][0])
+    if tail is None or head is None:
+        return False
+    (tp, (tx, ty)), (hp, (hx, hy)) = tail, head
+    return math.dist(tp, hp) <= _TRACK_TOL and tx * hx + ty * hy >= _TRACK_HEADING_COS
+
+
+def _stretches_at_stations(
+    stretches: Sequence[_Stretch], tracks: Sequence[_RouteTrack], *, ending: bool
+) -> dict[str, list[int]]:
+    """Stretch indices that end (or start) at a station, by that station.
+
+    A stretch counts only when every route covering it ends (or starts) there.
+    """
+    found: dict[str, list[int]] = {}
+    for index, stretch in enumerate(stretches):
+        members = [tracks[r] for r in stretch.spans]
+        if ending:
+            reaches = all(
+                stretch.spans[t.index][1] >= t.total - _ROUTE_END_TOL for t in members
+            )
+            stations = {t.target for t in members}
+        else:
+            reaches = all(stretch.spans[t.index][0] <= _ROUTE_END_TOL for t in members)
+            stations = {t.source for t in members}
+        if reaches and len(stations) == 1:
+            found.setdefault(next(iter(stations)), []).append(index)
+    return found
+
+
+def _joined_runs(
+    stretches: Sequence[_Stretch],
+    tracks: Sequence[_RouteTrack],
+    invisible: frozenset[str],
+) -> list[list[_Stretch]]:
+    """Chain stretches end to end through a line's invisible port or junction.
+
+    Stretch *a* continues into *b* only where *a* is the single stretch of the
+    line ending at that station, *b* the single one starting there, and the
+    two meet at one point with one heading. Every other stretch begins and
+    ends its own run.
+    """
+    ending = _stretches_at_stations(stretches, tracks, ending=True)
+    starting = _stretches_at_stations(stretches, tracks, ending=False)
+    follows: dict[int, int] = {}
+    for station, tails in ending.items():
+        heads = starting.get(station, [])
+        if station in invisible and len(tails) == 1 and len(heads) == 1:
+            if _seamless(stretches[tails[0]], stretches[heads[0]], tracks):
+                follows[tails[0]] = heads[0]
+    continued = set(follows.values())
+    runs: list[list[_Stretch]] = []
+    seen: set[int] = set()
+    for first in [*(i for i in range(len(stretches)) if i not in continued), *follows]:
+        if first in seen:
+            continue
+        chain = [first]
+        seen.add(first)
+        while chain[-1] in follows and follows[chain[-1]] not in seen:
+            chain.append(follows[chain[-1]])
+            seen.add(chain[-1])
+        runs.append([stretches[i] for i in chain])
+    return runs
+
+
+class _Placed(NamedTuple):
+    """A chevron on a run: its position, stretch, owning route and pose."""
+
+    position: float
+    stretch: int
+    owner: int
+    arc: float
+    point: tuple[float, float]
+    heading: tuple[float, float]
+
+
+class _Run:
+    """A joined run: its stretches laid end to end on one arc-length axis."""
+
+    def __init__(
+        self,
+        stretches: Sequence[_Stretch],
+        tracks: Sequence[_RouteTrack],
+        reach: float,
+    ) -> None:
+        self.stretches = list(stretches)
+        self.tracks = tracks
+        self.offsets: list[float] = []
+        total = 0.0
+        for stretch in self.stretches:
+            self.offsets.append(total)
+            total += stretch.length
+        self.length = total
+        # The ink of a chevron within *reach* of a bridge gap of any route
+        # painting this stretch would cover the over-line the gap reveals.
+        self.blocked = [
+            (lo - b0 + offset - reach, hi - b0 + offset + reach)
+            for stretch, offset in zip(self.stretches, self.offsets, strict=True)
+            for route, (b0, b1) in stretch.spans.items()
+            for lo, hi in tracks[route].gaps
+            if hi > b0 - reach and lo < b1 + reach
+        ]
+
+    @property
+    def routes(self) -> set[int]:
+        return {route for stretch in self.stretches for route in stretch.spans}
+
+    def place(self, targets: Iterable[float]) -> list[_Placed]:
+        """A chevron at each unblocked target position along the run.
+
+        A chevron rides the lowest-indexed covering route's own pieces, which
+        are the same ink as every other covering route's.
+        """
+        found = []
+        for target in targets:
+            if any(lo <= target <= hi for lo, hi in self.blocked):
+                continue
+            for index, (stretch, offset) in enumerate(
+                zip(self.stretches, self.offsets, strict=True)
+            ):
+                if target <= offset + stretch.length + _ARC_EPS:
+                    arc = stretch.spans[stretch.owner][0] + target - offset
+                    if (sample := self.tracks[stretch.owner].at(arc)) is not None:
+                        found.append(
+                            _Placed(target, index, stretch.owner, arc, *sample)
+                        )
+                    break
+        return found
+
+
+def _route_tracks(
+    polylines: Sequence[Sequence[tuple[float, float]]],
+    radii: Sequence[Sequence[float] | None],
+    routes: Sequence[RoutedPath],
+    breaks_by_route: Mapping[int, Sequence[BridgeBreak]],
+) -> list[_RouteTrack]:
+    """Each route's drawn pieces with arc-length bookkeeping, in route order."""
+    tracks: list[_RouteTrack] = []
+    for index, (route, pts, route_radii) in enumerate(
+        zip(routes, polylines, radii, strict=True)
+    ):
+        pieces = _drawn_pieces(pts, route_radii)
+        profiles = [_arc_profile(piece) for piece in pieces]
+        lengths = [profile[-1][0] for profile in profiles]
+        tracks.append(
+            _RouteTrack(
+                index,
+                route.edge.source,
+                route.edge.target,
+                pieces,
+                profiles,
+                [sum(lengths[:i]) for i in range(len(lengths))],
+                _gap_spans(pieces, profiles, breaks_by_route.get(index, ())),
+                sum(lengths),
+            )
+        )
+    return tracks
+
+
+def _line_placements(
+    runs: Sequence[_Run], spacing: float, reach: float, min_length: float
+) -> list[_Placed]:
+    """Every chevron of one line: each run's even set, then cues for bare stretches.
+
+    A stretch the set skips takes a chevron at its middle, longest first, when
+    it is long enough for its routes (half a spacing once they are cued by a
+    chevron on one of their runs, else one chevron long), keeps half a spacing
+    along its run from the run's chevrons, clears the ink of every same-line
+    chevron, and is not in a bridge gap.
+    """
+    on_runs = []
+    for run in runs:
+        count = int(run.length // spacing)
+        start = (run.length - (count - 1) * spacing) / 2
+        on_runs.append(run.place(start + i * spacing for i in range(count)))
+    cued = {
+        route
+        for run, on_run in zip(runs, on_runs, strict=True)
+        if on_run
+        for route in run.routes
+    }
+    bare = sorted(
+        (
+            (run_index, index)
+            for run_index, run in enumerate(runs)
+            for index in range(len(run.stretches))
+            if all(p.stretch != index for p in on_runs[run_index])
+        ),
+        key=lambda c: -runs[c[0]].stretches[c[1]].length,
+    )
+    half = spacing / 2
+    # Same-line chevrons closer than 2*reach would overpaint each other, as at a
+    # crossing.
+    ink_clear = 2 * reach
+    for run_index, index in bare:
+        run, on_run = runs[run_index], on_runs[run_index]
+        stretch = run.stretches[index]
+        if stretch.length < (half if cued.issuperset(stretch.spans) else min_length):
+            continue
+        middle = run.offsets[index] + stretch.length / 2
+        if any(abs(p.position - middle) < half - _ARC_EPS for p in on_run):
+            continue
+        for chevron in run.place([middle]):
+            if all(
+                math.dist(chevron.point, other.point) >= ink_clear
+                for others in on_runs
+                for other in others
+            ):
+                on_run.append(chevron)
+                cued |= run.routes
+    return [chevron for on_run in on_runs for chevron in on_run]
+
+
+def _by_owner(
+    placed: Sequence[_Placed], count: int, size: float
+) -> tuple[tuple[ChevronVertices, ...], ...]:
+    """Chevron vertices on each of *count* routes, in arc order along the route."""
+    buckets: list[list[tuple[float, ChevronVertices]]] = [[] for _ in range(count)]
+    for chevron in placed:
+        vertices = _chevron_vertices(chevron.point, chevron.heading, size)
+        buckets[chevron.owner].append((chevron.arc, vertices))
+    return tuple(
+        tuple(vertices for _, vertices in sorted(bucket, key=lambda p: p[0]))
+        for bucket in buckets
+    )
+
+
+def _invisible_stations(graph: MetroGraph) -> frozenset[str]:
+    """Ports and junctions: stations a line passes through without a marker."""
+    return frozenset(
+        {sid for sid, station in graph.stations.items() if station.is_port}
+        | graph.junction_ids
+    )
+
+
+def _directional_chevrons(
+    routes: Sequence[RoutedPath],
+    polylines: Sequence[Sequence[tuple[float, float]]],
+    radii: Sequence[Sequence[float] | None],
+    breaks_by_route: Mapping[int, Sequence[BridgeBreak]],
+    invisible: frozenset[str],
+    theme: Theme,
+) -> tuple[tuple[ChevronVertices, ...], ...]:
+    """Each route's chevrons, riding its stroke exactly as it is drawn.
+
+    *polylines* and *radii* are the drawn route geometry, one entry per route;
+    *breaks_by_route* holds each bridged route's gaps by that route index.
+    Same-line routes that paint the same ink share one set of chevrons, so no
+    two chevrons of a line sit closer than half a spacing along a run.
+    """
+    size = theme.directional_marker_size
+    spacing = max(theme.directional_marker_spacing, 1.0)
+    reach = size + _chevron_stroke_width(theme) / 2
+    # A route shorter than one chevron carries no useful direction cue.
+    min_length = 2 * size
+
+    tracks = _route_tracks(polylines, radii, routes, breaks_by_route)
+    by_line: dict[str, list[_RouteTrack]] = {}
+    for route, track in zip(routes, tracks, strict=True):
+        by_line.setdefault(route.line_id, []).append(track)
+    placed: list[_Placed] = []
+    for line_tracks in by_line.values():
+        runs = [
+            _Run(chain, tracks, reach)
+            for chain in _joined_runs(_line_stretches(line_tracks), tracks, invisible)
+        ]
+        placed.extend(_line_placements(runs, spacing, reach, min_length))
+    return _by_owner(placed, len(tracks), size)
+
+
+def _gap_spans(
+    pieces: Sequence[_DrawnPiece],
+    profiles: Sequence[Sequence[tuple[float, float]]],
+    breaks: Sequence[BridgeBreak],
+) -> list[tuple[float, float]]:
+    """Arc-length interval of each bridge gap along the drawn *pieces*."""
+    spans: list[tuple[float, float]] = []
     travelled = 0.0
-    ti = 0
-    for (ax, ay), (bx, by), length in segments:
-        ux, uy = (bx - ax) / length, (by - ay) / length
-        while ti < len(targets) and targets[ti] <= travelled + length:
-            offset = targets[ti] - travelled
-            samples.append(((ax + ux * offset, ay + uy * offset), (ux, uy)))
-            ti += 1
+    for piece, profile in zip(pieces, profiles, strict=True):
+        length = profile[-1][0]
+        if piece.leg is not None and length > 0:
+            (sx, sy), (ex, ey) = piece.start, piece.end
+            ux, uy = (ex - sx) / length, (ey - sy) / length
+            for bk in _run_breaks(piece, breaks):
+                cuts = [
+                    travelled + (cx - sx) * ux + (cy - sy) * uy
+                    for cx, cy in (bk.cut_a, bk.cut_b)
+                ]
+                spans.append((min(cuts), max(cuts)))
         travelled += length
-    return samples
+    return spans
 
 
-def _draw_chevron(
-    d: draw.Drawing,
-    point: tuple[float, float],
-    heading: tuple[float, float],
-    color: str,
-    size: float,
-    stroke_width: float,
-    opacity: float,
-    class_name: str,
-    line_id: str,
-) -> None:
-    """Draw one open ``>`` chevron centred at *point*, apex along *heading*."""
+def _arc_profile(piece: _DrawnPiece) -> list[tuple[float, float]]:
+    """``(arc length, curve parameter)`` stations from a piece's start to end."""
+    if piece.control is None:
+        return [(0.0, 0.0), (math.dist(piece.start, piece.end), 1.0)]
+    profile = [(0.0, 0.0)]
+    prev = piece.start
+    for k in range(1, _CORNER_ARC_CHORDS + 1):
+        t = k / _CORNER_ARC_CHORDS
+        point, _ = _piece_at(piece, t)
+        profile.append((profile[-1][0] + math.dist(prev, point), t))
+        prev = point
+    return profile
+
+
+def _piece_at(
+    piece: _DrawnPiece, t: float
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Point and (unnormalised) forward tangent of *piece* at parameter *t*."""
+    (ax, ay), (bx, by) = piece.start, piece.end
+    if piece.control is None:
+        return (ax + (bx - ax) * t, ay + (by - ay) * t), (bx - ax, by - ay)
+    cx, cy = piece.control
+    s = 1.0 - t
+    point = (
+        s * s * ax + 2 * s * t * cx + t * t * bx,
+        s * s * ay + 2 * s * t * cy + t * t * by,
+    )
+    return point, (s * (cx - ax) + t * (bx - cx), s * (cy - ay) + t * (by - cy))
+
+
+def _chevron_vertices(
+    point: tuple[float, float], heading: tuple[float, float], size: float
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """``(wing, apex, wing)`` of an open chevron at *point* pointing along *heading*."""
     px, py = point
     ux, uy = heading
     perp = (-uy, ux)
@@ -4039,7 +4775,20 @@ def _draw_chevron(
     back = (px - ux * size, py - uy * size)
     wing1 = (back[0] + perp[0] * size, back[1] + perp[1] * size)
     wing2 = (back[0] - perp[0] * size, back[1] - perp[1] * size)
+    return wing1, apex, wing2
 
+
+def _draw_chevron(
+    d: draw.Drawing,
+    vertices: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
+    color: str,
+    stroke_width: float,
+    opacity: float,
+    class_name: str,
+    line_id: str,
+) -> None:
+    """Draw one open ``>`` chevron through *vertices*."""
+    wing1, apex, wing2 = vertices
     path = draw.Path(
         stroke=color,
         stroke_width=stroke_width,
@@ -4054,29 +4803,6 @@ def _draw_chevron(
     path.L(*apex)
     path.L(*wing2)
     d.append(path)
-
-
-def _curve_tangents(
-    pts: list[tuple[float, float]], resolved: list[float]
-) -> tuple[
-    dict[int, tuple[float, float]], dict[int, tuple[float, float]], dict[int, bool]
-]:
-    """Curve entry/exit points for each interior vertex.
-
-    Returns ``(before, after, curved)`` keyed by vertex index ``i`` in
-    ``1..len(pts)-2``: ``before[i]``/``after[i]`` are the points where the
-    smoothing curve leaves and rejoins the polyline; ``curved[i]`` is False
-    for a degenerate corner (zero-length neighbour), where both collapse to
-    the vertex itself.
-    """
-    before: dict[int, tuple[float, float]] = {}
-    after: dict[int, tuple[float, float]] = {}
-    curved: dict[int, bool] = {}
-    for i, tan in enumerate(curve_tangents(pts, resolved), start=1):
-        before[i] = tan.before
-        after[i] = tan.after
-        curved[i] = tan.curved
-    return before, after, curved
 
 
 def _render_bridged_edge(
@@ -4097,10 +4823,6 @@ def _render_bridged_edge(
     straight run carrying a crossing, the pen lifts across a small gap so the
     over-line reads as passing over the top.
     """
-    resolved = resolve_curve_radii(pts, curve_radii, default_radius=curve_radius)
-    m = len(pts) - 1
-    before, after, _ = _curve_tangents(pts, resolved)
-
     path = draw.Path(
         stroke=color,
         stroke_width=theme.line_width,
@@ -4112,21 +4834,14 @@ def _render_bridged_edge(
         **style_kw,
     )
     path.M(*pts[0])
-    for s in range(m):
-        run_start = pts[0] if s == 0 else after[s]
-        run_end = pts[m] if s + 1 == m else before[s + 1]
-        seg_breaks = sorted(
-            (bk for bk in breaks if bk.seg_index == s),
-            key=lambda bk: (
-                (bk.cut_a[0] - run_start[0]) ** 2 + (bk.cut_a[1] - run_start[1]) ** 2
-            ),
-        )
-        for bk in seg_breaks:
+    for piece in _drawn_pieces(pts, curve_radii, curve_radius):
+        if piece.control is not None:
+            path.Q(*piece.control, *piece.end)
+            continue
+        for bk in _run_breaks(piece, breaks):
             path.L(*bk.cut_a)
             path.M(*bk.cut_b)
-        path.L(*run_end)
-        if s + 1 <= m - 1:
-            path.Q(pts[s + 1][0], pts[s + 1][1], *after[s + 1])
+        path.L(*piece.end)
     d.append(path)
 
 

@@ -620,14 +620,19 @@ def test_info_output():
 
 def test_info_default_matches_formatter():
     """Default text output equals the non-verbose formatter, byte-for-byte."""
-    from nf_metro.introspect import build_info, format_info_text
+    from nf_metro.introspect import (
+        build_info,
+        format_info_text,
+        rendered_section_numbers,
+    )
     from nf_metro.parser import parse_metro_mermaid
 
     runner = CliRunner()
     result = runner.invoke(cli, ["info", str(RNASEQ_MMD)])
     assert result.exit_code == 0
     graph = parse_metro_mermaid(RNASEQ_MMD.read_text())
-    expected = format_info_text(build_info(graph), verbose=False)
+    report = build_info(graph, section_numbers=rendered_section_numbers(graph))
+    expected = format_info_text(report, verbose=False)
     assert result.stdout == expected + "\n"
     # The verbose-only sections must not leak into the default output.
     assert "Section dependency graph:" not in result.output
@@ -2074,3 +2079,109 @@ def test_render_result_names_every_input_in_a_batch(tmp_path):
         str(tmp_path / "a.svg"),
         str(tmp_path / "b.svg"),
     ]
+
+
+def _info_section_numbers(path: Path) -> dict[str, int | None]:
+    import json
+
+    result = CliRunner().invoke(cli, ["info", str(path), "--json"])
+    assert result.exit_code == 0, result.output
+    return {sec["id"]: sec["number"] for sec in json.loads(result.stdout)["sections"]}
+
+
+def test_info_reports_the_numbers_the_render_draws_for_number_zero():
+    """A section set to 0 draws no badge, so ``info`` reports none for it and
+    numbers the others as the render does."""
+    numbers = _info_section_numbers(FIXTURES_DIR / "section_number_zero.mmd")
+    assert numbers == {"first": None, "second": 1, "third": None, "fourth": 2}
+
+
+def test_info_reports_an_authored_number_override(tmp_path):
+    path = tmp_path / "override.mmd"
+    path.write_text(
+        "graph LR\n"
+        "    subgraph first [First]\n"
+        "        %%metro number: 7\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph second [Second]\n"
+        "        b[B]\n"
+        "    end\n"
+    )
+    assert _info_section_numbers(path) == {"first": 7, "second": 1}
+
+
+def test_info_text_shows_no_number_for_a_number_zero_section():
+    result = CliRunner().invoke(
+        cli, ["info", str(FIXTURES_DIR / "section_number_zero.mmd")]
+    )
+    assert result.exit_code == 0
+    assert "- number: null\n    name: First" in result.stdout
+    assert "- number: 1\n    name: Second" in result.stdout
+
+
+def test_rendered_section_numbers_raises_no_layout_warnings():
+    """Layout spacing warnings belong to render, not to ``info``."""
+    import warnings
+
+    from nf_metro.introspect import rendered_section_numbers
+    from nf_metro.parser import parse_metro_mermaid
+
+    graph = parse_metro_mermaid(RNASEQ_MMD.read_text())
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert rendered_section_numbers(graph) is not None
+    assert not caught
+
+
+def test_info_reports_no_number_for_a_hidden_section(tmp_path):
+    """A hidden section draws no box and so no badge; it reports none."""
+    path = tmp_path / "hidden.mmd"
+    path.write_text(
+        "%%metro line: main | Main | #ff0000\n"
+        "graph LR\n"
+        "    subgraph first [First]\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph _middle [Middle]\n"
+        "        b[B]\n"
+        "    end\n"
+        "    subgraph last [Last]\n"
+        "        c[C]\n"
+        "    end\n"
+        "    a -->|main| b\n"
+        "    b -->|main| c\n"
+    )
+    assert _info_section_numbers(path) == {"first": 1, "_middle": None, "last": 2}
+
+
+def test_info_falls_back_to_authored_numbers_when_layout_fails(monkeypatch):
+    """With no laid-out numbers, an authored 0 still reports none and the
+    warning says the numbers are not the rendered ones."""
+    import json
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("nf_metro.layout.engine.compute_layout", fail)
+    result = CliRunner().invoke(
+        cli, ["info", str(FIXTURES_DIR / "section_number_zero.mmd"), "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    assert report["warnings"] == [
+        "layout failed, so section numbers are as authored or parsed, not as rendered"
+    ]
+    assert {sec["id"]: sec["number"] for sec in report["sections"]} == {
+        "first": None,
+        "second": 2,
+        "third": None,
+        "fourth": 4,
+    }
+
+
+def test_info_reports_renumbered_sections_of_a_real_map():
+    """Route renumbering swaps two sections' numbers against parse order."""
+    numbers = _info_section_numbers(EXAMPLES_DIR / "differentialabundance.mmd")
+    assert numbers["reporting"] == 5
+    assert numbers["plots"] == 4

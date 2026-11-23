@@ -240,7 +240,7 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         name="logo_scale",
         kind="float",
         sign="positive",
-        help="Scale the logo within the legend block.",
+        help="Scale the logo, in the legend block or standalone.",
     ),
     LayoutOption(
         name="legend_min_height",

@@ -478,7 +478,7 @@ def test_section_number_override():
     assert graph.sections["first"].number_override == 7
 
 
-@pytest.mark.parametrize("value", ["0", "-1", "one"])
+@pytest.mark.parametrize("value", ["-1", "one"])
 def test_invalid_section_number_override_is_ignored(value):
     text = (
         "graph LR\n"
@@ -487,9 +487,21 @@ def test_invalid_section_number_override_is_ignored(value):
         "        a[A]\n"
         "    end\n"
     )
-    with pytest.warns(UserWarning, match="expected a positive integer"):
+    with pytest.warns(UserWarning, match="expected a non-negative integer"):
         graph = parse_metro_mermaid(text)
     assert graph.sections["first"].number_override is None
+
+
+def test_zero_section_number_override_is_accepted():
+    text = (
+        "graph LR\n"
+        "    subgraph first [First]\n"
+        "        %%metro number: 0\n"
+        "        a[A]\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    assert graph.sections["first"].number_override == 0
 
 
 def test_duplicate_section_number_override_is_ignored():

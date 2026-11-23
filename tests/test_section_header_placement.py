@@ -118,7 +118,7 @@ def test_nudge_clears_a_route_to_the_right_of_the_box() -> None:
     trunk fixes the nudge origin; a second route sits to the right of the box,
     past the un-nudged header's right edge, inside the nudged header's span."""
     graph = MetroGraph()
-    section = Section(id="s", name="Alignment")
+    section = Section(id="s", name="Alignment", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = 97.0, 18.0
     graph.sections["s"] = section
@@ -311,9 +311,11 @@ def test_a_contested_band_loses_to_the_roomier_bottom_edge() -> None:
     """A stroke descending through the default position and leaving only a
     pinched slot in the band drops the caption to the clear bottom edge."""
     graph = MetroGraph()
-    section = Section(id="s", name="Work")
+    section = Section(id="s", name="Work", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
-    header_width = section_header._header_length("Work", 13.0)
+    header_width = section_header._header_length(
+        "Work", 13.0, SECTION_NUM_CIRCLE_R_LARGE
+    )
     section.bbox_w, section.bbox_h = header_width + 30.0, 80.0
     graph.sections["s"] = section
 
@@ -339,7 +341,7 @@ def test_a_band_slot_clear_of_an_over_top_loop_beats_a_roomier_bottom_edge() -> 
     """A loop passing over the box a full header band clear of the slot under it
     leaves the caption above its box, even where the bottom edge has more air."""
     graph = MetroGraph()
-    section = Section(id="s", name="Work")
+    section = Section(id="s", name="Work", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = 600.0, 80.0
     graph.sections["s"] = section
@@ -396,7 +398,7 @@ def test_a_roomy_band_slot_keeps_the_caption_above_its_box() -> None:
     """A band with a wide clear stretch keeps the caption above its box, centred
     in that stretch rather than hugging the stroke it stepped past."""
     graph = MetroGraph()
-    section = Section(id="s", name="Work")
+    section = Section(id="s", name="Work", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = 600.0, 80.0
     graph.sections["s"] = section
@@ -424,9 +426,9 @@ def test_the_band_guard_reports_a_caption_deeper_than_its_gap(
     shallow strands a caption the guard names, so the guard is what holds the
     accounting rather than the ranking happening to agree with it."""
     graph = MetroGraph()
-    upper = Section(id="u", name="Upper work")
+    upper = Section(id="u", name="Upper work", number=1)
     upper.bbox_x, upper.bbox_y, upper.bbox_w, upper.bbox_h = 0.0, 100.0, 300.0, 80.0
-    lower = Section(id="l", name="Lower work")
+    lower = Section(id="l", name="Lower work", number=1)
     lower.bbox_x, lower.bbox_y, lower.bbox_w, lower.bbox_h = 0.0, 210.0, 300.0, 80.0
     graph.sections["u"] = upper
     graph.sections["l"] = lower
@@ -437,6 +439,7 @@ def test_the_band_guard_reports_a_caption_deeper_than_its_gap(
             upper.bbox_y + upper.bbox_h,
             section_header._BandBlock(
                 circle_r=SECTION_NUM_CIRCLE_R_LARGE,
+                badge_r=SECTION_NUM_CIRCLE_R_LARGE,
                 num_y=4.0,
                 length=120.0,
                 half_text=10.4,
@@ -479,7 +482,7 @@ def _horizontal_placement(
         section_header.estimate_section_label_width(line, font_size)
         for line in label_lines
     )
-    width = section_header._badge_span() + text_width
+    width = section_header._badge_span(SECTION_NUM_CIRCLE_R_LARGE) + text_width
     return section_header.SectionHeaderPlacement(
         mode="above",
         badge_cx=0.0,
@@ -493,7 +496,7 @@ def _horizontal_placement(
 
 
 def _single_station_section(section_id: str, bbox_w: float) -> Section:
-    section = Section(id=section_id, name="Novel transcripts")
+    section = Section(id=section_id, name="Novel transcripts", number=1)
     section.bbox_x, section.bbox_y = 0.0, 100.0
     section.bbox_w, section.bbox_h = bbox_w, 40.0
     return section
@@ -539,3 +542,137 @@ def test_wrapped_header_with_breakable_widest_line_still_reported() -> None:
     assert check_section_headers_fit_box_width(graph, {"wide_break": placement}) == [
         "wide_break"
     ]
+
+
+def test_unnumbered_header_title_starts_at_the_box_edge() -> None:
+    """A section numbered 0 draws no badge, so its title sits where the badge
+    would have started rather than a badge-width to the right."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment", number=0)
+    section.bbox_x, section.bbox_y = 40.0, 100.0
+    section.bbox_w, section.bbox_h = 200.0, 80.0
+    graph.sections["s"] = section
+
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=[], title_font_size=13.0
+    )
+    assert placement.mode == "above"
+    assert placement.label_x == section.bbox_x
+
+
+@pytest.mark.parametrize(
+    ("number", "expected_offset"),
+    [
+        pytest.param(
+            1,
+            2.0 * SECTION_NUM_CIRCLE_R_LARGE + section_header.SECTION_LABEL_TEXT_OFFSET,
+            id="badged",
+        ),
+        pytest.param(0, 0.0, id="unnumbered"),
+    ],
+)
+def test_rotated_header_title_offset_follows_the_badge(
+    number: int, expected_offset: float
+) -> None:
+    """A rotated side header starts its title past the badge, or at the badge's
+    own starting edge when the section is numbered 0 and draws none."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment", number=number)
+    section.bbox_x, section.bbox_y = 100.0, 100.0
+    section.bbox_w, section.bbox_h = 120.0, 60.0
+    graph.sections["s"] = section
+
+    # Routes spanning the box width above and below it block every
+    # horizontal position, leaving the rotated side columns.
+    above_route = [(112.0, 90.0), (208.0, 90.0)]
+    below_route = [(112.0, 170.0), (208.0, 170.0)]
+    placement = resolve_section_header_placement(
+        graph,
+        section,
+        label_font_size=13.0,
+        polylines=[above_route, below_route],
+        title_font_size=13.0,
+    )
+
+    reading_start = {
+        "left": section.bbox_y + section.bbox_h,
+        "right": section.bbox_y,
+    }
+    assert placement.mode in reading_start
+    offset = abs(placement.label_y - reading_start[placement.mode])
+    assert offset == pytest.approx(expected_offset)
+    _, y0, _, y1 = placement.keepout
+    title_width = section_header.estimate_section_label_width("Alignment", 13.0)
+    assert y1 - y0 == pytest.approx(expected_offset + title_width)
+
+
+_BADGE_SPAN = (
+    2.0 * SECTION_NUM_CIRCLE_R_LARGE + section_header.SECTION_LABEL_TEXT_OFFSET
+)
+
+# Routes that push the header of a 200px-wide box into each horizontal tier:
+# a full-width route inside the band above blocks ``above``; a second inside
+# the band below (with a box too short for a side column) blocks ``below``.
+_ROUTE_ABOVE = [(100.0, 90.0), (300.0, 90.0)]
+_ROUTE_BELOW = [(100.0, 122.0), (300.0, 122.0)]
+
+
+@pytest.mark.parametrize(
+    ("number", "badge_span"),
+    [pytest.param(1, _BADGE_SPAN, id="badged"), pytest.param(0, 0.0, id="unnumbered")],
+)
+@pytest.mark.parametrize(
+    ("mode", "routes", "bbox_h"),
+    [
+        pytest.param("above", [], 80.0, id="above"),
+        pytest.param("below", [_ROUTE_ABOVE], 80.0, id="below"),
+        pytest.param("nudge", [_ROUTE_ABOVE, _ROUTE_BELOW], 10.0, id="nudge"),
+    ],
+)
+def test_horizontal_header_title_offset_and_extent_follow_the_badge(
+    mode: str,
+    routes: list[list[tuple[float, float]]],
+    bbox_h: float,
+    number: int,
+    badge_span: float,
+) -> None:
+    """In every horizontal tier the title starts a badge span past the header
+    origin, and the header's extent is the badge span plus the title: an
+    unnumbered section reserves the title width alone."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment", number=number)
+    section.bbox_x, section.bbox_y = 100.0, 100.0
+    section.bbox_w, section.bbox_h = 200.0, bbox_h
+    graph.sections["s"] = section
+
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=routes, title_font_size=13.0
+    )
+
+    assert placement.mode == mode
+    x0, _, x1, _ = placement.keepout
+    title_width = section_header.estimate_section_label_width("Alignment", 13.0)
+    assert placement.label_x - x0 == pytest.approx(badge_span)
+    assert x1 - x0 == pytest.approx(badge_span + title_width)
+
+
+@pytest.mark.parametrize(
+    ("number", "expected_lines"),
+    [pytest.param(1, 3, id="badged"), pytest.param(0, 2, id="unnumbered")],
+)
+def test_wrap_budget_gives_the_whole_box_width_to_an_unnumbered_title(
+    number: int, expected_lines: int
+) -> None:
+    """The badge width comes off the wrap budget only when a badge is drawn, so
+    the same title and box wrap onto fewer lines for an unnumbered section."""
+    graph = MetroGraph()
+    section = Section(id="s", name="Alignment and sorting of reads", number=number)
+    section.bbox_x, section.bbox_y = 100.0, 100.0
+    section.bbox_w, section.bbox_h = 150.0, 80.0
+    graph.sections["s"] = section
+
+    placement = resolve_section_header_placement(
+        graph, section, label_font_size=13.0, polylines=[], title_font_size=13.0
+    )
+
+    assert len(placement.label_lines) == expected_lines

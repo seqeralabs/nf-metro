@@ -4,15 +4,17 @@ Layout guards run before rendering applies line offsets and final label
 adjustments. These checks parse the finished SVG so they can find problems
 introduced during rendering.
 
-The label-strike and marker-cross checks need only the SVG. The offset-collapse
-check also needs the :class:`~nf_metro.render.plan.RenderPlan` used to create
-the SVG. The plan records whether two lines should share a track or remain
-separate.
+The label-strike, marker-cross and directional-chevron checks need only the
+SVG. The offset-collapse check also needs the
+:class:`~nf_metro.render.plan.RenderPlan` used to create the SVG. The plan
+records whether two lines should share a track or remain separate.
 """
 
 from __future__ import annotations
 
+import math
 import re
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from nf_metro.layout.constants import LABEL_FONT_SIZE, OFFSET_STEP
@@ -32,6 +34,7 @@ from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
 LABEL_STRIKE = "label-strike"
 MARKER_CROSS = "marker-cross"
 OFFSET_COLLAPSE = "offset-collapse"
+CHEVRON_OFF_STROKE = "chevron-off-stroke"
 
 # A drawn run shorter than this reads as a corner nub, not a parallel stretch;
 # two lines closer than ``_FLUSH_TOL`` perpendicular read as a single stroke.
@@ -40,6 +43,16 @@ _FLUSH_TOL = 1.5
 # A pair the offset regime spread by a full step (allowing diagonal foreshorten
 # and rounding) is meant to read as two lines; drawn flush, it has collapsed.
 _PITCH_MIN = OFFSET_STEP - 0.5
+
+# A chevron is placed on its line's drawn centreline exactly, so these bound
+# only this parser's flattening of the quadratic corners (a chord of
+# ``_Q_CHORDS`` strays well under a degree and a hundredth of a pixel).
+_CHEVRON_CENTRE_TOL = 0.5
+_CHEVRON_HEADING_COS = math.cos(math.radians(3.0))
+_Q_CHORDS = 64
+# Pen-lift overlap below this is float noise at a chevron that ends flush with
+# a bridge gap, not a chevron drawn into it.
+_GAP_OVERLAP_EPS = 1e-3
 
 _Point = tuple[float, float]
 _Segment = tuple[_Point, _Point]
@@ -75,11 +88,37 @@ _ELEMENT = re.compile(r"<(path|line)\b([^>]*?)/?>", re.DOTALL)
 _TEXT = re.compile(r"<text\b([^>]*?)>(.*?)</text>", re.DOTALL)
 _TSPAN = re.compile(r"<tspan\b[^>]*>(.*?)</tspan>", re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
+_PATH_CMD = re.compile(r"([MLQ])([^MLQ]*)")
 
 
 def _attr(attrs: str, name: str, default: str | None = None) -> str | None:
     match = re.search(rf'\b{name}="([^"]*)"', attrs)
     return match.group(1) if match else default
+
+
+def _iter_path_cmds(d: str) -> Iterator[tuple[str, list[float]]]:
+    """``(command, numbers)`` for each ``M``/``L``/``Q`` in a path's ``d``."""
+    for cmd, body in _PATH_CMD.findall(d):
+        yield cmd, [float(n) for n in _NUM.findall(body)]
+
+
+def _route_elements(svg: str) -> Iterator[tuple[str, list[tuple[str, list[float]]]]]:
+    """``(line_id, commands)`` of each drawn route element.
+
+    A ``<line>`` element reads as the ``M``/``L`` pair it draws.
+    """
+    for tag, attrs in _ELEMENT.findall(svg):
+        cls = _attr(attrs, "class") or ""
+        if _ROUTE_CLASS not in cls:
+            continue
+        line_id = _attr(attrs, "data-line-id") or ""
+        if tag == "line":
+            x1, y1, x2, y2 = (
+                float(_attr(attrs, k) or 0.0) for k in ("x1", "y1", "x2", "y2")
+            )
+            yield line_id, [("M", [x1, y1]), ("L", [x2, y2])]
+        else:
+            yield line_id, list(_iter_path_cmds(_attr(attrs, "d") or ""))
 
 
 def parse_route_polylines(
@@ -95,22 +134,10 @@ def parse_route_polylines(
     pre-smoothing vertex, so the polyline equals the logical routed path.
     """
     routes: list[tuple[str, list[list[tuple[float, float]]]]] = []
-    for tag, attrs in _ELEMENT.findall(svg):
-        cls = _attr(attrs, "class") or ""
-        if _ROUTE_CLASS not in cls:
-            continue
-        line_id = _attr(attrs, "data-line-id") or ""
-        if tag == "line":
-            x1, y1, x2, y2 = (
-                float(_attr(attrs, k) or 0.0) for k in ("x1", "y1", "x2", "y2")
-            )
-            routes.append((line_id, [[(x1, y1), (x2, y2)]]))
-            continue
-        d = _attr(attrs, "d") or ""
+    for line_id, commands in _route_elements(svg):
         subpaths: list[list[tuple[float, float]]] = []
         current: list[tuple[float, float]] = []
-        for cmd, body in re.findall(r"([MLQ])([^MLQ]*)", d):
-            nums = [float(n) for n in _NUM.findall(body)]
+        for cmd, nums in commands:
             if cmd == "M":
                 if current:
                     subpaths.append(current)
@@ -464,6 +491,256 @@ def _perp_gap(
     return best
 
 
+_DIRECTION_CLASS = "metro-direction-"
+
+
+class StrokeTrace(NamedTuple):
+    """One drawn route's painted centreline as straight chords.
+
+    ``chords`` are the inked pieces in drawing order, each quadratic corner
+    flattened into ``_Q_CHORDS`` of them; ``gaps`` are the pen lifts between
+    subpaths (a bridged edge's hop gaps), which carry no ink.
+    """
+
+    line_id: str
+    chords: list[_Segment]
+    gaps: list[_Segment]
+
+
+class DrawnChevron(NamedTuple):
+    """A directional chevron read back from its ``M wing L apex L wing`` ink.
+
+    ``reach`` is how far its ink extends along ``heading`` either side of
+    ``centre``, round stroke caps included.
+    """
+
+    line_id: str
+    centre: _Point
+    heading: _Point
+    reach: float
+
+
+def _quad_point(a: _Point, c: _Point, b: _Point, t: float) -> _Point:
+    s = 1.0 - t
+    return (
+        s * s * a[0] + 2 * s * t * c[0] + t * t * b[0],
+        s * s * a[1] + 2 * s * t * c[1] + t * t * b[1],
+    )
+
+
+def parse_route_strokes(svg: str) -> list[StrokeTrace]:
+    """Each drawn route's painted centreline, rounded corners included.
+
+    :func:`parse_route_polylines` folds every ``Q`` back onto its corner
+    vertex; this follows the curve the stroke paints instead, so a mark can be
+    measured against the ink rather than the pre-smoothing polyline.
+    """
+    traces: list[StrokeTrace] = []
+    for line_id, commands in _route_elements(svg):
+        chords: list[_Segment] = []
+        gaps: list[_Segment] = []
+        pen: _Point | None = None
+        for cmd, nums in commands:
+            if cmd == "M":
+                target = (nums[0], nums[1])
+                if pen is not None:
+                    gaps.append((pen, target))
+                pen = target
+            elif pen is None:
+                continue
+            elif cmd == "L":
+                target = (nums[0], nums[1])
+                chords.append((pen, target))
+                pen = target
+            else:
+                control, end = (nums[0], nums[1]), (nums[2], nums[3])
+                prev = pen
+                for k in range(1, _Q_CHORDS + 1):
+                    point = _quad_point(pen, control, end, k / _Q_CHORDS)
+                    chords.append((prev, point))
+                    prev = point
+                pen = end
+        traces.append(StrokeTrace(line_id, chords, gaps))
+    return traces
+
+
+def parse_chevrons(svg: str) -> list[DrawnChevron]:
+    """Every directional chevron in the drawn SVG."""
+    chevrons: list[DrawnChevron] = []
+    for tag, attrs in _ELEMENT.findall(svg):
+        cls = _attr(attrs, "class") or ""
+        if tag != "path" or _DIRECTION_CLASS not in cls:
+            continue
+        nums = [n for _, ns in _iter_path_cmds(_attr(attrs, "d") or "") for n in ns]
+        if len(nums) != 6:
+            continue
+        w1x, w1y, ax, ay, w2x, w2y = nums
+        bx, by = (w1x + w2x) / 2, (w1y + w2y) / 2
+        length = math.hypot(ax - bx, ay - by)
+        if length <= 0.0:
+            continue
+        stroke = float(_attr(attrs, "stroke-width") or 0.0)
+        chevrons.append(
+            DrawnChevron(
+                _attr(attrs, "data-line-id") or "",
+                ((ax + bx) / 2, (ay + by) / 2),
+                ((ax - bx) / length, (ay - by) / length),
+                length / 2 + stroke / 2,
+            )
+        )
+    return chevrons
+
+
+def _point_segment_distance(point: _Point, a: _Point, b: _Point) -> float:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length_sq = dx * dx + dy * dy
+    t = 0.0
+    if length_sq > 0.0:
+        t = ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length_sq
+        t = min(1.0, max(0.0, t))
+    return math.hypot(point[0] - a[0] - t * dx, point[1] - a[1] - t * dy)
+
+
+def _runs_along(heading: _Point, a: _Point, b: _Point) -> bool:
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy)
+    if length <= 0.0:
+        return False
+    return (dx * heading[0] + dy * heading[1]) / length >= _CHEVRON_HEADING_COS
+
+
+def stroke_arcs(trace: StrokeTrace) -> tuple[list[float], float]:
+    """Arc length at the start of each chord of *trace*, and its total length.
+
+    The pen lift across a bridge gap counts, so positions read along the whole
+    route.
+    """
+    starts: list[float] = []
+    travelled = 0.0
+    pen = trace.chords[0][0] if trace.chords else (0.0, 0.0)
+    for a, b in trace.chords:
+        travelled += math.dist(pen, a)
+        starts.append(travelled)
+        travelled += math.dist(a, b)
+        pen = b
+    return starts, travelled
+
+
+def chevron_arc_on_trace(
+    trace: StrokeTrace, centre: _Point, heading: _Point
+) -> float | None:
+    """Arc position along *trace* of a chevron lying on its stroke, else None.
+
+    Lying on the stroke is the test :func:`check_chevrons_on_stroke` applies:
+    the centre within the centre tolerance of a chord the heading runs along.
+    """
+    starts, _ = stroke_arcs(trace)
+    best: tuple[float, float] | None = None
+    for (a, b), start in zip(trace.chords, starts, strict=True):
+        distance = _point_segment_distance(centre, a, b)
+        if distance > _CHEVRON_CENTRE_TOL or not _runs_along(heading, a, b):
+            continue
+        length = math.dist(a, b)
+        along = (
+            (centre[0] - a[0]) * (b[0] - a[0]) + (centre[1] - a[1]) * (b[1] - a[1])
+        ) / length
+        if best is None or distance < best[0]:
+            best = (distance, start + min(max(along, 0.0), length))
+    return None if best is None else best[1]
+
+
+def _gap_overlap(chevron: DrawnChevron, gap: _Segment) -> float:
+    """Length of *gap* lying along the chevron's ink; negative when clear."""
+    (cx, cy), (ux, uy) = chevron.centre, chevron.heading
+    along: list[float] = []
+    for gx, gy in gap:
+        rx, ry = gx - cx, gy - cy
+        if abs(rx * uy - ry * ux) > _CHEVRON_CENTRE_TOL:
+            return -math.inf
+        along.append(rx * ux + ry * uy)
+    return min(max(along), chevron.reach) - max(min(along), -chevron.reach)
+
+
+_Box = tuple[float, float, float, float]
+
+
+def _trace_box(trace: StrokeTrace) -> _Box | None:
+    points = [point for seg in (*trace.chords, *trace.gaps) for point in seg]
+    if not points:
+        return None
+    xs, ys = [x for x, _ in points], [y for _, y in points]
+    pad = _CHEVRON_CENTRE_TOL
+    return min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad
+
+
+def _chevron_problem(
+    chevron: DrawnChevron, traces: list[tuple[StrokeTrace, _Box | None]]
+) -> str | None:
+    """Why *chevron* is off its line's drawn stroke, or None when it is on it."""
+    nearest = math.inf
+    in_gap = False
+    cx, cy = chevron.centre
+    for trace, box in traces:
+        if box is None or not (box[0] <= cx <= box[2] and box[1] <= cy <= box[3]):
+            continue
+        on_stroke = False
+        for a, b in trace.chords:
+            distance = _point_segment_distance(chevron.centre, a, b)
+            nearest = min(nearest, distance)
+            if distance <= _CHEVRON_CENTRE_TOL and _runs_along(chevron.heading, a, b):
+                on_stroke = True
+        gapped = any(
+            _gap_overlap(chevron, gap) > _GAP_OVERLAP_EPS for gap in trace.gaps
+        )
+        if on_stroke and not gapped:
+            return None
+        in_gap = in_gap or gapped
+    if in_gap:
+        return "reaches into a bridge gap of its line"
+    if nearest <= _CHEVRON_CENTRE_TOL:
+        return "points off its line's drawn tangent"
+    if math.isinf(nearest):
+        return "lies on no drawn stroke of its line"
+    return f"sits {nearest:.2f}px off its line's drawn stroke"
+
+
+def check_chevrons_on_stroke(svg: str) -> list[RenderFinding]:
+    """A directional chevron off its own line's drawn stroke, or in a bridge gap.
+
+    A chevron reads as the direction of travel of the line under it, so its
+    centre must sit on its own line's painted centreline (rounded corners
+    included) and point along that stroke's downstream tangent there. A
+    chevron reaching into a bridge gap paints its line across the over-line
+    the gap exists to reveal, so that is flagged too.
+    """
+    chevrons = parse_chevrons(svg)
+    if not chevrons:
+        return []
+    traces_by_line: dict[str, list[tuple[StrokeTrace, _Box | None]]] = {}
+    for trace in parse_route_strokes(svg):
+        traces_by_line.setdefault(trace.line_id, []).append((trace, _trace_box(trace)))
+    findings: list[RenderFinding] = []
+    for chevron in chevrons:
+        problem = _chevron_problem(chevron, traces_by_line.get(chevron.line_id, []))
+        if problem is None:
+            continue
+        (cx, cy), (ux, uy), reach = chevron.centre, chevron.heading, chevron.reach
+        findings.append(
+            RenderFinding(
+                CHEVRON_OFF_STROKE,
+                chevron.line_id,
+                "",
+                f"directional chevron of line {chevron.line_id!r} at "
+                f"({cx:.1f},{cy:.1f}) {problem}",
+                (
+                    (cx - ux * reach, cy - uy * reach),
+                    (cx + ux * reach, cy + uy * reach),
+                ),
+            )
+        )
+    return findings
+
+
 def validate_render(
     svg: str,
     *,
@@ -471,9 +748,9 @@ def validate_render(
 ) -> list[RenderFinding]:
     """Check a rendered SVG and return its geometry problems.
 
-    The SVG alone supports label-strike and marker-cross checks. Pass the
-    matching *plan* to also check whether separate lines collapsed onto one
-    track.
+    The SVG alone supports the label-strike, marker-cross and directional
+    chevron checks. Pass the matching *plan* to also check whether separate
+    lines collapsed onto one track.
     """
     manifest = read_manifest(svg)
     if manifest is None:
@@ -481,6 +758,7 @@ def validate_render(
     routes = parse_route_polylines(svg)
     findings = check_label_strikes(svg, manifest, routes)
     findings += check_marker_crossings(svg, manifest, routes)
+    findings += check_chevrons_on_stroke(svg)
     if plan is not None:
         findings += check_offset_collapse(plan, routes)
     return findings

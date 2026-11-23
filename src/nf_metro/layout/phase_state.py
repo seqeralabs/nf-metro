@@ -327,7 +327,7 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         reader_stages=(POST_LAYOUT,),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
-            "pass-control flag compute_layout sets while the pre-bypass passes "
+            "pass-control flag compute_layout sets while the layout passes "
             "run so the final-geometry guards defer on transient state; the "
             "breeze-through and after-final guards read it, tolerating the False "
             "default"
@@ -340,7 +340,7 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         enforcement=FieldEnforcement.FALLBACK,
         why=(
             "flag the after-final checkpoint sets when it is reached but deferred, "
-            "so compute_layout runs the checkpoint once on the settled post-bypass "
+            "so compute_layout runs the checkpoint once on the settled, band-lifted "
             "geometry; read by compute_layout, tolerating the False default"
         ),
     ),

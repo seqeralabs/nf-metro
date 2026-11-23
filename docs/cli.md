@@ -130,7 +130,7 @@ Because it has no light/dark pair, `--mode` does not apply to it.
 | Option                      | Default | Description                                                                                                                                               |
 | --------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--legend TEXT`             | auto    | Position the legend and logo block: keyword (`bl`/`br`/`tl`/`tr`/`bottom`/`right`/`none`), `<keyword> \| canvas`, `<keyword> \| dx,dy`, or absolute `x,y` |
-| `--logo-scale FLOAT`        | 1.0     | Scale the logo within the legend block (1.0 = default auto-size)                                                                                          |
+| `--logo-scale FLOAT`        | 1.0     | Scale the logo, in the legend block or standalone (1.0 = default auto-size)                                                                               |
 | `--legend-min-height FLOAT` | 0       | Minimum legend content height in pixels (useful for single-line maps where the logo would otherwise be tiny)                                              |
 | `--legend-logo-gap FLOAT`   | auto    | Horizontal gap in pixels between the logo and the legend entries                                                                                          |
 
@@ -272,7 +272,7 @@ All four are muxed in-process by [PyAV](https://github.com/PyAV-Org/PyAV), which
 ### Validate the rendered geometry
 
 Pass `--validate` to check the _drawn_ SVG after rendering.
-It exits non-zero if a route is drawn through a station's label or marker, or if two distinct lines collapse into one stroke where they should run parallel.
+It exits non-zero if a route is drawn through a station's label or marker, if two distinct lines collapse into one stroke where they should run parallel, or if a `--directional` chevron sits off its own line's drawn stroke or in a bridge gap.
 It reads the geometry as it ends up on the page, after the per-line offsets and label shifts the layout applies.
 It therefore catches defects the pre-render checks cannot see:
 
@@ -392,6 +392,8 @@ Parse warnings print as a `Warnings` panel on stderr rather than into the stdout
 
 `style:` reports the theme the map resolves to, using the same name `render --theme` accepts.
 
+Section numbers are the ones the render draws, honouring `%%metro number:` overrides; a section with no badge reports `null`: one set to `0`, a hidden one, or the implicit section of a map with no `subgraph`.
+
 <!-- RICH-CODEX {working_dir: .} -->
 
 ![`nf-metro info examples/rnaseq_sections.mmd`](assets/img/nf-metro-info.svg)
@@ -509,9 +511,9 @@ It ships in the `validate` extra:
 pip install "nf-metro[validate]"
 ```
 
-| Option       | Default | Description                                                                                                                                                                                                                                             |
-| ------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--geometry` | off     | Also run the artifact-only render-geometry guards on the drawn ink (label strikes and non-consumer marker crossings), not only the manifest schema. The offset-collapse check needs the engine's assigned offsets and runs only via `render --validate` |
+| Option       | Default | Description                                                                                                                                                                                                                                                                            |
+| ------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--geometry` | off     | Also run the artifact-only render-geometry guards on the drawn ink (label strikes, non-consumer marker crossings and off-stroke direction chevrons), not only the manifest schema. The offset-collapse check needs the engine's assigned offsets and runs only via `render --validate` |
 
 ## `nf-metro embed-script`
 

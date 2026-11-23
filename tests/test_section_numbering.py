@@ -7,14 +7,17 @@ branches complete before their join, while authored numbers stay fixed.
 from __future__ import annotations
 
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
+from nf_metro.api import render_string
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _load(name: str) -> MetroGraph:
@@ -264,3 +267,60 @@ class TestSectionNumberingOrder:
         nums = [s.number for s in top_row]
         for i in range(len(nums) - 1):
             assert nums[i] < nums[i + 1], f"Top row numbers not increasing: {nums}"
+
+    def test_authored_number_zero_disables_section_number(self):
+        text = (FIXTURES / "section_number_zero.mmd").read_text()
+        graph = parse_metro_mermaid(text)
+        compute_layout(graph)
+
+        assert graph.sections["first"].number == 0
+        assert graph.sections["first"].number_override == 0
+        assert graph.sections["second"].number == 1
+        assert graph.sections["third"].number == 0
+        assert graph.sections["fourth"].number == 2
+
+
+def test_zero_section_number_overrides_never_conflict(recwarn):
+    text = (
+        "graph LR\n"
+        "    subgraph one [One]\n"
+        "        %%metro number: 1\n"
+        "        a[A]\n"
+        "    end\n"
+        "    subgraph zero_a [ZeroA]\n"
+        "        %%metro number: 0\n"
+        "        b[B]\n"
+        "    end\n"
+        "    subgraph zero_b [ZeroB]\n"
+        "        %%metro number: 0\n"
+        "        c[C]\n"
+        "    end\n"
+        "    subgraph auto [Auto]\n"
+        "        d[D]\n"
+        "    end\n"
+    )
+    graph = parse_metro_mermaid(text)
+    compute_layout(graph)
+    assert not [w for w in recwarn if "number" in str(w.message)]
+    numbers = {sid: s.number for sid, s in graph.sections.items()}
+    assert numbers == {"one": 1, "zero_a": 0, "zero_b": 0, "auto": 2}
+
+
+def test_number_zero_section_draws_no_badge_while_numbered_sections_do():
+    svg = render_string((FIXTURES / "section_number_zero.mmd").read_text())
+
+    circles: set[str] = set()
+    badge_text: dict[str, str] = {}
+    for element in ElementTree.fromstring(svg).iter():
+        section_id = element.get("data-section-id")
+        if section_id is None:
+            continue
+        tag = element.tag.rsplit("}", 1)[-1]
+        classes = (element.get("class") or "").split()
+        if tag == "circle" and "nf-metro-section-num-circle" in classes:
+            circles.add(section_id)
+        elif tag == "text" and "nf-metro-section-label" not in classes:
+            badge_text[section_id] = element.text or ""
+
+    assert circles == {"second", "fourth"}
+    assert badge_text == {"second": "1", "fourth": "2"}

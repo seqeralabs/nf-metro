@@ -1591,6 +1591,19 @@ gallery:
       the forking station, so the qc bypass V seats on the trailing row. The folded
       section's perpendicular exit corridor clears the V by a full station-flat length, so
       the bypass run-out reads as a visible flat rather than collapsing onto the curve apex.
+  - id: bypass_hidden_lane_side
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      One line of a two-line trunk bypasses a station through a hidden helper. The
+      bypass opens on the side its line's lane stacks, so neither leg crosses the line
+      staying on the trunk (#2170).
+  - id: bypass_hidden_lane_side_symmetric
+    source_dir: examples/topologies
+    category: Bypass Routing
+    description:
+      "The same hidden bypass under `diamond_style: symmetric`. The nested fan seats the
+      bypass on its line's lane side and the trunk on the other (#2170)."
 
   # ── Merge & Convergence ────────────────────────────────────────────────────
   - id: merge_offrow_continuation
@@ -2430,6 +2443,14 @@ gallery:
       feed-forward chain, so the line leaves on the feeders' row as one horizontal
       trunk and drops on a single riser in the gap, rather than dragging both
       feeders into near-parallel diagonals through the section's bottom corner."
+  - id: exit_row_sibling_branches
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "Two stations feed one right exit, so each rides its own row out to the
+      section edge. The second also fans into two dead-end branches, and both peel
+      below the exit rows instead of one sitting on the first feeder's row, where
+      that feeder's exit run would be drawn straight through its marker."
   - id: orbit_perp_exit_perp_entry
     source_dir: examples/topologies
     category: Inter-section Routing

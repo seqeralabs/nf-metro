@@ -47,6 +47,17 @@ class Violation:
     context: dict = field(default_factory=dict)
 
 
+def min_drawn_section_bbox_top(graph: MetroGraph) -> float | None:
+    """Smallest ``bbox_y`` among sections that own a grid cell, or ``None``.
+
+    Implicit holders draw no box or header badge, so they are excluded.
+    """
+    return min(
+        (s.bbox_y for s in graph.real_sections.values() if s.bbox_h > 0),
+        default=None,
+    )
+
+
 def shared_same_line_turn_vertices(
     routes: list[RoutedPath],
 ) -> set[tuple[str, int, int]]:

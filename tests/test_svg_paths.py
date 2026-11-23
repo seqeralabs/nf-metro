@@ -28,7 +28,7 @@ from nf_metro.layout.routing.invariants import (
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import build_render_plan, emit_render_plan
 from nf_metro.render.animate import _points_to_svg_path
-from nf_metro.render.svg import _curve_tangents, apply_route_offsets, render_svg
+from nf_metro.render.svg import _drawn_pieces, apply_route_offsets, render_svg
 from nf_metro.themes import NFCORE_DARK_THEME
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -754,6 +754,19 @@ def _expected_q_triples(tangents) -> list[tuple[tuple, tuple, tuple]]:
     ]
 
 
+def _svg_corners(pts, radii):
+    """``(curved, before, corner, after)`` of each corner the static SVG draws."""
+    return [
+        (piece.curved, piece.start, piece.control, piece.end)
+        for piece in _drawn_pieces(pts, radii, CURVE_RADIUS)
+        if piece.control is not None
+    ]
+
+
+def _tangent_corners(tangents):
+    return [(t.curved, t.before, t.corner, t.after) for t in tangents]
+
+
 class TestSharedCornerTangents:
     """Static SVG and animation must round each corner identically.
 
@@ -782,11 +795,7 @@ class TestSharedCornerTangents:
         pts = self.POLYLINES[name]
         resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
         shared = curve_tangents(pts, resolved)
-        before, after, curved = _curve_tangents(pts, resolved)
-        for i, tan in enumerate(shared, start=1):
-            assert curved[i] == tan.curved
-            assert before[i] == tan.before
-            assert after[i] == tan.after
+        assert _svg_corners(pts, None) == _tangent_corners(shared)
 
     @pytest.mark.parametrize("name", sorted(POLYLINES))
     def test_animation_corners_match_shared_helper(self, name):
@@ -812,11 +821,7 @@ class TestSharedCornerTangents:
                 pts, route.curve_radii, default_radius=CURVE_RADIUS
             )
             shared = curve_tangents(pts, resolved)
-            before, after, curved = _curve_tangents(pts, resolved)
-            for i, tan in enumerate(shared, start=1):
-                assert curved[i] == tan.curved
-                assert before[i] == tan.before
-                assert after[i] == tan.after
+            assert _svg_corners(pts, route.curve_radii) == _tangent_corners(shared)
             d = _points_to_svg_path(
                 pts, curve_radius=CURVE_RADIUS, route_curve_radii=route.curve_radii
             )

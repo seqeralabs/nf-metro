@@ -42,7 +42,6 @@ from nf_metro.layout.constants import (
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
     SECTION_Y_PADDING,
-    TITLE_BAND_OVERLAP_FLOOR,
     X_SPACING,
     graph_offset_step,
 )
@@ -99,7 +98,6 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.phases.bbox import (
     COLUMN_ANCHOR_SIGNS,
     _column_neighbour_anchor_limit,
-    _min_drawn_section_bbox_top,
     _predict_section_content_bottom,
     _section_band_is_empty,
     _section_content_hug_top,
@@ -121,6 +119,7 @@ from nf_metro.layout.phases.spacing import (
     _residual_label_overlaps,
 )
 from nf_metro.layout.port_order_plan import ApproachKind, approach_source
+from nf_metro.layout.title_band import title_band_floors
 from nf_metro.parser.model import (
     LineSpread,
     MetroGraph,
@@ -3180,26 +3179,23 @@ def _guard_topmost_row_top_entry_hugs_section(
 def _guard_title_band_clearance(
     graph: MetroGraph, phase: str, *, section_y_padding: float
 ) -> None:
-    """A titled map's topmost drawn section must not overlap the title band.
+    """No section may reach into the canvas-top title/logo band.
 
-    The title is drawn in the canvas-top padding at a fixed baseline; the
-    section header badge protrudes ``SECTION_HEADER_PROTRUSION`` above its box
-    top.  A drawn box top above ``TITLE_BAND_OVERLAP_FLOOR`` sits its badge
-    level with the title.  Untitled maps, and implicit holders (which draw no
-    badge), are exempt.
+    The title, and a logo not folded into the legend, are drawn in the
+    canvas-top padding.  A drawn section's header badge protrudes
+    ``SECTION_HEADER_PROTRUSION`` above its box top; an implicit holder's
+    content stays inside its box.  Each must sit at or below its floor from
+    :func:`~nf_metro.layout.title_band.title_band_floors`.  Maps that draw
+    neither title nor standalone logo are exempt.
     """
-    if not graph.title:
-        return
-    min_top = _min_drawn_section_bbox_top(graph)
-    if min_top is None:
-        return
-    limit = max(section_y_padding, TITLE_BAND_OVERLAP_FLOOR) - GUARD_TOLERANCE
-    if min_top < limit:
-        raise PhaseInvariantError(
-            f"{phase}: titled map's topmost section box top y={min_top:.1f} "
-            f"sits above the title-band floor {limit:.1f}; the header badge "
-            f"would rise level with the map title"
-        )
+    for top, floor in title_band_floors(graph):
+        limit = max(section_y_padding, floor) - GUARD_TOLERANCE
+        if top < limit:
+            raise PhaseInvariantError(
+                f"{phase}: topmost section box top y={top:.1f} sits above the "
+                f"title-band floor {limit:.1f}; it would reach into the "
+                f"canvas-top title/logo band"
+            )
 
 
 def _ensure_routes(
@@ -5775,8 +5771,9 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         needs=frozenset({"section_y_padding"}),
         issue_pin=("#1273",),
         narrow_reason=(
-            "Scoped to titled maps, whose canvas-top title band the header "
-            "must clear; untitled maps keep the tighter section_y_padding top."
+            "Scoped to maps drawing a canvas-top title or standalone logo, "
+            "whose band the header must clear; other maps keep the tighter "
+            "section_y_padding top."
         ),
     ),
     GuardSpec(

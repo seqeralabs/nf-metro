@@ -69,6 +69,8 @@ class FrozenRecord:
                 return frozenset((*self.entry_ports, *self.exit_ports))
             if self.kind == "Section" and name == "draws_box":
                 return not (self.is_implicit or self.is_hidden)
+            if self.kind == "Section" and name == "has_badge":
+                return self.draws_box and self.number > 0
             raise AttributeError(name) from exc
 
 
@@ -164,6 +166,10 @@ class FrozenGraph(FrozenRecord):
         }
 
 
+# ``(wing, apex, wing)`` of one open directional chevron.
+ChevronVertices = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
+
+
 @dataclass(frozen=True)
 class RenderPlan:
     """All data needed to render a map, stored in SVG pixels."""
@@ -200,6 +206,8 @@ class RenderPlan:
     logo_y: float
     logo_w: float
     logo_h: float
+    title_x: float
+    title_y: float
     legend_logo_size: tuple[float, float] | None
     manifest: FrozenMap | None
     debug: bool
@@ -207,6 +215,9 @@ class RenderPlan:
     bare: bool
     draws_standalone_title: bool
     inactive_line_ids: frozenset[str] = frozenset()
+    # One entry per route, in ``routes`` order; empty unless the map is
+    # directional.
+    directional_chevrons: tuple[tuple[ChevronVertices, ...], ...] = ()
 
     @property
     def edge_routes(self) -> tuple[FrozenRecord, ...]:

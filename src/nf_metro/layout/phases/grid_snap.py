@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
+    COORD_TOLERANCE_FINE,
 )
 from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.phase_state import require_phase_field
@@ -115,7 +117,10 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     for pitch, sec_ids in groups.values():
         _snap_group_to_grid(graph, pitch, sec_ids, convergence_sources)
 
-    _restore_convergence_midpoints(graph, convergence_sources)
+    section_pitch = {
+        sec_id: pitch for pitch, sec_ids in groups.values() for sec_id in sec_ids
+    }
+    _restore_convergence_midpoints(graph, convergence_sources, section_pitch)
     _restore_divergence_midpoints(graph, divergence_targets, trunk_followers)
     _register_half_grid_entry_fan_ports(graph, entry_fan_ports)
 
@@ -207,20 +212,53 @@ def _off_grid_line(y: float, origin: float, pitch: float, tol: float = 1.0) -> b
     return min(residue, pitch - residue) > tol
 
 
-def _slot_snap(y: float, origin: float, pitch: float, half: float) -> float:
-    """Snap ``y`` to ``origin + n*pitch`` unless that shifts it over half a pitch."""
-    snapped = origin + round((y - origin) / pitch) * pitch
-    return snapped if abs(snapped - y) <= half + 1e-6 else y
+_SNAP_TOLERANCE_PX: float = COORD_TOLERANCE_FINE
+"""Distance within which two grid snap Ys count as coinciding.
+
+It decides which residues vote for one grid line, which Ys sit midway between
+two slots, and when a tie's snap levels a relation.  The group origin is
+rounded to 0.001 px, so it must comfortably exceed that rounding's 5e-4 px
+error for these answers not to depend on where the row sits on the canvas.
+"""
+
+_UP = -1
+_DOWN = 1
+
+
+def _is_slot_tie(y: float, origin: float, pitch: float) -> bool:
+    """True when ``y`` sits midway between two ``origin + n*pitch`` slots."""
+    q = (y - origin) / pitch
+    return abs(q - math.floor(q) - 0.5) * pitch <= _SNAP_TOLERANCE_PX
+
+
+def _slot_snap(
+    y: float, origin: float, pitch: float, half: float, tie_direction: int = _UP
+) -> float:
+    """Snap ``y`` to ``origin + n*pitch`` unless that shifts it over half a pitch.
+
+    A ``y`` midway between two slots takes the one ``tie_direction`` names
+    (:data:`_UP` or :data:`_DOWN`); any other ``y`` takes the nearest slot.
+    """
+    q = (y - origin) / pitch
+    if _is_slot_tie(y, origin, pitch):
+        n = math.floor(q) + (1 if tie_direction == _DOWN else 0)
+    else:
+        n = round(q)
+    snapped = origin + n * pitch
+    return snapped if abs(snapped - y) <= half + _SNAP_TOLERANCE_PX else y
 
 
 def _group_grid_origin(
     graph: MetroGraph, sec_ids: list[str], pitch: float
 ) -> tuple[float, dict[str, set[str]]] | None:
-    """Mode of ``y % pitch`` across the group's on-grid stations, with port map.
+    """Most-held grid line ``y % pitch`` of the group's on-grid stations, with port map.
 
     Returns ``(origin, per_section_ports)``, or None when the group holds no
-    station to read a grid from.  Off-track stations were lifted relative to
-    their consumers; they snap to the same grid but don't influence the origin.
+    station to read a grid from.  Residues within :data:`_SNAP_TOLERANCE_PX` of
+    each other, wrapping at the pitch, vote for one line, so float noise cannot
+    split a line's vote; the origin is the line's first residue, rounded to
+    0.001 px.  Off-track stations were lifted relative to their consumers; they
+    snap to the same grid but don't influence the origin.
 
     Rows a section allocator spread to a pitch the grid does not divide carry
     one residue each and so name no mode.  Every candidate origin puts each of
@@ -228,7 +266,8 @@ def _group_grid_origin(
     first station holds; refusing the vote is the one outcome that leaves the
     rows off the grid the snap exists to restore them to.
     """
-    residues: Counter[float] = Counter()
+    line_residues: list[float] = []
+    line_votes: list[int] = []
     per_section_ports: dict[str, set[str]] = {}
     require_phase_field(graph, "half_grid_station_ids")
     half_grid_ids = graph.half_grid_station_ids
@@ -250,11 +289,19 @@ def _group_grid_origin(
             st = graph.stations.get(sid)
             if st is None or st.off_track:
                 continue
-            residues[round(st.y % pitch, 3)] += 1
-    if not residues:
+            residue = st.y % pitch
+            for i, line in enumerate(line_residues):
+                gap = abs(residue - line)
+                if min(gap, pitch - gap) <= _SNAP_TOLERANCE_PX:
+                    line_votes[i] += 1
+                    break
+            else:
+                line_residues.append(residue)
+                line_votes.append(1)
+    if not line_votes:
         return None
-    origin_r, _count = residues.most_common(1)[0]
-    return origin_r, per_section_ports
+    winner = line_votes.index(max(line_votes))
+    return round(line_residues[winner], 3), per_section_ports
 
 
 def _snap_group_to_grid(
@@ -269,15 +316,45 @@ def _snap_group_to_grid(
     if origin_info is None:
         return
     origin_r, per_section_ports = origin_info
-    require_phase_field(graph, "half_grid_station_ids")
-    half_grid_ids = graph.half_grid_station_ids
-    require_phase_field(graph, "symfan_trunk_station_ids")
-    symfan_trunk_ids = graph.symfan_trunk_station_ids
+    candidates = _snap_candidates(graph, per_section_ports, convergence_sources)
+    group_ids = {
+        sid
+        for sec_id in per_section_ports
+        for sid in graph.sections[sec_id].station_ids
+        if sid in graph.stations
+    }
+    tie_directions = _tie_directions(
+        graph, [sid for sid, _is_port in candidates], group_ids, origin_r, pitch
+    )
 
     # Independent snapping can round two same-column stations onto one slot;
     # the later one keeps its pre-snap Y rather than collapsing.
     column_slots: dict[float, set[float]] = {}
 
+    for sid, is_port in candidates:
+        st = graph.stations[sid]
+        target = _slot_snap(st.y, origin_r, pitch, half, tie_directions.get(sid, _UP))
+        if is_port:
+            _set_port_y(graph, sid, target)
+            continue
+        slots = column_slots.setdefault(round(st.x, 3), set())
+        if round(target, 3) in slots:
+            target = st.y
+        slots.add(round(target, 3))
+        st.y = target
+
+
+def _snap_candidates(
+    graph: MetroGraph,
+    per_section_ports: dict[str, set[str]],
+    convergence_sources: dict[str, list[str]],
+) -> list[tuple[str, bool]]:
+    """``(station id, is_port)`` for everything the group snap moves, in snap order."""
+    require_phase_field(graph, "half_grid_station_ids")
+    half_grid_ids = graph.half_grid_station_ids
+    require_phase_field(graph, "symfan_trunk_station_ids")
+    symfan_trunk_ids = graph.symfan_trunk_station_ids
+    candidates: list[tuple[str, bool]] = []
     for sec_id, port_ids in per_section_ports.items():
         section = graph.sections.get(sec_id)
         if section is None:
@@ -286,19 +363,12 @@ def _snap_group_to_grid(
         for sid in section.station_ids:
             if sid in port_ids or sid in half_grid_ids or sid in symfan_trunk_ids:
                 continue
-            st = graph.stations.get(sid)
-            if st is None or sid in convergence_sources:
+            if sid not in graph.stations or sid in convergence_sources:
                 continue
-            target = _slot_snap(st.y, origin_r, pitch, half)
-            slots = column_slots.setdefault(round(st.x, 3), set())
-            if round(target, 3) in slots:
-                target = st.y
-            slots.add(round(target, 3))
-            st.y = target
+            candidates.append((sid, False))
         for pid in port_ids:
             port = graph.ports.get(pid)
-            port_st = graph.stations.get(pid)
-            if port is None or port_st is None:
+            if port is None or pid not in graph.stations:
                 continue
             if port.side not in (PortSide.LEFT, PortSide.RIGHT):
                 continue
@@ -309,13 +379,256 @@ def _snap_group_to_grid(
                 continue
             if pid in convergence_sources:
                 continue
-            _set_port_y(graph, pid, _slot_snap(port_st.y, origin_r, pitch, half))
+            candidates.append((pid, True))
+    return candidates
+
+
+def _tie_directions(
+    graph: MetroGraph,
+    candidate_ids: list[str],
+    group_ids: set[str],
+    origin: float,
+    pitch: float,
+) -> dict[str, int]:
+    """One snap direction for each connected set of stations tied between slots.
+
+    The grid origin is a residue of ``y % pitch``, so how a row's slots are
+    numbered depends on where the row sits on the canvas; ties are therefore
+    resolved from the row's relative geometry alone.  Tied stations joined by
+    an edge, or sharing one hub in the same column (a fan's branches), form a
+    component that moves as one, so neither a fan nor a run is split across two
+    slots.  A component takes the direction that levels more of its relations
+    to the group's other stations (see :func:`_tie_relations`); failing that,
+    the direction its feeders sit in, then its consumers; then the direction
+    whose levelled neighbours carry more of its lines (see
+    :func:`_levelled_line_counts`); failing that, up.
+    """
+    ys = {sid: graph.stations[sid].y for sid in candidate_ids}
+    tied = sorted(sid for sid, y in ys.items() if _is_slot_tie(y, origin, pitch))
+    if not tied:
+        return {}
+    half = pitch / 2.0
+    tied_set = set(tied)
+    feeders: dict[str, set[str]] = {}
+    consumers: dict[str, set[str]] = {}
+    for edge in graph.edges:
+        if edge.source in tied_set or edge.target in tied_set:
+            consumers.setdefault(edge.source, set()).add(edge.target)
+            feeders.setdefault(edge.target, set()).add(edge.source)
+    partner_ys = {sid: graph.stations[sid].y for sid in group_ids}
+    partner_ys.update(
+        (sid, _slot_snap(y, origin, pitch, half)) for sid, y in ys.items()
+    )
+
+    directions: dict[str, int] = {}
+    for component in _tie_components(graph, tied, feeders, consumers):
+        feeder_relations = _tie_relations(component, feeders, ys, partner_ys, pitch)
+        consumer_relations = _tie_relations(component, consumers, ys, partner_ys, pitch)
+        line_counts = _levelled_line_counts(
+            graph, component, group_ids, ys, partner_ys, pitch
+        )
+        direction = _component_tie_direction(
+            feeder_relations, consumer_relations, half, line_counts
+        )
+        for sid in component:
+            directions[sid] = direction
+    return directions
+
+
+def _tie_components(
+    graph: MetroGraph,
+    tied: list[str],
+    feeders: dict[str, set[str]],
+    consumers: dict[str, set[str]],
+) -> list[list[str]]:
+    """Tied stations joined by an edge or by one hub's same-column fan."""
+    tied_set = set(tied)
+    links: dict[str, set[str]] = {sid: set() for sid in tied}
+
+    def link(a: str, b: str) -> None:
+        links[a].add(b)
+        links[b].add(a)
+
+    for sid in tied:
+        for other in consumers.get(sid, set()) & tied_set:
+            link(sid, other)
+    for neighbours in (feeders, consumers):
+        for hub in sorted(neighbours):
+            fan_ids = neighbours[hub] & tied_set
+            if len(fan_ids) < 2:
+                continue
+            columns: dict[float, list[str]] = {}
+            for sid in sorted(fan_ids):
+                st = graph.stations[sid]
+                if not st.is_port and not st.off_track:
+                    columns.setdefault(round(st.x, 3), []).append(sid)
+            for fan in columns.values():
+                for sid in fan[1:]:
+                    link(fan[0], sid)
+    components: list[list[str]] = []
+    seen: set[str] = set()
+    for root in tied:
+        if root in seen:
+            continue
+        seen.add(root)
+        component, frontier = [], [root]
+        while frontier:
+            sid = frontier.pop()
+            component.append(sid)
+            for other in sorted(links[sid] - seen):
+                seen.add(other)
+                frontier.append(other)
+        components.append(sorted(component))
+    return components
+
+
+def _tie_relations(
+    component: list[str],
+    neighbours: dict[str, set[str]],
+    ys: dict[str, float],
+    partner_ys: dict[str, float],
+    pitch: float,
+) -> list[tuple[float, float]]:
+    """``(component y, partner y)`` pairs along one side of a tied component.
+
+    Partners are the snap group's stations outside the component, keyed in
+    ``partner_ys`` by the Y they hold once snapped.  A partner
+    shared by several members (the hub of a tied fan) is compared with the
+    members' centre; a member with several partners on this side is compared
+    with their centre.  Partners more than one pitch away say nothing about
+    which neighbouring slot keeps the member level, and are dropped.
+    """
+    members = set(component)
+
+    def partners_of(sid: str) -> list[str]:
+        return sorted(
+            p
+            for p in neighbours.get(sid, set())
+            if p not in members and p in partner_ys
+        )
+
+    members_by_partner: dict[str, list[str]] = {}
+    for sid in component:
+        for partner in partners_of(sid):
+            members_by_partner.setdefault(partner, []).append(sid)
+    shared = {p: ms for p, ms in members_by_partner.items() if len(ms) >= 2}
+
+    relations = [
+        (_centre([ys[sid] for sid in ms]), partner_ys[p]) for p, ms in shared.items()
+    ]
+    for sid in component:
+        own = [p for p in partners_of(sid) if p not in shared]
+        if own:
+            relations.append((ys[sid], _centre([partner_ys[p] for p in own])))
+    return [(a, b) for a, b in relations if abs(b - a) <= pitch + _SNAP_TOLERANCE_PX]
+
+
+def _centre(ys: list[float]) -> float:
+    return (max(ys) + min(ys)) / 2.0
+
+
+def _component_tie_direction(
+    feeder_relations: list[tuple[float, float]],
+    consumer_relations: list[tuple[float, float]],
+    half: float,
+    line_counts: dict[int, int],
+) -> int:
+    """The direction levelling more relations; else toward feeders, consumers.
+
+    Failing those, the direction whose levelled neighbours carry more of the
+    component's lines (``line_counts``); failing that, up.
+    """
+
+    def levelled(direction: int) -> int:
+        return sum(
+            abs(own + direction * half - partner) < _SNAP_TOLERANCE_PX
+            for own, partner in feeder_relations + consumer_relations
+        )
+
+    up, down = levelled(_UP), levelled(_DOWN)
+    if up != down:
+        return _UP if up > down else _DOWN
+    for relations in (feeder_relations, consumer_relations):
+        net = sum(partner - own for own, partner in relations)
+        if abs(net) > _SNAP_TOLERANCE_PX:
+            return _UP if net < 0 else _DOWN
+    if line_counts[_UP] != line_counts[_DOWN]:
+        return _UP if line_counts[_UP] > line_counts[_DOWN] else _DOWN
+    return _UP
+
+
+def _levelled_line_counts(
+    graph: MetroGraph,
+    component: list[str],
+    group_ids: set[str],
+    ys: dict[str, float],
+    partner_ys: dict[str, float],
+    pitch: float,
+) -> dict[int, int]:
+    """Per direction, the lines passing through the neighbours it levels with.
+
+    A member's neighbour counts each line that reaches it from the member along
+    the group's own edges, directly or via other group stations, so the station
+    where a member's bundle reunites outweighs a one-line detour.
+    """
+    members = set(component)
+    consumers_by_line: dict[tuple[str, str], set[str]] = {}
+    feeders_by_line: dict[tuple[str, str], set[str]] = {}
+    for edge in graph.edges:
+        if edge.source in group_ids and edge.target in group_ids:
+            consumers_by_line.setdefault((edge.line_id, edge.source), set()).add(
+                edge.target
+            )
+            feeders_by_line.setdefault((edge.line_id, edge.target), set()).add(
+                edge.source
+            )
+    line_ids = sorted({line_id for line_id, _sid in consumers_by_line})
+    half = pitch / 2.0
+    counts = {_UP: 0, _DOWN: 0}
+    for sid in component:
+        for step in (consumers_by_line, feeders_by_line):
+            adjacent = {
+                p for line_id in line_ids for p in step.get((line_id, sid), ())
+            } - members
+            for line_id in line_ids:
+                for p in _line_reach(sid, line_id, step, members) & adjacent:
+                    for direction in (_UP, _DOWN):
+                        gap = ys[sid] + direction * half - partner_ys[p]
+                        if abs(gap) < _SNAP_TOLERANCE_PX:
+                            counts[direction] += 1
+    return counts
+
+
+def _line_reach(
+    start: str,
+    line_id: str,
+    step: dict[tuple[str, str], set[str]],
+    blocked: set[str],
+) -> set[str]:
+    """Stations ``line_id`` reaches from ``start`` without entering ``blocked``."""
+    reached: set[str] = set()
+    frontier = list(step.get((line_id, start), ()))
+    while frontier:
+        sid = frontier.pop()
+        if sid in reached or sid in blocked:
+            continue
+        reached.add(sid)
+        frontier.extend(step.get((line_id, sid), ()))
+    return reached
 
 
 def _restore_convergence_midpoints(
-    graph: MetroGraph, convergence_sources: dict[str, list[str]]
+    graph: MetroGraph,
+    convergence_sources: dict[str, list[str]],
+    section_pitch: dict[str, float],
 ) -> None:
-    """Re-centre each fan-in target on its post-snap source midpoint."""
+    """Re-centre each fan-in target on its post-snap source midpoint.
+
+    Sources an odd number of slots apart put the midpoint half a pitch off the
+    section's grid; the target is then registered in ``graph.half_grid_station_ids``
+    so the grid-alignment invariants read it as an intentional centreline, as
+    :func:`_restore_divergence_midpoints` does for a fork hub.
+    """
     for target_id, src_ids in convergence_sources.items():
         st = graph.stations.get(target_id)
         if st is None or st.off_track:
@@ -325,6 +638,9 @@ def _restore_convergence_midpoints(
             continue
         midpoint = (max(new_src_ys) + min(new_src_ys)) / 2.0
         _set_port_y(graph, target_id, midpoint)
+        pitch = section_pitch.get(st.section_id or "")
+        if pitch and _off_grid_line(midpoint, min(new_src_ys), pitch):
+            graph.half_grid_station_ids.add(target_id)
 
 
 def _restore_divergence_midpoints(

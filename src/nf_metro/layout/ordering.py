@@ -37,6 +37,7 @@ def assign_tracks(
     terminal_nodes: frozenset[str] = frozenset(),
     exit_reaching: frozenset[str] = frozenset(),
     flow_horizontal: bool = True,
+    priority_lane_sign: float | None = None,
 ) -> dict[str, float]:
     """Assign each station a track using the track-per-line strategy.
 
@@ -61,6 +62,10 @@ def assign_tracks(
             is a horizontal row a level exit run would cross. A dead-end output
             tail peels below that row only then; a vertical (TB/BT) section's
             exit leaves perpendicular and its tail continues along the flow.
+        priority_lane_sign: Sign along the track axis toward which the section
+            stacks its lanes in line-priority order, or ``None`` when a seam may
+            impose another order.  Lets a bypass branch open toward its own
+            lines' lanes (see :func:`_bypass_lane_side`).
 
     Returns a dict mapping station_id -> track (float).
     """
@@ -174,6 +179,7 @@ def assign_tracks(
                     layer_idx=layer_idx if entry_top else -1,
                     graph=graph,
                     exit_reaching=exit_reaching,
+                    priority_lane_sign=priority_lane_sign,
                 )
                 for n in nodes:
                     layer_occupancy[layer_idx][n] = tracks[n]
@@ -197,8 +203,73 @@ def assign_tracks(
             line_gap,
             line_base=line_base if centered else None,
         )
+        if flow_horizontal:
+            _step_off_exit_rows(
+                layer_idx, layers, tracks, G, exit_reaching, layer_occupancy
+            )
 
     return tracks
+
+
+def _step_off_exit_rows(
+    layer_idx: int,
+    layers: dict[str, int],
+    tracks: dict[str, float],
+    G: nx.DiGraph[str],
+    exit_reaching: frozenset[str],
+    layer_occupancy: dict[int, dict[str, float]],
+) -> None:
+    """Move this layer's dead-end stations off rows an exit run holds.
+
+    A station whose flow leaves through the section's exit port, with no
+    in-section successor carrying it there, is an exit carrier.  A sole
+    carrier's run peels off its row ahead of everything downstream of the
+    carrier, so only a station hanging off a different feeder is in its way.
+    When several carriers converge on the exit, each rides its own row flat to
+    the section edge, and any dead-end station seated on one of those rows in a
+    later layer would have a run drawn straight through its marker.  Such a
+    station peels downward, as other dead-end tails do, one sibling pitch at
+    a time until it clears every blocking row and every station already at
+    this layer.
+    """
+    placed = layer_occupancy.get(layer_idx, {})
+    if not placed:
+        return
+    carriers = {
+        s: tracks[s]
+        for s in exit_reaching
+        if s in tracks
+        and layers.get(s, 0) < layer_idx
+        and not any(n in exit_reaching for n in G.successors(s))
+    }
+    if not carriers:
+        return
+    distinct = sorted(set(tracks[n] for n in placed) | set(carriers.values()))
+    gaps = [
+        b - a for a, b in zip(distinct, distinct[1:]) if b - a > SAME_COORD_TOLERANCE
+    ]
+    pitch = min(gaps) if gaps else LINE_GAP
+
+    for node in sorted(placed, key=lambda n: tracks[n]):
+        if node in exit_reaching:
+            continue
+        upstream = nx.ancestors(G, node)
+        foreign = [
+            t for c, t in carriers.items() if len(carriers) > 1 or c not in upstream
+        ]
+
+        def on_foreign_row(t: float, rows: list[float] = foreign) -> bool:
+            return any(abs(t - r) < SAME_COORD_TOLERANCE for r in rows)
+
+        if not on_foreign_row(tracks[node]):
+            continue
+        new = tracks[node] + pitch
+        while on_foreign_row(new) or _is_track_occupied_at_layer(
+            new, layer_idx, layer_occupancy, node
+        ):
+            new += pitch
+        tracks[node] = new
+        placed[node] = new
 
 
 def _build_diamond_index(
@@ -743,6 +814,45 @@ def _trunk_fanout_node(nodes: list[str], graph: MetroGraph | None) -> str | None
     return None
 
 
+def _bypass_lane_side(
+    trunk: str,
+    branch: str,
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+    priority_lane_sign: float | None,
+) -> float:
+    """The side of *trunk*'s track a fan *branch* takes: ``+1.0`` or ``-1.0``.
+
+    A bypass -- a branch fed from the trunk's lone feeder that runs as a chain
+    back into the trunk downstream -- rides the fork's bundle until it peels
+    off, so it opens toward the side its lines stack on relative to the lines
+    staying on the trunk; the other side sends both its legs across them.  Any
+    other branch, a tie in line rank, or a section whose lanes may not follow
+    line priority takes the allocator's default ``+1.0``.
+    """
+    if priority_lane_sign is None:
+        return 1.0
+    feeders = set(G.predecessors(trunk))
+    if len(feeders) != 1 or set(G.predecessors(branch)) != feeders:
+        return 1.0
+    chain = _linear_chain_to_merge(branch, G)
+    if chain is None or chain[-1] not in nx.descendants(G, trunk):
+        return 1.0
+    branch_lines = set(graph.station_lines(branch))
+    staying = set(graph.station_lines(trunk)) - branch_lines
+    if not branch_lines or not staying:
+        return 1.0
+    rank = {lid: i for i, lid in enumerate(graph.lines)}
+
+    def mean_rank(lines: set[str]) -> float:
+        return sum(rank.get(lid, len(rank)) for lid in lines) / len(lines)
+
+    rank_gap = mean_rank(branch_lines) - mean_rank(staying)
+    if rank_gap == 0.0:
+        return 1.0
+    return priority_lane_sign if rank_gap > 0 else -priority_lane_sign
+
+
 def _phantom_trunk_node(nodes: list[str], graph: MetroGraph | None) -> str | None:
     """Return the lone entry-runway phantom in a fan-out group, if any.
 
@@ -877,6 +987,7 @@ def _place_fan_out(
     layer_idx: int = -1,
     graph: MetroGraph | None = None,
     exit_reaching: frozenset[str] = frozenset(),
+    priority_lane_sign: float | None = None,
 ) -> None:
     """Place multiple nodes in the same layer+line, centered around an anchor.
 
@@ -954,8 +1065,8 @@ def _place_fan_out(
     # fan the real fan-in branches above it -- the phantom enters from the
     # section's left edge at the trunk track, so the merging branches read
     # cleanest dropping in from above (note this fans the OPPOSITE way to
-    # the line-superset trunk_node block below, which fans branches down).
-    # Keeps the trunk straight through the junction (#420).
+    # the line-superset trunk_node block below, which fans branches down by
+    # default).  Keeps the trunk straight through the junction (#420).
     phantom_trunk = _phantom_trunk_node(nodes, graph)
     if phantom_trunk is not None:
         tracks[phantom_trunk] = anchor
@@ -1059,14 +1170,19 @@ def _place_fan_out(
 
     # Trunk-anchored placement: when one node carries a strict superset
     # of every sibling's line set, it's the bundle trunk.  Pin it at
-    # anchor and fan the side branches below so the trunk stays straight
-    # through the junction.
+    # anchor and fan the side branches off it so the trunk stays straight
+    # through the junction: below, unless a branch is a bypass whose lines
+    # stack on the other side.
     trunk_node = _trunk_fanout_node(nodes, graph)
-    if trunk_node is not None:
+    if trunk_node is not None and graph is not None:
         tracks[trunk_node] = anchor
-        others = [n for n in nodes if n != trunk_node]
-        for i, node in enumerate(others, 1):
-            tracks[node] = anchor + i * fan_spacing
+        depth = {-1.0: 0, 1.0: 0}
+        for node in nodes:
+            if node == trunk_node:
+                continue
+            side = _bypass_lane_side(trunk_node, node, G, graph, priority_lane_sign)
+            depth[side] += 1
+            tracks[node] = anchor + side * depth[side] * fan_spacing
     elif use_asymmetric:
         # First node stays at anchor, others fan out below.
         tracks[nodes[0]] = anchor

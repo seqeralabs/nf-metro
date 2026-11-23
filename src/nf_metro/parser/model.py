@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, ClassVar, Literal, TypedDict
 
 from nf_metro.errors import NfMetroError, UnknownInactiveLineError
 from nf_metro.parser.provenance import LayoutProvenance
@@ -391,6 +391,17 @@ class Section:
         """Whether the section renders its box, header and number badge."""
         return not (self.is_implicit or self.is_hidden)
 
+    @property
+    def is_drawn_box(self) -> bool:
+        """Whether the section renders a box with a non-empty extent."""
+        return self.bbox_w > 0 and self.bbox_h > 0 and self.draws_box
+
+    @property
+    def has_badge(self) -> bool:
+        """Whether the section draws a number badge: it draws a box and its
+        number is positive (0 means none)."""
+        return self.draws_box and self.number > 0
+
     # Hints from %%metro entry/exit directives: list of (side, [line_ids])
     exit_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)
     entry_hints: list[tuple[PortSide, list[str]]] = field(default_factory=list)
@@ -531,14 +542,18 @@ class MetroGraph:
     # of aborting with no output. Takes precedence over strict.
     permissive: bool = False
     embed_manifest: bool = True
-    # Whether a render will actually draw a title/logo band at the canvas
-    # top for a titled map. Set by prepare_graph (from --bare, %%metro
-    # legend:, and whether a logo is configured) before compute_layout runs,
-    # mirroring render.svg's own drawing decision so the title-band
-    # clearance in layout/phases/canvas.py doesn't reserve space for a
-    # header nothing will occupy. Defaults to True (always reserve) for
-    # callers that build a graph directly and skip prepare_graph.
-    reserve_title_band: bool = True
+    # Lowest y the canvas-top title and standalone logo reach (0 when render
+    # draws neither). Set by prepare_graph from --bare, the output format,
+    # %%metro legend: and the logo before compute_layout runs, so the band
+    # lift in layout/title_band.py reserves exactly what render draws.
+    # None for a graph that skipped prepare_graph: read it through
+    # layout.title_band.title_band_bottom, which then assumes a default SVG.
+    title_band_bottom: float | None = None
+    # How far layout moved the finished map down to clear that band: the map's
+    # own canvas top sits at this y.  Routing and render measure every
+    # canvas-top clearance from it, so the banded map is its unbanded layout
+    # translated, routes included.
+    title_band_lift: float = 0.0
     # When set, every real station with no explicit %%metro process: directive
     # gets its own id as a default process pattern, so a map whose station ids
     # already name their processes lights up live with no per-station mapping.
@@ -592,6 +607,11 @@ class MetroGraph:
     logo_path: str = ""
     logo_path_light: str = ""
     logo_path_dark: str = ""
+    LOGO_PATH_FIELDS: ClassVar[tuple[str, ...]] = (
+        "logo_path",
+        "logo_path_light",
+        "logo_path_dark",
+    )
     source_dir: str = ""
     # Output paths from %%metro output:, exactly as written, each paired with
     # the per-output render overrides declared after its `|` (empty for a bare
@@ -599,7 +619,7 @@ class MetroGraph:
     # against the .mmd's own directory and folds the overrides over the run's
     # global options; layout and render never read this.
     declared_outputs: list[tuple[str, dict[str, object]]] = field(default_factory=list)
-    logo_scale: float = 1.0  # multiplies the logo size within the legend block
+    logo_scale: float = 1.0  # multiplies the logo size, in the legend or standalone
     legend_logo_gap: float | None = None  # px gap between logo and legend entries
     # Multiplies every text size for the render (station labels, title,
     # section labels, legend, terminus/icon captions) and the label-width
@@ -996,6 +1016,11 @@ class MetroGraph:
         if station:
             return station.section_id
         return None
+
+    @property
+    def has_logo(self) -> bool:
+        """True when any logo variant is configured."""
+        return any(getattr(self, name) for name in self.LOGO_PATH_FIELDS)
 
     @property
     def real_sections(self) -> dict[str, Section]:

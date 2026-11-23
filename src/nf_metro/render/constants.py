@@ -10,14 +10,12 @@ import html
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
+    CANVAS_ORIGIN_MARGIN as CANVAS_ORIGIN_MARGIN,  # re-export
+)
+from nf_metro.layout.constants import (
     CURVE_RADIUS,
     ICON_CAPTION_GAP,
-    SECTION_HEADER_PROTRUSION,
     SECTION_HEADER_ROUTE_CLEARANCE,
-    SECTION_X_PADDING,
-    SECTION_Y_PADDING,
-    X_OFFSET,
-    Y_OFFSET,
 )
 from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
 from nf_metro.layout.constants import (
@@ -35,20 +33,6 @@ if TYPE_CHECKING:
 CANVAS_PADDING: float = 60.0
 """Default padding around the entire SVG canvas."""
 
-CANVAS_ORIGIN_MARGIN: tuple[float, float] = (
-    X_OFFSET - SECTION_X_PADDING,
-    Y_OFFSET - SECTION_Y_PADDING - SECTION_HEADER_PROTRUSION,
-)
-"""Room between the canvas edge and the first drawn element, left and top.
-
-The layout seats the first section against these two lines: its box edge one
-section padding inboard of the first layer, and above its top, one section
-padding inboard of the first track, the header badge that protrudes from it.
-Ink drawn outside the box envelope is settled against the same lines, so one
-boundary reads per side whether a box or a run defines it.  The far sides are
-not framed this way: nothing is placed against them, so they simply grow
-``CANVAS_PADDING`` past whatever they end up holding.
-"""
 
 LEGEND_GAP: float = 30.0
 """Gap between content area and legend (bottom/right positions)."""
@@ -58,9 +42,6 @@ LEGEND_INSET: float = 10.0
 
 LEGEND_ROUTE_CLEARANCE: float = 6.0
 """Clearance kept between the legend box and routed lines when testing overlap."""
-
-LOGO_Y_STANDALONE: float = 5.0
-"""Y offset for standalone logo (no legend)."""
 
 # ---------------------------------------------------------------------------
 # Legend
@@ -142,10 +123,14 @@ used to extend the header keep-out band above/below the text baseline."""
 HEADER_WRAP_CLEARANCE: float = 8.0
 """Minimum visible gap a wrapped header's extra lines leave before whatever
 is nearest in their growth direction (the map title, another section's box,
-or the canvas edge).  Matches the buffer ``TITLE_BAND_CLEARANCE`` adds on the
-layout side for the same single-line-header clearance."""
+or the canvas edge).  Matches ``TITLE_BAND_HEADER_GAP``, the gap the layout
+leaves between the canvas-top band and a single-line header."""
 
-TEXT_VCENTER_DY: str = "0.3em"
+TEXT_VCENTER_EM: float = 0.3
+"""Baseline drop, in ems below a graphic's centre line, that visually centres
+text on it (see ``TEXT_VCENTER_DY``)."""
+
+TEXT_VCENTER_DY: str = f"{TEXT_VCENTER_EM}em"
 """Downward dy shift applied to text that must be visually centered on
 a companion graphic (badge circles, legend swatches).  Using dy instead
 of ``dominant-baseline: central`` gives more consistent results across
@@ -216,11 +201,11 @@ above the canvas top.
 """
 
 TITLE_ASCENT_RATIO: float = 0.8
-"""Cap-height above the baseline as a fraction of the title's font size.
+"""Cap-height above the baseline as a fraction of the title's font size."""
 
-Companion to the ``0.25`` descender fraction the header-ceiling maths uses, so
-the two bound the title's glyph band from both sides.
-"""
+TITLE_DESCENT_RATIO: float = 0.25
+"""Descender depth below the baseline as a fraction of the title's font size;
+with ``TITLE_ASCENT_RATIO`` it bounds the title's glyph band."""
 
 
 def title_baseline_y(title_font_size: float) -> float:
@@ -232,6 +217,10 @@ def title_baseline_y(title_font_size: float) -> float:
     glyph ascent once it outgrows the default offset.
     """
     return max(TITLE_Y_OFFSET, title_font_size * TITLE_ASCENT_RATIO)
+
+
+TITLE_LOGO_GAP: float = 16.0
+"""Gap between a standalone logo's right edge and the title drawn beside it."""
 
 
 TITLE_CANVAS_SAFETY_MARGIN: float = 4.0

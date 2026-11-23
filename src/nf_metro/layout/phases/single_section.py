@@ -33,6 +33,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     section_lane_sign,
+    section_lanes_follow_line_priority,
 )
 from nf_metro.layout.labels import (
     _label_text_height,
@@ -286,6 +287,7 @@ def _layout_single_section(
     # edges, so this too is classified against the full graph (walking backward
     # from the exit ports through in-section feeders).
     exit_reaching = _exit_reaching_nodes(graph, section)
+    priority_lane_sign = _priority_lane_sign(section, graph)
     tracks = assign_tracks(
         sub,
         layers,
@@ -294,6 +296,7 @@ def _layout_single_section(
         terminal_nodes=terminal_nodes,
         exit_reaching=exit_reaching,
         flow_horizontal=lanes_run_along_y(section.direction),
+        priority_lane_sign=priority_lane_sign,
     )
 
     if not layers:
@@ -403,7 +406,7 @@ def _layout_single_section(
     # distinct line tracks at a layer with only one occupant per line.
     _resolve_station_collisions(sub, section, x_spacing, effective_y_spacing)
 
-    _seat_fan_in_branches_on_lane_side(sub, section, graph, frame)
+    _seat_fan_in_branches_on_lane_side(sub, graph, frame, priority_lane_sign)
 
     apply_planned_fans_to_section_subgraph(graph, sub, section)
 
@@ -532,6 +535,13 @@ def _lane_sign(section: Section, graph: MetroGraph) -> float:
     return section_lane_sign(section, tb_positive_fan_sections(graph))
 
 
+def _priority_lane_sign(section: Section, graph: MetroGraph) -> float | None:
+    """*section*'s lane sign while its lanes follow line priority, else ``None``."""
+    if not section_lanes_follow_line_priority(graph, section):
+        return None
+    return _lane_sign(section, graph)
+
+
 def _in_section_sources(sub: MetroGraph, sid: str) -> list[str]:
     """Sources of *sid*'s in-edges that are non-port stations of *sub*, per edge."""
     return [
@@ -578,7 +588,10 @@ def _slot_occupied(
 
 
 def _seat_fan_in_branches_on_lane_side(
-    sub: MetroGraph, section: Section, graph: MetroGraph, frame: AxisFrame
+    sub: MetroGraph,
+    graph: MetroGraph,
+    frame: AxisFrame,
+    priority_lane_sign: float | None,
 ) -> None:
     """Seat a partitioned fan-in's branches on the side its section's lanes stack.
 
@@ -589,18 +602,10 @@ def _seat_fan_in_branches_on_lane_side(
     in a section whose lanes stack the other way each such branch is reflected
     across the join.
     """
-    # assign_tracks seats lines in priority order, which is the section's lane
-    # order only while no seam delivers an order of its own: at most one line
-    # enters the section (the lane plan leaves it on priority).
-    seam_lines = {
-        edge.line_id
-        for port_id in section.entry_ports
-        for edge in graph.edges_to(port_id)
-    }
-    if len(seam_lines) > 1:
-        return
-    lane_sign = _lane_sign(section, graph)
-    if lane_sign > 0:
+    # assign_tracks seats lines in priority order, which is only the section's
+    # lane order while no seam delivers an order of its own.
+    lane_sign = priority_lane_sign
+    if lane_sign is None or lane_sign > 0:
         return
     axis = frame.secondary
 

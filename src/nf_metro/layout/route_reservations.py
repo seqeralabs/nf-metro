@@ -2591,8 +2591,10 @@ def _canvas_region_measurement(
     canvas_size = canvas_height if allocates_y else canvas_width
     canvas_blocker = (f"canvas:{region.side.value}",)
     if canvas_edge_is_negative:
+        # The map's own canvas top sits below any title/logo band.
+        canvas_edge = graph.title_band_lift if region.side is CanvasSide.TOP else 0.0
         return _RegionMeasurement(
-            0.0,
+            canvas_edge,
             content_edge,
             canvas_blocker,
             blockers,
