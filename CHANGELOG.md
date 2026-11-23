@@ -105,6 +105,16 @@ history.
   Under `diamond_style: symmetric`, a fan whose branches nest (one branch
   carries every line the others do) also seats each branch on its lines' lane
   side, in sections where at most one line enters (#2170).
+- `--directional` chevrons sit on their line's drawn stroke and point along it
+  through rounded corners; a chevron that would land in a bridge gap is
+  omitted. `--validate` and `validate-svg --geometry` report a chevron that
+  leaves its stroke (#2177).
+- `--directional` draws one evenly spaced set of chevrons per line where several
+  of its routes overlap, and continues that set through an invisible port or
+  junction where the strokes meet at one point and heading. A stretch of at
+  least half a spacing that the set skips gets a chevron at its middle,
+  provided that stays half a spacing from the set's neighbours and clear of
+  other chevrons of the line.
 - When two stations feed the same exit and one of them also fans into
   dead-end branches, a branch no longer sits on the other feeder's row.
   That feeder's exit run was drawn straight through the branch's marker
