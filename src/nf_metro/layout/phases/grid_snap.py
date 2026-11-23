@@ -118,7 +118,10 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     for pitch, sec_ids in groups.values():
         _snap_group_to_grid(graph, pitch, sec_ids, convergence_sources)
 
-    _restore_convergence_midpoints(graph, convergence_sources)
+    section_pitch = {
+        sec_id: pitch for pitch, sec_ids in groups.values() for sec_id in sec_ids
+    }
+    _restore_convergence_midpoints(graph, convergence_sources, section_pitch)
     _restore_divergence_midpoints(graph, divergence_targets, trunk_followers)
     _restore_partial_trunk_descents(graph)
     _register_half_grid_entry_fan_ports(graph, entry_fan_ports)
@@ -654,9 +657,17 @@ def _restore_partial_trunk_descents(graph: MetroGraph) -> None:
 
 
 def _restore_convergence_midpoints(
-    graph: MetroGraph, convergence_sources: dict[str, list[str]]
+    graph: MetroGraph,
+    convergence_sources: dict[str, list[str]],
+    section_pitch: dict[str, float],
 ) -> None:
-    """Re-centre each fan-in target on its post-snap source midpoint."""
+    """Re-centre each fan-in target on its post-snap source midpoint.
+
+    Sources an odd number of slots apart put the midpoint half a pitch off the
+    section's grid; the target is then registered in ``graph.half_grid_station_ids``
+    so the grid-alignment invariants read it as an intentional centreline, as
+    :func:`_restore_divergence_midpoints` does for a fork hub.
+    """
     for target_id, src_ids in convergence_sources.items():
         st = graph.stations.get(target_id)
         if st is None or st.off_track:
@@ -666,6 +677,9 @@ def _restore_convergence_midpoints(
             continue
         midpoint = (max(new_src_ys) + min(new_src_ys)) / 2.0
         _set_port_y(graph, target_id, midpoint)
+        pitch = section_pitch.get(st.section_id or "")
+        if pitch and _off_grid_line(midpoint, min(new_src_ys), pitch):
+            graph.half_grid_station_ids.add(target_id)
 
 
 def _restore_divergence_midpoints(
