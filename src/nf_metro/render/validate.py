@@ -609,6 +609,46 @@ def _runs_along(heading: _Point, a: _Point, b: _Point) -> bool:
     return (dx * heading[0] + dy * heading[1]) / length >= _CHEVRON_HEADING_COS
 
 
+def stroke_arcs(trace: StrokeTrace) -> tuple[list[float], float]:
+    """Arc length at the start of each chord of *trace*, and its total length.
+
+    The pen lift across a bridge gap counts, so positions read along the whole
+    route.
+    """
+    starts: list[float] = []
+    travelled = 0.0
+    pen = trace.chords[0][0] if trace.chords else (0.0, 0.0)
+    for a, b in trace.chords:
+        travelled += math.dist(pen, a)
+        starts.append(travelled)
+        travelled += math.dist(a, b)
+        pen = b
+    return starts, travelled
+
+
+def chevron_arc_on_trace(
+    trace: StrokeTrace, centre: _Point, heading: _Point
+) -> float | None:
+    """Arc position along *trace* of a chevron lying on its stroke, else None.
+
+    Lying on the stroke is the test :func:`check_chevrons_on_stroke` applies:
+    the centre within the centre tolerance of a chord the heading runs along.
+    """
+    starts, _ = stroke_arcs(trace)
+    best: tuple[float, float] | None = None
+    for (a, b), start in zip(trace.chords, starts, strict=True):
+        distance = _point_segment_distance(centre, a, b)
+        if distance > _CHEVRON_CENTRE_TOL or not _runs_along(heading, a, b):
+            continue
+        length = math.dist(a, b)
+        along = (
+            (centre[0] - a[0]) * (b[0] - a[0]) + (centre[1] - a[1]) * (b[1] - a[1])
+        ) / length
+        if best is None or distance < best[0]:
+            best = (distance, start + min(max(along, 0.0), length))
+    return None if best is None else best[1]
+
+
 def _gap_overlap(chevron: DrawnChevron, gap: _Segment) -> float:
     """Length of *gap* lying along the chevron's ink; negative when clear."""
     (cx, cy), (ux, uy) = chevron.centre, chevron.heading

@@ -1,0 +1,33 @@
+%%metro title: Dead-end branches off another feeder's exit row
+%%metro file: b_out | TSV
+%%metro file: c_out | TSV
+%%metro line: main | Main | #0570b0
+%%metro grid: s1 | 0,0
+%%metro grid: s2 | 0,1
+
+graph LR
+    subgraph s1 [Section one]
+        %%metro exit: right | main
+        align[align]
+        summary[summary]
+        collapse[collapse]
+        b[branch B]
+        b_out[ ]
+        c[branch C]
+        c_out[ ]
+        align -->|main| summary
+        align -->|main| collapse
+        collapse -->|main| b
+        b -->|main| b_out
+        collapse -->|main| c
+        c -->|main| c_out
+    end
+
+    subgraph s2 [Section two]
+        %%metro entry: left | main
+        qc[qc]
+        sort[sort]
+    end
+
+    summary -->|main| qc
+    collapse -->|main| sort

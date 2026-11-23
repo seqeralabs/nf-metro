@@ -113,6 +113,17 @@ history.
   through rounded corners; a chevron that would land in a bridge gap is
   omitted. `--validate` and `validate-svg --geometry` report a chevron that
   leaves its stroke (#2177).
+- `--directional` draws one evenly spaced set of chevrons per line where several
+  of its routes overlap, and continues that set through an invisible port or
+  junction where the strokes meet at one point and heading. A stretch of at
+  least half a spacing that the set skips gets a chevron at its middle,
+  provided that stays half a spacing from the set's neighbours and clear of
+  other chevrons of the line.
+- When two stations feed the same exit and one of them also fans into
+  dead-end branches, a branch no longer sits on the other feeder's row.
+  That feeder's exit run was drawn straight through the branch's marker
+  (and any file icon after it); the branch now peels below the exit rows
+  (#2175).
 
 ## [2.1.0] — 2026-09-15
 
