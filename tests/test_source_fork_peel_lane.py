@@ -218,3 +218,111 @@ def test_no_line_crosses_another(
         if v.check == "route_segment_crossing"
     ]
     assert not flagged, flagged
+
+
+_P3_BODY = """\
+        a -->|main| s
+        s -->|main| d
+        d -->|main| j
+        j -->|main| m
+        s -->|b| g
+        g -->|b| j
+        f -->|c| m
+"""
+_LINES_BC = """\
+%%metro line: main | Main | #2db572
+%%metro line: b | B | #0570b0
+%%metro line: c | C | #f5c542
+"""
+_LINES_CB = """\
+%%metro line: main | Main | #2db572
+%%metro line: c | C | #f5c542
+%%metro line: b | B | #0570b0
+"""
+_LINE_E = "%%metro line: e | E | #e41a1c\n"
+
+
+def _one_section(lines: str, body: str, header: str = "") -> str:
+    return f"{header}{lines}graph LR\n    subgraph p [P]\n{body}    end\n"
+
+
+def _framed(lines: str) -> str:
+    """The fork's trunk fed flat from a neighbouring section."""
+    body = _P3_BODY.replace("        a -->|main| s\n", "")
+    return (
+        f"{lines}graph LR\n"
+        "    subgraph u [Up]\n        x -->|main| a\n    end\n"
+        f"    subgraph p [P]\n{body}    end\n"
+        "    a -->|main| s\n"
+    )
+
+
+SHAPES = {
+    "centered_peel_line_first": _one_section(
+        _LINES_BC, _P3_BODY, "%%metro line_spread: centered\n"
+    ),
+    "centered_sibling_line_first": _one_section(
+        _LINES_CB, _P3_BODY, "%%metro line_spread: centered\n"
+    ),
+    "compact": _one_section(_LINES_BC, _P3_BODY, "%%metro compact_offsets: true\n"),
+    "flat_frame_peel_line_first": _framed(_LINES_BC),
+    "flat_frame_sibling_line_first": _framed(_LINES_CB),
+    "two_contenders": _one_section(
+        _LINES_BC + _LINE_E, _P3_BODY + "        h -->|e| m\n"
+    ),
+    "station_along_run": _one_section(
+        _LINES_BC + _LINE_E,
+        _P3_BODY
+        + "".join(
+            f"        {a} -->|e| {b}\n"
+            for a, b in (("h", "y"), ("y", "z"), ("z", "w"), ("w", "v"), ("v", "m"))
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("orientation", list(all_orientations()), ids=lambda o: o.name)
+@pytest.mark.parametrize("shape", sorted(SHAPES))
+def test_contender_shapes_stay_clear(shape: str, orientation: Orientation) -> None:
+    """Other spreads, offset modes, frames and contender mixes hold the rule.
+
+    The contender ``f`` seats on the far side of the trunk from the peel ``g``,
+    its line runs through no station it does not serve, and no two lines cross.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        graph = prepare_graph(transform_source(SHAPES[shape], orientation))
+        svg = render_graph(graph, THEMES["nfcore"], RenderConfig())
+    downgrades = [
+        str(w.message) for w in caught if issubclass(w.category, PermissiveGuardWarning)
+    ]
+    assert not downgrades, downgrades
+
+    def side(sid: str) -> float:
+        fork, ahead, station = (graph.stations[n] for n in ("s", "d", sid))
+        flow = (ahead.x - fork.x, ahead.y - fork.y)
+        return flow[0] * (station.y - fork.y) - flow[1] * (station.x - fork.x)
+
+    assert side("f") * side("g") < 0, "'f' sits on the peel's side of the trunk"
+
+    offsets = compute_station_offsets(graph)
+    segments = drawn_segments(parse_route_polylines(svg))
+    for sid, station in graph.stations.items():
+        if station.is_port:
+            continue
+        bbox = _station_marker_bbox(graph, sid, offsets=offsets)
+        lines = set(graph.station_lines(sid))
+        hits = [
+            line_id
+            for line_id, p, q in segments
+            if bbox is not None
+            and line_id not in lines
+            and segment_intersects_bbox(p[0], p[1], q[0], q[1], bbox)
+        ]
+        assert not hits, f"lines {sorted(set(hits))} cross {sid!r}'s marker"
+    crossings = [
+        (a[0], b[0], point)
+        for a, b in combinations(segments, 2)
+        if a[0] != b[0] and (point := _segments_cross(a[1], a[2], b[1], b[2]))
+    ]
+    assert not crossings, f"lines cross: {crossings}"

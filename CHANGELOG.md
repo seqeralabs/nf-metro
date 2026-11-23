@@ -67,9 +67,9 @@ history.
 
 - A source whose line runs past a branch station no longer puts that line
   through the branch when the fork has stations before it on the trunk. The
-  source sits one row on the far side of the trunk from the branch, with no
-  empty row in its column, and its line takes the lane on that side where it
-  joins the trunk, so it crosses no other line
+  source sits on the far side of the trunk from the branch, in the nearest row
+  clear of the stations along its run, and its line takes the lane on that
+  side where it joins the trunk instead of crossing the trunk to reach it
   ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
 - A source that feeds a station adding a second line stays on that station's
   row when other sources share its column. The other sources sit one row to
