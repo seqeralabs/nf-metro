@@ -2471,7 +2471,7 @@ def _guard_no_line_crosses_file_icon(
     different edge of that line is still raking the artefact.
     """
     from nf_metro.render.svg import _icon_obstacles_by_station
-    from nf_metro.themes import layout_theme
+    from nf_metro.themes import THEMES
 
     if offsets is None:
         offsets = routing.compute_station_offsets(graph)
@@ -2481,7 +2481,7 @@ def _guard_no_line_crosses_file_icon(
         except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
             return
 
-    icon_boxes = _icon_obstacles_by_station(graph, layout_theme(graph), offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
     if not icon_boxes:
         return
     index = BBoxXIndex(list(icon_boxes.items()))
@@ -2685,7 +2685,7 @@ def iter_line_label_strikes(
         segment_strikes_label,
     )
     from nf_metro.render.svg import _compute_icon_obstacles
-    from nf_metro.themes import layout_theme
+    from nf_metro.themes import THEMES
 
     if offsets is None:
         offsets = routing.compute_station_offsets(graph)
@@ -2699,7 +2699,7 @@ def iter_line_label_strikes(
         placements = place_labels(
             graph,
             station_offsets=offsets,
-            icon_obstacles=_compute_icon_obstacles(graph, layout_theme(graph), offsets),
+            icon_obstacles=_compute_icon_obstacles(graph, THEMES["nfcore"], offsets),
             routes=routes,
             label_angle=graph.label_angle or 0.0,
         )
@@ -2841,7 +2841,7 @@ def _guard_no_wrapped_label_trunk_strike(
         place_labels,
     )
     from nf_metro.render.svg import _compute_icon_obstacles
-    from nf_metro.themes import layout_theme
+    from nf_metro.themes import THEMES
 
     if offsets is None:
         offsets = routing.compute_station_offsets(graph)
@@ -2855,7 +2855,7 @@ def _guard_no_wrapped_label_trunk_strike(
         placements = place_labels(
             graph,
             station_offsets=offsets,
-            icon_obstacles=_compute_icon_obstacles(graph, layout_theme(graph), offsets),
+            icon_obstacles=_compute_icon_obstacles(graph, THEMES["nfcore"], offsets),
             routes=routes,
             label_angle=graph.label_angle or 0.0,
         )

@@ -77,7 +77,9 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 
 #### Per-output render overrides
 
-A `%%metro output:` path may carry its own render settings after a `|`, so one `nf-metro render` pass writes several differently-configured files with no CLI flags at all:
+A `%%metro output:` path may carry its own render settings after a `|`, so one
+`nf-metro render` pass writes several differently-configured files with no CLI
+flags at all:
 
 ```metro
 %%metro output: nf-core-demo_metro_map.svg
@@ -88,9 +90,12 @@ A `%%metro output:` path may carry its own render settings after a `|`, so one `
 %%metro output: nf-core-demo_metro_map_light.png    | mode=light
 ```
 
-Right of the first `|` is a space- or comma-separated list of `key=value` tokens; `animate` may also be written bare, meaning `animate=true`.
-An override applies to every path on its own line and beats the matching global flag for that output alone.
-Only options that change how the map is _drawn_ are accepted — nothing here can change what the map _is_, so every declared output is the same diagram:
+Right of the first `|` is a space- or comma-separated list of `key=value`
+tokens; `animate` may also be written bare, meaning `animate=true`. An
+override applies to every path on its own line and beats the matching global
+flag for that output alone. Only options that change how the map is _drawn_
+are accepted — nothing here can change what the map _is_, so every declared
+output is the same diagram:
 
 | Key            | Equivalent flag  | Example                    |
 | -------------- | ---------------- | -------------------------- |
@@ -100,11 +105,16 @@ Only options that change how the map is _drawn_ are accepted — nothing here ca
 | `scale`        | `--scale`        | `scale=3`                  |
 | `raster_width` | `--raster-width` | `raster_width=800`         |
 
-An unknown key, or a value the matching flag would reject, is warned about and ignored; the output itself still renders under the run's global options.
+An unknown key, or a value the matching flag would reject, is warned about and
+ignored; the output itself still renders under the run's global options.
 
-`mode` is baked when the SVG is serialized rather than when the map is laid out, so the static SVG and both PNGs above share a single layout run — only the animated SVG needs one of its own.
-Four files, two layouts.
-Outputs with different `theme` values are laid out separately, because a theme can set layout options.
+`mode` is baked when the SVG is serialized rather than when the map is laid
+out, so the static SVG and both PNGs above share a single layout run — only the
+animated SVG needs one of its own. Four files, two layouts. Outputs with
+different `theme` values are laid out separately, because a theme can set
+layout options. `theme` takes the same stacks and theme files as `--theme`:
+quote a stack (`theme="seqera, london-tube"`), and theme files resolve against
+the `.mmd`.
 
 ### Theme and branding
 

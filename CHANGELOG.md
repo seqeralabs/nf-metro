@@ -17,6 +17,20 @@ history.
 
 ### Added
 
+- Theme stacks and theme files (#2195): `%%metro style:`, `--theme` and a
+  per-output `theme=` take a comma-separated list of built-in names and YAML
+  theme files, merged left to right over the `nfcore` base. A theme file can
+  set any field of the theme schema per light/dark palette, extend other
+  themes, fix one palette (`fixed_mode`), and set look-related layout options
+  in a `layout:` block, which sits below `%%metro` directives and CLI flags.
+  Every built-in theme is itself such a file. See the Theming page.
+- Themes can set station and section shapes: tab-and-ring station glyphs in
+  multiples of the line width, section outline width, dash and corners,
+  number badges, title case and tracking, and a legend frame.
+- `london-tube` built-in theme: a schematic transit look after the geometry of
+  TfL's Line Diagram Standard, with track-weight station tabs, terminus bars,
+  bridged interchange rings, bundled lines edge to edge and a 30% grey for
+  inactive lines.
 - `%%metro number: 0` hides a section's number badge and starts its title where
   the badge would have been. Automatic numbering skips such a section, so the
   remaining sections number from 1 as if it were absent (#2058).
@@ -28,12 +42,17 @@ history.
   `animate`, `mode=`, `theme=`, `scale=`, and `raster_width=`. One
   `nf-metro render` pass now writes a static SVG, an animated SVG, and a
   light/dark PNG pair with no CLI flags, which is what the nf-core pipeline
-  template needs from the GitHub Action and pre-commit hook. `mode` and
-  `theme` are baked at serialize time, so those four files still cost two
-  layout runs, not four.
+  template needs from the GitHub Action and pre-commit hook. `mode` is
+  baked at serialize time, so those four files cost two layout runs, not
+  four.
 
 ### Changed
 
+- The transparent embed theme is named `transparent`; `light` is an accepted
+  alias. `nf-metro info` reports `style: transparent` for a map written with
+  `style: light`.
+- The Python API raises `ThemeError` (an `NfMetroError` and `ValueError`) for
+  an unknown theme name instead of falling back to `nfcore`.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,
   embed dialog) and the copyable inline-HTML snippet now follow the map's mode
   instead of always being dark. `--mode` or `%%metro mode:` fixes both light

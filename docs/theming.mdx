@@ -50,7 +50,7 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 | `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                                             |
 
 Add `-light` or `-dark` to `nfcore`, `seqera` or `london-tube` to pin the baked palette, for example `nfcore-light`.
-The older names `dark` (for `nfcore`) and `light` (for `transparent`) are still accepted.
+`dark` is also accepted for `nfcore`, and `light` for `transparent`.
 
 <Metro src="examples/rnaseq_london_tube.mmd" />
 
@@ -101,6 +101,8 @@ layout:
 
 A theme with one palette sets `fixed_mode: light` or `fixed_mode: dark`.
 It then renders that palette whatever mode is asked for, and its SVG does not adapt to the viewer.
+In a stack, `fixed_mode` behaves like any field: a later theme that sets it, to a mode or to `none`, replaces an earlier one.
+The built-in `nfcore`, `seqera` and `london-tube` set `fixed_mode: none`, so `transparent, seqera` adapts to the viewer again.
 
 nf-metro checks the whole file before it renders anything.
 An unknown field, a value of the wrong type, a color it cannot read, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the problem.
@@ -128,7 +130,8 @@ Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/n
   It sets every field the schema leaves without a default, so it is the template for a complete theme.
 - `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
 - `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
-  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width: an interchange ring has a 2-wide inside and a 0.5-wide outline, and a chain of rings is bridged by a 0.5-wide strip.
+  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width: an interchange ring has a 2-wide inside and a 0.5-wide outline, a chain of rings is bridged by a 0.5-wide strip, and lines on separate tracks are joined by a dumbbell link.
+  Rings also mark cross-track `%%metro interchange:` stations and multi-rail stations in rail mode.
   The theme deliberately uses track-weight tabs rather than the standard's 0.66 square: a tab is 1 line width thick and reaches 1.5 past the line, so it reads as a continuation of the track, and the terminus bar matches it.
   Lines on a shared track are drawn edge to edge, as in the standard, so the theme sets no `track_gap`.
   Inactive lines are 30% grey.

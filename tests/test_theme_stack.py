@@ -525,3 +525,170 @@ def test_inactive_lines_take_the_theme_muted_grey():
         _MMD, theme="london-tube", mode="light", inactive_line_ids=frozenset({"alt"})
     )
     assert 'stroke="#b3b3b3"' in svg
+
+
+# ---------------------------------------------------------------------------
+# The default two-palette SVG switches every theme colour with the mode
+# ---------------------------------------------------------------------------
+
+
+def test_unset_ring_colours_fall_back_and_still_follow_the_mode(tmp_path):
+    path = _write(
+        tmp_path,
+        "rings.yaml",
+        "name: rings\ninterchange_glyph: ring\n",
+    )
+    svg = render_string(_MMD, theme=f"seqera, {path}")
+    stroke_light, stroke_dark = (
+        THEMES["seqera-light"].station_stroke,
+        THEMES["seqera-dark"].station_stroke,
+    )
+    assert "--nfm-map-ring-color" in svg
+    fill = "var(--nfm-map-ring-fill, light-dark(#f8f9fa, #1a1625))"
+    assert fill in svg
+    if stroke_light != stroke_dark:
+        assert f"light-dark({stroke_light}, {stroke_dark})" in svg
+
+
+def test_pill_themes_emit_no_ring_rules():
+    svg = render_string(_MMD, theme="nfcore")
+    assert "nf-metro-ring" not in svg
+
+
+def test_inactive_styling_follows_the_mode_in_the_default_svg():
+    svg = render_string(
+        _MMD_TWO_STATIONS, theme="london-tube", inactive_line_ids=frozenset({"alt"})
+    )
+    switch = "var(--nfm-map-muted-color, light-dark(#b3b3b3, #585a60))"
+    assert f".nf-metro-muted-stroke {{ stroke: {switch}; }}" in svg
+    assert f".nf-metro-muted-fill {{ fill: {switch}; }}" in svg
+    root = ET.fromstring(svg)
+    alt_paths = [
+        el for el in root.iter() if el.get("data-line-id") == "alt" and el.get("stroke")
+    ]
+    assert alt_paths
+    assert all("nf-metro-muted-stroke" in (el.get("class") or "") for el in alt_paths)
+    tab = _station_glyphs(root)["d"]
+    assert "nf-metro-muted-fill" in tab.get("class")
+
+
+def test_nfcore_inactive_render_adds_no_switching_classes():
+    svg = render_string(_MMD, theme="nfcore", inactive_line_ids=frozenset({"alt"}))
+    assert "nf-metro-muted-stroke" not in svg
+    assert "nf-metro-muted-fill" not in svg
+
+
+_MMD_TWO_STATIONS = textwrap.dedent("""\
+    %%metro line: main | Main | #ff0000
+    %%metro line: alt | Alt | #0000ff
+    graph LR
+        a -->|main,alt| b
+        b -->|main| c
+        b -->|alt| d
+        d -->|alt| e
+""")
+
+
+# ---------------------------------------------------------------------------
+# Section titles measured as drawn
+# ---------------------------------------------------------------------------
+
+
+def test_uppercase_tracked_titles_are_measured_wider():
+    from nf_metro.render.section_header import (
+        HeaderLettering,
+        estimate_section_label_width,
+        header_lettering_context,
+    )
+
+    plain = estimate_section_label_width("Variant calling", 13.0)
+    with header_lettering_context(HeaderLettering(True, 2.0)):
+        drawn = estimate_section_label_width("Variant calling", 13.0)
+    assert drawn >= plain + 2.0 * len("Variant calling")
+
+
+def test_neighbouring_london_tube_titles_do_not_overlap():
+    from nf_metro.render.svg import build_render_plan
+
+    path = _ROOT / "examples" / "legend_logo_placement.mmd"
+    graph = prepare_graph(
+        path.read_text(), theme="london-tube", source_dir=str(path.parent)
+    )
+    plan = build_render_plan(graph, resolve_theme(None, graph))
+    keepouts = sorted(
+        (p.keepout for p in plan.header_placements.values() if not p.label_rotation),
+        key=lambda k: (round(k[1]), k[0]),
+    )
+    for a, b in zip(keepouts, keepouts[1:]):
+        if abs(a[1] - b[1]) < 1.0:
+            assert a[2] <= b[0] + 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Rings, fixed modes, theme files and per-output themes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("lines", [2, 3, 4, 6, 8])
+def test_rings_are_centred_on_their_bundle(lines):
+    from nf_metro.render.svg import ring_centre_offsets
+
+    lo = 10.0
+    hi = lo + (lines - 1) * _LW
+    centres = ring_centre_offsets(lo, hi, _GEOM)
+    assert sum(centres) / len(centres) == pytest.approx((lo + hi) / 2)
+
+
+def test_separate_tracks_get_separate_ring_groups():
+    from nf_metro.render.svg import ring_centres
+
+    groups = ring_centres([0.0, _LW, 40.0, 40.0 + _LW], _GEOM)
+    assert len(groups) == 2
+    assert groups[0] == [pytest.approx(_LW / 2)]
+    assert groups[1] == [pytest.approx(40.0 + _LW / 2)]
+
+
+def test_extends_resolves_against_the_theme_files_own_folder(tmp_path, monkeypatch):
+    themes = tmp_path / "themes"
+    themes.mkdir()
+    _write(themes, "base.yaml", 'name: base\nlabel_color: "#123456"\n')
+    child = _write(themes, "child.yaml", "name: child\nextends: base.yaml\n")
+    monkeypatch.chdir(tmp_path)
+    assert resolve_stack(str(child)).light.label_color == "#123456"
+
+
+def test_a_later_entry_clears_a_fixed_mode():
+    assert resolve_stack("transparent").fixed_mode == "dark"
+    later = resolve_stack("transparent, seqera")
+    assert later.fixed_mode is None
+    assert later.for_mode("light").background_color == (
+        THEMES["seqera-light"].background_color
+    )
+
+
+def test_fixed_mode_none_in_a_file_clears_it(tmp_path):
+    path = _write(tmp_path, "free.yaml", "name: free\nfixed_mode: none\n")
+    assert resolve_stack(f"transparent, {path}").fixed_mode is None
+
+
+def test_per_output_theme_takes_a_quoted_stack():
+    from nf_metro.parser.directives import _parse_output_overrides
+
+    overrides = _parse_output_overrides('theme="seqera, london-tube" mode=light')
+    assert overrides == {"theme": "seqera, london-tube", "mode": "light"}
+
+
+def test_per_output_theme_rejects_an_unknown_name():
+    from nf_metro.parser.directives import _parse_output_overrides
+
+    with pytest.warns(UserWarning, match="bad value for theme"):
+        assert _parse_output_overrides("theme=nosuchtheme") == {}
+
+
+def test_playground_lists_the_paired_built_in_themes():
+    app = (_ROOT / "website" / "public" / "playground" / "app.js").read_text()
+    keys = re.search(r"const THEME_KEYS = \[(.*?)\];", app).group(1)
+    assert [k.strip().strip('"') for k in keys.split(",")] == list(PAIRED_THEMES)
+    page = (_ROOT / "website" / "src" / "pages" / "playground.astro").read_text()
+    picker = re.search(r'<select id="opt-theme">(.*?)</select>', page, re.S).group(1)
+    assert re.findall(r'<option value="([^"]+)"', picker) == list(PAIRED_THEMES)

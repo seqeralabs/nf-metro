@@ -216,11 +216,10 @@ def resolve_graph_stack(theme: str | None, graph: MetroGraph) -> ResolvedTheme:
 def bind_graph_stack(
     graph: MetroGraph, theme: str | None, source_dir: str
 ) -> ResolvedTheme:
-    """Record on *graph* the stack its layout and render use, and resolve it.
+    """Record on *graph* the stack its render uses, and resolve it.
 
-    Layout passes that need a theme (icon obstacles, label probes, the final
-    render-plan check) read it back through :func:`layout_theme`, so they see
-    the same theme the render draws with.
+    The render then reads it back through :func:`resolve_theme` with no
+    explicit theme, so a graph is resolved once per preparation.
     """
     if theme is not None:
         graph.theme_stack, graph.theme_dir = theme, ""
@@ -229,9 +228,15 @@ def bind_graph_stack(
     return resolve_stack(graph.theme_stack, graph.theme_dir)
 
 
-def layout_theme(graph: MetroGraph) -> Theme:
-    """The theme *graph* is laid out for, in the mode it will be baked in."""
-    return resolve_graph_stack(None, graph).for_mode(resolve_mode(None, graph))
+def style_theme(graph: MetroGraph) -> Theme:
+    """The theme of *graph*'s own ``%%metro style:``, in its baked mode.
+
+    Layout passes that borrow render geometry measure with this, whatever
+    theme the caller renders with.
+    """
+    return resolve_stack(graph.style, graph.source_dir).for_mode(
+        resolve_mode(None, graph)
+    )
 
 
 def resolve_mode(mode: str | None, graph: MetroGraph) -> str:
@@ -276,7 +281,7 @@ __all__ = [
     "anchor_stack",
     "bind_graph_stack",
     "check_stack",
-    "layout_theme",
+    "style_theme",
     "resolve_graph_stack",
     "resolve_mode",
     "resolve_stack",
