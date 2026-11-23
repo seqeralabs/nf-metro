@@ -131,7 +131,7 @@ With `ring`, `ring_max_lines` is the most lines on one track that a single ring 
 
 So the three styles are: one standard-size ring (raise `ring_max_lines`), a bridged chain (`chain`), or one larger ring (`grow`).
 Lines on separate tracks, as at a cross-track `%%metro interchange:` or a rail-mode station, get separate rings joined by a dumbbell link.
-`london-tube` uses a single ring for two lines and a chain from three up.
+`london-tube` uses a single ring for two lines, a chain from three up, and a `bar` at every line end.
 
 A line end shared by several lines follows `terminus_glyph` instead:
 
@@ -171,6 +171,7 @@ station_tick_width: 1 # track-weight tabs
 station_tick_length: 1.5
 interchange_glyph: ring
 ring_max_lines: 2 # a chain from three lines up
+terminus_glyph: bar
 line_width: 4
 label_font_weight: normal
 section_stroke_dasharray: "6 4"

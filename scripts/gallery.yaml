@@ -23,7 +23,7 @@ gallery:
     category: Feature Showcase
     description:
       "The rnaseq map under the built-in `london-tube` theme (`%%metro style: london-tube`):
-      square tabs for stations on one line, a bar at each line end, rings at interchanges,
+      track-weight tabs for stations on one line, a buffer-stop bar at every line end, rings at interchanges,
       bundled lines edge to edge, unboxed sections and a humanist sans, after the geometry of
       TfL's Line Diagram Standard. Themes stack left to right (`%%metro style: nfcore, london-tube`) and
       can be [user-defined YAML files](/nf-metro/theming/)."

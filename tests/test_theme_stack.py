@@ -347,8 +347,14 @@ def test_a_three_line_bundle_gets_a_chain_under_london_tube(tube_svg):
     assert len(_ring_outlines(samtools)) == 2
 
 
-def test_a_six_line_line_end_is_a_nub_by_default(tube_svg):
+def test_london_tube_ends_a_six_line_bundle_with_a_bar(tube_svg):
     fastq = _station_glyphs(tube_svg)["fastq_in"]
+    assert "nf-metro-terminus-bar" in fastq.get("class")
+
+
+def test_a_line_end_is_a_nub_by_default(tmp_path):
+    root = _terminus_svg(tmp_path, "nub")
+    fastq = _station_glyphs(root)["fastq_in"]
     assert fastq.get("rx") is None
     assert fastq.get("fill") == "#ffffff"
     assert fastq.get("stroke") == "#000000"

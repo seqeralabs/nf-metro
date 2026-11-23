@@ -27,6 +27,10 @@ history.
 - Themes can set station and section shapes: tab-and-ring station glyphs in
   multiples of the line width, section outline width, dash and corners,
   number badges, title case and tracking, and a legend frame.
+- `terminus_glyph` theme setting for a line end shared by several lines:
+  `nub` (the default square box), `bar` (a track-weight buffer-stop bar
+  across the bundle, in a colour that follows the viewer's light or dark
+  mode) or `ring`.
 - `london-tube` built-in theme: a schematic transit look after the geometry of
   TfL's Line Diagram Standard, with track-weight station tabs, terminus bars,
   bridged interchange rings, bundled lines edge to edge and a 30% grey for
@@ -48,6 +52,10 @@ history.
 
 ### Changed
 
+- Parallel lines turning together through any angle, not only 90 degrees,
+  now turn about one shared centre, so a bundle on a diagonal turn keeps its
+  lines touching instead of opening a thin gap between them. Maps with
+  diagonal bundle turns redraw those curves slightly.
 - The transparent embed theme is named `transparent`; `light` is an accepted
   alias. `nf-metro info` reports `style: transparent` for a map written with
   `style: light`.

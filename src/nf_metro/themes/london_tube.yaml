@@ -14,6 +14,8 @@ station_tick_length: 1.5
 interchange_glyph: ring
 # A ring covers two lines on one track; three or more get a bridged chain.
 ring_max_lines: 2
+# A line end shared by several lines gets one buffer-stop bar across them.
+terminus_glyph: bar
 station_fill: "#ffffff"
 station_stroke: "#000000"
 station_stroke_width: 2.5
