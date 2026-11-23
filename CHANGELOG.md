@@ -109,6 +109,12 @@ history.
   through rounded corners; a chevron that would land in a bridge gap is
   omitted. `--validate` and `validate-svg --geometry` report a chevron that
   leaves its stroke (#2177).
+- `--directional` draws one evenly spaced set of chevrons per line where several
+  of its routes overlap, and continues that set through an invisible port or
+  junction where the strokes meet at one point and heading. A stretch of at
+  least half a spacing that the set skips gets a chevron at its middle,
+  provided that stays half a spacing from the set's neighbours and clear of
+  other chevrons of the line.
 
 ## [2.1.0] — 2026-09-15
 
