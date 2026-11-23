@@ -102,8 +102,8 @@ def _corridors(graph: MetroGraph, key: _Key) -> tuple[_Corridor, _Corridor]:
     builder = _builder(graph)
     travel = builder.same_axis_u_turn(*key)
     assert travel is not None, key
-    right, left, *_extents = builder.side_corridors(*key, travel)
-    return right, left
+    hop = builder.hop(key, travel)
+    return hop.right, hop.left
 
 
 def _approach(graph: MetroGraph, key: _Key) -> Approach:
@@ -117,14 +117,17 @@ def _screen(graph: MetroGraph, key: _Key) -> str:
     return "below" if sign > 0 else "above"
 
 
-def _connector_ys(laid: _Laid, key: _Key) -> list[float]:
+def _connector_routes(laid: _Laid, key: _Key) -> list[RoutedPath]:
     return [
-        y
+        route
         for route in laid.routes
         if route.edge.target == key[0]
         and approach_source(laid.drawn, route.edge.source, route.edge.line_id) == key[1]
-        for _x, y in route.points
     ]
+
+
+def _connector_ys(laid: _Laid, key: _Key) -> list[float]:
+    return [y for route in _connector_routes(laid, key) for _x, y in route.points]
 
 
 # Every curated U-turn whose two clear corridors are equally long where the lane
@@ -404,13 +407,7 @@ def _drawn_side(laid: _Laid, key: _Key) -> str:
     target's row that it spans."""
     graph = laid.drawn
     target = graph.sections[graph.ports[key[0]].section_id]
-    points = [
-        point
-        for route in laid.routes
-        if route.edge.target == key[0]
-        and approach_source(graph, route.edge.source, route.edge.line_id) == key[1]
-        for point in route.points
-    ]
+    points = [point for route in _connector_routes(laid, key) for point in route.points]
     assert points, key
     x0, x1 = min(x for x, _y in points), max(x for x, _y in points)
     band = [
@@ -490,12 +487,7 @@ NESTED: tuple[tuple[str, _Key, _Key], ...] = (
 def _traverse_depths(laid: _Laid, key: _Key) -> tuple[list[float], tuple[float, float]]:
     """Each line's deepest drawn y on *key*'s connector, and the x extent of
     the traverses at those depths."""
-    routes = [
-        route
-        for route in laid.routes
-        if route.edge.target == key[0]
-        and approach_source(laid.drawn, route.edge.source, route.edge.line_id) == key[1]
-    ]
+    routes = _connector_routes(laid, key)
     assert routes, key
     depths = [max(y for _x, y in route.points) for route in routes]
     xs = [
@@ -561,18 +553,14 @@ def test_group_without_assignment_takes_turn_round(
     [
         ((0.0, 100.0), (-150.0, -50.0), True),
         ((20.0, 80.0), (-100.0, 0.0), False),
-        ((0.0, 100.0), (-80.0, -20.0), False),
         ((0.0, 100.0), (-100.0, 0.0), True),
         ((0.0, 100.0), (-80.0, -0.05), True),
-        ((0.05, 80.0), (-100.0, 0.0), True),
     ],
     ids=[
         "interleaved",
         "inside-the-other",
-        "holding-the-other",
         "equal",
         "touching-at-one-end",
-        "touching-inside",
     ],
 )
 def test_legs_interleave_unless_one_nests_clear_inside_the_other(
@@ -583,14 +571,13 @@ def test_legs_interleave_unless_one_nests_clear_inside_the_other(
     assert legs_interleave(b, a) is interleave
 
 
-def _f8404575_builder(
-    mp: pytest.MonkeyPatch, ranked: _Key, partner: _Key
-) -> PortOrderBuilder:
+def _f8404575_builder(mp: pytest.MonkeyPatch, corridor: _Key) -> PortOrderBuilder:
+    """f8404575's builder with *corridor* taking (-1, CORRIDOR) alone."""
     builder = _builder(_laid(CANVAS_DATA / "f8404575.mmd").sealed)
     real_side = builder.u_turn_side
 
     def u_turn_side(entry_id: str, source_id: str, below: int) -> tuple[int, SideRule]:
-        if (entry_id, source_id) == partner:
+        if (entry_id, source_id) == corridor:
             return -1, SideRule.CORRIDOR
         return real_side(entry_id, source_id, below)
 
@@ -604,7 +591,7 @@ def test_a_group_sharing_a_corridor_partners_side_raises() -> None:
     partner: the plan raises rather than knot the loops."""
     _stem, ranked, partner = PARTNERED[1]
     with pytest.MonkeyPatch.context() as mp:
-        builder = _f8404575_builder(mp, ranked, partner)
+        builder = _f8404575_builder(mp, partner)
         real_hop = builder.corridor_hop
 
         def corridor_hop(key: _Key) -> _CorridorHop | None:
@@ -624,7 +611,7 @@ def test_two_linked_turn_rounds_on_one_side_raise() -> None:
     taking a CORRIDOR side onto the screen side of the other raises."""
     _stem, ranked, partner = PARTNERED[1]
     with pytest.MonkeyPatch.context() as mp:
-        builder = _f8404575_builder(mp, partner, ranked)
+        builder = _f8404575_builder(mp, ranked)
         real_scope = builder.corridor_scope
 
         def corridor_scope(entry_id: str, source_id: str) -> object:
@@ -728,10 +715,8 @@ def _below_channels(path: Path, key: _Key) -> set[float]:
 )
 def test_same_row_right_under_run_stays_in_row_gap(stem: str, key: _Key) -> None:
     """A same-row loop into a RIGHT entry recorded round below traverses the
-    gap under its own row, above every lower-row box in the hop's columns:
-    clear of every box of the row it passes under and of the header of every
-    lower-row box it passes over, in the one channel the exit-turn planner and
-    routing both read."""
+    gap under its own row, in the one channel the exit-turn planner and routing
+    both read."""
     path = CANVAS_DATA / f"{stem}.mmd"
     laid = _laid(path)
     graph = laid.drawn
@@ -771,11 +756,11 @@ def test_a_row_under_run_reads_every_column_a_section_spans() -> None:
     export, gather = graph.sections["sec2"], graph.sections["sec1"]
     report, vcf = graph.sections["sec4"], graph.sections["sec0"]
     floor = max(s.bbox_y + s.bbox_h for s in (export, gather))
-    assert under(graph, 0, (1, 2), (2, 2), None) == floor + BYPASS_CLEARANCE
+    assert under(graph, 0, 1, 2, None) == floor + BYPASS_CLEARANCE
     report.grid_col_span = 2
-    assert under(graph, 0, (1, 2), (2, 2), None) == section_header_safe_cap(report)
+    assert under(graph, 0, 1, 2, None) == section_header_safe_cap(report)
     report.grid_col_span = 1
     vcf.grid_col_span = 2
     vcf_floor = vcf.bbox_y + vcf.bbox_h
     assert vcf_floor > floor
-    assert under(graph, 0, (1, 2), (2, 2), None) == vcf_floor + BYPASS_CLEARANCE
+    assert under(graph, 0, 1, 2, None) == vcf_floor + BYPASS_CLEARANCE

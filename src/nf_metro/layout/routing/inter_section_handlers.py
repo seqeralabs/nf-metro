@@ -42,10 +42,12 @@ from nf_metro.layout.geometry import (
     AxisFrame,
     axis_split,
     cotravelling_lane_clearance,
+    grid_spans_overlap,
     lane_delta,
     lanes_run_along_x,
     lanes_run_along_y,
     section_bbox_span,
+    section_column_span,
 )
 from nf_metro.layout.lane_plan import (
     approach_source,
@@ -1360,64 +1362,48 @@ def _right_entry_cross_row_channel_y(f: _InterFacts) -> float | None:
 def _row_under_run_y(
     graph: MetroGraph,
     row: int,
-    passed: tuple[int, int],
-    capped: tuple[int, int],
+    src_col: int,
+    tgt_col: int,
     reserved: ReservedBands | None,
 ) -> float:
-    """The channel of a run along the gap under grid row *row*:
-    ``BYPASS_CLEARANCE`` below every section spanning the row whose columns
-    meet the *passed* range, capped clear of the lowest header badge of the
-    sections in lower rows whose columns meet the *capped* range, or halfway
-    to that badge where the gap cannot hold both clearances, then held in the
-    band reserved for the gap."""
+    """The channel of a run under grid row *row* from *src_col* to *tgt_col*:
+    ``BYPASS_CLEARANCE`` below the row's sections in those columns, clear of the
+    lowest header badge in lower rows past *src_col* (halfway to it where the gap
+    cannot hold both), then held in the reserved gap band."""
     placed = [s for s in graph.sections.values() if s.bbox_w > 0]
-
-    def meets(section: Section, cols: tuple[int, int]) -> bool:
-        last = section.grid_col + section.grid_col_span - 1
-        return section.grid_col <= cols[1] and cols[0] <= last
-
     row_bottom = max(
         s.bbox_y + s.bbox_h
         for s in placed
-        if s.grid_row <= row < s.grid_row + s.grid_row_span and meets(s, passed)
+        if s.grid_row <= row < s.grid_row + s.grid_row_span
+        and grid_spans_overlap(section_column_span(s), (src_col, tgt_col))
     )
     y = row_bottom + BYPASS_CLEARANCE
     lowest = min(
-        (s for s in placed if s.grid_row > row and meets(s, capped)),
+        (
+            s
+            for s in placed
+            if s.grid_row > row
+            and grid_spans_overlap(section_column_span(s), (src_col + 1, tgt_col))
+        ),
         key=section_header_top,
         default=None,
     )
-    if lowest is not None and y > section_header_safe_cap(lowest):
-        cap = section_header_safe_cap(lowest)
+    if lowest is not None and y > (cap := section_header_safe_cap(lowest)):
         y = cap if cap >= row_bottom else (row_bottom + section_header_top(lowest)) / 2
     return held_in_reserved_gap_band(graph, y, reserved)
 
 
 def _right_entry_below_channel_y(f: _InterFacts) -> float:
-    """The around-below channel of a RIGHT-entry wrap.
-
-    A same-row wrap from the left runs in the gap under its own row
-    (:func:`_row_under_run_y`).  The lead turns down beyond the exit's lateral
-    within the source's column, so the channel clears the source box with the
-    rest of the row; the traverse passes under only the columns after the
-    source, so only their lower-row badges cap it.  Any other wrap runs below
-    every section in the column range, the target row included."""
-    if (
-        f.src_row is not None
-        and f.src_row == f.tgt_row
-        and f.src_col is not None
-        and f.tgt_col is not None
-        and f.src_col < f.tgt_col
-    ):
-        return _row_under_run_y(
-            f.graph,
-            f.src_row,
-            (f.src_col, f.tgt_col),
-            (f.src_col + 1, f.tgt_col),
-            f.ctx.reserved_bands.rows,
-        )
+    """The around-below channel of a RIGHT-entry wrap.  A same-row wrap from the
+    left runs under its own row (:func:`_row_under_run_y`): its lead turns down
+    within the source's column, so it clears the source box but passes over only
+    the columns after it.  Any other wrap runs below every section in the range."""
     src_col = f.src_col if f.src_col is not None else 0
     tgt_col = f.tgt_col if f.tgt_col is not None else src_col
+    if f.src_row is not None and f.src_row == f.tgt_row and src_col < tgt_col:
+        return _row_under_run_y(
+            f.graph, f.src_row, src_col, tgt_col, f.ctx.reserved_bands.rows
+        )
     return bypass_bottom_y(
         f.graph,
         src_col,

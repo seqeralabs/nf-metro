@@ -6240,10 +6240,7 @@ def _u_turn_pass_through(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> str | None:
-    """The first pass-through (:func:`routes_through_unrelated_sections`) on a
-    connector the approach record sends round as a U-turn, described; ``None``
-    when there is none.  The record chose that loop's side as the one whose legs
-    clear every section, so drawing it through one is no drawing of the record."""
+    """The first pass-through on a connector recorded as a U-turn, or ``None``."""
     plan = recorded_lane_plan(graph)
     if plan is None:
         return None

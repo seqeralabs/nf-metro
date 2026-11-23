@@ -33,6 +33,7 @@ from itertools import combinations
 from pathlib import Path
 
 import pytest
+from test_u_turn_corridors import PARTNERED
 
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
@@ -2017,17 +2018,11 @@ def test_linked_bypass_u_turns_take_opposite_screen_sides(path: Path) -> None:
     "turn", [None, *TURNS], ids=lambda t: "r0" if t is None else t.name
 )
 def test_a_corridor_linked_to_a_turn_round_follows_it(turn: _Turn | None) -> None:
-    """A bypass U-turn linked to a direct turn-round partner takes the
-    screen side opposite it, so its CORRIDOR side follows the partner's
-    turn-round convention through every turn: a reflection keeps both sides
-    rather than flipping the CORRIDOR one.
-
-    In f8404063 the bypass U-turn's left corridor is the shorter, but the
-    partner's turn-round loop takes that screen side, so the record holds the
-    right one; every turn of the placement plans the same pair."""
-    ranked = ("sec3__entry_left_3", "sec2__exit_left_1")
-    partner = ("sec2__entry_right_2", "sec0__exit_right_0")
-    path = ROOT / "tests" / "data" / "canvas_placement" / "f8404063.mmd"
+    """A bypass U-turn linked to a turn-round partner takes the screen side
+    opposite it in every frame, so a reflection keeps its CORRIDOR side rather
+    than flipping it; f8404063's shorter corridor is the partner's side."""
+    stem, ranked, partner = PARTNERED[0]
+    path = ROOT / "tests" / "data" / "canvas_placement" / f"{stem}.mmd"
     graph = _laid_out(path).graph
     assert graph is not None
     if turn is not None:

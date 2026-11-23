@@ -110,6 +110,7 @@ ALLOWED_IMPORTS = {
             ("collections.abc", "Mapping"),
             ("collections.abc", "Sequence"),
             ("dataclasses", "dataclass"),
+            ("dataclasses", "replace"),
             ("enum", "Enum"),
             ("functools", "partial"),
             ("nf_metro.layout.constants", "SAME_Y_TOLERANCE"),
