@@ -1,6 +1,7 @@
 # The reference look and the base every theme stack starts from, so it sets
 # every field that has no default in the Theme schema.
 name: nfcore
+fixed_mode: none # both palettes, even over a single-palette theme
 
 station_fill: "#ffffff"
 station_stroke: "#333333"

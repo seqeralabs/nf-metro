@@ -40,9 +40,9 @@ def _icon_label_obstacles(
 ) -> list[tuple[float, float, float, float]]:
     """Terminus file-icon boxes as the renderer feeds them to label placement."""
     from nf_metro.render.svg import _compute_icon_obstacles
-    from nf_metro.themes import resolve_theme
+    from nf_metro.themes import layout_theme
 
-    return _compute_icon_obstacles(graph, resolve_theme(None, graph), offsets)
+    return _compute_icon_obstacles(graph, layout_theme(graph), offsets)
 
 
 def _probe_label_placements(

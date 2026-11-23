@@ -248,7 +248,19 @@ from nf_metro.render.section_header import (
     check_section_headers_hold_the_reserved_band,
     resolve_all_section_headers,
 )
-from nf_metro.render.style import Theme, chrome_bindings, color_pair, is_adaptive
+from nf_metro.render.style import (
+    GLYPH_RING,
+    MUTED_FILL_CLASS,
+    MUTED_STROKE_CLASS,
+    Theme,
+    adaptive_value,
+    baked_binding,
+    binding_pair,
+    chrome_bindings,
+    color_pair,
+    is_adaptive,
+    muted_adapts,
+)
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
     MetricsFace,
@@ -3300,23 +3312,11 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     theme), so the map follows the viewer's ``color-scheme`` with no host
     intervention.  The rules come from the chrome bindings declared on the
     :class:`~nf_metro.render.style.Theme` schema.  Line/route colors carry
-    semantic meaning and remain as baked presentation attributes.
+    semantic meaning and are baked presentation attributes.
 
     ``any_inactive`` adds the muted-state rules; a map with no inactive line
     has nothing for them to match, so it ships without them.
     """
-
-    def _adapt(light_val: str, dark_val: str) -> str:
-        if light_val == dark_val:
-            return light_val
-        return f"light-dark({light_val}, {dark_val})"
-
-    def _pair(name: str, fallback: str = "") -> tuple[str, str]:
-        light, dark = color_pair(theme, name)
-        if fallback:
-            fb_light, fb_dark = color_pair(theme, fallback)
-            light, dark = light or fb_light, dark or fb_dark
-        return light, dark
 
     def _rule(cls: str, props: str, *also: str) -> str:
         selector = "".join(f".{_ns(c)}" for c in (cls, *also))
@@ -3324,13 +3324,13 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
 
     rules: dict[str, list[str]] = {}
     for binding in chrome_bindings():
-        baked = getattr(theme, binding.field) or (
-            getattr(theme, binding.fallback) if binding.fallback else ""
-        )
+        if binding.emit_if and getattr(theme, binding.emit_if[0]) != binding.emit_if[1]:
+            continue
+        baked = baked_binding(theme, binding)
         if not baked or baked == "none":
             continue
         value = (
-            f"var({binding.css_var}, {_adapt(*_pair(binding.field, binding.fallback))})"
+            f"var({binding.css_var}, {adaptive_value(*binding_pair(theme, binding))})"
         )
         for cls, prop in binding.targets:
             rules.setdefault(cls, []).append(f"{prop}: {value}")
@@ -3343,7 +3343,7 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     halo_light = _label_halo_color_for(theme.label_halo_width, halo_light_set, bg_light)
     halo_dark = _label_halo_color_for(theme.label_halo_width, halo_dark_set, bg_dark)
     if halo_light is not None and halo_dark is not None:
-        halo_val = f"var(--nfm-map-bg, {_adapt(halo_light, halo_dark)})"
+        halo_val = f"var(--nfm-map-bg, {adaptive_value(halo_light, halo_dark)})"
         lines.append(
             _rule("nf-metro-label-halo", f"fill: {halo_val}; stroke: {halo_val}")
         )
@@ -3352,11 +3352,21 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     # Each muted state therefore needs a selector that outranks its own plain
     # rule, and its own property so a host can recolor the two states apart.
     if any_inactive:
-        muted_val = f"var(--nfm-map-muted-color, {_adapt(*_pair('muted_line_color'))})"
+        muted_val = (
+            "var(--nfm-map-muted-color, "
+            f"{adaptive_value(*color_pair(theme, 'muted_line_color'))})"
+        )
         lines += [
             _rule("nf-metro-station-label", f"fill: {muted_val}", _MUTED_CLASS),
             _rule("nf-metro-marker-stroke", f"stroke: {muted_val}", _MUTED_CLASS),
         ]
+        if theme.interchange_glyph == GLYPH_RING:
+            lines.append(_rule("nf-metro-ring", f"stroke: {muted_val}", _MUTED_CLASS))
+        if muted_adapts(theme):
+            lines += [
+                _rule(MUTED_STROKE_CLASS, f"stroke: {muted_val}"),
+                _rule(MUTED_FILL_CLASS, f"fill: {muted_val}"),
+            ]
     d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
 
 

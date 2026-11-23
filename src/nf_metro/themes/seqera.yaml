@@ -1,6 +1,7 @@
 # Seqera brand: Inter type and the Platform palette, stepping down from the
 # brand navy (#160F26) into deep purple-greys for dark mode.
 name: seqera
+fixed_mode: none # both palettes, even over a single-palette theme
 
 station_fill: "#ffffff"
 station_stroke: "#2D273C"

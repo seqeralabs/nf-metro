@@ -13,16 +13,29 @@ in ``docs/theming.mdx`` is checked against it.
 from __future__ import annotations
 
 __all__ = [
+    "GLYPH_PILL",
+    "GLYPH_RING",
+    "GLYPH_TICK",
     "ChromeBinding",
     "Theme",
+    "adaptive_value",
     "authored_fields",
     "chrome_bindings",
     "color_pair",
+    "MUTED_FILL_CLASS",
+    "MUTED_STROKE_CLASS",
+    "baked_binding",
+    "binding_pair",
     "is_adaptive",
+    "muted_adapts",
+    "muted_paint_class",
+    "opaque_or_white",
 ]
 
 import dataclasses
 from dataclasses import dataclass
+from functools import lru_cache
+from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from nf_metro.layout.constants import (
@@ -36,8 +49,13 @@ from nf_metro.render.constants import (
     SECTION_BOX_RADIUS,
     SECTION_STROKE_WIDTH,
 )
+from nf_metro.render.ns import ns as _ns
 
 _MISSING: Any = dataclasses.MISSING
+
+GLYPH_PILL = "pill"
+GLYPH_TICK = "tick"
+GLYPH_RING = "ring"
 
 
 def _field(
@@ -50,6 +68,8 @@ def _field(
     chrome: tuple[tuple[str, str], ...] = (),
     css_var: str = "",
     fallback: str = "",
+    opaque: bool = False,
+    emit_if: tuple[str, str] | None = None,
 ) -> Any:  # noqa: ANN401
     return dataclasses.field(
         default=default,
@@ -61,6 +81,8 @@ def _field(
             "chrome": chrome,
             "css_var": css_var,
             "fallback": fallback,
+            "opaque": opaque,
+            "emit_if": emit_if,
         },
     )
 
@@ -69,7 +91,7 @@ def _derived(default: Any) -> Any:  # noqa: ANN401
     return dataclasses.field(default=default, metadata={"derived": True})
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, frozen=True)
 class Theme:
     """Visual theme for a metro map, resolved for one display mode.
 
@@ -78,8 +100,7 @@ class Theme:
     rules are emitted, which keeps the generated stylesheet stable.
     """
 
-    # Identity, set by the resolver rather than authored.
-    name: str = _derived("")
+    # The palette this theme is resolved for, set by the resolver.
     mode: str = _derived("dark")
     # ``(field, light value, dark value)`` for every colour field when the
     # theme has both palettes; empty for a single-palette theme.
@@ -244,6 +265,8 @@ class Theme:
         color=True,
         chrome=(("nf-metro-ring", "stroke"),),
         css_var="--nfm-map-ring-color",
+        fallback="station_stroke",
+        emit_if=("interchange_glyph", GLYPH_RING),
     )
     ring_fill: str = _field(
         "",
@@ -253,6 +276,9 @@ class Theme:
         color=True,
         chrome=(("nf-metro-ring", "fill"), ("nf-metro-ring-bridge", "fill")),
         css_var="--nfm-map-ring-fill",
+        fallback="background_color",
+        opaque=True,
+        emit_if=("interchange_glyph", GLYPH_RING),
     )
     station_glyph: str = _field(
         "pill",
@@ -260,7 +286,7 @@ class Theme:
         "`tick` draws a square tab in the line's colour on the label's side, "
         "and a bar across the line's end (a buffer stop) at a terminus.",
         group="Stations",
-        choices=("pill", "tick"),
+        choices=(GLYPH_PILL, GLYPH_TICK),
     )
     interchange_glyph: str = _field(
         "pill",
@@ -269,7 +295,7 @@ class Theme:
         "of touching rings bridged by a strip when the lines are too wide for "
         "one.",
         group="Stations",
-        choices=("pill", "ring"),
+        choices=(GLYPH_PILL, GLYPH_RING),
     )
     station_fill: str = _field(
         doc="Station capsule fill.", group="Stations", color=True
@@ -318,7 +344,7 @@ class Theme:
     muted_line_color: str = _field(
         FALLBACK_LINE_COLOR,
         doc="Grey for inactive lines and the stations, labels and icons only "
-        "they touch. One value for both modes.",
+        "they touch. A two-palette SVG switches it with the viewer's mode.",
         group="Lines",
         color=True,
     )
@@ -398,32 +424,60 @@ class Theme:
 
 
 class ChromeBinding(NamedTuple):
-    """One chrome colour: the field, its custom property, and what it paints."""
+    """One chrome colour: the field, its custom property, and what it paints.
+
+    ``fallback`` names the field an empty value takes; ``opaque`` turns a
+    transparent value into white; ``emit_if`` is the ``(field, value)`` a
+    theme must have for the colour to be drawn at all.
+    """
 
     field: str
     css_var: str
     targets: tuple[tuple[str, str], ...]
     fallback: str
+    opaque: bool
+    emit_if: tuple[str, str] | None
 
 
-def authored_fields() -> dict[str, dataclasses.Field[Any]]:
+@lru_cache(maxsize=1)
+def authored_fields() -> MappingProxyType[str, dataclasses.Field[Any]]:
     """The fields a theme file may set, in declaration order."""
-    return {
-        f.name: f
-        for f in dataclasses.fields(Theme)
-        if not f.metadata.get("derived", False)
-    }
+    return MappingProxyType(
+        {
+            f.name: f
+            for f in dataclasses.fields(Theme)
+            if not f.metadata.get("derived", False)
+        }
+    )
 
 
-def chrome_bindings() -> list[ChromeBinding]:
+@lru_cache(maxsize=1)
+def chrome_bindings() -> tuple[ChromeBinding, ...]:
     """Every chrome colour, in the order its CSS rules are emitted."""
-    return [
+    return tuple(
         ChromeBinding(
-            f.name, f.metadata["css_var"], f.metadata["chrome"], f.metadata["fallback"]
+            f.name,
+            f.metadata["css_var"],
+            f.metadata["chrome"],
+            f.metadata["fallback"],
+            f.metadata["opaque"],
+            f.metadata["emit_if"],
         )
         for f in dataclasses.fields(Theme)
         if f.metadata.get("chrome")
-    ]
+    )
+
+
+def opaque_or_white(color: str) -> str:
+    """*color*, or white when it is empty or ``none``."""
+    return color if color and color != "none" else "#ffffff"
+
+
+def adaptive_value(light: str, dark: str) -> str:
+    """One CSS value for a light/dark pair: ``light-dark()`` unless they match."""
+    if light == dark:
+        return light
+    return f"light-dark({light}, {dark})"
 
 
 def is_adaptive(theme: object) -> bool:
@@ -439,3 +493,44 @@ def color_pair(theme: object, name: str) -> tuple[str, str]:
             return light, dark
     value: str = getattr(theme, name)
     return value, value
+
+
+def binding_pair(theme: object, binding: ChromeBinding) -> tuple[str, str]:
+    """A chrome colour's ``(light, dark)`` values after its fallback rules."""
+    light, dark = color_pair(theme, binding.field)
+    if binding.fallback:
+        fb_light, fb_dark = color_pair(theme, binding.fallback)
+        light, dark = light or fb_light, dark or fb_dark
+    if binding.opaque:
+        light, dark = opaque_or_white(light), opaque_or_white(dark)
+    return light, dark
+
+
+def baked_binding(theme: object, binding: ChromeBinding) -> str:
+    """A chrome colour's value for *theme*'s own mode after its fallback rules."""
+    value: str = getattr(theme, binding.field)
+    if not value and binding.fallback:
+        value = getattr(theme, binding.fallback)
+    return opaque_or_white(value) if binding.opaque else value
+
+
+MUTED_STROKE_CLASS = "nf-metro-muted-stroke"
+MUTED_FILL_CLASS = "nf-metro-muted-fill"
+
+
+def muted_adapts(theme: object) -> bool:
+    """Whether *theme*'s inactive grey differs between its light and dark palettes.
+
+    Only then do muted line strokes and glyph fills need a class for the chrome
+    CSS to switch them; otherwise the baked attribute is right in both modes.
+    """
+    light, dark = color_pair(theme, "muted_line_color")
+    return light != dark
+
+
+def muted_paint_class(theme: object, muted: bool, prop: str) -> str:
+    """The class that lets a muted line ``stroke`` or glyph ``fill`` follow the
+    viewer's mode, or ``""`` when nothing needs it."""
+    if not (muted and muted_adapts(theme)):
+        return ""
+    return _ns(MUTED_STROKE_CLASS if prop == "stroke" else MUTED_FILL_CLASS)

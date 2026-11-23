@@ -43,7 +43,7 @@ from nf_metro.text_metrics import (
     metrics_face_context,
     metrics_face_for_portability,
 )
-from nf_metro.themes import resolve_stack, resolve_theme
+from nf_metro.themes import ResolvedTheme, bind_graph_stack, resolve_theme
 from nf_metro.themes.stack import THEMEABLE_LAYOUT_OPTIONS
 
 
@@ -109,18 +109,12 @@ def apply_layout_overrides(graph: MetroGraph, opts: Mapping[str, object]) -> Non
                 graph.layout_provenance.record_caller_line_order(value)
 
 
-def apply_theme_layout(graph: MetroGraph, theme: str | None, source_dir: str) -> None:
-    """Write the theme stack's layout options the map's directives left unset.
+def apply_theme_layout(graph: MetroGraph, resolved: ResolvedTheme) -> None:
+    """Write the theme's layout options the map's directives left unset.
 
-    *theme* is the caller's stack (the CLI's ``--theme``), else the map's
-    ``%%metro style:``, whose theme files resolve against *source_dir*.
     Explicit caller options are applied afterwards and win over both.
     """
-    if theme is not None:
-        layout = resolve_stack(theme).layout
-    else:
-        layout = resolve_stack(graph.style, source_dir).layout
-    for name, value in layout.items():
+    for name, value in resolved.layout.items():
         if name not in graph.directive_options:
             setattr(graph, THEMEABLE_LAYOUT_OPTIONS[name].target_attr, value)
 
@@ -316,7 +310,7 @@ def _prepare_graph_state(
             "recognised"
         )
 
-    apply_theme_layout(graph, theme, source_dir)
+    apply_theme_layout(graph, bind_graph_stack(graph, theme, source_dir))
     apply_layout_overrides(graph, opts)
 
     if source_dir:
@@ -604,5 +598,5 @@ def render_string(
     )
     if config is None and flat.baked_mode is None:
         flat.baked_mode = graph.mode.strip() or None
-    theme_obj = resolve_theme(theme, graph, mode=mode)
+    theme_obj = resolve_theme(None, graph, mode=mode)
     return render_graph(graph, theme_obj, effective_cfg)

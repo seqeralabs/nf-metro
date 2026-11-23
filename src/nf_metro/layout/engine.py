@@ -601,10 +601,10 @@ def compute_layout(
             from nf_metro.layout.routing.invariants import CurveInvariantError
             from nf_metro.render.section_header import SectionHeaderClashError
             from nf_metro.render.svg import build_render_plan
-            from nf_metro.themes import resolve_theme
+            from nf_metro.themes import layout_theme
 
             try:
-                build_render_plan(graph, validation_theme or resolve_theme(None, graph))
+                build_render_plan(graph, validation_theme or layout_theme(graph))
             except (
                 CurveInvariantError,
                 FanRouteInvariantError,

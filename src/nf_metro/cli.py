@@ -80,10 +80,11 @@ from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
 from nf_metro.themes import (
     DEFAULT_MODE,
     ThemeError,
+    anchor_stack,
+    bind_graph_stack,
     check_stack,
     resolve_stack,
 )
-from nf_metro.themes.stack import is_theme_file_entry
 
 RenderFormat = Literal["svg", "html", "png", "gif", "webp", "mp4", "webm"]
 _RENDER_FORMATS: tuple[str, ...] = get_args(RenderFormat)
@@ -349,12 +350,9 @@ class _ThemeStack(click.ParamType[str]):
     ) -> str:
         text = str(value)
         try:
-            entries = check_stack(text)
+            check_stack(text, must_exist=True)
         except ThemeError as e:
             self.fail(str(e), param, ctx)
-        for entry in entries:
-            if is_theme_file_entry(entry) and not Path(entry).expanduser().is_file():
-                self.fail(f"theme file not found: {entry}", param, ctx)
         return text
 
 
@@ -980,8 +978,11 @@ def render(
             return layout_opts
         return {**layout_opts, "animate": overrides["animate"]}
 
-    def _job_theme(overrides: Mapping[str, object]) -> str | None:
-        return cast("str | None", overrides.get("theme", theme))
+    def _job_theme(overrides: Mapping[str, object], source: Path) -> str | None:
+        """The output's own ``theme=``, its files relative to the map, else --theme."""
+        if "theme" not in overrides:
+            return theme
+        return anchor_stack(str(overrides["theme"]), source.resolve().parent)
 
     def _job(
         input_file: Path,
@@ -1005,7 +1006,7 @@ def render(
             raster_width=job_raster_width,
             fps=fps,
             duration=duration,
-            theme=_job_theme(overrides),
+            theme=_job_theme(overrides, input_file),
             mode=cast("str | None", overrides.get("mode", mode)),
             debug=debug,
             logo=logo,
@@ -1098,7 +1099,7 @@ def render(
         graphs: dict[tuple[Literal["svg", "html"], bool, str | None], MetroGraph] = {}
         job_opts = [_job_layout_opts(job.overrides) for job in jobs]
         keys = [
-            _graph_key(job.format, opts, _job_theme(job.overrides))
+            _graph_key(job.format, opts, _job_theme(job.overrides, source))
             for job, opts in zip(jobs, job_opts, strict=True)
         ]
         if len(jobs) > 1:
@@ -1121,7 +1122,7 @@ def render(
                                 svg_format=key[0],
                                 error_prefix=_error_prefix(source, quiet=True),
                                 parsed=parsed,
-                                theme=_job_theme(job.overrides),
+                                theme=_job_theme(job.overrides, source),
                             )
                 finally:
                     _report_render_warnings(
@@ -1405,7 +1406,7 @@ def _render_one_unsafe(
         embed_font = not text_to_paths
         mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
 
-    theme_obj = resolve_theme(theme, graph, mode=mode)
+    theme_obj = resolve_theme(None, graph, mode=mode)
 
     if format_ == "html":
         # The interactive page supplies its own responsive frame, chrome, and
@@ -1966,7 +1967,7 @@ def serve(
         try:
             graph = parse_metro_mermaid(input_file.read_text())
             graph.source_dir = str(input_file.resolve().parent)
-            apply_theme_layout(graph, theme, graph.source_dir)
+            apply_theme_layout(graph, bind_graph_stack(graph, theme, graph.source_dir))
             compute_layout(graph)
         except (ValueError, PhaseInvariantError) as e:
             raise click.ClickException(str(e))

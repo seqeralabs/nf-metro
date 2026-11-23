@@ -529,6 +529,10 @@ class MetroGraph:
     # Registry options a ``%%metro`` directive set, so a theme's layout options
     # fill only the ones the map left unset.
     directive_options: set[str] = field(default_factory=set, repr=False)
+    # The theme stack layout and render use (the caller's ``--theme``, else the
+    # map's style) and the folder its relative theme files resolve against.
+    theme_stack: str = field(default="", repr=False)
+    theme_dir: str = field(default="", repr=False)
     # Multi-section grid cells: a ``%%metro grid:`` directive may name several
     # comma-separated sections that share one cell.  Keyed by (col, row); each
     # value is the listed-order member ids, which pack side-by-side along the

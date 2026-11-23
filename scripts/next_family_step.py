@@ -30,23 +30,48 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("issue", type=int)
     ap.add_argument("--repo", default="seqeralabs/nf-metro")
-    ap.add_argument("--all", action="store_true", help="list every step with its status")
+    ap.add_argument(
+        "--all", action="store_true", help="list every step with its status"
+    )
     a = ap.parse_args()
 
-    body = json.loads(sh("gh", "issue", "view", str(a.issue), "--repo", a.repo, "--json", "body"))["body"]
+    body = json.loads(
+        sh("gh", "issue", "view", str(a.issue), "--repo", a.repo, "--json", "body")
+    )["body"]
     steps = [m.groupdict() for m in map(STEP.match, body.splitlines()) if m]
     if not steps:
-        print(f"#{a.issue}: no step lines found (expected `- [ ] S1 ... (base: main)`)", file=sys.stderr)
+        print(
+            f"#{a.issue}: no step lines found (expected `- [ ] S1 ... (base: main)`)",
+            file=sys.stderr,
+        )
         return 2
 
     done = {s["id"] for s in steps if s["done"].strip()}
     heads = set(
-        line.split("refs/heads/", 1)[1] for line in sh("git", "ls-remote", "--heads", "origin").splitlines() if "refs/heads/" in line
+        line.split("refs/heads/", 1)[1]
+        for line in sh("git", "ls-remote", "--heads", "origin").splitlines()
+        if "refs/heads/" in line
     )
-    open_prs = json.loads(sh("gh", "pr", "list", "--repo", a.repo, "--state", "open", "--limit", "200", "--json", "number,title,body,headRefName"))
+    open_prs = json.loads(
+        sh(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            a.repo,
+            "--state",
+            "open",
+            "--limit",
+            "200",
+            "--json",
+            "number,title,body,headRefName",
+        )
+    )
 
     def claimed_by(step_id: str) -> int | None:
-        token = re.compile(rf"#{a.issue}\b[^\n]{{0,20}}\b{step_id}\b|\b{step_id}\b[^\n]{{0,20}}#{a.issue}\b")
+        token = re.compile(
+            rf"#{a.issue}\b[^\n]{{0,20}}\b{step_id}\b|\b{step_id}\b[^\n]{{0,20}}#{a.issue}\b"
+        )
         for pr in open_prs:
             if token.search(pr["title"] or "") or token.search(pr["body"] or ""):
                 return pr["number"]

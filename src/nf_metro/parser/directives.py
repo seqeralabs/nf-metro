@@ -121,8 +121,9 @@ _OUTPUT_OVERRIDE_KINDS: dict[str, str] = {
     "raster_width": "int",
 }
 
-# Override tokens are separated by commas, whitespace, or both.
-_OUTPUT_OVERRIDE_SEP = re.compile(r"[,\s]+")
+# Override tokens are separated by commas, whitespace, or both; a quoted value
+# (`theme="seqera, london-tube"`) keeps its own commas and spaces.
+_OUTPUT_OVERRIDE_TOKEN = re.compile(r"""(?:[^,\s"']|"[^"]*"|'[^']*')+""")
 
 # Whitespace hugging a `=` is part of the token's own separator, not the
 # token boundary, so `mode = dark` reads as one token rather than three.
@@ -139,6 +140,17 @@ def _output_override_value(key: str, raw: str) -> object | None:
     than for truthiness.
     """
     kind = _OUTPUT_OVERRIDE_KINDS[key]
+    if kind == "theme":
+        # Imported here, not at module scope, because the theme registry
+        # reaches the render package, which imports the parser back.
+        from nf_metro.themes import ThemeError, check_stack
+
+        stack = raw.strip().strip("\"'")
+        try:
+            check_stack(stack)
+        except ThemeError:
+            return None
+        return stack
     text = raw.strip().lower()
     if kind == "bool" and text == "":
         # A bare flag ("animate") means on; coerce's own bool kind reads an
@@ -146,12 +158,6 @@ def _output_override_value(key: str, raw: str) -> object | None:
         return True
     if kind == "mode":
         opt = LayoutOption(name=key, kind="choice", choices=_MODE_CHOICES, help="")
-    elif kind == "theme":
-        # Imported here, not at module scope, because the theme registry
-        # reaches the render package, which imports the parser back.
-        from nf_metro.themes import STYLE_NAMES
-
-        opt = LayoutOption(name=key, kind="choice", choices=tuple(STYLE_NAMES), help="")
     elif kind in ("float", "int"):
         numeric_kind: Literal["float", "int"] = "float" if kind == "float" else "int"
         opt = LayoutOption(name=key, kind=numeric_kind, sign="positive", help="")
@@ -170,7 +176,7 @@ def _parse_output_overrides(spec: str) -> dict[str, object]:
     """
     overrides: dict[str, object] = {}
     normalized = _OUTPUT_OVERRIDE_EQ_SPACE.sub("=", spec.strip())
-    for token in _OUTPUT_OVERRIDE_SEP.split(normalized):
+    for token in _OUTPUT_OVERRIDE_TOKEN.findall(normalized):
         if not token:
             continue
         name, sep, raw = token.partition("=")

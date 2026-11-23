@@ -12,13 +12,16 @@ from __future__ import annotations
 import dataclasses
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from nf_metro.render.style import Theme
 from nf_metro.themes.stack import (
+    DARK,
+    LIGHT,
     MODES,
     ResolvedTheme,
     ThemeError,
+    ThemeFile,
     ThemeLayer,
     is_theme_file_entry,
     load_theme_file,
@@ -34,7 +37,7 @@ BASE_THEME = "nfcore"
 
 #: Mode baked when none is chosen (e.g. PNG export). SVG output carries both
 #: palettes and adapts at view time, so this governs only a baked render.
-DEFAULT_MODE = "dark"
+DEFAULT_MODE = DARK
 
 _BUILTIN_DIR = Path(__file__).parent
 _BUILTIN_FILES = {
@@ -44,16 +47,17 @@ _BUILTIN_FILES = {
     "transparent": "transparent.yaml",
 }
 
-# ``dark`` is ``MetroGraph.style``'s default and a legacy style value; ``light``
-# is the old name of the transparent theme, which collides with the mode.
+# ``dark`` is ``MetroGraph.style``'s default, so a map with no style directive
+# arrives as ``dark``. ``light`` names the transparent theme; both names are
+# accepted wherever a theme name is.
 _ALIASES = {"dark": "nfcore", "light": "transparent"}
 
 
 def _load_builtin(name: str) -> ThemeLayer:
-    layer, extends = load_theme_file(_BUILTIN_DIR / _BUILTIN_FILES[name])
-    if extends:
+    loaded = load_theme_file(_BUILTIN_DIR / _BUILTIN_FILES[name])
+    if loaded.extends:
         raise ThemeError(f"built-in theme {name!r} may not use extends")
-    return layer
+    return loaded.layer
 
 
 _BUILTIN_LAYERS: dict[str, ThemeLayer] = {
@@ -90,19 +94,40 @@ def _parse_name(entry: str) -> tuple[str, str | None]:
     )
 
 
-def check_stack(value: str) -> list[str]:
-    """Return the entries of a stack, raising :class:`ThemeError` on an unknown name.
+def _file_path(entry: str, base_dir: Path) -> Path:
+    path = Path(entry).expanduser()
+    return (path if path.is_absolute() else base_dir / path).resolve()
 
-    Theme file entries are only checked for their suffix here; whether the
-    file exists and is valid is checked when the stack resolves.
+
+def check_stack(
+    value: str, base_dir: Path | str = "", *, must_exist: bool = False
+) -> list[str]:
+    """Return the entries of a stack, raising :class:`ThemeError` on a bad one.
+
+    Every built-in name is checked. Theme file entries are checked only for
+    their suffix unless *must_exist*, which also loads and validates each file
+    (relative to *base_dir*, the working directory when empty). Entries are
+    checked left to right, so the first bad one is the one reported.
     """
     entries = split_stack(value)
     if not entries:
         raise ThemeError("empty theme stack")
+    root = Path(base_dir) if base_dir else Path.cwd()
     for entry in entries:
         if not is_theme_file_entry(entry):
             _parse_name(entry)
+        elif must_exist:
+            load_theme_file(_file_path(entry, root))
     return entries
+
+
+def anchor_stack(value: str, base_dir: Path | str) -> str:
+    """*value* with each relative theme file made absolute against *base_dir*."""
+    root = Path(base_dir)
+    return ", ".join(
+        str(_file_path(entry, root)) if is_theme_file_entry(entry) else entry
+        for entry in check_stack(value)
+    )
 
 
 def resolve_style(style: str) -> str:
@@ -120,25 +145,26 @@ def resolve_style(style: str) -> str:
     )
 
 
-def _entry_layers(
+def _expand(
     entry: str, base_dir: Path, seen: tuple[Path, ...]
-) -> tuple[list[ThemeLayer], str | None]:
+) -> tuple[list[ThemeLayer | ThemeFile], str | None]:
+    """An entry's layers in stack order (its ``extends`` first) and its pin.
+
+    A theme file's ``extends`` entries resolve against that file's folder.
+    """
     if not is_theme_file_entry(entry):
         name, pin = _parse_name(entry)
         return [_BUILTIN_LAYERS[name]], pin
-    path = Path(entry).expanduser()
-    if not path.is_absolute():
-        path = base_dir / path
-    path = path.resolve()
+    path = _file_path(entry, base_dir)
     if path in seen:
         chain = " -> ".join(str(p) for p in (*seen, path))
         raise ThemeError(f"theme files extend each other in a cycle: {chain}")
-    layer, extends = load_theme_file(path)
-    layers: list[ThemeLayer] = []
-    for base in extends:
-        base_layers, _ = _entry_layers(base, path.parent, (*seen, path))
+    loaded = load_theme_file(path)
+    layers: list[ThemeLayer | ThemeFile] = []
+    for base in loaded.extends:
+        base_layers, _ = _expand(base, path.parent, (*seen, path))
         layers += base_layers
-    return [*layers, layer], None
+    return [*layers, loaded], None
 
 
 def resolve_stack(value: str, base_dir: Path | str = "") -> ResolvedTheme:
@@ -146,56 +172,71 @@ def resolve_stack(value: str, base_dir: Path | str = "") -> ResolvedTheme:
 
     Relative theme file entries resolve against *base_dir* (the working
     directory when empty). A mode-suffixed name pins the baked mode; the last
-    pin in the stack wins. A stack of built-in names resolves to the same
-    object every time.
+    pin in the stack wins. The result is shared by every resolution of the
+    same stack whose files have the same content.
     """
     entries = check_stack(value)
-    if not any(is_theme_file_entry(entry) for entry in entries):
-        return _resolve_builtin_stack(resolve_style(value))
-    return _resolve(entries, Path(base_dir) if base_dir else Path.cwd())
-
-
-def _resolve_builtin_stack(canonical: str) -> ResolvedTheme:
+    root = Path(base_dir) if base_dir else Path.cwd()
+    parts: list[ThemeLayer | ThemeFile] = []
     names: list[str] = []
     pinned: str | None = None
-    for entry in split_stack(canonical):
-        name, pin = _parse_name(entry)
-        names.append(name)
+    for entry in entries:
+        entry_parts, pin = _expand(entry, root, ())
+        parts += entry_parts
         pinned = pin or pinned
-    resolved = _resolve_builtin_names(", ".join(names))
+        names.append(entry if is_theme_file_entry(entry) else _parse_name(entry)[0])
+    resolved = _merge_cached(tuple(parts), ", ".join(names))
     return dataclasses.replace(resolved, pinned_mode=pinned) if pinned else resolved
 
 
 @lru_cache(maxsize=128)
-def _resolve_builtin_names(names: str) -> ResolvedTheme:
-    return _resolve(split_stack(names), Path.cwd())
-
-
-def _resolve(entries: list[str], root: Path) -> ResolvedTheme:
-    layers = [_BUILTIN_LAYERS[BASE_THEME]]
-    pinned: str | None = None
-    for entry in entries:
-        entry_layers, pin = _entry_layers(entry, root, ())
-        layers += entry_layers
-        pinned = pin or pinned
-    return merge_layers(layers, name=", ".join(entries), pinned_mode=pinned)
-
-
-def _stack_source(theme: str | None, graph: MetroGraph) -> tuple[str, str]:
-    """The stack a render uses and the directory its relative files resolve against."""
-    if theme is not None:
-        return theme, ""
-    return graph.style, graph.source_dir
+def _merge_cached(
+    parts: tuple[ThemeLayer | ThemeFile, ...], name: str
+) -> ResolvedTheme:
+    layers = [_BUILTIN_LAYERS[BASE_THEME]] + [
+        part.layer if isinstance(part, ThemeFile) else part for part in parts
+    ]
+    return merge_layers(layers, name=name)
 
 
 def resolve_graph_stack(theme: str | None, graph: MetroGraph) -> ResolvedTheme:
-    """The caller's stack (``--theme``) if given, else the map's ``%%metro style:``."""
-    return resolve_stack(*_stack_source(theme, graph))
+    """The stack *graph* renders with: the caller's *theme* if given, else the
+    stack it was prepared with, else its ``%%metro style:``.
+
+    A caller's theme files resolve against the working directory and the map's
+    against the ``.mmd``'s folder.
+    """
+    if theme is not None:
+        return resolve_stack(theme)
+    if graph.theme_stack:
+        return resolve_stack(graph.theme_stack, graph.theme_dir)
+    return resolve_stack(graph.style, graph.source_dir)
 
 
-def theme_layout_options(theme: str | None, graph: MetroGraph) -> dict[str, Any]:
-    """Layout options the render's theme stack sets."""
-    return dict(resolve_graph_stack(theme, graph).layout)
+def bind_graph_stack(
+    graph: MetroGraph, theme: str | None, source_dir: str
+) -> ResolvedTheme:
+    """Record on *graph* the stack its layout and render use, and resolve it.
+
+    Layout passes that need a theme (icon obstacles, label probes, the final
+    render-plan check) read it back through :func:`layout_theme`, so they see
+    the same theme the render draws with.
+    """
+    if theme is not None:
+        graph.theme_stack, graph.theme_dir = theme, ""
+    else:
+        graph.theme_stack, graph.theme_dir = graph.style, source_dir
+    return resolve_stack(graph.theme_stack, graph.theme_dir)
+
+
+def layout_theme(graph: MetroGraph) -> Theme:
+    """The theme *graph* is laid out for, in the mode it will be baked in."""
+    return resolve_graph_stack(None, graph).for_mode(resolve_mode(None, graph))
+
+
+def resolve_mode(mode: str | None, graph: MetroGraph) -> str:
+    """The mode to bake: explicit, else the graph's ``%%metro mode:``, else default."""
+    return (mode or graph.mode).strip().lower() or DEFAULT_MODE
 
 
 def resolve_theme(
@@ -206,12 +247,11 @@ def resolve_theme(
     The stack is the explicit *theme* or the graph's style; the mode is the
     explicit *mode*, the graph's ``%%metro mode:``, or :data:`DEFAULT_MODE`.
     """
-    resolved_mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
-    return resolve_graph_stack(theme, graph).for_mode(resolved_mode)
+    return resolve_graph_stack(theme, graph).for_mode(resolve_mode(mode, graph))
 
 
 #: Every accepted built-in name resolved at :data:`DEFAULT_MODE`, for callers
-#: that need a concrete theme without a graph (e.g. layout's icon obstacles).
+#: that need a concrete theme without a graph.
 THEMES: dict[str, Theme] = {
     name: resolve_stack(name).for_mode(DEFAULT_MODE) for name in sorted(STYLE_NAMES)
 }
@@ -226,17 +266,22 @@ TRANSPARENT_THEME = THEMES["transparent"]
 __all__ = [
     "BASE_THEME",
     "DEFAULT_MODE",
+    "LIGHT",
+    "DARK",
     "PAIRED_THEMES",
     "STYLE_NAMES",
     "THEMES",
     "ResolvedTheme",
     "ThemeError",
+    "anchor_stack",
+    "bind_graph_stack",
     "check_stack",
+    "layout_theme",
     "resolve_graph_stack",
+    "resolve_mode",
     "resolve_stack",
     "resolve_style",
     "resolve_theme",
-    "theme_layout_options",
     "NFCORE_LIGHT_THEME",
     "NFCORE_DARK_THEME",
     "SEQERA_LIGHT_THEME",

@@ -4,6 +4,7 @@
 # sections and a humanist sans in navy. Glyph sizes are multiples of
 # line_width. Also the worked example of the theme file format.
 name: london-tube
+fixed_mode: none # both palettes, even over a single-palette theme
 
 station_glyph: tick
 # Track-weight tabs, heavier than the Line Diagram Standard's 0.66 square, so

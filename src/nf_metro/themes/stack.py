@@ -4,7 +4,7 @@ A theme file is YAML. Every key except ``name`` is optional::
 
     name: my-theme
     extends: london-tube      # names or files stacked before this one
-    fixed_mode: dark          # one palette, rendered in this mode only
+    fixed_mode: dark          # one palette, rendered in this mode; none clears
     label_font_size: 13       # top-level fields apply to both modes
     light:
       label_color: "#1c3f94"
@@ -15,17 +15,21 @@ A theme file is YAML. Every key except ``name`` is optional::
 
 A stack is an ordered list of theme names and files. It always starts from the
 base theme (``nfcore``), then applies each entry in turn; a later entry wins
-for every field it sets, and light and dark merge independently.
+for every field it sets, and light and dark merge independently. ``fixed_mode``
+merges the same way: a later entry that sets it, to a mode or to ``none``,
+replaces an earlier one.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
@@ -35,10 +39,15 @@ from nf_metro.options import INVALID, LAYOUT_OPTIONS, LayoutOption, coerce
 from nf_metro.render.style import Theme, authored_fields
 
 __all__ = [
+    "DARK",
+    "LIGHT",
     "MODES",
+    "UNSET",
+    "field_kind",
     "THEMEABLE_LAYOUT_OPTIONS",
     "ResolvedTheme",
     "ThemeError",
+    "ThemeFile",
     "ThemeLayer",
     "is_theme_file_entry",
     "layer_from_mapping",
@@ -47,7 +56,13 @@ __all__ = [
     "split_stack",
 ]
 
-MODES = ("light", "dark")
+LIGHT = "light"
+DARK = "dark"
+MODES = (LIGHT, DARK)
+
+#: A layer's ``fixed_mode`` when its file does not mention the key, as opposed
+#: to ``None`` for an explicit ``fixed_mode: none``.
+UNSET = "unset"
 _THEME_FILE_SUFFIXES = (".yaml", ".yml")
 
 # Layout options that shape a map's look. Options that change what is drawn
@@ -96,15 +111,21 @@ class ThemeError(NfMetroError, ValueError):
     """A theme stack entry or theme file is unknown, unreadable, or invalid."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ThemeLayer:
-    """One stack entry's contribution: the fields it sets per mode, and more."""
+    """One stack entry's contribution: the fields it sets per mode, and more.
+
+    ``fixed_mode`` is :data:`UNSET` when the entry leaves the stack's fixed
+    mode alone, ``None`` when it clears it, or the mode it fixes.
+    """
 
     name: str
     light: Mapping[str, Any]
     dark: Mapping[str, Any]
-    layout: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    fixed_mode: str | None = None
+    layout: Mapping[str, Any] = dataclasses.field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    fixed_mode: str | None = UNSET
 
 
 @dataclass(frozen=True)
@@ -127,7 +148,7 @@ class ResolvedTheme:
     def for_mode(self, mode: str) -> Theme:
         """The theme to bake for a requested *mode*."""
         effective = self.fixed_mode or self.pinned_mode or mode
-        return self.light if effective == "light" else self.dark
+        return self.light if effective == LIGHT else self.dark
 
 
 def split_stack(value: str) -> list[str]:
@@ -140,7 +161,8 @@ def is_theme_file_entry(entry: str) -> bool:
     return entry.lower().endswith(_THEME_FILE_SUFFIXES)
 
 
-def _field_kind(field: dataclasses.Field[Any]) -> str:
+def field_kind(field: dataclasses.Field[Any]) -> str:
+    """A schema field's type name: ``str``, ``float``, ``int`` or ``bool``."""
     return field.type if isinstance(field.type, str) else field.type.__name__
 
 
@@ -151,7 +173,7 @@ def _check_field(key: str, value: object, where: str) -> object:
             f"{where}: unknown theme field {key!r}; valid fields are "
             + ", ".join(sorted(authored_fields()))
         )
-    kind = _field_kind(field)
+    kind = field_kind(field)
     if kind == "bool":
         if not isinstance(value, bool):
             raise ThemeError(f"{where}: {key} must be true or false, got {value!r}")
@@ -219,59 +241,84 @@ def layer_from_mapping(data: object, where: str) -> tuple[ThemeLayer, list[str]]
         extends = [e.strip() for e in extends_raw if e.strip()]
     else:
         raise ThemeError(f"{where}: 'extends' must be a name or a list of names")
-    fixed_mode = data.get("fixed_mode")
-    if fixed_mode is not None and fixed_mode not in MODES:
-        raise ThemeError(
-            f"{where}: fixed_mode must be light or dark, got {fixed_mode!r}"
-        )
+    fixed_mode: str | None = UNSET
+    if "fixed_mode" in data:
+        raw_mode = data["fixed_mode"]
+        fixed_mode = None if raw_mode in (None, "none") else raw_mode
+        if fixed_mode is not None and fixed_mode not in MODES:
+            raise ThemeError(
+                f"{where}: fixed_mode must be light, dark or none, got {raw_mode!r}"
+            )
     shared = _check_fields(
         {k: v for k, v in data.items() if k not in _TOP_LEVEL_KEYS}, where
     )
     light = {**shared, **_check_fields(data.get("light"), f"{where} (light)")}
     dark = {**shared, **_check_fields(data.get("dark"), f"{where} (dark)")}
     layout = _check_layout(data.get("layout"), f"{where} (layout)")
-    layer = ThemeLayer(name.strip(), light, dark, layout, fixed_mode)
+    layer = ThemeLayer(
+        name.strip(),
+        MappingProxyType(light),
+        MappingProxyType(dark),
+        MappingProxyType(layout),
+        fixed_mode,
+    )
     return layer, extends
 
 
+@dataclass(frozen=True)
+class ThemeFile:
+    """A theme file's validated layer, keyed by its path and content."""
+
+    path: Path
+    digest: str
+    layer: ThemeLayer
+    extends: tuple[str, ...]
+
+
 @lru_cache(maxsize=64)
-def _load_cached(path: str, mtime_ns: int) -> tuple[ThemeLayer, tuple[str, ...]]:
+def _parse(path: Path, digest: str, data: bytes) -> ThemeFile:
+    where = f"theme file {path}"
     try:
-        data = yaml.safe_load(Path(path).read_text())
+        parsed = yaml.safe_load(data.decode())
+    except UnicodeDecodeError:
+        raise ThemeError(f"{where}: not UTF-8 text") from None
     except yaml.YAMLError as e:
-        raise ThemeError(f"theme file {path}: invalid YAML: {e}") from None
-    layer, extends = layer_from_mapping(data, f"theme file {path}")
-    return layer, tuple(extends)
+        raise ThemeError(f"{where}: invalid YAML: {e}") from None
+    layer, extends = layer_from_mapping(parsed, where)
+    return ThemeFile(path, digest, layer, tuple(extends))
 
 
-def load_theme_file(path: Path) -> tuple[ThemeLayer, list[str]]:
-    """Read and validate a theme file; return its layer and ``extends`` entries."""
+def load_theme_file(path: Path) -> ThemeFile:
+    """Read and validate a theme file, reusing the result while its content holds."""
     try:
-        stat = path.stat()
+        data = path.read_bytes()
     except OSError:
         raise ThemeError(f"theme file not found: {path}") from None
-    layer, extends = _load_cached(str(path), stat.st_mtime_ns)
-    return layer, list(extends)
+    return _parse(path, hashlib.sha256(data).hexdigest(), data)
 
 
 def merge_layers(
     layers: Sequence[ThemeLayer], *, name: str, pinned_mode: str | None = None
 ) -> ResolvedTheme:
     """Merge *layers* left to right into a :class:`ResolvedTheme`."""
-    fields: dict[str, dict[str, Any]] = {"light": {}, "dark": {}}
+    fields: dict[str, dict[str, Any]] = {LIGHT: {}, DARK: {}}
     layout: dict[str, Any] = {}
     fixed_mode: str | None = None
     for layer in layers:
-        fields["light"].update(layer.light)
-        fields["dark"].update(layer.dark)
+        fields[LIGHT].update(layer.light)
+        fields[DARK].update(layer.dark)
         layout.update(layer.layout)
-        fixed_mode = layer.fixed_mode or fixed_mode
+        if layer.fixed_mode != UNSET:
+            fixed_mode = layer.fixed_mode
+    frozen_layout = MappingProxyType(layout)
     try:
         if fixed_mode is not None:
-            theme = Theme(name=name, mode=fixed_mode, **fields[fixed_mode])
-            return ResolvedTheme(name, theme, theme, layout, fixed_mode, pinned_mode)
-        light = Theme(name=f"{name}-light", mode="light", **fields["light"])
-        dark = Theme(name=f"{name}-dark", mode="dark", **fields["dark"])
+            theme = Theme(mode=fixed_mode, **fields[fixed_mode])
+            return ResolvedTheme(
+                name, theme, theme, frozen_layout, fixed_mode, pinned_mode
+            )
+        light = Theme(mode=LIGHT, **fields[LIGHT])
+        dark = Theme(mode=DARK, **fields[DARK])
     except TypeError as e:
         raise ThemeError(f"theme {name!r} leaves required fields unset: {e}") from None
     mode_colors = tuple(
@@ -283,7 +330,7 @@ def merge_layers(
         name,
         dataclasses.replace(light, mode_colors=mode_colors),
         dataclasses.replace(dark, mode_colors=mode_colors),
-        layout,
+        frozen_layout,
         None,
         pinned_mode,
     )

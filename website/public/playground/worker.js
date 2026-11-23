@@ -32,7 +32,7 @@ def nfm_render(mmd, opts_json):
     theme_sel = opts.get("theme") or None
     if theme_sel:
         mmd_norm = _STYLE_RE.sub("", mmd).strip()
-        theme_key = json.dumps(resolve_stack(theme_sel).layout, sort_keys=True)
+        theme_key = json.dumps(dict(resolve_stack(theme_sel).layout), sort_keys=True)
     else:
         mmd_norm = _MODE_RE.sub("", mmd).strip()
         theme_key = ""

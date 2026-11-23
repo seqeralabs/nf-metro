@@ -237,15 +237,15 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Lines
 
-| Field                        | Value             | Default       | Effect                                                                                                |
-| ---------------------------- | ----------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
-| `line_width`                 | number            | from `nfcore` | Route stroke width, px.                                                                               |
-| `muted_line_color`           | colour            | `#888888`     | Grey for inactive lines and the stations, labels and icons only they touch. One value for both modes. |
-| `bridge_glyph`               | `true` \| `false` | `true`        | Break the lower line where two unrelated lines cross.                                                 |
-| `directional_marker_size`    | number            | `4`           | Half-size of `--directional` chevrons, px.                                                            |
-| `directional_marker_spacing` | number            | `64`          | Distance between chevrons along a route, px.                                                          |
-| `directional_marker_opacity` | number            | `0.75`        | Chevron opacity, 0 to 1.                                                                              |
-| `directional_marker_color`   | colour            | empty         | Chevron colour. Empty takes the line's colour.                                                        |
+| Field                        | Value             | Default       | Effect                                                                                                                            |
+| ---------------------------- | ----------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `line_width`                 | number            | from `nfcore` | Route stroke width, px.                                                                                                           |
+| `muted_line_color`           | colour            | `#888888`     | Grey for inactive lines and the stations, labels and icons only they touch. A two-palette SVG switches it with the viewer's mode. |
+| `bridge_glyph`               | `true` \| `false` | `true`        | Break the lower line where two unrelated lines cross.                                                                             |
+| `directional_marker_size`    | number            | `4`           | Half-size of `--directional` chevrons, px.                                                                                        |
+| `directional_marker_spacing` | number            | `64`          | Distance between chevrons along a route, px.                                                                                      |
+| `directional_marker_opacity` | number            | `0.75`        | Chevron opacity, 0 to 1.                                                                                                          |
+| `directional_marker_color`   | colour            | empty         | Chevron colour. Empty takes the line's colour.                                                                                    |
 
 ### File icons
 
