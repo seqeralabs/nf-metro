@@ -17,11 +17,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 _STEP = 4.0
 
 
-def _lane(offset: float) -> list[tuple[float, float]]:
-    """A lane of a bundle turning 45 degrees up, shifted *offset* outward."""
-    d = 1 / math.sqrt(2)
-    corner = (100.0 + math.tan(math.radians(22.5)) * offset, 100.0 + offset)
-    return [(0.0, 100.0 + offset), corner, (corner[0] + 100 * d, corner[1] - 100 * d)]
+def _lane(offset: float, turn_degrees: float) -> list[tuple[float, float]]:
+    """A lane of a bundle turning *turn_degrees* left, shifted *offset* outward."""
+    phi = math.radians(turn_degrees)
+    corner = (100.0 + math.tan(phi / 2) * offset, 100.0 + offset)
+    end = (corner[0] + 100 * math.cos(phi), corner[1] - 100 * math.sin(phi))
+    return [(0.0, 100.0 + offset), corner, end]
 
 
 def _samples(points, radii, n=400):
@@ -44,22 +45,32 @@ def _centre(points, arm):
     return (before[0] + normal[0] * radius, before[1] + normal[1] * radius)
 
 
-def test_adjacent_lanes_at_a_45_degree_turn_share_a_centre_and_stay_touching():
-    inner, outer = _lane(0.0), _lane(_STEP)
-    arm_inner = 10.0
+def _pair(turn_degrees: float):
+    inner, outer = _lane(0.0, turn_degrees), _lane(_STEP, turn_degrees)
     displacement = (outer[1][0] - inner[1][0], outer[1][1] - inner[1][1])
-    arm_outer = concentric_turn_radius(*outer, displacement, arm_inner)
-    assert arm_outer > arm_inner
-    assert _centre(inner, arm_inner) == pytest.approx(
-        _centre(outer, arm_outer), abs=1e-6
-    )
-    inner_pts = [q for q, _ in _samples(inner, [arm_inner])]
-    gap = max(
+    return inner, outer, concentric_turn_radius(*outer, displacement, 10.0)
+
+
+def _gap(inner, inner_arm, outer, outer_arm) -> float:
+    inner_pts = [q for q, _ in _samples(inner, [inner_arm])]
+    return max(
         min(math.dist(q, s) for s in inner_pts) - _STEP
-        for q, on_curve in _samples(outer, [arm_outer])
+        for q, on_curve in _samples(outer, [outer_arm])
         if on_curve
     )
-    assert gap <= 0.1
+
+
+@pytest.mark.parametrize("turn_degrees", [45.0, 61.0, 90.0])
+def test_adjacent_lanes_share_a_centre_at_any_turn(turn_degrees):
+    inner, outer, outer_arm = _pair(turn_degrees)
+    assert outer_arm > 10.0
+    assert _centre(inner, 10.0) == pytest.approx(_centre(outer, outer_arm), abs=1e-6)
+
+
+@pytest.mark.parametrize("turn_degrees", [45.0, 61.0])
+def test_adjacent_lanes_stay_touching_through_a_diagonal_turn(turn_degrees):
+    inner, outer, outer_arm = _pair(turn_degrees)
+    assert _gap(inner, 10.0, outer, outer_arm) <= 0.1
 
 
 def test_right_angle_turns_keep_the_existing_concentric_rule():

@@ -101,7 +101,6 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _nest_bypass_above_over_top_wrap,
     _plan_trunk_band,
     _reconcile_port_peeloff_risers,
-    _rederive_concentric_bundle_turns,
     _rederive_semantic_end_corners,
     _restack_channel,
     _restack_htrunk,
@@ -623,10 +622,6 @@ def _route_edges(  # noqa: C901
     assert_exit_turn_snapshot(routes, planned_segments, "corner-radius unification")
     _rederive_semantic_end_corners(routes, ctx.curve_radius, ctx.station_offsets or {})
     assert_exit_turn_snapshot(routes, planned_segments, "semantic corner derivation")
-    _rederive_concentric_bundle_turns(
-        routes, ctx.curve_radius, ctx.station_offsets or {}
-    )
-    assert_exit_turn_snapshot(routes, planned_segments, "bundle turn derivation")
     covered_edges = (
         system_execution.covered_edges()
         if system_execution is not None
