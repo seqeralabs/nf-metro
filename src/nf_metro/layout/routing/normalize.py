@@ -6301,11 +6301,9 @@ def _gap_channel_base(
     channel against the upper column's real edge, the box it descends beside,
     rather than centring it on a span reaching back to the coordinate origin.
 
-    *split_face* is the near face of the section a bundle leaving through
-    such a one-sided gap stays in its row up to (see
-    ``inter_section_handlers._bypass_split_face``): the bundle seats
-    :data:`EDGE_TO_BUNDLE_CLEARANCE` off it on the *anchor_side* travel side,
-    beside the box it goes round rather than against the source.
+    *split_face* is the near face of the section the bundle stays in its row
+    up to; it seats :data:`EDGE_TO_BUNDLE_CLEARANCE` off it on the
+    *anchor_side* travel side.
     """
     width = max(0, n - 1) * offset_step
     edges = None

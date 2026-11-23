@@ -89,10 +89,13 @@ FANS = [
     CANVAS_DATA / "bypass_split_rl_fan_beyond.mmd",
 ]
 
-# (fan map, the branch whose cross-row target lies before the obstacle)
+# The fan every fan witness turns, and the section of its branch whose
+# cross-row target lies before the obstacle.
+JUNCTION = "__junction_12"
+EARLY_TARGET = "far"
 TARGET_BEFORE_OBSTACLE = [
-    (CANVAS_DATA / "bypass_split_lr_fan_target_before.mmd", "far"),
-    (CANVAS_DATA / "bypass_split_rl_fan_target_before.mmd", "far"),
+    CANVAS_DATA / "bypass_split_lr_fan_target_before.mmd",
+    CANVAS_DATA / "bypass_split_rl_fan_target_before.mmd",
 ]
 
 
@@ -156,27 +159,25 @@ def test_the_bypass_splits_beside_the_section_it_goes_round(
 @pytest.mark.parametrize("path", FANS, ids=_id)
 def test_every_turning_branch_of_a_fan_turns_through_one_column(path: Path) -> None:
     plan = _plan(path, {})
-    jid = "__junction_12"
     risers = [
         riser
         for r in plan.routes
-        if r.edge.source == jid
+        if r.edge.source == JUNCTION
         for riser in [_first_riser(_drawn(plan, r))]
         if riser is not None
     ]
     assert len(risers) >= 2
-    assert max(risers) - min(risers) <= _bundle_width(plan, jid) + TOL, risers
+    assert max(risers) - min(risers) <= _bundle_width(plan, JUNCTION) + TOL, risers
 
 
-@pytest.mark.parametrize(("path", "target_section"), TARGET_BEFORE_OBSTACLE, ids=_id)
+@pytest.mark.parametrize("path", TARGET_BEFORE_OBSTACLE, ids=_id)
 def test_a_fan_turns_before_a_branch_target_that_lies_before_the_obstacle(
-    path: Path, target_section: str
+    path: Path,
 ) -> None:
     plan = _plan(path, {})
-    jid = "__junction_12"
-    box = plan.graph.sections[target_section]
+    box = plan.graph.sections[EARLY_TARGET]
     for r in plan.routes:
-        if r.edge.source != jid:
+        if r.edge.source != JUNCTION:
             continue
         points = _drawn(plan, r)
         riser = _first_riser(points)
@@ -186,7 +187,7 @@ def test_a_fan_turns_before_a_branch_target_that_lies_before_the_obstacle(
         near_face = box.bbox_x + box.bbox_w if leftward else box.bbox_x
         past = near_face - riser if leftward else riser - near_face
         assert past < 0, (
-            f"{r.line_id} turns at x={riser:.1f}, past {target_section}'s near "
+            f"{r.line_id} turns at x={riser:.1f}, past {EARLY_TARGET}'s near "
             f"face {near_face:.1f}"
         )
 

@@ -48,6 +48,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     section_bbox_span,
     section_column_span,
+    section_row_span,
 )
 from nf_metro.layout.lane_plan import (
     approach_source,
@@ -6421,15 +6422,10 @@ def _bypass_split_face(
     """Near face of the section a bundle leaving grid cell (*col*, *row*)
     travelling *horizontal* stays in its row up to, or ``None``.
 
-    Only a bundle whose next column along travel is empty in *row* has a
-    choice of where to leave: an occupied neighbour bounds an ordinary gap the
-    bundle centres in.  Each ``(source, target)`` branch meeting a section in
-    *row* between its source's box and its target must leave the row before
-    that section, and every branch must leave it before its target's own box.
-    The branches turn as one bundle, so the face is the nearest of those across
-    all of them: a branch whose target lies short of the bypassed section holds
-    the bundle back to that target.  ``None`` when no branch meets a section in
-    *row*, or when that face is not ahead of every source's box.
+    An occupied next column bounds an ordinary two-sided gap the bundle centres
+    in, so only an empty one gives a face.  The *branches* turn as one bundle,
+    so the face is the nearest across all of them, and a branch whose target
+    lies short of the bypassed section holds the bundle back to that target.
     """
     sign = horizontal.sign
     if col is None or row is None or _sections_in_col(graph, col + int(sign), row):
@@ -6458,7 +6454,7 @@ def _bypass_split_face(
             if sec.bbox_w > 0
             and sec is not src_sec
             and sec is not tgt_sec
-            and sec.grid_row <= row < sec.grid_row + sec.grid_row_span
+            and grid_spans_overlap(section_row_span(sec), (row, row))
             and sign * (far(sec) - start) > 0
             and sign * (tgt.x - near(sec)) > 0
         ]
