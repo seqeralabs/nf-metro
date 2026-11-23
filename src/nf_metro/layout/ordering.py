@@ -112,18 +112,17 @@ def assign_tracks(
     # its single highest-priority line's base, which would pull every trunk
     # station up to the top line.  Single-line stations keep their own
     # line's (now symmetric) base so exclusive callers fan above/below.
-    node_base: dict[str, float] = {}
-    if centered:
-        for sid in graph.stations:
-            node_lines = graph.station_lines(sid)
-            bases = [line_base[ln] for ln in node_lines if ln in line_base]
-            if bases:
-                node_base[sid] = sum(bases) / len(bases)
-    station_base = {
-        sid: node_base.get(sid, line_base[primary])
-        for sid, primary in node_primary.items()
-        if primary in line_base
-    }
+    station_base: dict[str, float] = {}
+    for sid, primary in node_primary.items():
+        if primary not in line_base:
+            continue
+        if centered:
+            bases = [
+                line_base[ln] for ln in graph.station_lines(sid) if ln in line_base
+            ]
+            station_base[sid] = sum(bases) / len(bases)
+        else:
+            station_base[sid] = line_base[primary]
 
     # Step 3: Group nodes by (layer, primary_line).  Off-track stations
     # are excluded from grouping: their Y is overwritten by the Stage 5.2
@@ -966,26 +965,18 @@ def _root_fan_trunk(
     anchor: float,
     G: nx.DiGraph[str],
     graph: MetroGraph | None,
-    station_base: dict[str, float] | None,
-    line_base: dict[str, float] | None,
+    station_base: dict[str, float],
+    line_base: dict[str, float],
 ) -> tuple[str, float] | None:
     """The source-fan member whose chain the fan continues, and its siblings' side.
 
-    In a fan of predecessor-less stations, a member qualifies when its lone
-    successor is fed by it alone yet carries more lines, so the successor seats
-    on its own base rather than riding the member's track.  When that base is
-    the anchor, pinning the member there puts the pair on one row.  Returns the
-    member and the track-axis sign its siblings open toward: away from the base
-    of the lines the successor adds, which branch off on the other side.
-    ``None`` unless exactly one member qualifies, its successor's base is the
-    anchor, and the side is definite.
+    Returns the lone predecessor-less member whose only successor it alone
+    feeds, carries more lines, and is based on the anchor, with the track-axis
+    sign its siblings open toward: away from the base of the lines the
+    successor adds.  ``None`` when no single member qualifies or the side is
+    not definite.
     """
-    if (
-        graph is None
-        or station_base is None
-        or line_base is None
-        or any(G.in_degree(node) for node in nodes)
-    ):
+    if graph is None or any(G.in_degree(node) for node in nodes):
         return None
     qualifying: list[tuple[str, str]] = []
     for member in nodes:
@@ -1025,7 +1016,7 @@ def _seat_around_trunk(
 
     Siblings take whole *line_gap* steps, the first on the *away* side.  A
     fractional step would round onto a row, or collide with the trunk within
-    one, and drag the trunk off its successor's row.
+    one.
     """
     tracks[trunk] = anchor
     others = [node for node in nodes if node != trunk]
@@ -1207,8 +1198,8 @@ def _place_fan_out(
     graph: MetroGraph | None = None,
     exit_reaching: frozenset[str] = frozenset(),
     priority_lane_sign: float | None = None,
-    station_base: dict[str, float] | None = None,
-    line_base: dict[str, float] | None = None,
+    station_base: dict[str, float],
+    line_base: dict[str, float],
 ) -> None:
     """Place multiple nodes in the same layer+line, centered around an anchor.
 
@@ -1374,8 +1365,7 @@ def _place_fan_out(
                 if (
                     main_station is not None
                     and not main_station.is_hidden
-                    and set(graph.station_lines(main))
-                    == set(graph.station_lines(trunk_pred))
+                    and _shares_line_set(trunk_pred, main, graph)
                 ):
                     trunk = tracks[trunk_pred]
                     tracks[main] = trunk

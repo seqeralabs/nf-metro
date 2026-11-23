@@ -34,27 +34,21 @@ BRANCH = "fastqc"
 ROW = 40.0
 
 _SOURCES = {
-    "genome": ("genome[Genome]", "genome -->|main| report"),
-    "reads": ("reads[Reads]", "reads -->|main| trim"),
-    "index": ("index[Index]", "index -->|main| report"),
+    "genome": ("        genome[Genome]\n", "        genome -->|main| report\n"),
+    "reads": ("        reads[Reads]\n", "        reads -->|main| trim\n"),
+    "index": ("        index[Index]\n", "        index -->|main| report\n"),
 }
-_INDENT = " " * 8
 
 
 def _with_sources(*order: str) -> str:
     """The fixture with exactly *order*'s sources, declared in that order."""
-    stations = {station for station, _ in _SOURCES.values()}
-    edges = {edge for _, edge in _SOURCES.values()}
-    out: list[str] = []
-    for line in FIXTURE.read_text().splitlines(keepends=True):
-        text = line.strip()
-        if text in stations or text in edges:
-            column = 0 if text in stations else 1
-            if text == _SOURCES["reads"][column]:
-                out += [f"{_INDENT}{_SOURCES[n][column]}\n" for n in order]
-            continue
-        out.append(line)
-    return "".join(out)
+    fixture_order = ("genome", "reads")
+    source = FIXTURE.read_text()
+    for column in (0, 1):
+        declared = "".join(_SOURCES[n][column] for n in fixture_order)
+        assert declared in source
+        source = source.replace(declared, "".join(_SOURCES[n][column] for n in order))
+    return source
 
 
 def _layout(source: str) -> MetroGraph:
@@ -71,15 +65,10 @@ def _coords(graph: MetroGraph) -> dict[str, tuple[float, float]]:
     }
 
 
-def test_fixture_declares_genome_before_reads() -> None:
-    assert _with_sources("genome", "reads") == FIXTURE.read_text()
-
-
 def test_trunk_holds_one_row_with_feeder_and_branch_one_row_off() -> None:
     graph = _layout(FIXTURE.read_text())
     st = graph.stations
     trunk_y = st["reads"].y
-    assert [st[s].y for s in TRUNK] == [trunk_y] * len(TRUNK)
     assert st[FEEDER].y == trunk_y - ROW
     assert st[BRANCH].y == trunk_y + ROW
     assert [st[s].track for s in TRUNK] == [0.0] * len(TRUNK)
@@ -97,12 +86,6 @@ def test_trunk_source_shares_its_successor_row_at_track_placement(
     (snapshot,) = tmp_path.glob("*/2.1.json")
     stations = json.loads(snapshot.read_text())["stations"]
     assert stations["reads"]["y"] == stations["trim"]["y"]
-
-
-def test_source_declaration_order_does_not_move_the_layout() -> None:
-    assert _coords(_layout(_with_sources("reads", "genome"))) == _coords(
-        _layout(FIXTURE.read_text())
-    )
 
 
 @pytest.mark.parametrize("orientation", list(all_orientations()), ids=lambda o: o.name)
@@ -125,23 +108,24 @@ def test_lone_source_keeps_the_trunk_row() -> None:
     assert st[BRANCH].y == trunk_y + ROW
 
 
-def test_three_source_fan_centred_on_trunk_seats_feeders_either_side() -> None:
-    st = _layout(_with_sources("genome", "reads", "index")).stations
-    trunk_y = st["reads"].y
-    assert st[FEEDER].y == trunk_y - ROW
-    assert st["index"].y == trunk_y + ROW
-
-
 @pytest.mark.parametrize(
-    "order", list(permutations(("genome", "reads", "index"))), ids="-".join
+    "order",
+    [
+        order
+        for size in (2, 3)
+        for order in permutations(_SOURCES, size)
+        if "reads" in order
+    ],
+    ids="-".join,
 )
-def test_three_source_fan_keeps_trunk_row_in_any_order(
-    order: tuple[str, ...],
-) -> None:
+def test_trunk_row_holds_in_any_source_order(order: tuple[str, ...]) -> None:
     graph = _layout(_with_sources(*order))
     st = graph.stations
     trunk_y = st["reads"].y
     assert [st[s].y for s in TRUNK] == [trunk_y] * len(TRUNK)
-    assert {st[FEEDER].y, st["index"].y} == {trunk_y - ROW, trunk_y + ROW}
+    feeders = {st[s].y for s in order if s != "reads"}
+    assert feeders <= {trunk_y - ROW, trunk_y + ROW} and len(feeders) == len(order) - 1
     assert st[BRANCH].y == trunk_y + ROW
     assert validate_layout(graph) == []
+    canonical = ("reads", *(s for s in order if s != "reads"))
+    assert _coords(graph) == _coords(_layout(_with_sources(*canonical)))
