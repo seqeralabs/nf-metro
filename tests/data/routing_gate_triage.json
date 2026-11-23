@@ -535,10 +535,6 @@
     "note": "_seat_bypass_descent reads the segment at BYPASS_DESCENT_RANK, which the U-bypass builder emits as the descent between the two gap corners and is vertical by construction. The non-vertical bail guards a route whose point order does not match the shape the caller just built.",
     "status": "defensive"
   },
-  "inter_section_handlers.py::if col_left <= 0.0:::#1": {
-    "note": "col_left_edge's 0.0 default only fires for a column with no sections; the target's own column always holds its section.",
-    "status": "defensive"
-  },
   "inter_section_handlers.py::if ctx.station_offsets:::#1": {
     "note": "_run_pass_c_guards always populates ctx.station_offsets before route_edges, and RAILS mode returns earlier; the empty-offsets arm never fires. Reclassified candidate-dead -> defensive (#762): corpus instrumentation across 128 fixtures confirms the un-exercised arm is never taken.",
     "status": "defensive"
@@ -566,10 +562,6 @@
   "inter_section_handlers.py::if fan is not None and ep_col is not None:::#1": {
     "note": "Reachable only via a defective render (inter-row corridor on a <78px gap); see #722.",
     "status": "needs-review"
-  },
-  "inter_section_handlers.py::if gap_bottom <= gap_top:::#1": {
-    "note": "The row-gap enforcer keeps stacked rows separated, so the inter-row band above a target row (row_bottom_edge(tgt_row-1) up to row_top_edge(tgt_row)) has positive height whenever a RIGHT entry is fed from a higher row; the degenerate-band arm guards an abutting-rows layout placement never produces.",
-    "status": "defensive"
   },
   "inter_section_handlers.py::if len(landing_sections) != len(plan.branches):::#1": {
     "note": "The planner emits this route family only when every branch lands in one distinct RIGHT-entry section. A count mismatch can arise only if the frozen emission and plan have drifted apart.",
@@ -1160,7 +1152,7 @@
     "status": "defensive"
   },
   "reserved_bands.py::if boundary is None:::#1": {
-    "note": "Optional-boundary convenience for callers carrying an unresolved grid index (_left_exit_wrap_over_top_y takes tgt_row: int | None). Such a caller returns before it needs a band -- with no target row there is no gap above it to measure, so the wrap is rejected first -- leaving this arm a type-level accommodation no topology reaches.",
+    "note": "Optional-boundary convenience in ReservedBands.at's signature: every caller (in common.py and inter_section_handlers.py) passes a grid row or column it has already resolved to an int, so this arm is a type-level accommodation no topology reaches.",
     "status": "defensive"
   },
   "reserved_bands.py::if realised is None:::#1": {
@@ -1222,10 +1214,6 @@
   "inter_section_handlers.py::if _v_segment_crosses_other_section(graph, corner_x, src.y, ey, exclude):::#1": {
     "note": "Drop-in viability test in _right_entry_drop_in_is_clear (#889). The cross-row RIGHT-entry rule fires only when the earlier bypass / plough rules ceded the edge, i.e. no section sits between source and port, so the outward-side descent usually runs clear; the not-clear arm needs a descent blocked by a wide same-column sibling, which no gate-corpus map builds. The generated map f8403881 (8k sample, aborts later) takes it. needs-review because the arm is reachable, not because it is unreachable.",
     "status": "needs-review"
-  },
-  "inter_section_handlers.py::if tgt_row is None:::#1": {
-    "note": "In _left_exit_wrap_over_top_y: narrows the Optional target row for the band lookups below. A same-row wrap reaches it with both ends in placed sections, whose grid rows always resolve, so the unresolved arm cannot be taken.",
-    "status": "defensive"
   },
   "normalize.py::if trunk_ys[-1] - trunk_ys[0] <= COORD_TOLERANCE:::#1": {
     "note": "Equal-depth guard on a merge-fed confluence: every corpus confluence rides its shared band at distinct depths, so the same-Y reject arm has no fixture.",
@@ -1986,5 +1974,29 @@
   "landing_deal.py::if set(by_line) != {edge.line_id for edge in edges}:::#1": {
     "note": "INCOMPLETE refusal when the compile's targets omit a line entering the port; no job of the 15k-job census reaches it and no test pins it.",
     "status": "defensive"
+  },
+  "inter_section_handlers.py::if not _sections_in_col(ctx.graph, tgt_col):::#1": {
+    "note": "In _fan_left_entry_descent_x: the column has no measurable left edge only when it holds no section, and the target's own column always holds its section.",
+    "status": "defensive"
+  },
+  "inter_section_handlers.py::if not fits(f):::#1": {
+    "note": "In _takes_gap_above: the fail-closed raise for a connector recorded round above whose wrap cannot traverse the band above its target row. Reachable: the 6.12 side owner's clear-corridor test checks the legs against section boxes but has no term for the leaf's band test, so a ranked hop held above (by its bundle, a single clear side, or the neither-clear turn-round side) can reach a leaf whose band is negative. 8k map w2_01944 does: (z4__entry_right_6, z2__exit_right_2) is held above by its sibling z3__exit_right_3, its source z2 spans rows 0-1, gap_above_row(g, 1) is the negative band (298, 220), and routing raises rather than drawing over the record. No swept fixture reaches it.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if side == \"below\":::#1": {
+    "note": "In _takes_gap_above: a connector the approach record sends round below reaching a gap-above predicate. tests/data/canvas_placement/f8401267.mmd and tests/fixtures/regressions/outward_loop_bottom_right_entry.mmd reach it (a RIGHT entry's bypass U-turn recorded below), but the sweep's corpus roots include neither.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if not _gap_above_holds_run(graph, tgt_row):::#1": {
+    "note": "In _right_entry_gap_above_fits: the canvas headroom above the topmost row always holds the run, and below another row the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if not _gap_above_holds_run(graph, f.tgt_row):::#1": {
+    "note": "In _left_entry_gap_above_fits: a LEFT entry fed from a higher row always has a section above its row, so the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if lowest is not None and y > (cap := section_header_safe_cap(lowest)):::#1": {
+    "note": "In _row_under_run_y: the arm caps a same-row under-run at the highest header badge among the lower-row sections in the columns after the source. tests/data/gate_witnesses/f8402075.mmd and tests/data/canvas_placement/f8403977.mmd run under their row with no lower-row section in those columns; a map whose next row starts within BYPASS_CLEARANCE plus the badge clearance under the run takes it, and no swept map has one.",
+    "status": "needs-review"
   }
 }

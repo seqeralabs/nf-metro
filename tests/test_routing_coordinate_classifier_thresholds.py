@@ -21,12 +21,11 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
 )
 from nf_metro.layout.fan_ordering import fanout_divergence_peel_order
-from nf_metro.layout.routing.common import Direction
+from nf_metro.layout.routing.common import Direction, gap_above_row
 from nf_metro.layout.routing.context import _build_routing_context, _RoutingCtx
 from nf_metro.layout.routing.corners import outer_lane_radius
 from nf_metro.layout.routing.inter_section_handlers import (
     _gap_above_channel_y,
-    _gap_above_target_y,
     _perp_entry_source_beyond_channel,
 )
 from nf_metro.layout.routing.offsets import loops_round_entry_section
@@ -284,7 +283,7 @@ def test_topmost_row_traverse_rides_over_the_header_headroom(
     stacked: MetroGraph,
 ) -> None:
     ctx = _context(stacked)
-    _gap_top, gap_bottom = _gap_above_target_y(stacked, 0)
+    _gap_top, gap_bottom = gap_above_row(stacked, 0)
     assert _gap_above_channel_y(ctx, 0) == (
         gap_bottom - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
     )
@@ -292,7 +291,7 @@ def test_topmost_row_traverse_rides_over_the_header_headroom(
 
 def test_traverse_below_another_row_centres_in_the_gap(stacked: MetroGraph) -> None:
     ctx = _context(stacked)
-    gap_top, gap_bottom = _gap_above_target_y(stacked, 1)
+    gap_top, gap_bottom = gap_above_row(stacked, 1)
     channel = _gap_above_channel_y(ctx, 1)
     assert gap_top < channel < gap_bottom
     assert channel != gap_bottom - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius

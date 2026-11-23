@@ -1,0 +1,33 @@
+%%metro title: Fuzz 8401830
+%%metro line: l0 | Report | #e6194b
+%%metro line: l1 | Qc_Bin_Annotate | #3cb44b
+%%metro line: l2 | Assemble | #4363d8
+%%metro grid: sec0 | 2,0
+%%metro grid: sec2 | 1,0
+%%metro grid: sec3 | 0,0
+
+graph LR
+    subgraph sec0 [Polish 0]
+        %%metro direction: RL
+        s0n0[vcf_quant_gather]
+        s0n2[vcf_cluster]
+        s0n3[cluster_sort_fastqc]
+        s0n0 -->|l1| s0n2
+        s0n2 -->|l1| s0n3
+    end
+    subgraph sec2 [Markdup 2]
+        %%metro direction: TB
+        s2n0[trim]
+        s2n1[vcf]
+        s2n0 -->|l0,l2| s2n1
+    end
+    subgraph sec3 [Align_Polish 3]
+        s3n0[assemble]
+        s3n1[assemble]
+        s3n3[export]
+        s3n0 -->|l0,l2| s3n1
+        s3n1 -->|l2| s3n3
+    end
+    s2n1 -->|l0,l2| s3n0
+    s0n3 -->|l1| s2n0
+    s2n0 -->|l1| s3n0

@@ -59,7 +59,11 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     segment_intersects_bbox,
 )
-from nf_metro.layout.lane_plan import LANE_PLAN_STAGE, fan_seam_lane
+from nf_metro.layout.lane_plan import (
+    LANE_PLAN_STAGE,
+    fan_seam_lane,
+    recorded_lane_plan,
+)
 from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.phases._common import (
@@ -102,6 +106,7 @@ from nf_metro.layout.phases.bbox import (
     _section_fit_top,
     _shared_anchor_runway_runs,
 )
+from nf_metro.layout.phases.junctions import derived_junction_positions
 from nf_metro.layout.phases.off_track import (
     _dead_end_producer_anchor,
     _is_single_trunk_section,
@@ -115,6 +120,7 @@ from nf_metro.layout.phases.spacing import (
     _placed_name_label_station_ids,
     _residual_label_overlaps,
 )
+from nf_metro.layout.port_order_plan import ApproachKind, approach_source
 from nf_metro.parser.model import (
     LineSpread,
     MetroGraph,
@@ -3147,14 +3153,14 @@ def _guard_topmost_row_top_entry_hugs_section(
             continue
         if sec_a.grid_row_span != 1 or sec_b.grid_row_span != 1:
             continue
-        if routing_common.section_exists_above_row(graph, sec_b.grid_row):
+        if routing_common.section_lies_before(graph, "y", sec_b.grid_row):
             continue
         tgt_port = graph.ports.get(r.edge.target)
         if tgt_port is not None and tgt_port.side == PortSide.RIGHT:
             # An over-the-top loop into a RIGHT entry port must climb above the
-            # section's header badge to approach from the right; the row was
-            # pushed down (_reserve_over_top_headroom) to keep that climb below
-            # the title, so the hug limit does not apply.
+            # section's header badge to approach from the right; the canvas
+            # grows to fit that climb below the title (_canvas_placement), so
+            # the hug limit does not apply.
             continue
         band_top = routing_common.row_top_edge(
             graph, sec_b.grid_row, default=sec_b.bbox_y
@@ -5477,39 +5483,6 @@ def _guard_planned_fan_frame_realised(
                     )
 
 
-def _guard_canvas_margin_settled(
-    graph: MetroGraph,
-    phase: str,
-    *,
-    shift: tuple[float, float],
-    margins: tuple[float, float],
-    moves: int,
-) -> None:
-    """Guard that no left or top canvas margin outlives the moves that own it.
-
-    A canvas margin is not a boundary any row or column offset can widen, so
-    the render answers a short one by moving the whole map away from the edge
-    (issue #1769).  Each move gives the runs concerned strictly more room than
-    the measurement that asked for it, so a *shift* surviving *moves* of them
-    is a demand moving does not answer: engine drift rather than something an
-    author can express.  Drawing it pinched is what ``permissive`` asks for.
-    """
-    dx, dy = shift
-    sides = ", ".join(
-        f"{name} by {amount:.1f}px inside a {margin:.0f}px margin"
-        for name, amount, margin in (("left", dx, margins[0]), ("top", dy, margins[1]))
-        if amount
-    )
-    msg = (
-        f"{phase}: the canvas margin still falls short after {moves} moves: "
-        f"content outside the section-box envelope is drawn {sides}.  Moving "
-        "the map clear of the edge is not converging on this arrangement."
-    )
-    if graph.strict and not graph.permissive:
-        raise LayoutInvariantError(msg)
-    warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
-
-
 # The single ordered source of truth for the ``validate=True`` guard
 # sequence.  The runner iterates this list in order, so its order *is* the
 # guard call order; the bisection-safe prefix is what ``_run_pass_c_guards``
@@ -6128,21 +6101,6 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_symmetric_diamond_branches_half_pitch, "B"),
     GuardSpec(_guard_tall_anchor_stack_well_formed, "B"),
     GuardSpec(_guard_tb_top_entry_drop_hugs_top, "B"),
-    # Called from the render's canvas-margin move loop rather than by either
-    # guard runner: its input is the shortfall a move left behind, which exists
-    # nowhere else.  Tier B keeps it out of the chokepoint's dispatched Tier-A
-    # set, which its signature could not join; the loop calls it on every
-    # render regardless.
-    GuardSpec(
-        _guard_canvas_margin_settled,
-        "B",
-        issue_pin=("#1769",),
-        narrow_reason=(
-            "Restricted to the shortfall the canvas-margin moves leave behind: "
-            "the moves own this margin outright, so a map they answer has no "
-            "margin left to assert and one they cannot is the whole failure."
-        ),
-    ),
 )
 
 
@@ -6277,6 +6235,29 @@ _RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
 _RENDER_ABORTING_GUARD = "_guard_inter_section_route_clears_own_section_interior"
 
 
+def _u_turn_pass_through(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> str | None:
+    """The first pass-through on a connector recorded as a U-turn, or ``None``."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return None
+    for rp, sid in routes_through_unrelated_sections(
+        graph, routes=routes, offsets=offsets
+    ):
+        edge = rp.edge
+        key = (edge.target, approach_source(graph, edge.source, edge.line_id))
+        record = plan.port_orders.approaches.get(key)
+        if record is not None and record.kind is ApproachKind.U_TURN:
+            return (
+                f"[u-turn pass-through] line {rp.line_id!r} on U-turn "
+                f"{edge.source!r}->{edge.target!r} passes through section {sid!r}"
+            )
+    return None
+
+
 def deferred_final_route_guard_specs() -> tuple[GuardSpec, ...]:
     """Return final-checkpoint guards that require settled route geometry."""
     return tuple(spec for spec in GUARD_REGISTRY if "routes" in spec.needs)
@@ -6320,9 +6301,9 @@ def assert_render_layout_invariants(
     registry guard. Each guard raises ``PhaseInvariantError`` on its first
     violation rather than returning a list, so each runs in isolation and its
     message is captured; the aggregate is one message. It raises
-    :class:`LayoutInvariantError` under *strict* or where
-    ``_RENDER_ABORTING_GUARD`` fired on a non-permissive graph; else it is a
-    :class:`UserWarning`.
+    :class:`LayoutInvariantError` under *strict*, or on a non-permissive graph
+    where ``_RENDER_ABORTING_GUARD`` fired or a pass-through lies on a U-turn
+    (:func:`_u_turn_pass_through`); else it is a :class:`UserWarning`.
     """
     available: dict[str, Any] = {"offsets": offsets, "routes": routes}
     messages: list[str] = []
@@ -6335,6 +6316,11 @@ def assert_render_layout_invariants(
         except PhaseInvariantError as exc:
             messages.append(f"[{spec.name}] {exc}")
             aborting = aborting or spec.name == _RENDER_ABORTING_GUARD
+            if spec.fn is _guard_no_route_through_section:
+                u_turn = _u_turn_pass_through(graph, routes, offsets)
+                if u_turn is not None:
+                    messages.append(u_turn)
+                    aborting = True
     if not messages:
         return
 
@@ -6389,6 +6375,28 @@ def assert_render_header_clearance(graph: MetroGraph, *, strict: bool = False) -
     if strict:
         raise LayoutInvariantError(msg)
     warnings.warn(msg, category=PermissiveGuardWarning, stacklevel=2)
+
+
+def assert_junctions_on_their_anchors(graph: MetroGraph) -> None:
+    """Refuse a graph whose junctions are not where their ports derive them.
+
+    A junction's coordinates are a function of the ports it joins
+    (:func:`~nf_metro.layout.phases.junctions.derived_junction_positions`), and
+    layout leaves every junction on that derivation, so the router reads the
+    junctions as laid out.  One off its anchor is an engine defect rather than a
+    layout an author can ask for, so it is refused under every strictness.
+    """
+    moved = [
+        f"{jid!r} at ({station.x:.2f}, {station.y:.2f}), derived ({x:.2f}, {y:.2f})"
+        for jid, (x, y) in derived_junction_positions(graph).items()
+        if max(abs((station := graph.stations[jid]).x - x), abs(station.y - y))
+        > COORD_TOLERANCE_FINE
+    ]
+    if moved:
+        raise LayoutInvariantError(
+            "layout left junctions off the anchors their ports derive: "
+            + "; ".join(moved)
+        )
 
 
 def _corridor_deficit_detail(

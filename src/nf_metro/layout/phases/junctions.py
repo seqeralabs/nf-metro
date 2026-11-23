@@ -113,7 +113,24 @@ def reanchor_junctions(graph: MetroGraph) -> None:
         _position_junctions(graph)
 
 
+def derived_junction_positions(graph: MetroGraph) -> dict[str, tuple[float, float]]:
+    """Where :func:`reanchor_junctions` puts each junction, without moving any.
+
+    Empty for a graph-wide rail layout, whose junctions are not derived from
+    their ports.
+    """
+    if graph.line_spread is LineSpread.RAILS:
+        return {}
+    return _junction_positions(graph)
+
+
 def _position_junctions(graph: MetroGraph) -> None:
+    for jid, (x, y) in _junction_positions(graph).items():
+        junction = graph.stations[jid]
+        junction.x, junction.y = x, y
+
+
+def _junction_positions(graph: MetroGraph) -> dict[str, tuple[float, float]]:
     """Position junction stations at the midpoint of the inter-section gap.
 
     A junction is where bundled lines diverge to different downstream sections.
@@ -121,10 +138,18 @@ def _position_junctions(graph: MetroGraph) -> None:
     exit port's Y coordinate so lines travel straight from exit to junction.
 
     Merge junctions (N>1 predecessors, 1 entry port successor) are positioned by
-    :func:`_position_merge_junction`, a margin back along the lead-in their entry
+    :func:`_merge_junction_position`, a margin back along the lead-in their entry
     port receives, so the merge point and the port are joined by a visible
     single-line segment.
+
+    Junctions are derived in turn, so one fed by another reads its feeder where
+    this derivation has already put it.
     """
+    positions: dict[str, tuple[float, float]] = {}
+
+    def at(station: Station) -> tuple[float, float]:
+        return positions.get(station.id, (station.x, station.y))
+
     topology = build_route_topology_query(graph)
     for jid in graph.junctions:
         junction = graph.stations.get(jid)
@@ -165,10 +190,9 @@ def _position_junctions(graph: MetroGraph) -> None:
             )
             entry_port_obj = graph.ports.get(entry_port.id)
             if entry_port_obj and entry_port_obj.is_entry:
-                _position_merge_junction(
-                    junction,
-                    predecessors,
-                    entry_port,
+                positions[jid] = _merge_junction_position(
+                    [at(pred)[0] for pred in predecessors],
+                    (entry_port.x, entry_port.y),
                     entry_side=entry_port_obj.side,
                     n=_junction_incoming_line_count(graph, jid),
                 )
@@ -202,34 +226,36 @@ def _position_junctions(graph: MetroGraph) -> None:
             )
             exit_port_obj = graph.ports.get(exit_port_id) if exit_port_id else None
             if exit_port_obj and exit_port_obj.side in (PortSide.TOP, PortSide.BOTTOM):
-                junction.x = exit_port_x
-                junction.y = exit_port_y + (
-                    margin if exit_port_obj.side is PortSide.BOTTOM else -margin
+                positions[jid] = (
+                    exit_port_x,
+                    exit_port_y
+                    + (margin if exit_port_obj.side is PortSide.BOTTOM else -margin),
                 )
             elif exit_port_obj and exit_port_obj.side in (
                 PortSide.RIGHT,
                 PortSide.LEFT,
             ):
                 direction = 1.0 if exit_port_obj.side == PortSide.RIGHT else -1.0
-                junction.x = exit_port_x + direction * _flow_side_junction_margin(
-                    graph, jid, exit_port_id, margin
+                positions[jid] = (
+                    exit_port_x
+                    + direction
+                    * _flow_side_junction_margin(graph, jid, exit_port_id, margin),
+                    exit_port_y,
                 )
-                junction.y = exit_port_y
             else:
                 nearest_entry_x = min(entry_port_xs, key=lambda x: abs(x - exit_port_x))
                 direction = 1.0 if nearest_entry_x > exit_port_x else -1.0
-                junction.x = exit_port_x + direction * margin
-                junction.y = exit_port_y
+                positions[jid] = exit_port_x + direction * margin, exit_port_y
+    return positions
 
 
-def _position_merge_junction(
-    junction: Station,
-    predecessors: list[Station],
-    entry_port: Station,
+def _merge_junction_position(
+    predecessor_xs: list[float],
+    entry_port: tuple[float, float],
     entry_side: PortSide | None = None,
     n: int = 1,
-) -> None:
-    """Position a merge junction on the lead-in its entry port receives.
+) -> tuple[float, float]:
+    """Where a merge junction stands on the lead-in its entry port receives.
 
     The junction is where the converging lines become one stroke, so it has to
     stand on the segment that stroke travels: a LEFT/RIGHT port is approached
@@ -242,22 +268,19 @@ def _position_merge_junction(
     junction; passing 1 falls back to the baseline margin.
     """
     margin = _required_junction_margin(n)
+    entry_x, entry_y = entry_port
     if entry_side in (PortSide.TOP, PortSide.BOTTOM):
-        junction.x = entry_port.x
-        junction.y = entry_port.y + (-margin if entry_side is PortSide.TOP else margin)
-        return
-    max_pred_x = max(p.x for p in predecessors)
+        return entry_x, entry_y + (-margin if entry_side is PortSide.TOP else margin)
+    max_pred_x = max(predecessor_xs)
     # Normal forward fan-in: merge just past the right-most predecessor on its
     # way into a target to the right.  But when the target sits well to the LEFT
     # of the predecessors (a collector like MultiQC fed from across the map),
     # merging at max_pred_x forces the whole merged bundle to backtrack the full
     # width into the entry.  Merge local to the target instead, so only the
     # individual feeders make the long approach and the merge->entry hop is short.
-    if entry_port.x < max_pred_x - margin:
-        junction.x = entry_port.x - margin
-    else:
-        junction.x = max_pred_x + margin
-    junction.y = entry_port.y
+    if entry_x < max_pred_x - margin:
+        return entry_x - margin, entry_y
+    return max_pred_x + margin, entry_y
 
 
 def _resolve_source_section_id(

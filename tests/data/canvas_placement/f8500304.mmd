@@ -1,0 +1,43 @@
+%%metro title: Fuzz 8500304
+%%metro style: seqera
+%%metro line: l0 | Count_Quant_Trim | #e6194b
+%%metro line: l1 | Vcf | #3cb44b
+%%metro line: l2 | Markdup_Summarise | #4363d8
+%%metro grid: sec0 | 2,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 0,0
+
+graph LR
+    subgraph sec0 [Cluster_Bin_Annotate 0]
+        %%metro direction: RL
+        s0n0[pca]
+        s0n1[classify]
+        s0n2[cluster_qc]
+        s0n3[qc_index]
+        s0n2 -->|l0| s0n3
+        s0n0 -->|l2| s0n1
+        s0n1 -->|l2| s0n3
+    end
+    subgraph sec1 [Markdup_Call 1]
+        %%metro direction: RL
+        %%metro exit: right | l0, l1, l2
+        s1n0[fastqc_cluster_cluster]
+        s1n1[fastqc_classify]
+        s1n2[merge_report]
+        s1n0 -->|l1| s1n2
+        s1n0 -->|l1| s1n1
+        s1n0 -->|l2| s1n1
+    end
+    subgraph sec2 [Export_Cluster_Classify 2]
+        s2n0[trim_sort]
+        s2n1[classify_annotate]
+        s2n0 -->|l0| s2n1
+        s2n0 -->|l2| s2n1
+    end
+    s0n3 -->|l0| s1n1
+    s0n3 -->|l0| s1n1
+    s1n1 -->|l0| s2n0
+    s1n1 -->|l2| s2n0
+    s1n2 -->|l1| s2n1
+    s1n1 -->|l1| s2n1
+    s0n3 -->|l2| s1n0

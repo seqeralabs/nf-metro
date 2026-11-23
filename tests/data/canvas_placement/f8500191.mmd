@@ -1,0 +1,46 @@
+%%metro title: Fuzz 8500191
+%%metro style: nfcore
+%%metro line: l0 | Filter | #e6194b
+%%metro line: l1 | Summarise_Assemble | #3cb44b
+%%metro line: l2 | Bam_Index_Cluster | #4363d8
+%%metro grid: sec0 | 1,0
+%%metro grid: sec1 | 0,0
+%%metro grid: sec2 | 2,0
+
+graph LR
+    subgraph sec0 [Markdup_Fastqc 0]
+        %%metro direction: RL
+        s0n0[gather]
+        s0n1[sort]
+        s0n3[cluster_summarise_filter]
+        s0n1 -->|l1| s0n3
+        s0n0 -->|l2| s0n1
+        s0n0 -->|l2| s0n3
+    end
+    subgraph sec1 [Bin_Summarise_Classify 1]
+        s1n0[DEDUP_INDEX_PCA]
+        s1n1[export]
+        s1n0 -->|l0| s1n1
+        s1n0 -->|l0| s1n1
+        s1n0 -->|l1| s1n1
+    end
+    subgraph sec2 [Filter_Filter 2]
+        s2n0[call_qc]
+        s2n1[align]
+        s2n2[classify]
+        s2n3[call]
+        s2n4[report_bam]
+        s2n0 -->|l0| s2n2
+        s2n0 -->|l0| s2n2
+        s2n2 -->|l0| s2n3
+        s2n2 -->|l1| s2n3
+        s2n2 -->|l2| s2n3
+        s2n3 -->|l1| s2n4
+        s2n3 -->|l2| s2n4
+        s2n1 -->|l2| s2n2
+    end
+    s1n1 -->|l0| s2n0
+    s0n3 -->|l1| s1n0
+    s1n1 -->|l1| s2n2
+    s0n1 -->|l2| s1n0
+    s1n0 -->|l2| s2n1

@@ -33,6 +33,7 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.pass_metrics import canvas_edge_clearance
 from nf_metro.layout.route_plan import (
     BindingKind,
+    CanvasMove,
     ConvergenceDisposition,
     ConvergencePlan,
     ConvergencePlanId,
@@ -62,6 +63,7 @@ from nf_metro.layout.route_plan import (
     SymbolicDemand,
     grid_span_for_sections,
     reservation_decision_refs,
+    translate_coordinate,
 )
 from nf_metro.layout.routing.common import Direction, RoutedPath, apply_route_offsets
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -413,6 +415,27 @@ class RouteReservation:
         ):
             raise ValueError("canvas corridors require observed-run blocker scope")
 
+    def translated(self, move: CanvasMove) -> RouteReservation:
+        allocation, longitudinal = _reservation_axes(self)
+        return replace(
+            self,
+            claims=tuple(
+                replace(
+                    claim,
+                    longitudinal_start=translate_coordinate(
+                        claim.longitudinal_start, longitudinal, move
+                    ),
+                    longitudinal_end=translate_coordinate(
+                        claim.longitudinal_end, longitudinal, move
+                    ),
+                    allocation_coordinate=translate_coordinate(
+                        claim.allocation_coordinate, allocation, move
+                    ),
+                )
+                for claim in self.claims
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class RealisedRouteReservation:
@@ -460,6 +483,27 @@ class RealisedRouteReservation:
             raise ValueError("realised available width disagrees with its edges")
         if not self.negative_blocker_ids or not self.positive_blocker_ids:
             raise ValueError("realised corridor requires both boundary blockers")
+
+    def translated(self, move: CanvasMove) -> RealisedRouteReservation:
+        def across(value: float) -> float:
+            return translate_coordinate(value, self.allocation_axis, move)
+
+        def along(value: float) -> float:
+            return translate_coordinate(value, self.longitudinal_axis, move)
+
+        return replace(
+            self,
+            coordinate=across(self.coordinate),
+            longitudinal_start=along(self.longitudinal_start),
+            longitudinal_end=along(self.longitudinal_end),
+            region_start=across(self.region_start),
+            region_end=across(self.region_end),
+            occupied_start=across(self.occupied_start),
+            occupied_end=across(self.occupied_end),
+            coordinate_translations=tuple(
+                item.translated(move) for item in self.coordinate_translations
+            ),
+        )
 
 
 def canvas_edge_slack(
@@ -524,6 +568,11 @@ class ReservationCoordinateTranslation:
             raise ValueError("reservation translation must be positive")
         if set(self.fully_owned_member_ids).intersection(self.crossing_member_ids):
             raise ValueError("reservation translation member ownership overlaps")
+
+    def translated(self, move: CanvasMove) -> ReservationCoordinateTranslation:
+        return replace(
+            self, coordinate=translate_coordinate(self.coordinate, self.axis, move)
+        )
 
 
 def project_reservation_coordinate(

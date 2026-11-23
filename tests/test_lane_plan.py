@@ -29,9 +29,11 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
+from itertools import combinations
 from pathlib import Path
 
 import pytest
+from test_u_turn_corridors import PARTNERED
 
 import nf_metro.layout.lane_plan as lane_plan_module
 import nf_metro.layout.port_order_plan as port_order_plan_module
@@ -65,6 +67,7 @@ from nf_metro.layout.routing.offsets import (
 )
 from nf_metro.layout.routing.orientation import (
     direction_vector,
+    lateral_axis,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, PortSide
@@ -104,6 +107,7 @@ ROTATION_FIXTURES = [
     FIXTURES / "curve_invariant_repros" / "backward_right_entry_lane_handover.mmd",
     FIXTURES / "regressions" / "approach_order_multi_line_feeder.mmd",
     FIXTURES / "regressions" / "approach_order_carry_sandwich.mmd",
+    ROOT / "tests" / "data" / "canvas_placement" / "f8401678.mmd",
 ]
 
 
@@ -1018,7 +1022,13 @@ def _src_modules() -> Iterator[tuple[str, ast.Module]]:
 # and the graph field's type.
 RECORD_USES = {
     "layout/engine.py": {"seal_lane_plan", "start_layout"},
-    "layout/phases/guards.py": {"LANE_PLAN_STAGE", "fan_seam_lane"},
+    "layout/phases/guards.py": {
+        "ApproachKind",
+        "LANE_PLAN_STAGE",
+        "approach_source",
+        "fan_seam_lane",
+        "recorded_lane_plan",
+    },
     "layout/routing/offsets.py": {
         "Approach",
         "approach_source",
@@ -1029,7 +1039,6 @@ RECORD_USES = {
     },
     "layout/routing/inter_section_handlers.py": {
         "Approach",
-        "SideRule",
         "approach_source",
         "gap_counter_runners",
         "port_travel",
@@ -1507,6 +1516,7 @@ def test_rotation_fixtures_cover_every_rule() -> None:
         "single-consumer turn",
         SideRule.TURN_ROUND.value,
         SideRule.SCREEN_BELOW.value,
+        SideRule.CORRIDOR.value,
         "far side",
     }
 
@@ -1949,9 +1959,9 @@ def test_a_bypass_parting_at_its_entry_lies_outermost(path: Path) -> None:
     assert bad == []
 
 
-def test_the_over_top_u_turn_is_the_wrap_handler_scope() -> None:
-    """Only a single-line U-turn from a LEFT exit into a far LEFT entry of an
-    LR section loops over the top: the far-side wrap handler's own scope."""
+def test_a_corridor_side_is_a_same_axis_u_turn() -> None:
+    """Only a U-turn from an exit heading along or against its entry's travel
+    takes a corridor."""
     seen = 0
     for path in CURATED:
         graph = _laid_out(path).graph
@@ -1961,15 +1971,75 @@ def test_the_over_top_u_turn_is_the_wrap_handler_scope() -> None:
             entry_id,
             source_id,
         ), approach in graph._lane_plan.port_orders.approaches.items():
-            if approach.rule is not SideRule.OVER_TOP:
+            if approach.rule is not SideRule.CORRIDOR:
                 continue
             entry, source = graph.ports[entry_id], graph.ports[source_id]
-            assert entry.side is PortSide.LEFT and source.side is PortSide.LEFT
-            assert graph.section_for_port(entry).direction == "LR"
-            assert approach.kind is ApproachKind.U_TURN and approach.side == -1
-            assert len({e.line_id for e in graph.edges_to(entry_id)}) == 1
+            assert approach.kind is ApproachKind.U_TURN
+            assert not source.is_entry
+            assert lateral_axis(EXIT_SIDE_DIRECTION[source.side]) == lateral_axis(
+                port_travel(entry)
+            )
             seen += 1
     assert seen > 0
+
+
+@pytest.mark.parametrize(
+    "path",
+    [*CURATED, ROOT / "tests" / "data" / "canvas_placement" / "f8401678.mmd"],
+    ids=lambda p: str(p.relative_to(ROOT)),
+)
+def test_linked_bypass_u_turns_take_opposite_screen_sides(path: Path) -> None:
+    """Bypass U-turns sharing a line and travelling opposite ways over
+    overlapping spans of one band are recorded on opposite screen sides."""
+    run = _laid_out(path)
+    graph = run.graph
+    if graph is None or graph._lane_plan is None or run.planner is None:
+        return
+    approaches = graph._lane_plan.port_orders.approaches
+    hops = [
+        hop
+        for key, hop in (run.planner.builder.ranked_hops or {}).items()
+        if key in approaches
+    ]
+
+    def screen(hop: port_order_plan_module._CorridorHop) -> int:
+        travel = port_travel(graph.ports[hop.key[0]])
+        return approaches[hop.key].side * right_normal_axis_sign(travel)
+
+    shared = [
+        (a.key, b.key)
+        for a, b in combinations(hops, 2)
+        if port_order_plan_module._runs_opposite(a, b) and screen(a) == screen(b)
+    ]
+    assert shared == []
+
+
+@pytest.mark.parametrize(
+    "turn", [None, *TURNS], ids=lambda t: "r0" if t is None else t.name
+)
+def test_a_corridor_linked_to_a_turn_round_follows_it(turn: _Turn | None) -> None:
+    """A bypass U-turn linked to a turn-round partner takes the screen side
+    opposite it in every frame, so a reflection keeps its CORRIDOR side rather
+    than flipping it; f8404063's shorter corridor is the partner's side."""
+    stem, ranked, partner = PARTNERED[0]
+    path = ROOT / "tests" / "data" / "canvas_placement" / f"{stem}.mmd"
+    graph = _laid_out(path).graph
+    assert graph is not None
+    if turn is not None:
+        graph = _turned(graph, turn)
+    plan, planner = _planned(graph)
+    approaches = plan.port_orders.approaches
+    assert (approaches[partner].side, approaches[partner].rule) == (
+        1,
+        SideRule.TURN_ROUND,
+    )
+    assert (approaches[ranked].side, approaches[ranked].rule) == (1, SideRule.CORRIDOR)
+    builder = planner.builder
+    hop = builder.corridor_hop(ranked)
+    assert hop is not None and hop.held is None
+    assert port_order_plan_module._runs_opposite(hop, builder.turn_rounds()[partner])
+    if turn is None:
+        assert hop.left.detour < hop.right.detour
 
 
 @pytest.mark.parametrize("path", CURATED, ids=lambda p: str(p.relative_to(ROOT)))

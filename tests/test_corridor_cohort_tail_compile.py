@@ -548,17 +548,25 @@ def test_merge_fed_confluence_descent_compiles_where_it_is_drawn(
     through a merge junction whose convergence owns its west descent, so
     ``annotation``'s free descent is drawn one pitch inboard of ``riboseq``'s,
     the side its corridor lane takes.  The last compile reads the same
-    descent."""
+    descent, once moved by the one move that places the canvas after it."""
     compiled = []
+    moves = []
     real_compile = member_geometry.compile_corridor_cohort_plan
+    place = svg._move_onto_the_canvas
 
     def record(*args, **kwargs):
         cohort_plan = real_compile(*args, **kwargs)
         compiled.append(cohort_plan)
         return cohort_plan
 
+    def record_move(graph, settled, move):
+        moves.append(move)
+        return place(graph, settled, move)
+
     monkeypatch.setattr(member_geometry, "compile_corridor_cohort_plan", record)
+    monkeypatch.setattr(svg, "_move_onto_the_canvas", record_move)
     _graph, observed, _plans = _tail_render(relative_path, monkeypatch)
+    (move,) = moves
     edge_key = RIBOSEQ_TOP_CORRIDOR_EDGES[2]
     drawn = next(
         route.points
@@ -566,7 +574,7 @@ def test_merge_fed_confluence_descent_compiles_where_it_is_drawn(
         if (route.edge.source, route.edge.target, route.line_id) == edge_key
     )
     descent = [
-        allocation.coordinate
+        allocation.coordinate + move[allocation.axis]
         for allocation in compiled[-1].allocations
         if allocation.edge_key == edge_key and allocation.segment_rank == 3
     ]

@@ -213,6 +213,7 @@ from nf_metro.layout.port_order_plan import (
     PortOrder,
     PortOrderBuilder,
     PortOrderPlan,
+    approach_source,
     decide_ports,
     merge_orders,
     port_travel,
@@ -3171,16 +3172,3 @@ def planned_offsets(
                 )
             out[(node, lid)] = lanes * step
     return out
-
-
-def approach_source(graph: MetroGraph, node: str, line_id: str) -> str:
-    """The node an approach record keys *line_id*'s connector from *node*
-    by: up through junctions each fed by one edge of the line."""
-    seen: set[str] = set()
-    while node in graph.junction_ids and node not in seen:
-        seen.add(node)
-        ups = [e.source for e in graph.edges_to(node) if e.line_id == line_id]
-        if len(ups) != 1:
-            return node
-        node = ups[0]
-    return node

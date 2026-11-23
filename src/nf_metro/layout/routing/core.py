@@ -48,7 +48,6 @@ from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
     _corridor_is_viable,
     _fan_has_corridor_sibling,
     _fan_left_entry_descent_x,
-    _gap_above_target_y,
     _has_around_section_sibling,
     _has_bypass_sibling_to_same_entry,
     _left_entry_descent_x,

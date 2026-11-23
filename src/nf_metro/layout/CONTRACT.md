@@ -1594,19 +1594,34 @@ through the record's draw accessors (`planned_offsets` in
   Rail-mode layouts hold no record.  Stages 6.13 to 6.17 still move positions
   the record read on a few maps (#2171); a layout's record is not rebuilt for
   them.
+- **Side-entry U-turn sides**: `PortOrderBuilder.u_turn_side` is the one
+  owner of the side a U-turn into a side entry passes on, decided here from
+  structure and placement as they stand at the close of Stage 6.12.  It reads
+  each box's lateral faces no further than the section padding beyond the
+  section's content, so the bundle sizing of Stages 6.13 and 6.15a cannot move
+  its inputs.  Stages 6.14, 6.15a, 6.17 and 6.18 and envelope settlement never
+  re-decide the side; routing reads it (the RIGHT- and LEFT-entry gap-above
+  traverses, the far-left U-turn wrap, `draws_over_top_loop` and the exit turn
+  it opens with) with no fallback of its own.  Linked U-turns (opposite runs
+  of one line with interleaving legs) never share a screen side: a direct
+  turn-round partner keeps its own side, a group no assignment separates takes
+  the turn-round side (`PortOrderPlan.turn_round_fallbacks`), and
+  `decide_ports` raises on a linked pair sharing one.
 - **Invariants preserved**: The record reads no lane offset, route or draft.
   `compute_station_offsets` returns exactly
   `planned_offsets(graph, record, step)`; the record holds every station
   line, and one it lacks fails closed.
 - **Readers**: `compute_station_offsets`; routing's approach-side consumers
-  (the same-row bypass entry, the left-entry over-top and far-left U-turn
-  wraps, the row-level bottom-row climb), the perpendicular-entry crossing
+  (the same-row bypass entry, the RIGHT- and LEFT-entry gap-above traverses,
+  the far-left U-turn wrap, the RIGHT entry loop, the row-level bottom-row
+  climb), the perpendicular-entry crossing
   (`_planned_entry_crossing` in `routing/perp.py`), the seam turn facts of
   `_InterFacts`, and the invariants `check_exit_inherits_entry_bundle_order`,
   `check_merge_port_approach_side` and
   `check_convergence_shallow_feeder_concentric` (which exempts the pairs a
-  recorded crossing exchanges at the entry), and the
-  `_guard_corridor_fed_solo_rides_trunk` guard (a fan seam's lane).
+  recorded crossing exchanges at the entry), the
+  `_guard_corridor_fed_solo_rides_trunk` guard (a fan seam's lane), and the
+  render chokepoint's U-turn pass-through check (`_u_turn_pass_through`).
   `RECORD_USES` in
   `tests/test_lane_plan.py` names each one.
 - **Related tests**: `tests/test_lane_plan.py`,
@@ -2065,18 +2080,18 @@ They are design evidence, not part of this specification.
 - **Out of scope**: Canvas-side corridors, whose far boundary is the canvas
   edge rather than a grid neighbour; closing one grows a margin, which no row
   or column offset owns. The render owns that margin instead:
-  `_settle_clear_of_the_canvas_margins` (`render/svg.py`) measures the ink that
-  lands outside the section-box envelope on the two sides whose edge is pinned
-  at zero, moves the whole map away from the edge by the shortfall
-  (`translate_graph`), and re-derives the geometry on the moved copy; the far
-  margins grow the canvas by the same amount, so the map keeps a first-quadrant
-  frame and the zero edge a canvas measurement reads stays the zero edge. The
-  move is rigid and post-routing, which is why it is not one of settlement's
-  per-boundary allocations. Canvas corridors are gated separately, by
-  `assert_canvas_corridors_hold_their_claims`, which runs once the render has
-  sized its canvas -- the first point at which the number a canvas claim is
-  measured against exists, and the reason the settlement guard could never
-  measure one. A run is filed against a canvas side only when it lies beyond the
+  `_canvas_placement` (`render/svg.py`) measures the ink that lands outside the
+  section-box envelope on the two sides whose edge is pinned at the canvas
+  origin, and `_move_onto_the_canvas` moves the settled map, routes and plan
+  included, by the shortfall (`translate_graph`); the far margins grow the
+  canvas by the same amount, so the map keeps a first-quadrant frame and the
+  zero edge a canvas measurement reads stays the zero edge. The move is one
+  uniform translation after every routing decision, which is why it is not one
+  of settlement's per-boundary allocations. Canvas corridors are gated
+  separately, by `assert_canvas_corridors_hold_their_claims`, which runs once
+  the render has sized its canvas -- the first point at which the number a
+  canvas claim is measured against exists, and the reason the settlement guard
+  could never measure one. A run is filed against a canvas side only when it lies beyond the
   extreme of every placed section, so the margin it is measured within is the one
   it occupies, and its clearance on that side is `CANVAS_EDGE_CLEARANCE`: the
   stroke's half-width plus a direction chevron, which is what is drawn there,
@@ -2262,7 +2277,7 @@ They are design evidence, not part of this specification.
   translation this stage can express is 2px and a 1px deficit is below the
   resolution the ledger works at.
   A merge feeding a TOP or BOTTOM entry port is seated on the vertical lead-in
-  that port receives (`_position_merge_junction`). This puts its feeders in the
+  that port receives (`_merge_junction_position`). This puts its feeders in the
   row corridor they claim and the merged trunk in the column the port's own
   crossing gives that line. Three conditions govern that column.
   **The drop lands where its siblings land.** The junction-to-port hop is seated
@@ -2475,7 +2490,9 @@ rotated side header a lower tier below both (see the module docstring).
 `assert_render_header_clearance`, on the routes and offsets the renderer is
 handed. The guard therefore certifies the geometry after label placement,
 header reconciliation, and settlement, rather than an intermediate routing
-observation those stages can move.
+observation those stages can move. A pass-through on a connector the approach
+record sends round as a U-turn aborts a non-permissive render, like a route
+through its own section.
 
 ## Cross-stage contract: semantic fan planning
 

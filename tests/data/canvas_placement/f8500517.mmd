@@ -1,0 +1,48 @@
+%%metro title: Fuzz 8500517
+%%metro line: l0 | Filter_Stats | #e6194b
+%%metro line: l1 | Count | #3cb44b
+
+graph LR
+    subgraph sec0 [Merge 0]
+        s0n0[count]
+        s0n1[markdup]
+        s0n0 -->|l0| s0n1
+        s0n0 -->|l1| s0n1
+    end
+    subgraph sec1 [Index_Align_Summarise 1]
+        s1n0[markdup]
+        s1n1[pca]
+        s1n2[count_gather]
+        s1n3[markdup]
+        s1n4[annotate_export]
+        s1n0 -->|l0| s1n2
+        s1n2 -->|l0| s1n3
+        s1n2 -->|l1| s1n3
+        s1n3 -->|l0| s1n4
+        s1n3 -->|l1| s1n4
+        s1n0 -->|l0| s1n4
+        s1n0 -->|l1| s1n1
+        s1n1 -->|l1| s1n2
+    end
+    subgraph sec2 [Bin 2]
+        %%metro entry: right | l0
+        s2n0[align]
+        s2n1[pca_vcf_qc]
+        s2n2[annotate_call_align]
+        s2n4[sort_quant]
+        s2n0 -->|l0| s2n1
+        s2n1 -->|l0| s2n2
+        s2n2 -->|l0| s2n4
+    end
+    subgraph sec3 [Polish_Summarise_Gather 3]
+        s3n0[trim_fastqc_sort]
+        s3n1[summarise_fastqc]
+        s3n2[fastqc_annotate]
+        s3n0 -->|l1| s3n1
+        s3n1 -->|l1| s3n2
+    end
+    s0n1 -->|l0| s1n0
+    s0n1 -->|l1| s1n0
+    s1n4 -->|l0| s2n0
+    s1n4 -->|l1| s3n0
+    s0n1 -->|l1| s3n2

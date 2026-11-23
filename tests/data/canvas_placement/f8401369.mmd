@@ -1,0 +1,42 @@
+%%metro title: Fuzz 8401369
+%%metro line: l0 | Annotate | #e6194b
+%%metro line: l1 | Merge_Merge_Summarise | #3cb44b
+%%metro line: l2 | Index_Stats | #4363d8
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 1,1
+%%metro grid: sec3 | 0,1
+
+graph LR
+    subgraph sec0 [Annotate 0]
+        s0n0[cluster]
+        s0n1[index]
+        s0n2[filter_index_trim]
+        s0n0 -->|l1,l2| s0n1
+        s0n1 -->|l1,l2| s0n2
+    end
+    subgraph sec1 [Fastqc 1]
+        s1n0[QC]
+    end
+    subgraph sec2 [Gather_Report 2]
+        %%metro direction: TB
+        s2n0[MERGE_CLASSIFY]
+        s2n1[INDEX]
+        s2n2[quant]
+        s2n3[export_index]
+        s2n0 -->|l0,l1| s2n1
+        s2n1 -->|l1| s2n2
+        s2n0 -->|l2| s2n2
+        s2n2 -->|l2| s2n3
+    end
+    subgraph sec3 [Call 3]
+        s3n0[vcf_merge]
+        s3n1[MERGE_CLASSIFY]
+        s3n0 -->|l0,l1,l2| s3n1
+    end
+    s2n1 -->|l0| s3n0
+    s0n2 -->|l1| s2n0
+    s2n2 -->|l1| s3n0
+    s0n2 -->|l2| s1n0
+    s1n0 -->|l2| s2n0
+    s2n3 -->|l2| s3n0

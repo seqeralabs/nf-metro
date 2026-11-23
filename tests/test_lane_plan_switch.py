@@ -98,11 +98,11 @@ class _Drawn:
 
 @lru_cache(maxsize=None)
 def _drawn(path: Path) -> _Drawn:
-    """Lay out and render *path*, keeping the settled geometry the render
-    draws and the graph copy it settled, whose rows and columns the render
-    translates; ``graph`` is ``None`` when the map aborts."""
+    """Lay out and render *path*, keeping the geometry the render draws and
+    the graph copy it draws it on, both placed on the canvas; ``graph`` is
+    ``None`` when the map aborts."""
     settled: list[tuple[MetroGraph, svg._SettledRenderGeometry]] = []
-    real = svg._settle_render_geometry
+    real = svg._settle_once_on_the_canvas
     planners: list[lane_plan_module._Tracks] = []
 
     class Kept(lane_plan_module._Tracks):
@@ -111,15 +111,15 @@ def _drawn(path: Path) -> _Drawn:
             planners.append(self)
 
     def settle(
-        graph: MetroGraph, *args: object, **kwargs: object
-    ) -> svg._SettledRenderGeometry:
-        result = real(graph, *args, **kwargs)  # type: ignore[arg-type]
-        settled.append((graph, result))
+        *args: object, **kwargs: object
+    ) -> tuple[MetroGraph, svg._SettledRenderGeometry]:
+        result = real(*args, **kwargs)  # type: ignore[arg-type]
+        settled.append(result)
         return result
 
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as mp:
         warnings.simplefilter("ignore")
-        mp.setattr(svg, "_settle_render_geometry", settle)
+        mp.setattr(svg, "_settle_once_on_the_canvas", settle)
         mp.setattr(lane_plan_module, "_Tracks", Kept)
         try:
             source = prepare_graph(path.read_text(), source_dir=str(path.parent))
@@ -396,7 +396,22 @@ APPROACH_CASES = [
     )
     if path.stem in L_SHAPE_DROPS_PAST_A_BAND_SECTION
     else path
-    for path in CURATED
+    for path in [
+        *CURATED,
+        *(
+            ROOT / "tests" / "data" / "canvas_placement" / f"{stem}.mmd"
+            for stem in (
+                "f8401267",
+                "f8401678",
+                "f8402283",
+                "f8402603",
+                "f8403686",
+                "f8404063",
+                "f8404575",
+                "w2_01522",
+            )
+        ),
+    ]
 ]
 
 
@@ -763,24 +778,24 @@ def test_no_dealt_perpendicular_entry_columns() -> None:
 
 
 def test_the_far_left_entry_u_turn_runs_over_the_top() -> None:
+    """The P-sites loop into the far TE entry is recorded round above, the
+    side with room on a length tie, and drawn over the top of the TE box."""
     drawn = _drawn(_curated("samerow_left_exit_far_left_entry"))
     graph, plan = drawn.graph, drawn.plan
     assert graph is not None and plan is not None
-    over = [
-        key
-        for key, a in plan.port_orders.approaches.items()
-        if a.rule is SideRule.OVER_TOP
+    key = ("te__entry_left_9", "psite_id__exit_left_4")
+    approach = plan.port_orders.approaches[key]
+    assert approach.rule is SideRule.CORRIDOR
+    assert _screen_side(graph, key[0], approach.side) == -1
+    top = graph.sections[graph.ports[key[0]].section_id].bbox_y
+    loops = [
+        polyline
+        for route, polyline in zip(drawn.routes, drawn.polylines, strict=True)
+        if route.edge.target == key[0]  # type: ignore[attr-defined]
+        and _origin(graph, route.edge.source, route.edge.line_id) == key[1]  # type: ignore[attr-defined]
     ]
-    assert over
-    for entry_id, source_id in over:
-        top = graph.sections[graph.ports[entry_id].section_id].bbox_y
-        for route, polyline in zip(drawn.routes, drawn.polylines, strict=True):
-            edge = route.edge  # type: ignore[attr-defined]
-            if (
-                edge.target == entry_id
-                and _origin(graph, edge.source, edge.line_id) == source_id
-            ):
-                assert min(y for _x, y in polyline) < top
+    assert loops
+    assert all(min(y for _x, y in polyline) < top for polyline in loops)
 
 
 def test_a_rail_mode_map_reads_no_lanes() -> None:

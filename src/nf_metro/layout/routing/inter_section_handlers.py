@@ -31,7 +31,6 @@ from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
@@ -43,19 +42,17 @@ from nf_metro.layout.geometry import (
     AxisFrame,
     axis_split,
     cotravelling_lane_clearance,
+    grid_spans_overlap,
     lane_delta,
     lanes_run_along_x,
     lanes_run_along_y,
     section_bbox_span,
+    section_column_span,
 )
 from nf_metro.layout.lane_plan import (
     approach_source,
     gap_counter_runners,
     recorded_lane_plan,
-)
-from nf_metro.layout.pass_metrics import canvas_edge_clearance
-from nf_metro.layout.port_order_plan import (
-    SideRule,
 )
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
@@ -78,6 +75,7 @@ from nf_metro.layout.routing.common import (
     RoutedPath,
     _center_inter_row_channel,
     _inter_row_band_fits,
+    _sections_in_col,
     _v_segment_crosses_other_section,
     bundle_width,
     bypass_bottom_y,
@@ -88,8 +86,10 @@ from nf_metro.layout.routing.common import (
     column_gap_edges,
     endpoint_port_xs,
     flanked_cross_row_riser_neighbour_col,
+    gap_above_row,
     gap_lo_for_x,
     header_corridor_y,
+    held_in_reserved_gap_band,
     horizontal_direction,
     inter_column_channel_x,
     inter_row_channel_y,
@@ -108,9 +108,10 @@ from nf_metro.layout.routing.common import (
     right_normal_axis_sign,
     row_bottom_edge,
     row_top_edge,
-    section_exists_above_row,
+    section_header_safe_cap,
     section_header_top,
     section_ids_of_stations,
+    section_lies_before,
     segment_direction,
     symmetric_bundle_midpoint,
     trailing_perp_side,
@@ -144,7 +145,6 @@ from nf_metro.layout.routing.normalize import (
     _restack_channel,
     _VChannel,
 )
-from nf_metro.layout.routing.offsets import _approach_record
 from nf_metro.layout.routing.offsets import _recorded_approach as _recorded_side
 from nf_metro.layout.routing.perp import (
     _perp_entry_crossing_x,
@@ -154,6 +154,7 @@ from nf_metro.layout.routing.perp import (
 from nf_metro.layout.routing.reserved_bands import (
     EdgeKey,
     ReservedBand,
+    ReservedBands,
     corridor_clearance_band,
     held_in_reserved_band,
     seat_bundle_in_claimed_bands,
@@ -1212,8 +1213,8 @@ def left_exit_around_below_geometry(f: _InterFacts) -> _LeftExitUnderTargetLoop:
     members = [
         (edge_by_line[lid], lid, -exit_offs[lid], entry_offs[lid]) for lid in line_ids
     ]
-    # Run the horizontal over the target's top when viable, else dip below it
-    # (see :func:`_left_exit_wrap_over_top_y`).
+    # Run the horizontal over the target's top where the approach record sends
+    # the connector round above, else dip below it.
     over_gy = _left_exit_wrap_over_top_y(f)
     over_top = over_gy is not None
     channel_y = over_gy if over_gy is not None else by
@@ -1289,79 +1290,15 @@ def _route_left_exit_around_below_left_entry(f: _InterFacts) -> RoutedPath | Non
 def _left_exit_wrap_over_top_y(f: _InterFacts) -> float | None:
     """Over-the-top channel Y for a same-row LEFT-exit far-LEFT-entry wrap loop.
 
-    A same-row wrap dips below the target box; when the target is tall that dip
-    runs far below every section before returning the full width.  Where the
-    lane plan's approach record loops the connector over the target's top
-    (:attr:`SideRule.OVER_TOP`, decided from placement by
-    :func:`left_exit_wrap_over_top_y`), the loop traverses the band ABOVE the
-    target row (:func:`_gap_above_channel_y`); otherwise it keeps the dip
+    Where the lane plan's approach record sends the connector round above its
+    entry's band, the loop traverses the band above the target row
+    (:func:`_gap_above_channel_y`); otherwise it dips below the target
     (``None``).
     """
-    approach = _approach_record(f.graph, f.edge)
-    if approach is None or approach.rule is not SideRule.OVER_TOP:
+    if _recorded_side(f.graph, f.edge) != "above":
         return None
     assert f.tgt_row is not None
     return _gap_above_channel_y(f.ctx, f.tgt_row)
-
-
-def left_exit_wrap_over_top_y(
-    graph: MetroGraph,
-    src: Station,
-    tgt: Station,
-    tgt_row: int | None,
-    columns: tuple[float, float],
-    curve_radius: float,
-    reserved: ReservedBand | None,
-    crosses_v: Callable[[float, float, float], bool],
-    crosses_h: Callable[[float, float, float], bool],
-) -> float | None:
-    """:func:`_left_exit_wrap_over_top_y` from placement: the loop's source
-    ascent and target descent *columns*, the band above *tgt_row* holding
-    *reserved* corridors, and *crosses_v* / *crosses_h* telling whether a
-    vertical ``(x, y1, y2)`` or horizontal ``(x1, x2, y)`` leg crosses a
-    section other than the loop's ends."""
-    if tgt_row is None:
-        return None
-    gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
-    if gap_bottom <= gap_top or not _inter_row_band_fits(gap_top, gap_bottom):
-        return None
-    if len({e.line_id for e in graph.edges_to(tgt.id)}) > 1:
-        return None
-    gy = gap_above_channel_y(graph, tgt_row, curve_radius, reserved)
-    cx, vx = columns
-    blocked = (
-        crosses_v(cx, src.y, gy) or crosses_v(vx, gy, tgt.y) or crosses_h(cx, vx, gy)
-    )
-    return None if blocked else gy
-
-
-def left_exit_wrap_columns(
-    graph: MetroGraph,
-    src: Station,
-    tgt: Station,
-    src_cell: tuple[int | None, int | None],
-    offset_step: float,
-) -> tuple[float, float]:
-    """A single line's far-side wrap columns (source ascent, target descent) from
-    *src* in grid cell *src_cell*, as :func:`left_exit_around_below_geometry`
-    places them at zero exit and entry offset on the module's ``CURVE_RADIUS``."""
-    src_col, src_row = src_cell
-    gap_left, gap_right = (
-        column_gap_edges(graph, src_col - 1, src_col, row=src_row)
-        if src_col is not None and src_col > 0
-        else (0.0, 0.0)
-    )
-    if gap_right > gap_left:
-        cx = max(
-            symmetric_bundle_midpoint(gap_left, gap_right, [0.0], 0),
-            gap_right - CURVE_RADIUS - offset_step,
-        )
-    else:
-        cx = _left_descent_x(
-            CURVE_RADIUS, offset_step, _section_left_edge(graph, src), 1
-        )
-    vx = _left_descent_x(CURVE_RADIUS, offset_step, _section_left_edge(graph, tgt), 1)
-    return cx, vx
 
 
 def _route_right_entry_cross_row(f: _InterFacts) -> RoutedPath | None:
@@ -1422,11 +1359,51 @@ def _right_entry_cross_row_channel_y(f: _InterFacts) -> float | None:
     return _right_entry_below_channel_y(f)
 
 
+def _row_under_run_y(
+    graph: MetroGraph,
+    row: int,
+    src_col: int,
+    tgt_col: int,
+    reserved: ReservedBands | None,
+) -> float:
+    """The channel of a run under grid row *row* from *src_col* to *tgt_col*:
+    ``BYPASS_CLEARANCE`` below the row's sections in those columns, clear of the
+    highest header badge among lower-row sections past *src_col* (halfway to
+    it where the gap cannot hold both), then held in the reserved gap band."""
+    placed = [s for s in graph.sections.values() if s.bbox_w > 0]
+    row_bottom = max(
+        s.bbox_y + s.bbox_h
+        for s in placed
+        if s.grid_row <= row < s.grid_row + s.grid_row_span
+        and grid_spans_overlap(section_column_span(s), (src_col, tgt_col))
+    )
+    y = row_bottom + BYPASS_CLEARANCE
+    lowest = min(
+        (
+            s
+            for s in placed
+            if s.grid_row > row
+            and grid_spans_overlap(section_column_span(s), (src_col + 1, tgt_col))
+        ),
+        key=section_header_top,
+        default=None,
+    )
+    if lowest is not None and y > (cap := section_header_safe_cap(lowest)):
+        y = cap if cap >= row_bottom else (row_bottom + section_header_top(lowest)) / 2
+    return held_in_reserved_gap_band(graph, y, reserved)
+
+
 def _right_entry_below_channel_y(f: _InterFacts) -> float:
-    """The around-below channel of a RIGHT-entry wrap: below every section in
-    the column range, the target row included."""
+    """The around-below channel of a RIGHT-entry wrap.  A same-row wrap from the
+    left runs under its own row (:func:`_row_under_run_y`): its lead turns down
+    within the source's column, so it clears the source box but passes over only
+    the columns after it.  Any other wrap runs below every section in the range."""
     src_col = f.src_col if f.src_col is not None else 0
     tgt_col = f.tgt_col if f.tgt_col is not None else src_col
+    if f.src_row is not None and f.src_row == f.tgt_row and src_col < tgt_col:
+        return _row_under_run_y(
+            f.graph, f.src_row, src_col, tgt_col, f.ctx.reserved_bands.rows
+        )
     return bypass_bottom_y(
         f.graph,
         src_col,
@@ -3796,7 +3773,6 @@ def _bypass_geometry(
             ctx.offset_step,
             anchor_section_id=tgt_sec_id,
             anchor_side=PortSide.LEFT,
-            anchor_is_target=True,
         )
         gap2_limit = effective_tx - ctx.curve_radius
         if gap2_base + (g2_n - 1) * ctx.offset_step > gap2_limit:
@@ -3855,7 +3831,6 @@ def _bypass_geometry(
             ctx.offset_step,
             anchor_section_id=tgt_sec_id,
             anchor_side=PortSide.RIGHT,
-            anchor_is_target=True,
         )
         gap2_limit = effective_tx + ctx.curve_radius
         if gap2_base - (g2_n - 1) * ctx.offset_step < gap2_limit:
@@ -6259,13 +6234,6 @@ def _left_entry_descent_x(
     pass the per-line stagger as *signed_delta* (``+delta`` when the channel
     sits on the bundle's right, ``-delta`` when on its left) to keep the
     concentric-corner handedness local to each handler.
-
-    The bump is spent leftward, which for a channel descending the map's left
-    margin is spent toward the canvas edge.  It is therefore capped at the room
-    the margin leaves outboard of ``canvas_edge_clearance()``: a stroke and its
-    direction chevron drawn past that are clipped by the viewport, whereas
-    ``SECTION_ROUTE_CLEARANCE`` is a legibility gap beside a box edge that a run
-    can give up.
     """
     return _left_descent_x(
         ctx.curve_radius, ctx.offset_step, anchor_x, n_outer, signed_delta
@@ -6282,10 +6250,7 @@ def _left_descent_x(
     base_gap = curve_radius + offset_step
     max_delta = (n_outer - 1) * offset_step / 2
     extra_clearance = max(0.0, SECTION_ROUTE_CLEARANCE - (base_gap - max_delta))
-    outboard_room = max(
-        0.0, anchor_x - base_gap + signed_delta - canvas_edge_clearance()
-    )
-    return anchor_x - base_gap - min(extra_clearance, outboard_room) + signed_delta
+    return anchor_x - base_gap - extra_clearance + signed_delta
 
 
 def _right_entry_descent_x(
@@ -7022,10 +6987,9 @@ def _fan_left_entry_descent_x(
     per-line ``delta`` stagger is preserved.  Returns ``None`` when the
     column has no measurable left edge.
     """
-    col_left = col_left_edge(ctx.graph, tgt_col, default=0.0)
-    if col_left <= 0.0:
+    if not _sections_in_col(ctx.graph, tgt_col):
         return None
-    return _left_entry_descent_x(ctx, col_left, n_outer, delta)
+    return _left_entry_descent_x(ctx, col_left_edge(ctx.graph, tgt_col), n_outer, delta)
 
 
 def _fan_has_corridor_sibling(junction_id: str, ctx: _RoutingCtx) -> bool:
@@ -7705,6 +7669,24 @@ def _right_entry_wrap_geometry(f: _InterFacts) -> _RightEntryWrapGeometry:
     )
 
 
+def loops_round_right_entry(f: _InterFacts) -> bool:
+    """Whether *f* is a RIGHT entry fed from the left whose source is not a
+    resolved cross-row one, which routing loops round its target section: the
+    channel beside the source would cut the target's interior."""
+    return f.canonical_family_id is RouteFamilyId.RIGHT_ENTRY_WRAP and not (
+        f.cross_row and f.src_col is not None and f.tgt_col is not None
+    )
+
+
+def draws_over_top_loop(f: _InterFacts) -> bool:
+    """Whether routing draws *f* as a loop over the top of its target section:
+    a loop round a RIGHT entry (:func:`loops_round_right_entry`) the approach
+    record does not send round below.  The exit-turn planner reads this same
+    classification.
+    """
+    return loops_round_right_entry(f) and _recorded_side(f.graph, f.edge) != "below"
+
+
 def _route_right_entry_wrap(f: _InterFacts) -> RoutedPath:
     """Route to a RIGHT entry port by wrapping around the right side.
 
@@ -7725,17 +7707,17 @@ def _route_right_entry_wrap(f: _InterFacts) -> RoutedPath:
     centreline: the R-D-R-D-L loop is described once at the bundle centre, this
     line sits ``delta`` off it, and :func:`build_concentric_bundle` nests every
     corner concentrically so the loop cannot flip.  Same-row sources delegate to
-    :func:`_route_right_entry_over_top` (also a centreline build).
+    :func:`_route_right_entry_over_top` (also a centreline build), or to
+    :func:`_route_right_entry_around_below` where the approach record sends
+    the connector round below (:func:`draws_over_top_loop`).
     """
     edge, src, tgt, ctx = f.edge, f.src, f.tgt, f.ctx
-    # The cross-row channel is a bypass-style Y just below the source row's
-    # sections, so the line stays high and only drops at the target column.
-    if not (f.cross_row and f.src_col is not None and f.tgt_col is not None):
-        # Same-row source: loop over the top into the right port (the channel
-        # below would cut the interior).  Built as a concentric bundle.
+    if draws_over_top_loop(f):
         over_top = _route_right_entry_over_top(edge, src, tgt, ctx)
         assert over_top is not None  # edge is always among its own bundle members
         return over_top
+    if loops_round_right_entry(f):
+        return _route_right_entry_around_below(f)
 
     geometry = _right_entry_wrap_geometry(f)
     seam = geometry.wrap
@@ -7776,32 +7758,14 @@ def _route_right_entry_wrap(f: _InterFacts) -> RoutedPath:
     return route
 
 
-def _gap_above_target_y(graph: MetroGraph, tgt_row: int) -> tuple[float, float]:
-    """Return ``(gap_top, gap_bottom)`` of the inter-row band ABOVE *tgt_row*.
-
-    The band sits between the row above the target's bottom edge and the
-    target row's top edge -- the same band the counter-flow guard checks, so
-    the route runs its rightward traverse just above the target row then drops
-    into the RIGHT port.  For a source exactly one row up this is the band just
-    below the source row; for a source further up it is the wider band the
-    intervening rows leave abutting the target, which is what admits the
-    with-flow approach when the source-adjacent band is too narrow.  Computed
-    over all columns (not column-restricted) so the traverse stays clear of
-    every section in the span.
-    """
-    gap_top = row_bottom_edge(graph, tgt_row - 1)
-    gap_bottom = row_top_edge(graph, tgt_row, default=gap_top)
-    return gap_top, gap_bottom
-
-
 def _gap_above_channel_y(ctx: _RoutingCtx, tgt_row: int) -> float:
     """Y of the traverse a route runs in the band ABOVE *tgt_row*.
 
     Below another row the traverse centres in the inter-row gap.  The topmost
-    row has no gap above it, only the canvas-top padding that holds the title,
-    so the traverse takes the over-the-top headroom placement reserves above the
-    row (``_reserve_over_top_headroom``): clear of every header badge in the row
-    by the same margin as :func:`_right_entry_over_top_geometry`'s channel.
+    row has no gap above it, only canvas headroom, which the canvas grows to
+    fit once everything is drawn (``_canvas_placement``); there the traverse
+    runs clear of every header badge in the row by the same margin as
+    :func:`_right_entry_over_top_geometry`'s.
     """
     return gap_above_channel_y(
         ctx.graph, tgt_row, ctx.curve_radius, ctx.reserved_bands.rows.at(tgt_row)
@@ -7816,31 +7780,81 @@ def gap_above_channel_y(
 ) -> float:
     """:func:`_gap_above_channel_y` from placement, the band holding
     *reserved* corridors."""
-    gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
-    if not section_exists_above_row(graph, tgt_row):
+    gap_top, gap_bottom = gap_above_row(graph, tgt_row)
+    if not section_lies_before(graph, "y", tgt_row):
         return gap_bottom - INTER_ROW_HEADER_CLEARANCE - curve_radius
     return _center_inter_row_channel(gap_top, gap_bottom, reserved=reserved)
 
 
-def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
-    """Whether a RIGHT-entry feed from above can use the inter-row gap.
+def _gap_above_band_fits(graph: MetroGraph, tgt_row: int) -> bool:
+    """Whether the band above *tgt_row* is an inter-row gap a route may traverse.
 
-    The route runs its long horizontal in the band just above the target
-    row, then drops straight down the RIGHT side of the target column into
-    the port.  Viable only when that band genuinely exists (the row above the
-    target's bottom is above the target row's top), is wide enough for the
-    traverse to clear both the upper row's bottom edge and the target row's
-    header badge, and the horizontal at the band's centre crosses no section
-    interior between the source and the target's right edge.
+    The gap holds a run only when it clears both the upper row's bottom edge and
+    the target row's header badge (:func:`_inter_row_band_fits`); otherwise a
+    centred run grazes one of them.  Above the topmost row there is no gap, only
+    canvas headroom over the whole map, so this is False there.
+    """
+    return section_lies_before(graph, "y", tgt_row) and _inter_row_band_fits(
+        *gap_above_row(graph, tgt_row)
+    )
+
+
+def _gap_above_holds_run(graph: MetroGraph, tgt_row: int) -> bool:
+    """Whether a run may take the band above *tgt_row* by its width: an
+    inter-row gap that fits it (:func:`_gap_above_band_fits`), or the canvas
+    headroom above the topmost row, which grows to fit."""
+    return not section_lies_before(graph, "y", tgt_row) or _gap_above_band_fits(
+        graph, tgt_row
+    )
+
+
+def _takes_gap_above(f: _InterFacts, fits: Callable[[_InterFacts], bool]) -> bool:
+    """Whether a wrap into *f*'s entry traverses the band above the target row:
+    as the approach record says, else where the leaf *fits* it.  Above the
+    topmost row the headroom is no band of its own, so an unrecorded connector
+    takes it only to join another connector into its entry recorded above.
+
+    Raises:
+        RuntimeError: a connector recorded round above whose leaf does not
+            fit the band.
+    """
+    side = _recorded_side(f.graph, f.edge)
+    if side == "above":
+        if not fits(f):
+            raise RuntimeError(
+                f"{f.edge.source}->{f.edge.target} ({f.edge.line_id}) is planned "
+                "round above its entry's band, which its wrap cannot traverse"
+            )
+        return True
+    if side == "below":
+        return False
+    assert f.tgt_row is not None
+    if not section_lies_before(f.graph, "y", f.tgt_row):
+        return any(
+            (other.source, other.target) != (f.edge.source, f.edge.target)
+            and _recorded_side(f.graph, other) == "above"
+            for other in f.graph.edges_to(f.edge.target)
+        )
+    return fits(f)
+
+
+def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
+    """Whether a RIGHT-entry feed from above uses the band above the target
+    row (:func:`_takes_gap_above`, :func:`_right_entry_gap_above_fits`)."""
+    return _takes_gap_above(f, _right_entry_gap_above_fits)
+
+
+def _right_entry_gap_above_fits(f: _InterFacts) -> bool:
+    """Whether a RIGHT-entry feed fits the band above the target row.
+
+    The route runs its long horizontal in that band, then drops straight down
+    the RIGHT side of the target column into the port.  The band must hold the
+    run (:func:`_gap_above_holds_run`), and the horizontal must cross no
+    section interior between the source and the target's right edge.
     """
     graph, src, entry_port, tgt_row = f.graph, f.src, f.tgt, f.tgt_row
     assert tgt_row is not None
-    gap_top, gap_bottom = _gap_above_target_y(graph, tgt_row)
-    if gap_bottom <= gap_top:
-        return False
-    # A band too narrow for both clearances makes the centred run graze the
-    # source box bottom, so the feed loops around below the target row instead.
-    if not _inter_row_band_fits(gap_top, gap_bottom):
+    if not _gap_above_holds_run(graph, tgt_row):
         return False
     gy = _gap_above_channel_y(f.ctx, tgt_row)
 
@@ -7854,8 +7868,7 @@ def _right_entry_gap_above_is_clear(f: _InterFacts) -> bool:
     )
     # Horizontal run spans the source X out to just past the target's right
     # edge (where the descent channel sits).  Exclude the source and target
-    # sections themselves; any OTHER section the band crosses kills the gap
-    # route (fall back to the around-below loop).
+    # sections themselves.
     return not f.h_segment_crosses_other_section(src.x, section_right, gy)
 
 
@@ -8005,27 +8018,28 @@ def _route_right_entry_via_gap_above(f: _InterFacts) -> RoutedPath:
 
 
 def _left_entry_gap_above_is_clear(f: _InterFacts) -> bool:
-    """Whether a LEFT-entry feed from above can use the inter-row gap.
+    """Whether a LEFT-entry feed from above uses the band above the target
+    row (:func:`_takes_gap_above`, :func:`_left_entry_gap_above_fits`)."""
+    return _takes_gap_above(f, _left_entry_gap_above_fits)
 
-    The mirror of :func:`_right_entry_gap_above_is_clear`.  The route leads out
+
+def _left_entry_gap_above_fits(f: _InterFacts) -> bool:
+    """Whether a LEFT-entry feed fits the band above the target row.
+
+    The mirror of :func:`_right_entry_gap_above_fits`.  The route leads out
     right of the source, drops into the band just above the target row, runs
     LEFTWARD along it, then drops down the LEFT (outward) side of the target
-    column into the port.  Viable only when that band genuinely exists, is wide
-    enough to clear both the upper row's bottom edge and the target row's header
-    badge, and none of the three moving legs crosses another section interior:
-    the source-side descent (a source stacked above a *wider* neighbour would
-    drop into it), the band traverse, and the target-side descent.
+    column into the port.  The band must hold the run
+    (:func:`_gap_above_holds_run`), and none of the three moving legs may cross
+    another section interior: the source-side descent (a source stacked above a
+    *wider* neighbour would drop into it), the band traverse, and the
+    target-side descent.
     """
     graph, src, tgt, ctx = f.graph, f.src, f.tgt, f.ctx
     assert f.tgt_row is not None
-    gap_top, gap_bottom = _gap_above_target_y(graph, f.tgt_row)
-    if gap_bottom <= gap_top:
+    if not _gap_above_holds_run(graph, f.tgt_row):
         return False
-    if not _inter_row_band_fits(gap_top, gap_bottom):
-        return False
-    gy = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=ctx.reserved_bands.rows.at(f.tgt_row)
-    )
+    gy = _gap_above_channel_y(ctx, f.tgt_row)
     _fan, pos_n, _delta, corner_x = _wrap_fan_geometry(
         ctx, f.edge, src, f.i, f.n, Direction.D
     )
@@ -8050,10 +8064,7 @@ def _left_entry_gap_above_geometry(
 
     See :func:`_route_left_entry_via_gap_above` for the shape this describes.
     """
-    gap_top, gap_bottom = _gap_above_target_y(ctx.graph, tgt_row)
-    channel_y = _center_inter_row_channel(
-        gap_top, gap_bottom, reserved=ctx.reserved_bands.rows.at(tgt_row)
-    )
+    channel_y = _gap_above_channel_y(ctx, tgt_row)
     _fan, pos_n, delta, corner_x = _wrap_fan_geometry(ctx, edge, src, i, n, Direction.D)
     return _entry_wrap_record(
         ctx,
@@ -8174,8 +8185,8 @@ def _band_hop_geometry(f: _InterFacts) -> _BandHopGeometry | None:
     """
     graph, src, tgt, ctx = f.graph, f.src, f.tgt, f.ctx
     assert f.src_row is not None and f.tgt_row is not None
-    band0_top, band0_bottom = _gap_above_target_y(graph, f.src_row + 1)
-    band1_top, band1_bottom = _gap_above_target_y(graph, f.tgt_row)
+    band0_top, band0_bottom = gap_above_row(graph, f.src_row + 1)
+    band1_top, band1_bottom = gap_above_row(graph, f.tgt_row)
     # Both bands must clear the edge above and the next row's header badge below:
     # the band0 traverse runs above the intervening row, whose header can protrude
     # up into the gap, and band1 is where the branch descends past the target.
