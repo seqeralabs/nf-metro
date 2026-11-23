@@ -5920,17 +5920,27 @@ def _perp_entry_l_geometry(
             sorted(leaving(lid) for lid in ctx.graph.station_lines(edge.source))
         )
         if not straight_drop:
-            lx0 = sx + lead.sign * outer_lane_radius(
-                pos_i + 1, ctx.curve_radius, ctx.offset_step
-            )
+            riser = segment_direction((sx, sy), (sx, mid_y)) or lead
+            if _fan_split_face(ctx, src, lead) is not None:
+                # The member draws its riser off the centreline by its source
+                # offset, so the centreline sits that far back from the lane
+                # the fan's shared column gives this branch.
+                lx0 = (
+                    _fan_corner_x(ctx, src, pos_n, lead)
+                    + l_shape_stagger(pos_i, pos_n, riser, ctx.offset_step)
+                    - right_normal_axis_sign(riser) * leaving(edge.line_id)
+                )
+            else:
+                lx0 = sx + lead.sign * outer_lane_radius(
+                    pos_i + 1, ctx.curve_radius, ctx.offset_step
+                )
+                if lead is Direction.R:
+                    lx0 = _v1_corner_x(ctx, src, sx, lx0)
             # The riser's lanes take radii growing from the innermost lane of
             # the turn at the base radius, so every corner rounds in full once
             # that lane stands a base radius clear of the junction.
-            riser = segment_direction((sx, sy), (sx, mid_y)) or lead
             inward = -lead.sign * right_normal_axis_sign(riser)
             stand_off = ctx.curve_radius + max(inward * a for a in fan_source_offsets)
-            if lead is Direction.R:
-                lx0 = _v1_corner_x(ctx, src, sx, lx0)
 
     # Where the entry lands each line on its own lane, the centreline lands on
     # the reference line's, so the bundle tapers to the section's spread.
