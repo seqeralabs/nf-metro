@@ -1185,8 +1185,8 @@ def _print_render_result(sources: list[Path], paths: list[Path]) -> None:
     echo_yaml("\n".join(to_yaml(document)))
 
 
-# A deliberate easter egg: Snakemake runs of the CLI get one light-hearted
-# progress line, picked at random. The Python API prints nothing.
+# A deliberate easter egg for Snakemake runs of the CLI. The Python API
+# prints nothing.
 SNAKEMAKE_QUIPS = (
     "Convincing user that Nextflow is better than Snakemake...",
     "Snakes on a train...",
@@ -1716,7 +1716,10 @@ def convert(
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        result = convert_dag(text, input_format, title=title or "")
+        try:
+            result = convert_dag(text, input_format, title=title or "")
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
 
     if caught:
         _echo_block("Warnings", [str(w.message) for w in caught])

@@ -21,6 +21,8 @@ history.
   `nf-metro convert` turn `snakemake --rulegraph` or `--dag` output (DOT or
   mermaid-js) into a metro map. `nf-metro convert` detects the input format,
   or takes `--from nextflow|snakemake`.
+  From Python, pass `input_format="snakemake"` to `render_string` or
+  `prepare_graph`.
 - `%%metro number: 0` hides a section's number badge and starts its title where
   the badge would have been. Automatic numbering skips such a section, so the
   remaining sections number from 1 as if it were absent (#2058).

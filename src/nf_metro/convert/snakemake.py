@@ -21,12 +21,13 @@ from nf_metro.convert._core import (
     DagNode,
     ExperimentalInputWarning,
     ParsedDag,
+    _break_cycles,
     _humanize_label,
     dag_to_mmd,
 )
 from nf_metro.graph_views import directed_graph
 
-_DOT_HEADER = re.compile(r"^\s*digraph\s+snakemake_dag\b")
+_DOT_HEADER = re.compile(r"^\s*digraph\s+snakemake_dag\b", re.MULTILINE)
 _DOT_NODE = re.compile(r'^\s*(\d+)\s*\[\s*label\s*=\s*"((?:[^"\\]|\\.)*)"')
 _DOT_EDGE = re.compile(r"^\s*(\d+)\s*->\s*(\d+)\s*;?\s*$")
 
@@ -93,14 +94,15 @@ def _drop_shortcut_edges(dag: ParsedDag) -> None:
 
     A rule graph links a rule to every rule it reads from, so a rule that reads
     both an early output and a later one gets an edge past the rules between.
-    On a one-line map that edge would be drawn on top of the longer path. A
-    looping graph is left whole; :func:`dag_to_mmd` breaks the loop.
+    On a one-line map that edge would be drawn on top of the longer path.
+    Loop edges are kept as they are, for :func:`dag_to_mmd` to report.
     """
-    graph = directed_graph(dag.nodes, dag.edges)
-    if not nx.is_directed_acyclic_graph(graph):
-        return
-    reduced = nx.transitive_reduction(graph)
-    dag.edges = [edge for edge in dag.edges if reduced.has_edge(*edge)]
+    cycle_break = _break_cycles(set(dag.nodes), dag.edges)
+    reduced = nx.transitive_reduction(directed_graph(dag.nodes, cycle_break.kept))
+    loop_edges = set(cycle_break.removed)
+    dag.edges = [
+        edge for edge in dag.edges if edge in loop_edges or reduced.has_edge(*edge)
+    ]
 
 
 def is_snakemake_dag(text: str) -> bool:
@@ -119,6 +121,11 @@ def convert_snakemake_dag(text: str, title: str = "") -> str:
         Always: the Snakemake converter is experimental.
     FeedbackEdgesDroppedWarning
         When the rule graph loops (see :func:`dag_to_mmd`).
+
+    Raises
+    ------
+    ValueError
+        When *text* holds no Snakemake rules.
     """
     warnings.warn(
         ExperimentalInputWarning(
@@ -129,6 +136,11 @@ def convert_snakemake_dag(text: str, title: str = "") -> str:
         stacklevel=2,
     )
     dag = _parse_snakemake(text)
+    if not dag.nodes:
+        raise ValueError(
+            "No Snakemake rules found. Expected the output of "
+            "'snakemake --rulegraph' or '--dag', as DOT or mermaid-js."
+        )
     _drop_shortcut_edges(dag)
     has_outgoing = {src for src, _ in dag.edges}
     kept_ids = {

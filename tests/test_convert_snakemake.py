@@ -97,6 +97,39 @@ def test_an_edge_that_a_longer_path_covers_is_dropped():
     assert _edges(_convert(dot)) == {("align", "index"), ("index", "call")}
 
 
+def test_a_loop_elsewhere_does_not_keep_a_covered_edge():
+    dot = (
+        "digraph snakemake_dag {\n"
+        '\t0[label = "align", color = "0 0 0", style="rounded"];\n'
+        '\t1[label = "index", color = "0 0 0", style="rounded"];\n'
+        '\t2[label = "call", color = "0 0 0", style="rounded"];\n'
+        '\t3[label = "x", color = "0 0 0", style="rounded"];\n'
+        '\t4[label = "y", color = "0 0 0", style="rounded"];\n'
+        "\t0 -> 1\n\t1 -> 2\n\t0 -> 2\n\t3 -> 4\n\t4 -> 3\n}\n"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FeedbackEdgesDroppedWarning)
+        edges = _edges(_convert(dot))
+    assert ("align", "call") not in edges
+    assert {("align", "index"), ("index", "call")} <= edges
+
+
+def test_a_leading_log_line_does_not_hide_a_dot_export():
+    text = (
+        "Building DAG of jobs...\n"
+        + (FIXTURES / "flat_pipeline.rulegraph.dot").read_text()
+    )
+    assert detect_input_format(text) == "snakemake"
+    assert _convert(text) == _convert(
+        (FIXTURES / "flat_pipeline.rulegraph.dot").read_text()
+    )
+
+
+def test_input_without_rules_is_rejected():
+    with pytest.raises(ValueError, match="No Snakemake rules found"):
+        _convert("nothing to see\n")
+
+
 def test_rule_names_are_not_shortened():
     mmd = _convert((FIXTURES / "variant_calling.rulegraph.dot").read_text())
     assert "([Gatk Haplotypecaller])" in mmd
@@ -246,6 +279,14 @@ class TestCli:
         src.write_text("nothing to see\n")
         result = CliRunner().invoke(cli, ["convert", str(src)])
         assert "could not recognise the input" in result.output
+
+    def test_convert_reports_input_without_rules(self, tmp_path):
+        src = tmp_path / "x.txt"
+        src.write_text("nothing to see\n")
+        result = CliRunner().invoke(cli, ["convert", str(src), "--from", "snakemake"])
+        assert result.exit_code == 1
+        assert "No Snakemake rules found" in result.output
+        assert "Traceback" not in result.output
 
     def test_render_from_snakemake(self, tmp_path):
         out = tmp_path / "out.svg"
