@@ -9,7 +9,7 @@ in for the balls, and each frame substitutes the static circles
 and SVG therefore share one geometry and one clock, and the slot sits where
 the animated balls would, so the stacking matches too.
 
-The frame sequence spans exactly one animation cycle and stops one frame
+The frame sequence spans exactly one animation loop and stops one frame
 short of repeating it, so playback loops seamlessly in either direction of
 the wrap.
 
@@ -142,7 +142,7 @@ def write_animation(
     """Write one loop of *svg*'s animation to *output* as *fmt*.
 
     *svg* must have been emitted with ``animation_frame_slot`` set.  *duration*
-    replaces the map's own cycle length, compressing (or stretching) the whole
+    replaces the map's own loop length, compressing (or stretching) the whole
     loop into that many seconds -- the balls then move faster or slower than
     the SVG does, which is usually what a long map needs to fit a README.
     *scale* and *width* size the frames exactly as they size a PNG.
@@ -164,7 +164,7 @@ def write_animation(
         plan.station_offsets,  # type: ignore[arg-type]
         plan.theme,  # type: ignore[arg-type]
     )
-    if not timeline.tracks or timeline.balls_per_line < 1:
+    if not timeline.dots:
         # Animated, but with nothing in motion: the loop would be one still
         # repeated a few hundred times, which is worth saying rather than
         # writing out.
@@ -172,7 +172,7 @@ def write_animation(
             "this map's animation has no moving balls to export: no metro "
             "line chains into a path for one to travel along."
         )
-    loop = duration if duration is not None else timeline.cycle
+    loop = duration if duration is not None else timeline.loop
     count = max(1, round(loop * fps))
     if notify is not None and count > LARGE_LOOP_FRAMES:
         notify(_cost_note(plan, count=count, scale=scale, width=width))

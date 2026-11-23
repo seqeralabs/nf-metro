@@ -1,0 +1,17 @@
+%%metro title: rejoining branches share one dot per wave with the lone branch
+%%metro line: l1 | Line 1 | #2db572
+
+graph LR
+    src[Source]
+    a1[A step 1]
+    a2[A step 2]
+    a3[A step 3]
+    a_end[A end]
+    b_end[B end]
+    src -->|l1| a1
+    src -->|l1| a2
+    src -->|l1| a3
+    a1 -->|l1| a_end
+    a2 -->|l1| a_end
+    a3 -->|l1| a_end
+    src -->|l1| b_end

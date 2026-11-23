@@ -70,6 +70,10 @@ history.
   other source sits clear of the lane that branch takes, whichever line is
   declared first, instead of running its line flat through the branch's marker
   ([#2192](https://github.com/seqeralabs/nf-metro/issues/2192)).
+- Animated dots share each fork fairly: branches that split and rejoin take
+  turns, so a branch that forks internally no longer shows more dots than a
+  one-hop alternative. Every start node of a line now animates, and the
+  animation loops within 60 seconds (or one cycle, if longer) (#2009).
 - Nextflow conversion preserves spur dependencies between subworkflows instead
   of silently omitting those edges from the emitted map.
 - Nextflow conversion splits a section that runs both before and after another
