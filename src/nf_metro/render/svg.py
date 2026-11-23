@@ -3319,18 +3319,20 @@ def _capsule_adapts(theme: Theme) -> bool:
     return bool(theme.capsule_stroke or theme.capsule_fill)
 
 
-def _capsule_paint(
+def _capsule_attrs(
     theme: Theme, station_data: dict[str, str], muted: bool
-) -> dict[str, str]:
-    """Fill, outline and class of a station capsule or blank-terminus nub."""
-    paint = {
+) -> dict[str, Any]:
+    """Paint and data attributes of a station capsule or blank-terminus nub."""
+    attrs: dict[str, Any] = {
         "fill": theme.capsule_fill or theme.station_fill,
         "stroke": theme.capsule_stroke or theme.station_stroke,
+        "stroke_width": theme.station_stroke_width,
+        **station_data,
     }
     if _capsule_adapts(theme):
         capsule = _maybe_muted_class("nf-metro-capsule", muted)
-        paint["class_"] = f"{station_data['class_']} {capsule}"
-    return paint
+        attrs["class_"] = f"{station_data['class_']} {capsule}"
+    return attrs
 
 
 def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> None:
@@ -4887,8 +4889,7 @@ def _draw_blank_terminus_nub(
             by,
             bw,
             bh,
-            stroke_width=theme.station_stroke_width,
-            **{**station_data, **_capsule_paint(theme, station_data, muted)},
+            **_capsule_attrs(theme, station_data, muted),
         )
     )
 
@@ -5176,8 +5177,7 @@ def _render_station_into(
                 h,
                 rx=r,
                 ry=r,
-                stroke_width=theme.station_stroke_width,
-                **{**station_data, **_capsule_paint(theme, station_data, muted)},
+                **_capsule_attrs(theme, station_data, muted),
             )
         )
 

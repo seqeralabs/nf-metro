@@ -185,7 +185,7 @@ def test_seed_72_png_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     png = svg_to_png(svg, scale=2.0)
 
     assert hashlib.sha256(png).hexdigest() == (
-        "7e6e9c8190c5633a744580cce0786a28c6c309f8e142c2a64ef0fcf57744f981"
+        "aab8c313d0cbfd144f97158e89234c07c5ec2b40331ebb143ce8d7e5eac2dcf0"
     )
 
 

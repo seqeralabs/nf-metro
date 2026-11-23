@@ -258,8 +258,10 @@ def corner_arc_controls(
     radii along its tangent, which is ``k = 4/3 * tan(phi / 4) / tan(phi / 2)``
     of the tangent arm; the radial error is under 0.03% of the radius up to a
     right angle. Concentric lanes drawn this way stay parallel through the
-    turn, which a quadratic through *corner* does not. As ``phi`` tends to zero
-    ``k`` tends to 2/3, the cubic form of that quadratic.
+    turn, which a quadratic through *corner* does not. With ``t = tan(phi / 4)``
+    the ratio is ``2/3 * (1 - t**2)``, so a straight-through corner gets 2/3,
+    the cubic form of that quadratic. A corner with a zero arm is a straight
+    run between its tangent points.
     """
     d_in = (corner[0] - before[0], corner[1] - before[1])
     d_out = (after[0] - corner[0], after[1] - corner[1])
@@ -268,8 +270,8 @@ def corner_arc_controls(
     if len_in <= 0.0 or len_out <= 0.0:
         return before, after
     cos_phi = (d_in[0] * d_out[0] + d_in[1] * d_out[1]) / (len_in * len_out)
-    phi = math.acos(max(-1.0, min(1.0, cos_phi)))
-    k = 4.0 / 3.0 * math.tan(phi / 4) / math.tan(phi / 2) if phi > 1e-6 else 2.0 / 3.0
+    t = math.tan(math.acos(max(-1.0, min(1.0, cos_phi))) / 4)
+    k = 2.0 / 3.0 * (1.0 - t * t)
     return (
         (before[0] + d_in[0] * k, before[1] + d_in[1] * k),
         (after[0] - d_out[0] * k, after[1] - d_out[1] * k),
@@ -312,14 +314,21 @@ def corner_from_arc(
     c2: tuple[float, float],
     after: tuple[float, float],
 ) -> tuple[float, float]:
-    """The corner vertex a drawn arc was built around: where its tangents meet."""
+    """The corner vertex a drawn arc was built around.
+
+    Both handles sit the same fraction ``k`` of their leg from the tangent
+    points, so together they span ``k`` of the chord; dividing the first
+    handle's offset by ``k`` recovers the vertex, a straight-through corner
+    included. A zero-arm corner has no handle offset and is drawn straight, so
+    it folds to *before*.
+    """
     d1 = (c1[0] - before[0], c1[1] - before[1])
-    d2 = (after[0] - c2[0], after[1] - c2[1])
-    denom = d1[0] * d2[1] - d1[1] * d2[0]
-    if abs(denom) <= 1e-12:
-        return ((c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2)
-    t = ((after[0] - before[0]) * d2[1] - (after[1] - before[1]) * d2[0]) / denom
-    return (before[0] + d1[0] * t, before[1] + d1[1] * t)
+    chord = (after[0] - before[0], after[1] - before[1])
+    span = (d1[0] + after[0] - c2[0], d1[1] + after[1] - c2[1])
+    scale = (chord[0] * chord[0] + chord[1] * chord[1]) / max(
+        span[0] * chord[0] + span[1] * chord[1], 1e-12
+    )
+    return (before[0] + d1[0] * scale, before[1] + d1[1] * scale)
 
 
 def reversed_offset(offset: float, max_offset: float) -> float:
