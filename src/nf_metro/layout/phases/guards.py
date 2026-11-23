@@ -59,7 +59,11 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     segment_intersects_bbox,
 )
-from nf_metro.layout.lane_plan import LANE_PLAN_STAGE, fan_seam_lane
+from nf_metro.layout.lane_plan import (
+    LANE_PLAN_STAGE,
+    fan_seam_lane,
+    recorded_lane_plan,
+)
 from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.phases._common import (
@@ -116,6 +120,7 @@ from nf_metro.layout.phases.spacing import (
     _placed_name_label_station_ids,
     _residual_label_overlaps,
 )
+from nf_metro.layout.port_order_plan import ApproachKind, approach_source
 from nf_metro.parser.model import (
     LineSpread,
     MetroGraph,
@@ -6230,6 +6235,32 @@ _RENDER_LAYOUT_INVARIANT_SPECS: tuple[GuardSpec, ...] = tuple(
 _RENDER_ABORTING_GUARD = "_guard_inter_section_route_clears_own_section_interior"
 
 
+def _u_turn_pass_through(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> str | None:
+    """The first pass-through (:func:`routes_through_unrelated_sections`) on a
+    connector the approach record sends round as a U-turn, described; ``None``
+    when there is none.  The record chose that loop's side as the one whose legs
+    clear every section, so drawing it through one is no drawing of the record."""
+    plan = recorded_lane_plan(graph)
+    if plan is None:
+        return None
+    for rp, sid in routes_through_unrelated_sections(
+        graph, routes=routes, offsets=offsets
+    ):
+        edge = rp.edge
+        key = (edge.target, approach_source(graph, edge.source, edge.line_id))
+        record = plan.port_orders.approaches.get(key)
+        if record is not None and record.kind is ApproachKind.U_TURN:
+            return (
+                f"[u-turn pass-through] line {rp.line_id!r} on U-turn "
+                f"{edge.source!r}->{edge.target!r} passes through section {sid!r}"
+            )
+    return None
+
+
 def deferred_final_route_guard_specs() -> tuple[GuardSpec, ...]:
     """Return final-checkpoint guards that require settled route geometry."""
     return tuple(spec for spec in GUARD_REGISTRY if "routes" in spec.needs)
@@ -6273,9 +6304,9 @@ def assert_render_layout_invariants(
     registry guard. Each guard raises ``PhaseInvariantError`` on its first
     violation rather than returning a list, so each runs in isolation and its
     message is captured; the aggregate is one message. It raises
-    :class:`LayoutInvariantError` under *strict* or where
-    ``_RENDER_ABORTING_GUARD`` fired on a non-permissive graph; else it is a
-    :class:`UserWarning`.
+    :class:`LayoutInvariantError` under *strict*, or on a non-permissive graph
+    where ``_RENDER_ABORTING_GUARD`` fired or a pass-through lies on a U-turn
+    (:func:`_u_turn_pass_through`); else it is a :class:`UserWarning`.
     """
     available: dict[str, Any] = {"offsets": offsets, "routes": routes}
     messages: list[str] = []
@@ -6288,6 +6319,11 @@ def assert_render_layout_invariants(
         except PhaseInvariantError as exc:
             messages.append(f"[{spec.name}] {exc}")
             aborting = aborting or spec.name == _RENDER_ABORTING_GUARD
+            if spec.fn is _guard_no_route_through_section:
+                u_turn = _u_turn_pass_through(graph, routes, offsets)
+                if u_turn is not None:
+                    messages.append(u_turn)
+                    aborting = True
     if not messages:
         return
 

@@ -21,6 +21,7 @@ import nf_metro.layout.routing.inter_section_handlers as handlers_module
 import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import BYPASS_CLEARANCE, SAME_Y_TOLERANCE
+from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.layout.port_order_plan import (
     _CORRIDOR_CLEAR,
     Approach,
@@ -635,6 +636,63 @@ def test_two_linked_turn_rounds_on_one_side_raise() -> None:
         assert set(builder.turn_rounds()) >= {ranked, partner}
         with pytest.raises(RuntimeError, match="interleaving legs"):
             port_order_plan_module.decide_ports(builder)
+
+
+# A bypass U-turn round a section taller than the one before it: recorded
+# below, the LEFT wrap's under-run clears only the shorter one.
+TALL_ROUNDED = """\
+%%metro title: U-turn round a tall section
+%%metro line: l0 | L0 | #e6194b
+%%metro line: l1 | L1 | #3cb44b
+%%metro line: l2 | L2 | #4363d8
+%%metro grid: a | 0,0
+%%metro grid: b | 1,0
+%%metro grid: c | 2,0
+%%metro grid: d | 3,0
+
+graph LR
+    subgraph a [A]
+        %%metro entry: left | l0
+        a0[A0]
+    end
+    subgraph b [B]
+        b0[B0]
+    end
+    subgraph c [C]
+        c0[C0]
+        c1[C1]
+        c2[C2]
+        c3[C3]
+        c0 -->|l0| c1
+        c0 -->|l1| c2
+        c0 -->|l2| c3
+    end
+    subgraph d [D]
+        %%metro exit: left | l0
+        d0[D0]
+    end
+    b0 -->|l0,l1,l2| c0
+    c1 -->|l0| d0
+    d0 -->|l0| a0
+"""
+
+
+def test_a_u_turn_drawn_through_a_section_aborts_the_render() -> None:
+    """A connector recorded as a U-turn is drawn on the side whose legs the
+    record found clear; one drawn through a section anyway aborts the render
+    instead of warning."""
+
+    def below(self: PortOrderBuilder, group: list[_CorridorHop]) -> None:
+        for hop in group:
+            side = right_normal_axis_sign(hop.travel)
+            self.corridor_sides[hop.key] = (side, SideRule.CORRIDOR)
+
+    with pytest.MonkeyPatch.context() as mp, warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        mp.setattr(PortOrderBuilder, "decide_corridors", below)
+        graph = prepare_graph(TALL_ROUNDED)
+        with pytest.raises(LayoutInvariantError, match=r"\[u-turn pass-through\]"):
+            build_render_plan(graph, resolve_theme(None, graph))
 
 
 # Same-row RIGHT-entry loops recorded round below: (map, connector).

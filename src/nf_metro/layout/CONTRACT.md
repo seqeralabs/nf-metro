@@ -2491,7 +2491,10 @@ rotated side header a lower tier below both (see the module docstring).
 `assert_render_header_clearance`, on the routes and offsets the renderer is
 handed. The guard therefore certifies the geometry after label placement,
 header reconciliation, and settlement, rather than an intermediate routing
-observation those stages can move.
+observation those stages can move. A pass-through on a connector the approach
+record sends round as a U-turn aborts a non-permissive render, like a route
+through its own section: the record chose that loop's side as the one whose
+legs clear every section.
 
 ## Cross-stage contract: semantic fan planning
 
