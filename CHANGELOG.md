@@ -74,7 +74,9 @@ history.
 - A map with a `%%metro logo:` draws its title again. With the logo in the
   legend the title sits top-left as usual; with a standalone logo
   (`%%metro legend: none`, and every HTML output) the title sits beside the
-  logo. The whole map, rail-mode maps included, now moves down clear of a
+  logo. The title, or a standalone logo, now starts at the left edge of the
+  leftmost section box rather than at the canvas padding, so a canvas whose
+  title is wider than the map can come out narrower or wider. The whole map, rail-mode maps included, now moves down clear of a
   standalone logo instead of running under it, laid out and routed exactly as
   it would be without one. `logo_scale` sizes the standalone logo as well as
   the legend one.

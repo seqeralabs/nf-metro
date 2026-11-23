@@ -7,6 +7,7 @@ from collections import Counter
 
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
+    COORD_TOLERANCE_FINE,
     SAME_COORD_TOLERANCE,
 )
 from nf_metro.layout.geometry import lanes_run_along_y
@@ -210,7 +211,7 @@ def _off_grid_line(y: float, origin: float, pitch: float, tol: float = 1.0) -> b
     return min(residue, pitch - residue) > tol
 
 
-_SNAP_TOLERANCE_PX: float = 1e-2
+_SNAP_TOLERANCE_PX: float = COORD_TOLERANCE_FINE
 """Distance within which two grid snap Ys count as coinciding.
 
 It decides which residues vote for one grid line, which Ys sit midway between

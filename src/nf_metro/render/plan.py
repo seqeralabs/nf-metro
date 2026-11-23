@@ -202,6 +202,8 @@ class RenderPlan:
     logo_y: float
     logo_w: float
     logo_h: float
+    title_x: float
+    title_y: float
     legend_logo_size: tuple[float, float] | None
     manifest: FrozenMap | None
     debug: bool

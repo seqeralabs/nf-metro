@@ -804,6 +804,8 @@ class _FinalPublishedGeometry(FinalCanvasGeometry):
     logo_y: float
     logo_w: float
     logo_h: float
+    title_x: float
+    title_y: float
     legend_logo_size: tuple[float, float] | None
     manifest: Mapping[str, object] | None
     debug: bool
@@ -845,6 +847,8 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "logo_y": "published.logo_y",
     "logo_w": "published.logo_w",
     "logo_h": "published.logo_h",
+    "title_x": "published.title_x",
+    "title_y": "published.title_y",
     "legend_logo_size": "published.legend_logo_size",
     "manifest": "published.manifest",
     "debug": "published.debug",
@@ -2429,13 +2433,16 @@ def _build_render_plan_scaled(
         max_y = max(max_y, legend_y + legend_h)
 
     # Standalone logo positioning (only when no legend to embed it in)
+    block_left = _drawn_section_left(graph)
+    if block_left is None:
+        block_left = padding
     logo_x = 0.0
     logo_y = 0.0
     standalone_logo_box: tuple[float, float, float, float] | None = None
     if show_logo and not show_legend:
         logo_w *= graph.logo_scale
         logo_h *= graph.logo_scale
-        logo_x = padding
+        logo_x = block_left
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
         standalone_logo_box = (logo_x, logo_y, logo_w, logo_h)
@@ -2446,6 +2453,10 @@ def _build_render_plan_scaled(
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
 
+    title_x, title_y = _title_origin(
+        block_left, theme.title_font_size, standalone_logo_box
+    )
+
     # Content bounds ignore the title, so a title wider than the map would be
     # clipped at the right edge: grow the canvas to its true glyph advance.
     if draws_standalone_title:
@@ -2454,7 +2465,6 @@ def _build_render_plan_scaled(
             text_style(theme.title_font_size, "bold"),
             TextRole.TITLE,
         )
-        title_x, _ = _title_origin(padding, theme.title_font_size, standalone_logo_box)
         auto_width = max(
             auto_width, title_x + title_advance + TITLE_CANVAS_SAFETY_MARGIN
         )
@@ -2525,6 +2535,8 @@ def _build_render_plan_scaled(
         logo_y=logo_y,
         logo_w=logo_w,
         logo_h=logo_h,
+        title_x=title_x,
+        title_y=title_y,
         legend_logo_size=legend_logo_size,
         manifest=manifest,
         debug=debug,
@@ -2605,6 +2617,8 @@ def _build_render_plan_scaled(
         logo_y=published_geometry.logo_y,
         logo_w=published_geometry.logo_w,
         logo_h=published_geometry.logo_h,
+        title_x=published_geometry.title_x,
+        title_y=published_geometry.title_y,
         legend_logo_size=published_geometry.legend_logo_size,
         manifest=(
             freeze_render_value(published_geometry.manifest)
@@ -2757,15 +2771,12 @@ def _emit_render_plan(
             else:
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
         if plan.draws_standalone_title:
-            title_x, title_y = _title_origin(
-                padding, theme.title_font_size, standalone_logo_box
-            )
             d.append(
                 draw.Text(
                     graph.title,
                     theme.title_font_size,
-                    title_x,
-                    title_y,
+                    plan.title_x,
+                    plan.title_y,
                     fill=theme.title_color,
                     font_family=theme.label_font_family,
                     font_weight="bold",
@@ -3006,19 +3017,31 @@ def _effective_logo_path(graph: MetroGraph, mode: str) -> str:
     return graph.logo_path
 
 
+def _drawn_section_left(graph: MetroGraph) -> float | None:
+    """Left edge of the leftmost section box the render draws, or ``None``."""
+    return min(
+        (
+            section.bbox_x
+            for section in graph.sections.values()
+            if section.bbox_w > 0 and section.bbox_h > 0 and section.draws_box
+        ),
+        default=None,
+    )
+
+
 def _title_origin(
-    padding: float,
+    left: float,
     title_font_size: float,
     standalone_logo: tuple[float, float, float, float] | None,
 ) -> tuple[float, float]:
     """``(x, baseline_y)`` of the map title.
 
-    Top-left at ``padding`` on its own; beside a standalone logo (given as
+    Top-left at ``left`` on its own; beside a standalone logo (given as
     ``(x, y, w, h)``) it sits to the logo's right, vertically centred on it,
     with its baseline kept low enough that the glyphs never rise off the top.
     """
     if standalone_logo is None:
-        return padding, title_baseline_y(title_font_size)
+        return left, title_baseline_y(title_font_size)
     logo_x, logo_y, logo_w, logo_h = standalone_logo
     centred = logo_y + logo_h / 2 + title_font_size * TEXT_VCENTER_EM
     return (

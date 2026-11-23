@@ -1,6 +1,6 @@
 """The canvas is wide enough to hold the map title.
 
-The title is authored text drawn at ``x=padding``; a canvas sized from section
+The title is authored text drawn at ``plan.title_x``; a canvas sized from section
 content alone clips it at the right edge with no warning. These tests hold that
 the title's drawn right edge stays within the canvas width.
 """
@@ -40,14 +40,14 @@ def _plan(path: Path) -> RenderPlan:
 
 
 def _title_right_edge(plan: RenderPlan) -> float:
-    """Right edge of the title as drawn: ``x=padding`` plus its true advance."""
+    """Right edge of the title as drawn: ``title_x`` plus its true advance."""
     with metrics_face_context(MetricsFace.FALLBACK):
         advance = DEFAULT_TEXT_METRICS.advance(
             plan.graph.title,
             text_style(plan.theme.title_font_size, "bold"),
             TextRole.TITLE,
         )
-    return plan.padding + advance
+    return plan.title_x + advance
 
 
 @pytest.mark.parametrize("name", TITLE_FIXTURES)

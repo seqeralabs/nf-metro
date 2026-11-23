@@ -465,3 +465,63 @@ def test_rail_mode_lifts_clear_of_standalone_logo(scale: float) -> None:
         f"rail_mode [logo_scale={scale}]: route climbs to y={top_ink:.1f}, "
         f"into the standalone logo band"
     )
+
+
+def _drawn_box_left(root: ET.Element) -> float:
+    """Left x of the leftmost section box the SVG draws."""
+    return min(
+        float(el.get("x", "nan"))
+        for el in root.iter(f"{SVG_NS}rect")
+        if "nf-metro-section-box" in el.get("class", "").split()
+    )
+
+
+ALIGNMENT_FIXTURES = (
+    "examples/rnaseq_sections.mmd",
+    "examples/differentialabundance_default.mmd",
+    "examples/sarek_metro.mmd",
+)
+
+# (logo, legend, output format) per mode; the logo is standalone when the
+# legend is absent or the output is HTML.
+ALIGNMENT_MODES = {
+    "title-only": (None, None, "svg"),
+    "logo-in-legend": (PLACEHOLDER_LOGO, "bl", "svg"),
+    "standalone-logo-svg": (PLACEHOLDER_LOGO, "none", "svg"),
+    "standalone-logo-html": (PLACEHOLDER_LOGO, None, "html"),
+}
+
+
+@pytest.mark.parametrize("mode", ALIGNMENT_MODES)
+@pytest.mark.parametrize("name", ALIGNMENT_FIXTURES)
+def test_title_block_aligns_with_leftmost_section_box(name: str, mode: str) -> None:
+    """The title (or, beside a standalone logo, the logo) starts at the left
+    edge of the leftmost drawn section box; a standalone logo's title follows
+    it without overlap."""
+    logo, legend, output_format = ALIGNMENT_MODES[mode]
+    text, source_dir = _fixture(name)
+    plan, root = _render(
+        text,
+        source_dir=source_dir,
+        output_format=output_format,  # type: ignore[arg-type]
+        logo=logo,
+        legend=legend,
+    )
+    label = f"{name} [{mode}]"
+    box_left = _drawn_box_left(root)
+    titles = _title_elements(root)
+    assert len(titles) == 1, label
+    title_x = float(titles[0].get("x", "nan"))
+    if plan.show_logo and not plan.logo_in_legend:
+        assert plan.logo_x == pytest.approx(box_left, abs=0.5), label
+        assert title_x >= plan.logo_x + plan.logo_w, f"{label}: title overlaps logo"
+    else:
+        assert abs(title_x - box_left) <= 0.5, label
+    assert plan.svg_width >= title_x + _title_advance(plan), label
+
+
+def test_flat_map_title_keeps_padding_without_drawn_boxes() -> None:
+    """A map with no drawn section box has no edge to align to, so the title
+    keeps the canvas padding."""
+    plan, root = _render(FLAT_TITLED_MMD, source_dir=str(EXAMPLES))
+    assert float(_title_elements(root)[0].get("x", "nan")) == plan.padding
