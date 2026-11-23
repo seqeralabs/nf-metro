@@ -202,7 +202,6 @@ def assign_tracks(
             node_primary,
             line_gap,
             line_base,
-            centered=centered,
         )
 
     return tracks
@@ -360,12 +359,8 @@ def _source_peel_lanes(
     lane of the first-declared line it shares with the fork; peels opening to
     the same side take successive lanes outward in line order.  Returns peel
     successor -> claimed lane.
-
-    Source seating, the source-column repack and the peel branch's own
-    placement all read this one claim, so a sibling source is never left on
-    the lane a peel branch is about to take.
     """
-    if any(True for _ in G.predecessors(fork)):
+    if G.in_degree(fork):
         return {}
     primary = _primary_line(graph, fork)
     if primary is None:
@@ -393,10 +388,6 @@ def _source_peel_lanes(
     return lanes
 
 
-def _feeds_same_station(G: nx.DiGraph[str], a: str, b: str) -> bool:
-    return not set(G.successors(a)).isdisjoint(G.successors(b))
-
-
 def _foreign_claim_side(
     node: str,
     track: float,
@@ -415,7 +406,7 @@ def _foreign_claim_side(
     when *track* is free of foreign claims.
     """
     for fork, fork_track in neighbours.items():
-        if fork == node or _feeds_same_station(G, node, fork):
+        if fork == node or not set(G.successors(node)).isdisjoint(G.successors(fork)):
             continue
         for lane in _source_peel_lanes(
             fork, fork_track, G, graph, line_base, line_gap
@@ -446,12 +437,11 @@ def _seat_source(
     column = {
         sid: tracks[sid] for sid in layer_occupancy.get(layer, {}) if sid in tracks
     }
-    seat = base
-    side = _foreign_claim_side(node, seat, column, G, graph, line_base, line_gap)
-    while side is not None and (
-        _foreign_claim_side(node, seat, column, G, graph, line_base, line_gap)
-        is not None
-    ):
+    seat, side = base, None
+    while (
+        hit := _foreign_claim_side(node, seat, column, G, graph, line_base, line_gap)
+    ) is not None:
+        side = side or hit
         seat += side * line_gap
     return seat
 
@@ -1289,8 +1279,6 @@ def _equalize_fork_groups(
     node_primary: dict[str, str | None],
     line_gap: float,
     line_base: dict[str, float],
-    *,
-    centered: bool = False,
 ) -> None:
     """Redistribute cross-line fork siblings to equidistant spacing.
 
@@ -1305,7 +1293,7 @@ def _equalize_fork_groups(
     Groups where all members share the same primary line (diamonds /
     fan-outs already handled by ``_place_fan_out``) are skipped.
 
-    In *centered* mode, a fork group whose members are
+    In centred mode, a fork group whose members are
     all single-line exclusive stations is instead pinned to each member's
     own line's symmetric base track.  Consecutive repacking would collapse
     those exclusive runs toward the trunk midline (e.g. the bottom line's
@@ -1362,6 +1350,7 @@ def _equalize_fork_groups(
         # station, pin each to its own line's symmetric base rail rather
         # than repacking them consecutively (which would drag exclusive
         # runs toward the trunk midline and unbalance the weave).
+        centered = graph.line_spread is LineSpread.CENTERED
         if centered and all(len(graph.station_lines(sid)) == 1 for sid in group):
             for sid in group:
                 primary = node_primary.get(sid)
