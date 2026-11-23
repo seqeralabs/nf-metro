@@ -256,6 +256,7 @@ from nf_metro.render.style import (
     MUTED_FILL_CLASS,
     MUTED_STROKE_CLASS,
     RING_GROW,
+    TERMINUS_BAR,
     Theme,
     adaptive_value,
     baked_binding,
@@ -3370,6 +3371,10 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
             _rule("nf-metro-station-label", f"fill: {muted_val}", _MUTED_CLASS),
             _rule("nf-metro-marker-stroke", f"stroke: {muted_val}", _MUTED_CLASS),
         ]
+        if theme.terminus_glyph == TERMINUS_BAR:
+            lines.append(
+                _rule("nf-metro-terminus-bar", f"fill: {muted_val}", _MUTED_CLASS)
+            )
         if theme.interchange_glyph == GLYPH_RING:
             lines += [
                 _rule("nf-metro-ring", f"stroke: {muted_val}", _MUTED_CLASS),
@@ -5200,6 +5205,27 @@ def terminus_bar_box(
     )
 
 
+def bundle_end_bar_box(
+    bundle: _Bundle, theme: Theme
+) -> tuple[float, float, float, float]:
+    """``(x, y, w, h)`` of a ``bar`` terminus across a whole bundle.
+
+    As thick as a station tab, spanning every line's stroke and overhanging
+    the outermost lines by a tab's length on each side.
+    """
+    lw = theme.line_width
+    lo_x, lo_y = bundle.point(bundle.min_off)
+    hi_x, hi_y = bundle.point(bundle.max_off)
+    lo, hi = (lo_x, hi_x) if bundle.is_tb_vert else (lo_y, hi_y)
+    overhang = lw / 2 + theme.station_tick_length * lw
+    return _axis_box(
+        bundle,
+        theme.station_tick_width * lw,
+        min(lo, hi) - overhang,
+        abs(hi - lo) + 2 * overhang,
+    )
+
+
 class RingLayout(NamedTuple):
     """Ring centres along a bundle's cross axis, and their inside radius."""
 
@@ -5346,6 +5372,34 @@ def _draw_line_station_glyph(
         paint = muted_paint_class(theme, muted, "fill")
         extra = {"class_": f"{station_data['class_']} {paint}"} if paint else {}
         d.append(draw.Rectangle(*box, fill=color, **{**station_data, **extra}))
+        return True
+    if station.is_blank_terminus and len(lines) >= 2:
+        if theme.terminus_glyph == TERMINUS_BAR:
+            d.append(
+                draw.Rectangle(
+                    *bundle_end_bar_box(bundle, theme),
+                    fill=theme.terminus_bar_color or theme.station_stroke,
+                    **{
+                        **station_data,
+                        "class_": station_data["class_"]
+                        + " "
+                        + _maybe_muted_class("nf-metro-terminus-bar", muted),
+                    },
+                )
+            )
+            return True
+        if theme.terminus_glyph != GLYPH_RING:
+            return False
+        layout = ring_layout(bundle.min_off, bundle.max_off, len(lines), theme)
+        _draw_ring_chain(
+            d,
+            [layout],
+            bundle.point,
+            not bundle.is_tb_vert,
+            theme,
+            station_data,
+            muted,
+        )
         return True
     if theme.interchange_glyph == GLYPH_RING and len(lines) >= 2:
         layout = ring_layout(bundle.min_off, bundle.max_off, len(lines), theme)

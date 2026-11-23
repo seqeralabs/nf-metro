@@ -347,14 +347,59 @@ def test_a_three_line_bundle_gets_a_chain_under_london_tube(tube_svg):
     assert len(_ring_outlines(samtools)) == 2
 
 
-def test_a_six_line_terminus_is_a_bridged_ring_chain(tube_svg):
-    fastq = _glyph_by_station(tube_svg, "g")["fastq_in"]
+def test_a_six_line_line_end_is_a_nub_by_default(tube_svg):
+    fastq = _station_glyphs(tube_svg)["fastq_in"]
+    assert fastq.get("rx") is None
+    assert fastq.get("fill") == "#ffffff"
+    assert fastq.get("stroke") == "#000000"
+
+
+def _terminus_svg(tmp_path, glyph: str, mode: str = "dark") -> ET.Element:
+    theme = _write(
+        tmp_path,
+        f"{glyph}.yaml",
+        f"name: t\nextends: london-tube\nterminus_glyph: {glyph}\n",
+    )
+    return ET.fromstring(
+        render_string(
+            _RNASEQ.read_text().replace("%%metro style: nfcore", ""),
+            theme=str(theme),
+            mode=mode,
+            source_dir=str(_RNASEQ.parent),
+        )
+    )
+
+
+def test_a_bar_line_end_spans_the_bundle_at_track_weight(tmp_path):
+    root = _terminus_svg(tmp_path, "bar")
+    bar = _station_glyphs(root)["fastq_in"]
+    assert "nf-metro-terminus-bar" in bar.get("class")
+    lw = 4.0
+    assert float(bar.get("width")) == pytest.approx(1.0 * lw)
+    span = 5 * lw
+    assert float(bar.get("height")) == pytest.approx(span + lw + 2 * 1.5 * lw)
+    assert bar.get("fill") == THEMES["london-tube-dark"].terminus_bar_color
+
+
+def test_a_bar_line_end_switches_colour_with_the_mode(tmp_path):
+    svg = ET.tostring(_terminus_svg(tmp_path, "bar"), encoding="unicode")
+    rule = "fill: var(--nfm-map-terminus-bar-color, light-dark(#000000, #ffffff))"
+    assert rule in svg
+
+
+def test_a_ring_line_end_keeps_the_bridged_chain(tmp_path):
+    root = _terminus_svg(tmp_path, "ring")
+    fastq = _glyph_by_station(root, "g")["fastq_in"]
     assert len(_ring_outlines(fastq)) == 3
     assert [
         el
         for el in fastq.iter(f"{_SVG_NS}rect")
         if "nf-metro-ring-bridge" in (el.get("class") or "")
     ]
+
+
+def test_pill_themes_emit_no_terminus_bar_rules():
+    assert "nf-metro-terminus-bar" not in render_string(_MMD, theme="nfcore")
 
 
 # ---------------------------------------------------------------------------
@@ -596,8 +641,12 @@ def test_every_chrome_binding_reaches_the_stylesheet():
     from nf_metro.render.style import chrome_bindings
 
     svg = render_string(_MMD, theme="london-tube")
+    theme = THEMES["london-tube"]
     for binding in chrome_bindings():
-        assert binding.css_var in svg, binding.css_var
+        if binding.emit_if and getattr(theme, binding.emit_if[0]) != binding.emit_if[1]:
+            assert binding.css_var not in svg, binding.css_var
+        else:
+            assert binding.css_var in svg, binding.css_var
 
 
 def test_inactive_lines_take_the_theme_muted_grey():

@@ -18,6 +18,8 @@ __all__ = [
     "GLYPH_TICK",
     "RING_CHAIN",
     "RING_GROW",
+    "TERMINUS_BAR",
+    "TERMINUS_NUB",
     "ChromeBinding",
     "Theme",
     "adaptive_value",
@@ -60,6 +62,8 @@ GLYPH_TICK = "tick"
 GLYPH_RING = "ring"
 RING_CHAIN = "chain"
 RING_GROW = "grow"
+TERMINUS_NUB = "nub"
+TERMINUS_BAR = "bar"
 
 
 def _field(
@@ -284,6 +288,16 @@ class Theme:
         opaque=True,
         emit_if=("interchange_glyph", GLYPH_RING),
     )
+    terminus_bar_color: str = _field(
+        "",
+        doc="A `bar` terminus across several lines. Empty takes `station_stroke`.",
+        group="Stations",
+        color=True,
+        chrome=(("nf-metro-terminus-bar", "fill"),),
+        css_var="--nfm-map-terminus-bar-color",
+        fallback="station_stroke",
+        emit_if=("terminus_glyph", TERMINUS_BAR),
+    )
     station_glyph: str = _field(
         "pill",
         doc="How a station on one line is drawn. `pill` draws a capsule. "
@@ -314,6 +328,16 @@ class Theme:
     )
     station_radius: float = _field(
         STATION_RADIUS_APPROX, doc="Station capsule end radius, px.", group="Stations"
+    )
+    terminus_glyph: str = _field(
+        TERMINUS_NUB,
+        doc="How a line end shared by several lines is drawn. `nub` is a "
+        "square-cornered box across the lines in the station colours; `bar` is "
+        "a buffer-stop bar across the whole bundle, as thick as a tab and "
+        "overhanging the outermost lines by a tab's length; `ring` draws the "
+        "interchange glyph. A line end with one line follows `station_glyph`.",
+        group="Stations",
+        choices=(TERMINUS_NUB, TERMINUS_BAR, GLYPH_RING),
     )
     station_tick_width: float = _field(
         0.66,

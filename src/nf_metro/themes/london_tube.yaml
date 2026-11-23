@@ -36,6 +36,7 @@ light:
   title_color: "#000000"
   marker_stroke: "#000000"
   ring_color: "#000000"
+  terminus_bar_color: "#000000"
   ring_fill: "#ffffff"
   muted_line_color: "#b3b3b3"
   section_fill: transparent
@@ -51,6 +52,7 @@ dark:
   title_color: "#ffffff"
   marker_stroke: "#f0f0f0"
   ring_color: "#ffffff"
+  terminus_bar_color: "#ffffff"
   ring_fill: "#10141c"
   muted_line_color: "#585a60"
   section_fill: transparent
