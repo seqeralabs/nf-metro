@@ -113,6 +113,8 @@ history.
   that several of its routes share, instead of one set per route interleaving
   out of phase. A route that passes through an invisible port or junction
   continues its set across it where the strokes meet at one point and heading.
+  A stretch of at least half a spacing that the set skips gets a chevron at its
+  middle where that keeps half a spacing from its neighbours.
 
 ## [2.1.0] — 2026-09-15
 

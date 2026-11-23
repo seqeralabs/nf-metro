@@ -4010,10 +4010,8 @@ class _Run:
     def routes(self) -> set[int]:
         return {route for stretch in self.stretches for route in stretch.spans}
 
-    def place(
-        self, targets: Iterable[float]
-    ) -> list[tuple[int, float, tuple[tuple[float, float], tuple[float, float]]]]:
-        """``(owner route, arc, point and heading)`` at each unblocked target.
+    def place(self, targets: Iterable[float]) -> list[_Placed]:
+        """A chevron at each unblocked target position along the run.
 
         A chevron rides the lowest-indexed covering route's own pieces, which
         are the same ink as every other covering route's.
@@ -4022,13 +4020,28 @@ class _Run:
         for target in targets:
             if any(lo <= target <= hi for lo, hi in self.blocked):
                 continue
-            for stretch, offset in zip(self.stretches, self.offsets, strict=True):
+            for index, (stretch, offset) in enumerate(
+                zip(self.stretches, self.offsets, strict=True)
+            ):
                 if target <= offset + stretch.length + 1e-9:
                     arc = stretch.spans[stretch.owner][0] + target - offset
                     if (sample := self.tracks[stretch.owner].at(arc)) is not None:
-                        found.append((stretch.owner, arc, sample))
+                        found.append(
+                            _Placed(target, index, stretch.owner, arc, *sample)
+                        )
                     break
         return found
+
+
+class _Placed(NamedTuple):
+    """A chevron on a run: its position, stretch, owning route and pose."""
+
+    position: float
+    stretch: int
+    owner: int
+    arc: float
+    point: tuple[float, float]
+    heading: tuple[float, float]
 
 
 def _directional_chevrons(
@@ -4049,8 +4062,9 @@ def _directional_chevrons(
     chevrons is laid along each joined run of that ink rather than one set per
     route. A run is centred on its own length and carries
     ``floor(length / spacing)`` chevrons, each placed on the lowest-indexed
-    route covering that part. A run that carries none, because it is shorter
-    than the spacing or its positions fall in bridge gaps, gets one chevron at
+    route covering that part. A stretch of at least half a spacing that none
+    of them lands on gets one at its middle, unless that is within half a
+    spacing of another on its run. A run that still carries none gets one at
     the middle of its longest stretch when that is at least one chevron long.
     """
     size = theme.directional_marker_size
@@ -4092,18 +4106,33 @@ def _directional_chevrons(
             _Run(chain, tracks, reach)
             for chain in _joined_runs(_line_stretches(line_tracks), tracks, invisible)
         ]
-        covered: set[int] = set()
-        bare: list[_Run] = []
+        found: list[list[_Placed]] = []
         for run in runs:
             count = int(run.length // spacing)
             start = (run.length - (count - 1) * spacing) / 2
-            chevrons = run.place(start + i * spacing for i in range(count))
-            if chevrons:
-                covered |= run.routes
-            else:
-                bare.append(run)
-            for owner, arc, (point, heading) in chevrons:
-                placed[owner].append((arc, _chevron_vertices(point, heading, size)))
+            found.append(run.place(start + i * spacing for i in range(count)))
+        # A stretch left bare between a run's positions, or beside a break, is
+        # long enough to want a cue of its own: one chevron at its middle, kept
+        # at least half a spacing from every other chevron on the run.
+        half = spacing / 2
+        for run, on_run in zip(runs, found, strict=True):
+            bare_stretches = sorted(
+                (
+                    index
+                    for index, stretch in enumerate(run.stretches)
+                    if stretch.length >= half
+                    and all(p.stretch != index for p in on_run)
+                ),
+                key=lambda index: -run.stretches[index].length,
+            )
+            for index in bare_stretches:
+                middle = run.offsets[index] + run.stretches[index].length / 2
+                if all(abs(p.position - middle) >= half - 1e-9 for p in on_run):
+                    on_run.extend(run.place([middle]))
+        covered = {
+            route for run, on_run in zip(runs, found) if on_run for route in run.routes
+        }
+        bare = [run for run, on_run in zip(runs, found, strict=True) if not on_run]
         # Longest first, so the middle of the longest stretch carries a route's
         # direction cue, and a route in several bare runs is cued once.
         bare.sort(key=lambda run: -max(s.length for s in run.stretches))
@@ -4113,11 +4142,18 @@ def _directional_chevrons(
             longest = max(run.stretches, key=lambda s: s.length)
             if longest.length < min_length:
                 continue
-            for owner, arc, (point, heading) in _Run([longest], tracks, reach).place(
-                [longest.length / 2]
-            ):
-                placed[owner].append((arc, _chevron_vertices(point, heading, size)))
+            on_stretch = _Run([longest], tracks, reach).place([longest.length / 2])
+            if on_stretch:
+                found.append(on_stretch)
                 covered |= run.routes
+        for on_run in found:
+            for chevron in on_run:
+                placed[chevron.owner].append(
+                    (
+                        chevron.arc,
+                        _chevron_vertices(chevron.point, chevron.heading, size),
+                    )
+                )
     return tuple(
         tuple(vertices for _, vertices in sorted(placed[index], key=lambda p: p[0]))
         for index in range(len(tracks))
