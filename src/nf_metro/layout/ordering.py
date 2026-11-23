@@ -112,13 +112,17 @@ def assign_tracks(
     # its single highest-priority line's base, which would pull every trunk
     # station up to the top line.  Single-line stations keep their own
     # line's (now symmetric) base so exclusive callers fan above/below.
-    node_base: dict[str, float] = {}
-    if centered:
-        for sid in graph.stations:
-            node_lines = graph.station_lines(sid)
-            bases = [line_base[ln] for ln in node_lines if ln in line_base]
-            if bases:
-                node_base[sid] = sum(bases) / len(bases)
+    station_base: dict[str, float] = {}
+    for sid, primary in node_primary.items():
+        if primary not in line_base:
+            continue
+        if centered:
+            bases = [
+                line_base[ln] for ln in graph.station_lines(sid) if ln in line_base
+            ]
+            station_base[sid] = sum(bases) / len(bases)
+        else:
+            station_base[sid] = line_base[primary]
 
     # Step 3: Group nodes by (layer, primary_line).  Off-track stations
     # are excluded from grouping: their Y is overwritten by the Stage 5.2
@@ -148,12 +152,9 @@ def assign_tracks(
             base = line_base[lid]
 
             if len(nodes) == 1:
-                # Centred mode: a shared (multi-line) station anchors on the
-                # mean of its lines' bases so the trunk stays on the midline.
-                single_base = node_base.get(nodes[0], base) if centered else base
                 tracks[nodes[0]] = _place_single_node(
                     nodes[0],
-                    single_base,
+                    station_base[nodes[0]],
                     line_gap,
                     G,
                     tracks,
@@ -180,6 +181,8 @@ def assign_tracks(
                     graph=graph,
                     exit_reaching=exit_reaching,
                     priority_lane_sign=priority_lane_sign,
+                    station_base=station_base,
+                    line_base=line_base,
                 )
                 for n in nodes:
                     layer_occupancy[layer_idx][n] = tracks[n]
@@ -801,15 +804,12 @@ def _place_single_node(
     preds_list = list(G.predecessors(node))
     if len(preds_list) == 1 and preds_list[0] in tracks:
         pred = preds_list[0]
-        if graph is not None:
-            pred_line_set = set(graph.station_lines(pred))
-            node_line_set = set(graph.station_lines(node))
-            if (
-                pred_line_set
-                and pred_line_set == node_line_set
-                and _track_is_inheritable(tracks[pred])
-            ):
-                return tracks[pred]
+        if (
+            graph is not None
+            and _shares_line_set(pred, node, graph)
+            and _track_is_inheritable(tracks[pred])
+        ):
+            return tracks[pred]
 
     distance = abs(base - pred_avg)
     if distance <= line_gap:
@@ -952,6 +952,76 @@ def _trunk_fanout_node(nodes: list[str], graph: MetroGraph | None) -> str | None
     ):
         return trunk
     return None
+
+
+def _shares_line_set(pred: str, node: str, graph: MetroGraph) -> bool:
+    """Whether *node* carries exactly *pred*'s non-empty line set."""
+    pred_lines = set(graph.station_lines(pred))
+    return bool(pred_lines) and pred_lines == set(graph.station_lines(node))
+
+
+def _root_fan_trunk(
+    nodes: list[str],
+    anchor: float,
+    G: nx.DiGraph[str],
+    graph: MetroGraph | None,
+    station_base: dict[str, float],
+    line_base: dict[str, float],
+) -> tuple[str, float] | None:
+    """The source-fan member whose chain the fan continues, and its siblings' side.
+
+    Returns the lone predecessor-less member whose only successor it alone
+    feeds, carries more lines, and is based on the anchor, with the track-axis
+    sign its siblings open toward: away from the base of the lines the
+    successor adds.  ``None`` when no single member qualifies or the side is
+    not definite.
+    """
+    if graph is None or any(G.in_degree(node) for node in nodes):
+        return None
+    qualifying: list[tuple[str, str]] = []
+    for member in nodes:
+        successors = list(G.successors(member))
+        if len(successors) != 1:
+            continue
+        (successor,) = successors
+        if list(G.predecessors(successor)) == [member] and not _shares_line_set(
+            member, successor, graph
+        ):
+            qualifying.append((member, successor))
+    if len(qualifying) != 1:
+        return None
+    member, successor = qualifying[0]
+    successor_base = station_base.get(successor)
+    if successor_base is None or abs(successor_base - anchor) > COORD_TOLERANCE_FINE:
+        return None
+    added = set(graph.station_lines(successor)) - set(graph.station_lines(member))
+    added_bases = [line_base[lid] for lid in added if lid in line_base]
+    if not added_bases:
+        return None
+    lean = sum(added_bases) / len(added_bases) - anchor
+    if abs(lean) <= COORD_TOLERANCE_FINE:
+        return None
+    return member, -1.0 if lean > 0 else 1.0
+
+
+def _seat_around_trunk(
+    nodes: list[str],
+    trunk: str,
+    away: float,
+    anchor: float,
+    line_gap: float,
+    tracks: dict[str, float],
+) -> None:
+    """Pin *trunk* at *anchor* and alternate the other *nodes* outward from it.
+
+    Siblings take whole *line_gap* steps, the first on the *away* side.  A
+    fractional step would round onto a row, or collide with the trunk within
+    one.
+    """
+    tracks[trunk] = anchor
+    others = [node for node in nodes if node != trunk]
+    for i, node in enumerate(others):
+        tracks[node] = anchor + away * (-1) ** i * (i // 2 + 1) * line_gap
 
 
 def _bypass_lane_side(
@@ -1128,6 +1198,8 @@ def _place_fan_out(
     graph: MetroGraph | None = None,
     exit_reaching: frozenset[str] = frozenset(),
     priority_lane_sign: float | None = None,
+    station_base: dict[str, float],
+    line_base: dict[str, float],
 ) -> None:
     """Place multiple nodes in the same layer+line, centered around an anchor.
 
@@ -1156,14 +1228,8 @@ def _place_fan_out(
     nodes.sort(key=lambda n: bary.get(n, base))
 
     # Decide anchor: base track or predecessor center
-    if pred_avgs:
-        overall_pred_avg = sum(pred_avgs) / len(pred_avgs)
-        if abs(base - overall_pred_avg) <= line_gap:
-            anchor = base
-        else:
-            anchor = overall_pred_avg
-    else:
-        anchor = base
+    overall_pred_avg = sum(pred_avgs) / len(pred_avgs) if pred_avgs else base
+    anchor = base if abs(base - overall_pred_avg) <= line_gap else overall_pred_avg
 
     # Use sub-linear scaling so fan-outs don't grow proportionally:
     # per-item spacing = FANOUT_SPACING * n^(p-1) with p=0.8,
@@ -1299,8 +1365,7 @@ def _place_fan_out(
                 if (
                     main_station is not None
                     and not main_station.is_hidden
-                    and set(graph.station_lines(main))
-                    == set(graph.station_lines(trunk_pred))
+                    and _shares_line_set(trunk_pred, main, graph)
                 ):
                     trunk = tracks[trunk_pred]
                     tracks[main] = trunk
@@ -1314,6 +1379,7 @@ def _place_fan_out(
     # through the junction: below, unless a branch is a bypass whose lines
     # stack on the other side.
     trunk_node = _trunk_fanout_node(nodes, graph)
+    root_trunk = _root_fan_trunk(nodes, anchor, G, graph, station_base, line_base)
     if trunk_node is not None and graph is not None:
         tracks[trunk_node] = anchor
         depth = {-1.0: 0, 1.0: 0}
@@ -1323,6 +1389,8 @@ def _place_fan_out(
             side = _bypass_lane_side(trunk_node, node, G, graph, priority_lane_sign)
             depth[side] += 1
             tracks[node] = anchor + side * depth[side] * fan_spacing
+    elif root_trunk is not None:
+        _seat_around_trunk(nodes, *root_trunk, anchor, line_gap, tracks)
     elif use_asymmetric:
         # First node stays at anchor, others fan out below.
         tracks[nodes[0]] = anchor

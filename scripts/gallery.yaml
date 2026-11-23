@@ -574,6 +574,14 @@ gallery:
       while Genome's Reference line runs on to Quantify. Genome sits clear of the lane
       the QC branch peels into, so the Reference line never runs through the QC marker,
       whichever of the two lines is declared first (#2192)."
+  - id: root_fan_trunk_feeder_row
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "Two sources share a column: Reads feeds Trim, which adds the QC line, while Genome
+      runs straight to Report. Reads holds the trunk row through Trim, Align and Report,
+      with Genome one row above and the QC branch one row below, whichever source is
+      declared first (#2193)."
   - id: trunk_through_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in
