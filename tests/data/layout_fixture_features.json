@@ -484,6 +484,7 @@
     "topologies/shared_cell_fork_trunk_align.mmd",
     "topologies/shared_sink_parallel.mmd",
     "topologies/single_section.mmd",
+    "topologies/source_vs_chain_fed_fork_peel_lane.mmd",
     "topologies/stacked_left_exit_drop.mmd",
     "topologies/stacked_lr_serpentine.mmd",
     "topologies/stacked_multiline_left_exit_drop.mmd",
