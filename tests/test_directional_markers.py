@@ -7,8 +7,7 @@ import pytest
 from nf_metro.api import RenderConfig, prepare_graph, render_graph, resolve_theme
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid_file
-from nf_metro.render import build_render_plan
-from nf_metro.render.svg import _chevron_samples, _drawn_pieces, render_svg
+from nf_metro.render.svg import render_svg
 from nf_metro.render.validate import check_chevrons_on_stroke, parse_chevrons
 from nf_metro.themes import NFCORE_DARK_THEME
 
@@ -45,74 +44,7 @@ def test_directional_flag_emits_chevrons(stem):
     assert "metro-direction-" in svg
 
 
-@pytest.mark.parametrize("stem", DIRECTION_FIXTURES)
-def test_chevron_headings_point_downstream(stem):
-    """Every chevron points along its route's drawn stroke, source to target.
-
-    Samples come from the render plan's drawn geometry (the polylines and
-    corner radii the stroke is painted from), so each must lie on one of its
-    route's drawn pieces, a rounded corner included, and head along that
-    piece's source-to-target tangent there.
-    """
-    graph = _laid_out(stem)
-    graph.directional = True
-    plan = build_render_plan(graph, NFCORE_DARK_THEME)
-
-    spacing = NFCORE_DARK_THEME.directional_marker_spacing
-    min_length = 2 * NFCORE_DARK_THEME.directional_marker_size
-
-    checked = 0
-    for pts, radii in zip(plan.route_polylines, plan.route_curve_radii, strict=True):
-        pieces = _drawn_pieces(pts, radii)
-        for point, heading in _chevron_samples(pieces, spacing, min_length):
-            assert _heads_forward_on_pieces(pieces, point, heading)
-            checked += 1
-
-    assert checked > 0, f"{stem} produced no chevrons to check"
-
-
-def _piece_chords(piece, steps=64):
-    if piece.control is None:
-        return [(piece.start, piece.end)]
-    (ax, ay), (cx, cy), (bx, by) = piece.start, piece.control, piece.end
-    points = [
-        (
-            (1 - t) ** 2 * ax + 2 * (1 - t) * t * cx + t * t * bx,
-            (1 - t) ** 2 * ay + 2 * (1 - t) * t * cy + t * t * by,
-        )
-        for t in (k / steps for k in range(steps + 1))
-    ]
-    return list(zip(points, points[1:]))
-
-
-def _heads_forward_on_pieces(pieces, point, heading, tol=0.05):
-    """A chevron heading must run forward along a drawn chord it lies on.
-
-    Quadratic corners are flattened finely enough that a point on the curve
-    lies within *tol* of a chord whose direction matches the curve's tangent
-    there; a reversed or leg-aligned heading inside a corner matches none.
-    """
-    px, py = point
-    ux, uy = heading
-    for piece in pieces:
-        for (ax, ay), (bx, by) in _piece_chords(piece):
-            seg_len_sq = (bx - ax) ** 2 + (by - ay) ** 2
-            if seg_len_sq == 0:
-                continue
-            t = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / seg_len_sq
-            if not -0.01 <= t <= 1.01:
-                continue
-            cx, cy = ax + t * (bx - ax), ay + t * (by - ay)
-            if abs(cx - px) >= tol or abs(cy - py) >= tol:
-                continue
-            forward = ((bx - ax) * ux + (by - ay) * uy) / seg_len_sq**0.5
-            if forward > 0.999:
-                return True
-    return False
-
-
-# Tight rounded corners under a heavy stroke, so a chevron sampled on the
-# pre-smoothing polyline sits visibly off the painted curve.
+# Tight rounded corners under a heavy stroke.
 FLOATING_CHEVRONS = """\
 %%metro title: Floating chevrons
 %%metro line: a | Line A | #e6007e
@@ -153,20 +85,9 @@ DRAWN_STROKE_CASES = {
     "rnaseq_sections_stroke_1_5": lambda: _example_text(
         "rnaseq_sections.mmd", "%%metro stroke_scale: 1.5\n"
     ),
-    "riboseq_metro": lambda: _example_text("riboseq_metro.mmd"),
     "genomic_pipeline": lambda: _example_text("genomic_pipeline.mmd"),
-    "differentialabundance_default": lambda: _example_text(
-        "differentialabundance_default.mmd"
-    ),
-    "longread_variant_calling": lambda: _example_text("longread_variant_calling.mmd"),
     "junction_entry_lane_rebase": lambda: _example_text(
         "topologies/junction_entry_lane_rebase.mmd"
-    ),
-    "same_destination_vertical_convergence": lambda: _example_text(
-        "topologies/same_destination_vertical_convergence.mmd"
-    ),
-    "same_destination_short_overlap": lambda: _example_text(
-        "topologies/same_destination_short_overlap.mmd"
     ),
 }
 

@@ -166,6 +166,10 @@ class FrozenGraph(FrozenRecord):
         }
 
 
+# ``(wing, apex, wing)`` of one open directional chevron.
+ChevronVertices = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
+
+
 @dataclass(frozen=True)
 class RenderPlan:
     """All data needed to render a map, stored in SVG pixels."""
@@ -211,6 +215,9 @@ class RenderPlan:
     bare: bool
     draws_standalone_title: bool
     inactive_line_ids: frozenset[str] = frozenset()
+    # One entry per route, in ``routes`` order; empty unless the map is
+    # directional.
+    directional_chevrons: tuple[tuple[ChevronVertices, ...], ...] = ()
 
     @property
     def edge_routes(self) -> tuple[FrozenRecord, ...]:

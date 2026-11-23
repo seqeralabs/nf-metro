@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from nf_metro.layout.constants import LABEL_FONT_SIZE, OFFSET_STEP
@@ -87,11 +88,37 @@ _ELEMENT = re.compile(r"<(path|line)\b([^>]*?)/?>", re.DOTALL)
 _TEXT = re.compile(r"<text\b([^>]*?)>(.*?)</text>", re.DOTALL)
 _TSPAN = re.compile(r"<tspan\b[^>]*>(.*?)</tspan>", re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
+_PATH_CMD = re.compile(r"([MLQ])([^MLQ]*)")
 
 
 def _attr(attrs: str, name: str, default: str | None = None) -> str | None:
     match = re.search(rf'\b{name}="([^"]*)"', attrs)
     return match.group(1) if match else default
+
+
+def _iter_path_cmds(d: str) -> Iterator[tuple[str, list[float]]]:
+    """``(command, numbers)`` for each ``M``/``L``/``Q`` in a path's ``d``."""
+    for cmd, body in _PATH_CMD.findall(d):
+        yield cmd, [float(n) for n in _NUM.findall(body)]
+
+
+def _route_elements(svg: str) -> Iterator[tuple[str, list[tuple[str, list[float]]]]]:
+    """``(line_id, commands)`` of each drawn route element.
+
+    A ``<line>`` element reads as the ``M``/``L`` pair it draws.
+    """
+    for tag, attrs in _ELEMENT.findall(svg):
+        cls = _attr(attrs, "class") or ""
+        if _ROUTE_CLASS not in cls:
+            continue
+        line_id = _attr(attrs, "data-line-id") or ""
+        if tag == "line":
+            x1, y1, x2, y2 = (
+                float(_attr(attrs, k) or 0.0) for k in ("x1", "y1", "x2", "y2")
+            )
+            yield line_id, [("M", [x1, y1]), ("L", [x2, y2])]
+        else:
+            yield line_id, list(_iter_path_cmds(_attr(attrs, "d") or ""))
 
 
 def parse_route_polylines(
@@ -107,22 +134,10 @@ def parse_route_polylines(
     pre-smoothing vertex, so the polyline equals the logical routed path.
     """
     routes: list[tuple[str, list[list[tuple[float, float]]]]] = []
-    for tag, attrs in _ELEMENT.findall(svg):
-        cls = _attr(attrs, "class") or ""
-        if _ROUTE_CLASS not in cls:
-            continue
-        line_id = _attr(attrs, "data-line-id") or ""
-        if tag == "line":
-            x1, y1, x2, y2 = (
-                float(_attr(attrs, k) or 0.0) for k in ("x1", "y1", "x2", "y2")
-            )
-            routes.append((line_id, [[(x1, y1), (x2, y2)]]))
-            continue
-        d = _attr(attrs, "d") or ""
+    for line_id, commands in _route_elements(svg):
         subpaths: list[list[tuple[float, float]]] = []
         current: list[tuple[float, float]] = []
-        for cmd, body in re.findall(r"([MLQ])([^MLQ]*)", d):
-            nums = [float(n) for n in _NUM.findall(body)]
+        for cmd, nums in commands:
             if cmd == "M":
                 if current:
                     subpaths.append(current)
@@ -521,22 +536,11 @@ def parse_route_strokes(svg: str) -> list[StrokeTrace]:
     measured against the ink rather than the pre-smoothing polyline.
     """
     traces: list[StrokeTrace] = []
-    for tag, attrs in _ELEMENT.findall(svg):
-        cls = _attr(attrs, "class") or ""
-        if _ROUTE_CLASS not in cls:
-            continue
-        line_id = _attr(attrs, "data-line-id") or ""
-        if tag == "line":
-            x1, y1, x2, y2 = (
-                float(_attr(attrs, k) or 0.0) for k in ("x1", "y1", "x2", "y2")
-            )
-            traces.append(StrokeTrace(line_id, [((x1, y1), (x2, y2))], []))
-            continue
+    for line_id, commands in _route_elements(svg):
         chords: list[_Segment] = []
         gaps: list[_Segment] = []
         pen: _Point | None = None
-        for cmd, body in re.findall(r"([MLQ])([^MLQ]*)", _attr(attrs, "d") or ""):
-            nums = [float(n) for n in _NUM.findall(body)]
+        for cmd, nums in commands:
             if cmd == "M":
                 target = (nums[0], nums[1])
                 if pen is not None:
@@ -567,7 +571,7 @@ def parse_chevrons(svg: str) -> list[DrawnChevron]:
         cls = _attr(attrs, "class") or ""
         if tag != "path" or _DIRECTION_CLASS not in cls:
             continue
-        nums = [float(n) for n in _NUM.findall(_attr(attrs, "d") or "")]
+        nums = [n for _, ns in _iter_path_cmds(_attr(attrs, "d") or "") for n in ns]
         if len(nums) != 6:
             continue
         w1x, w1y, ax, ay, w2x, w2y = nums
@@ -617,14 +621,47 @@ def _gap_overlap(chevron: DrawnChevron, gap: _Segment) -> float:
     return min(max(along), chevron.reach) - max(min(along), -chevron.reach)
 
 
-def _near_trace(point: _Point, trace: StrokeTrace) -> bool:
-    xs = [x for seg in (*trace.chords, *trace.gaps) for x, _ in seg]
-    ys = [y for seg in (*trace.chords, *trace.gaps) for _, y in seg]
+_Box = tuple[float, float, float, float]
+
+
+def _trace_box(trace: StrokeTrace) -> _Box | None:
+    points = [point for seg in (*trace.chords, *trace.gaps) for point in seg]
+    if not points:
+        return None
+    xs, ys = [x for x, _ in points], [y for _, y in points]
     pad = _CHEVRON_CENTRE_TOL
-    return bool(xs) and (
-        min(xs) - pad <= point[0] <= max(xs) + pad
-        and min(ys) - pad <= point[1] <= max(ys) + pad
-    )
+    return min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad
+
+
+def _chevron_problem(
+    chevron: DrawnChevron, traces: list[tuple[StrokeTrace, _Box | None]]
+) -> str | None:
+    """Why *chevron* is off its line's drawn stroke, or None when it is on it."""
+    nearest = math.inf
+    in_gap = False
+    cx, cy = chevron.centre
+    for trace, box in traces:
+        if box is None or not (box[0] <= cx <= box[2] and box[1] <= cy <= box[3]):
+            continue
+        on_stroke = False
+        for a, b in trace.chords:
+            distance = _point_segment_distance(chevron.centre, a, b)
+            nearest = min(nearest, distance)
+            if distance <= _CHEVRON_CENTRE_TOL and _runs_along(chevron.heading, a, b):
+                on_stroke = True
+        gapped = any(
+            _gap_overlap(chevron, gap) > _GAP_OVERLAP_EPS for gap in trace.gaps
+        )
+        if on_stroke and not gapped:
+            return None
+        in_gap = in_gap or gapped
+    if in_gap:
+        return "reaches into a bridge gap of its line"
+    if nearest <= _CHEVRON_CENTRE_TOL:
+        return "points off its line's drawn tangent"
+    if math.isinf(nearest):
+        return "lies on no drawn stroke of its line"
+    return f"sits {nearest:.2f}px off its line's drawn stroke"
 
 
 def check_chevrons_on_stroke(svg: str) -> list[RenderFinding]:
@@ -636,54 +673,31 @@ def check_chevrons_on_stroke(svg: str) -> list[RenderFinding]:
     chevron reaching into a bridge gap paints its line across the over-line
     the gap exists to reveal, so that is flagged too.
     """
-    traces_by_line: dict[str, list[StrokeTrace]] = {}
+    chevrons = parse_chevrons(svg)
+    if not chevrons:
+        return []
+    traces_by_line: dict[str, list[tuple[StrokeTrace, _Box | None]]] = {}
     for trace in parse_route_strokes(svg):
-        traces_by_line.setdefault(trace.line_id, []).append(trace)
+        traces_by_line.setdefault(trace.line_id, []).append((trace, _trace_box(trace)))
     findings: list[RenderFinding] = []
-    for chevron in parse_chevrons(svg):
-        nearest = math.inf
-        in_gap = False
-        for trace in traces_by_line.get(chevron.line_id, ()):
-            if not _near_trace(chevron.centre, trace):
-                continue
-            on_stroke = False
-            for a, b in trace.chords:
-                distance = _point_segment_distance(chevron.centre, a, b)
-                nearest = min(nearest, distance)
-                if distance <= _CHEVRON_CENTRE_TOL and _runs_along(
-                    chevron.heading, a, b
-                ):
-                    on_stroke = True
-            gapped = any(
-                _gap_overlap(chevron, gap) > _GAP_OVERLAP_EPS for gap in trace.gaps
+    for chevron in chevrons:
+        problem = _chevron_problem(chevron, traces_by_line.get(chevron.line_id, []))
+        if problem is None:
+            continue
+        (cx, cy), (ux, uy), reach = chevron.centre, chevron.heading, chevron.reach
+        findings.append(
+            RenderFinding(
+                CHEVRON_OFF_STROKE,
+                chevron.line_id,
+                "",
+                f"directional chevron of line {chevron.line_id!r} at "
+                f"({cx:.1f},{cy:.1f}) {problem}",
+                (
+                    (cx - ux * reach, cy - uy * reach),
+                    (cx + ux * reach, cy + uy * reach),
+                ),
             )
-            if on_stroke and not gapped:
-                break
-            in_gap = in_gap or gapped
-        else:
-            (cx, cy), (ux, uy) = chevron.centre, chevron.heading
-            if in_gap:
-                problem = "reaches into a bridge gap of its line"
-            elif nearest <= _CHEVRON_CENTRE_TOL:
-                problem = "points off its line's drawn tangent"
-            elif math.isinf(nearest):
-                problem = "lies on no drawn stroke of its line"
-            else:
-                problem = f"sits {nearest:.2f}px off its line's drawn stroke"
-            reach = chevron.reach
-            findings.append(
-                RenderFinding(
-                    CHEVRON_OFF_STROKE,
-                    chevron.line_id,
-                    "",
-                    f"directional chevron of line {chevron.line_id!r} at "
-                    f"({cx:.1f},{cy:.1f}) {problem}",
-                    (
-                        (cx - ux * reach, cy - uy * reach),
-                        (cx + ux * reach, cy + uy * reach),
-                    ),
-                )
-            )
+        )
     return findings
 
 
