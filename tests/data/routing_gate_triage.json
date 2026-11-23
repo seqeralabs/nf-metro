@@ -1991,10 +1991,6 @@
     "note": "In _right_entry_gap_above_fits: the canvas headroom above the topmost row always holds the run, and below another row the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable.",
     "status": "needs-review"
   },
-  "inter_section_handlers.py::if not _gap_above_holds_run(graph, f.tgt_row):::#1": {
-    "note": "In _left_entry_gap_above_fits: a LEFT entry fed from a higher row always has a section above its row, so the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable.",
-    "status": "needs-review"
-  },
   "inter_section_handlers.py::if lowest is not None and y > (cap := section_header_safe_cap(lowest)):::#1": {
     "note": "In _row_under_run_y: the arm caps a same-row under-run at the highest header badge among the lower-row sections in the columns after the source. tests/data/gate_witnesses/f8402075.mmd and tests/data/canvas_placement/f8403977.mmd run under their row with no lower-row section in those columns; a map whose next row starts within BYPASS_CLEARANCE plus the badge clearance under the run takes it, and no swept map has one.",
     "status": "needs-review"
@@ -2002,5 +1998,53 @@
   "inter_section_handlers.py::if src_sec is None or tgt_sec is None:::#2": {
     "note": "_bypass_split_face reads the section of every branch of a bypass group or junction fan; a fan junction and the port or junction it feeds always resolve to a section, so the unresolved-section return never fires on the corpus.",
     "status": "defensive"
+  },
+  "co_row.py::if not _meets_a_neighbour(feeders, windows, others, flow, tolerance):::#1": {
+    "note": "Witnessed only by `examples/topologies/co_row_feeders_shared_diagonal.mmd`, whose station `s0n0` the grid-snap half-pitch tie rule seats on its exit port's row instead of the row the arm needs; under validation `_guard_station_bundle_contiguous_at_fan_port` rejects that layout. Reachable; open until that tie-rule conflict is resolved.",
+    "status": "needs-review"
+  },
+  "intra_handlers.py::if group is not None:::#1": {
+    "note": "Witnessed only by `examples/topologies/co_row_feeders_shared_diagonal.mmd`, whose station `s0n0` the grid-snap half-pitch tie rule seats on its exit port's row instead of the row the arm needs; under validation `_guard_station_bundle_contiguous_at_fan_port` rejects that layout. Reachable; open until that tie-rule conflict is resolved.",
+    "status": "needs-review"
+  },
+  "corridor_cohorts.py::if _q(equality.delta) == 0:::#1": {
+    "note": "Witnessed only by `tests/data/gate_witnesses/f8500449.mmd`, which aborts with a non-concentric bundle corner at `__junction_7 -> sec2__entry_left_5` once the grid-snap half-pitch tie rule moves its stations. Reachable; open until that tie-rule conflict is resolved.",
+    "status": "needs-review"
+  },
+  "exit_turns.py::if assignment.planned_family_id is RouteFamilyId.BOTTOM_EXIT_JUNCTION:::#1": {
+    "note": "Witnessed only by `tests/fixtures/regressions/approach_order_draft_off_lane.mmd`, which aborts with defective bundle curves once the grid-snap half-pitch tie rule moves its stations. Reachable; open until that tie-rule conflict is resolved.",
+    "status": "needs-review"
+  },
+  "exit_turns.py::elif wrap_kind is _LeftEntryRoute.BAND_HOP:::#1": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "exit_turns.py::if primary_delta * run_direction.sign < 2 * MIN_STRAIGHT_EDGE + diagonal:::#1": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "exit_turns.py::if transition is None:::#2": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if cellmate_left is None:::#1": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if other.bbox_x <= source_right + COORD_TOLERANCE:::#1": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if run_direction is None:::#1": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if self.launch_coordinate is None or self.axis_coordinate is None:::#1": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if source.id not in members:::#1": {
+    "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
   }
 }
