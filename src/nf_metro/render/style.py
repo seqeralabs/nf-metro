@@ -16,6 +16,8 @@ __all__ = [
     "GLYPH_PILL",
     "GLYPH_RING",
     "GLYPH_TICK",
+    "RING_CHAIN",
+    "RING_GROW",
     "ChromeBinding",
     "Theme",
     "adaptive_value",
@@ -56,6 +58,8 @@ _MISSING: Any = dataclasses.MISSING
 GLYPH_PILL = "pill"
 GLYPH_TICK = "tick"
 GLYPH_RING = "ring"
+RING_CHAIN = "chain"
+RING_GROW = "grow"
 
 
 def _field(
@@ -274,7 +278,7 @@ class Theme:
         "them. Empty takes the background, or white on a transparent canvas.",
         group="Stations",
         color=True,
-        chrome=(("nf-metro-ring", "fill"), ("nf-metro-ring-bridge", "fill")),
+        chrome=(("nf-metro-ring-hole", "fill"), ("nf-metro-ring-bridge", "fill")),
         css_var="--nfm-map-ring-fill",
         fallback="background_color",
         opaque=True,
@@ -338,6 +342,19 @@ class Theme:
         doc="Width of the strip bridging a chain of rings, in multiples of "
         "`line_width`.",
         group="Stations",
+    )
+    ring_max_lines: int = _field(
+        3,
+        doc="Most lines on one track a single ring of `ring_inner_diameter` "
+        "covers; a wider bundle follows `ring_overflow`.",
+        group="Stations",
+    )
+    ring_overflow: str = _field(
+        RING_CHAIN,
+        doc="What a bundle wider than `ring_max_lines` gets: `chain`, a bridged "
+        "chain of rings, or `grow`, one ring whose inside widens to cover it.",
+        group="Stations",
+        choices=(RING_CHAIN, RING_GROW),
     )
 
     line_width: float = _field(doc="Route stroke width, px.", group="Lines")

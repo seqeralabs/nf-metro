@@ -115,6 +115,23 @@ Use the layout option `font_scale` instead, which layout does account for.
 
 </Aside>
 
+### Interchange styles
+
+A station on several lines is an interchange.
+`interchange_glyph` picks how it is drawn:
+
+- `pill` (the default) draws one capsule across all its lines.
+- `ring` draws a ring centred on the lines, with the centre left in the background color.
+
+With `ring`, `ring_max_lines` is the most lines on one track that a single ring covers, and `ring_overflow` decides what a wider bundle gets:
+
+- `chain` draws a row of rings from the outermost line to the other, each touching the next, with a strip in the ring fill cut through the outlines where they meet so the centres join into one shape.
+- `grow` draws one ring whose inside widens to cover the whole bundle.
+
+So the three styles are: one standard-size ring (raise `ring_max_lines`), a bridged chain (`chain`), or one larger ring (`grow`).
+Lines on separate tracks, as at a cross-track `%%metro interchange:` or a rail-mode station, get separate rings joined by a dumbbell link.
+`london-tube` uses a single ring for two lines and a chain from three up.
+
 ### Fonts
 
 The SVG names the theme's font and the viewer's browser draws it, so name a font your readers have, followed by fallbacks.
@@ -144,6 +161,7 @@ station_glyph: tick
 station_tick_width: 1 # track-weight tabs
 station_tick_length: 1.5
 interchange_glyph: ring
+ring_max_lines: 2 # a chain from three lines up
 line_width: 4
 label_font_weight: normal
 section_stroke_dasharray: "6 4"
@@ -220,23 +238,25 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Stations
 
-| Field                  | Value            | Default       | Effect                                                                                                                                                                                                        |
-| ---------------------- | ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `marker_stroke`        | colour           | empty         | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                                                  |
-| `marker_open_fill`     | colour           | empty         | Inside of `open` markers. Empty takes the background, or white on a transparent canvas.                                                                                                                       |
-| `ring_color`           | colour           | empty         | Interchange ring outline when `interchange_glyph` is `ring`. Empty takes `station_stroke`.                                                                                                                    |
-| `ring_fill`            | colour           | empty         | Inside of interchange rings and the strip bridging a chain of them. Empty takes the background, or white on a transparent canvas.                                                                             |
-| `station_glyph`        | `pill` \| `tick` | `pill`        | How a station on one line is drawn. `pill` draws a capsule. `tick` draws a square tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.                |
-| `interchange_glyph`    | `pill` \| `ring` | `pill`        | How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one. |
-| `station_fill`         | colour           | from `nfcore` | Station capsule fill.                                                                                                                                                                                         |
-| `station_stroke`       | colour           | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                                       |
-| `station_stroke_width` | number           | from `nfcore` | Station capsule outline width, px.                                                                                                                                                                            |
-| `station_radius`       | number           | `5`           | Station capsule end radius, px.                                                                                                                                                                               |
-| `station_tick_width`   | number           | `0.66`        | Thickness of a `tick` tab along its line, and of a terminus bar, in multiples of `line_width`.                                                                                                                |
-| `station_tick_length`  | number           | `0.66`        | How far a `tick` tab reaches past the edge of its line, and how far a terminus bar overhangs each side, in multiples of `line_width`.                                                                         |
-| `ring_inner_diameter`  | number           | `2`           | Inside diameter of an interchange ring, in multiples of `line_width`.                                                                                                                                         |
-| `ring_stroke_width`    | number           | `0.5`         | Interchange ring outline width, in multiples of `line_width`.                                                                                                                                                 |
-| `ring_bridge_width`    | number           | `0.5`         | Width of the strip bridging a chain of rings, in multiples of `line_width`.                                                                                                                                   |
+| Field                  | Value             | Default       | Effect                                                                                                                                                                                                        |
+| ---------------------- | ----------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `marker_stroke`        | colour            | empty         | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                                                  |
+| `marker_open_fill`     | colour            | empty         | Inside of `open` markers. Empty takes the background, or white on a transparent canvas.                                                                                                                       |
+| `ring_color`           | colour            | empty         | Interchange ring outline when `interchange_glyph` is `ring`. Empty takes `station_stroke`.                                                                                                                    |
+| `ring_fill`            | colour            | empty         | Inside of interchange rings and the strip bridging a chain of them. Empty takes the background, or white on a transparent canvas.                                                                             |
+| `station_glyph`        | `pill` \| `tick`  | `pill`        | How a station on one line is drawn. `pill` draws a capsule. `tick` draws a square tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.                |
+| `interchange_glyph`    | `pill` \| `ring`  | `pill`        | How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one. |
+| `station_fill`         | colour            | from `nfcore` | Station capsule fill.                                                                                                                                                                                         |
+| `station_stroke`       | colour            | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                                       |
+| `station_stroke_width` | number            | from `nfcore` | Station capsule outline width, px.                                                                                                                                                                            |
+| `station_radius`       | number            | `5`           | Station capsule end radius, px.                                                                                                                                                                               |
+| `station_tick_width`   | number            | `0.66`        | Thickness of a `tick` tab along its line, and of a terminus bar, in multiples of `line_width`.                                                                                                                |
+| `station_tick_length`  | number            | `0.66`        | How far a `tick` tab reaches past the edge of its line, and how far a terminus bar overhangs each side, in multiples of `line_width`.                                                                         |
+| `ring_inner_diameter`  | number            | `2`           | Inside diameter of an interchange ring, in multiples of `line_width`.                                                                                                                                         |
+| `ring_stroke_width`    | number            | `0.5`         | Interchange ring outline width, in multiples of `line_width`.                                                                                                                                                 |
+| `ring_bridge_width`    | number            | `0.5`         | Width of the strip bridging a chain of rings, in multiples of `line_width`.                                                                                                                                   |
+| `ring_max_lines`       | whole number      | `3`           | Most lines on one track a single ring of `ring_inner_diameter` covers; a wider bundle follows `ring_overflow`.                                                                                                |
+| `ring_overflow`        | `chain` \| `grow` | `chain`       | What a bundle wider than `ring_max_lines` gets: `chain`, a bridged chain of rings, or `grow`, one ring whose inside widens to cover it.                                                                       |
 
 ### Lines
 

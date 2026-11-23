@@ -325,18 +325,31 @@ def test_one_line_stations_are_track_weight_tabs_in_their_line_colour(tube_svg):
     assert rsem.get("fill") == "#0570b0"
 
 
+def _ring_outlines(group: ET.Element) -> list[ET.Element]:
+    return [
+        c
+        for c in group.iter(f"{_SVG_NS}circle")
+        if "nf-metro-ring" in (c.get("class") or "").split()
+    ]
+
+
 def test_interchanges_are_rings(tube_svg):
     star = _glyph_by_station(tube_svg, "g")["star"]
-    rings = list(star.iter(f"{_SVG_NS}circle"))
+    rings = _ring_outlines(star)
     assert len(rings) == 1
     assert float(rings[0].get("r")) == pytest.approx(4.0 + 1.0)
     assert float(rings[0].get("stroke-width")) == pytest.approx(2.0)
     assert rings[0].get("stroke") == THEMES["london-tube-dark"].ring_color
 
 
+def test_a_three_line_bundle_gets_a_chain_under_london_tube(tube_svg):
+    samtools = _glyph_by_station(tube_svg, "g")["samtools"]
+    assert len(_ring_outlines(samtools)) == 2
+
+
 def test_a_six_line_terminus_is_a_bridged_ring_chain(tube_svg):
     fastq = _glyph_by_station(tube_svg, "g")["fastq_in"]
-    assert len(list(fastq.iter(f"{_SVG_NS}circle"))) == 3
+    assert len(_ring_outlines(fastq)) == 3
     assert [
         el
         for el in fastq.iter(f"{_SVG_NS}rect")
@@ -411,29 +424,66 @@ def test_terminus_bar_crosses_the_line_end_and_overhangs_both_sides(vertical):
 
 
 @pytest.mark.parametrize(
-    "lines,rings",
-    [(2, 1), (3, 1), (4, 3), (6, 3), (8, 4)],
+    "lines,max_lines,rings",
+    [(2, 3, 1), (3, 3, 1), (4, 3, 3), (6, 3, 3), (8, 3, 4), (2, 2, 1), (3, 2, 2)],
 )
-def test_ring_chain_length_follows_bundle_width(lines, rings):
-    from nf_metro.render.svg import ring_centre_offsets
+def test_ring_chain_length_follows_bundle_width(lines, max_lines, rings):
+    from nf_metro.render.svg import ring_layout
 
+    theme = replace(_GEOM, ring_max_lines=max_lines)
     span = (lines - 1) * _LW
-    centres = ring_centre_offsets(-span / 2, span / 2, _GEOM)
-    assert len(centres) == rings
+    layout = ring_layout(-span / 2, span / 2, lines, theme)
+    assert len(layout.centres) == rings
+    assert layout.inner == pytest.approx(_LW)
     if rings > 1:
-        assert centres[0] == pytest.approx(-span / 2)
-        assert centres[-1] == pytest.approx(span / 2)
-        gaps = {round(b - a, 6) for a, b in zip(centres, centres[1:])}
+        assert layout.centres[0] == pytest.approx(-span / 2)
+        assert layout.centres[-1] == pytest.approx(span / 2)
+        gaps = [b - a for a, b in zip(layout.centres, layout.centres[1:])]
         assert max(gaps) <= (2 * 1.0 + 0.5) * _LW + 1e-6
 
 
+def test_grow_widens_one_ring_over_the_bundle():
+    from nf_metro.render.svg import ring_layout
+
+    theme = replace(_GEOM, ring_max_lines=2, ring_overflow="grow")
+    layout = ring_layout(0.0, 5 * _LW, 6, theme)
+    assert layout.centres == [pytest.approx(2.5 * _LW)]
+    assert layout.inner == pytest.approx(3 * _LW)
+
+
 def test_ring_geometry_scales_with_line_width():
-    from nf_metro.render.svg import ring_centre_offsets
+    from nf_metro.render.svg import ring_layout
 
     wide = replace(_GEOM, line_width=2 * _LW)
-    assert len(ring_centre_offsets(0.0, 4 * _LW, _GEOM)) == len(
-        ring_centre_offsets(0.0, 8 * _LW, wide)
+    assert len(ring_layout(0.0, 4 * _LW, 5, _GEOM).centres) == len(
+        ring_layout(0.0, 8 * _LW, 5, wide).centres
     )
+
+
+def test_bridge_strip_cuts_through_where_ring_outlines_meet():
+    import drawsvg as draw
+
+    from nf_metro.render.svg import _draw_ring_chain, ring_layout
+
+    theme = replace(_GEOM, ring_max_lines=2)
+    layout = ring_layout(0.0, 2 * _LW, 3, theme)
+    canvas = draw.Drawing(100, 100)
+    _draw_ring_chain(canvas, [layout], lambda off: (0.0, off), True, theme, {}, False)
+    root = ET.fromstring(canvas.as_svg())
+    strip = next(
+        el
+        for el in root.iter(f"{_SVG_NS}rect")
+        if "nf-metro-ring-bridge" in (el.get("class") or "")
+    )
+    top, bottom = layout.centres
+    stroke = 0.5 * _LW
+    overlap_lo = bottom - layout.inner - stroke
+    overlap_hi = top + layout.inner + stroke
+    y, h = float(strip.get("y")), float(strip.get("height"))
+    assert y <= overlap_lo and y + h >= overlap_hi
+    kinds = [el.get("class") for el in root.iter() if el.get("class")]
+    last_outline = max(i for i, k in enumerate(kinds) if k == "nf-metro-ring")
+    assert kinds.index("nf-metro-ring-bridge") > last_outline
 
 
 def test_sections_are_unboxed_with_plain_uppercase_titles(tube_svg):
@@ -631,21 +681,22 @@ def test_neighbouring_london_tube_titles_do_not_overlap():
 
 @pytest.mark.parametrize("lines", [2, 3, 4, 6, 8])
 def test_rings_are_centred_on_their_bundle(lines):
-    from nf_metro.render.svg import ring_centre_offsets
+    from nf_metro.render.svg import ring_layout
 
     lo = 10.0
     hi = lo + (lines - 1) * _LW
-    centres = ring_centre_offsets(lo, hi, _GEOM)
+    centres = ring_layout(lo, hi, lines, _GEOM).centres
     assert sum(centres) / len(centres) == pytest.approx((lo + hi) / 2)
 
 
 def test_separate_tracks_get_separate_ring_groups():
-    from nf_metro.render.svg import ring_centres
+    from nf_metro.render.svg import ring_groups
 
-    groups = ring_centres([0.0, _LW, 40.0, 40.0 + _LW], _GEOM)
-    assert len(groups) == 2
-    assert groups[0] == [pytest.approx(_LW / 2)]
-    assert groups[1] == [pytest.approx(40.0 + _LW / 2)]
+    groups = ring_groups([0.0, _LW, 40.0, 40.0 + _LW], _GEOM)
+    assert [g.centres for g in groups] == [
+        [pytest.approx(_LW / 2)],
+        [pytest.approx(40.0 + _LW / 2)],
+    ]
 
 
 def test_extends_resolves_against_the_theme_files_own_folder(tmp_path, monkeypatch):

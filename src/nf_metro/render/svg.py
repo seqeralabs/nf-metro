@@ -19,7 +19,7 @@ import pickle
 import re
 import textwrap
 import warnings
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
 from typing import Any, Literal, NamedTuple, cast
@@ -255,6 +255,7 @@ from nf_metro.render.style import (
     GLYPH_TICK,
     MUTED_FILL_CLASS,
     MUTED_STROKE_CLASS,
+    RING_GROW,
     Theme,
     adaptive_value,
     baked_binding,
@@ -4648,8 +4649,15 @@ def _draw_interchange_glyph(
     ys = [y for _, y in knobs]
     top_y, bot_y = min(ys), max(ys)
     if theme.interchange_glyph == GLYPH_RING and len(knobs) > 1:
-        groups = [[(x, y) for y in group] for group in ring_centres(ys, theme)]
-        _draw_ring_chain(d, groups, theme, station_data, muted)
+        _draw_ring_chain(
+            d,
+            ring_groups(ys, theme),
+            lambda y: (x, y),
+            True,
+            theme,
+            station_data,
+            muted,
+        )
         return
     sw = theme.station_stroke_width
     # A spanning interchange draws each rail's knob slightly larger than the bare
@@ -5192,31 +5200,40 @@ def terminus_bar_box(
     )
 
 
-def ring_centre_offsets(lo: float, hi: float, theme: Theme) -> list[float]:
-    """Positions of the interchange rings spanning lines from *lo* to *hi*.
+class RingLayout(NamedTuple):
+    """Ring centres along a bundle's cross axis, and their inside radius."""
 
-    One ring, centred on the span, while the lines are no wider than the
-    ring (two or three lines on one track at the default sizes); otherwise a
-    chain from the outermost line to the other, each ring's outer edge
-    reaching no further than the inner edge of the next.
+    centres: list[float]
+    inner: float
+
+
+def ring_layout(lo: float, hi: float, lines: int, theme: Theme) -> RingLayout:
+    """The rings for *lines* lines on one track, spanning *lo* to *hi*.
+
+    Up to ``ring_max_lines`` lines get one ring of ``ring_inner_diameter``
+    centred on them. A wider bundle gets, under ``ring_overflow: chain``, a
+    chain from the outermost line to the other, each ring's outer edge reaching
+    no further than the next one's inner edge; under ``grow``, one ring whose
+    inside widens to cover the bundle.
     """
     lw = theme.line_width
     inner = theme.ring_inner_diameter * lw / 2
     stroke = theme.ring_stroke_width * lw
     span = hi - lo
-    if span + lw <= 2 * (inner + stroke) + COORD_TOLERANCE_FINE:
-        return [(lo + hi) / 2]
-    count = math.ceil(span / (2 * inner + stroke) - COORD_TOLERANCE_FINE) + 1
+    if lines <= theme.ring_max_lines or span <= COORD_TOLERANCE_FINE:
+        return RingLayout([(lo + hi) / 2], inner)
+    if theme.ring_overflow == RING_GROW:
+        return RingLayout([(lo + hi) / 2], max(inner, (span + lw) / 2))
+    count = max(2, math.ceil(span / (2 * inner + stroke) - COORD_TOLERANCE_FINE) + 1)
     step = span / (count - 1)
-    return [lo + k * step for k in range(count)]
+    return RingLayout([lo + k * step for k in range(count)], inner)
 
 
-def ring_centres(positions: Sequence[float], theme: Theme) -> list[list[float]]:
-    """Ring positions for lines at *positions*, grouped by track.
+def ring_groups(positions: Sequence[float], theme: Theme) -> list[RingLayout]:
+    """Rings for lines at *positions*, one layout per track.
 
-    Lines closer than a ring chain's own spacing share a track and get one
-    ring or chain (:func:`ring_centre_offsets`); a wider gap starts another
-    group, which the drawing joins with a dumbbell link.
+    Lines closer than a ring chain's own spacing share a track; a wider gap
+    starts another track, which the drawing joins with a dumbbell link.
     """
     lw = theme.line_width
     spacing = (theme.ring_inner_diameter + theme.ring_stroke_width) * lw
@@ -5227,65 +5244,68 @@ def ring_centres(positions: Sequence[float], theme: Theme) -> list[list[float]]:
             groups.append([pos])
         else:
             groups[-1].append(pos)
-    return [ring_centre_offsets(group[0], group[-1], theme) for group in groups]
+    return [ring_layout(g[0], g[-1], len(g), theme) for g in groups]
 
 
 def _draw_ring_chain(
     d: draw.Group | draw.Drawing,
-    groups: Sequence[Sequence[tuple[float, float]]],
+    groups: Sequence[RingLayout],
+    point: Callable[[float], tuple[float, float]],
+    vertical: bool,
     theme: Theme,
     station_data: Mapping[str, str],
     muted: bool,
 ) -> None:
-    """Draw interchange rings, grouped by track.
+    """Draw interchange rings, one :class:`RingLayout` per track.
 
-    Rings within a group touch; separate groups are joined by a dumbbell link
-    in the ring colour. A strip in the ring fill runs through every ring and
-    link, so touching rings read as bridged. All centres lie on one
-    horizontal or vertical axis.
+    Drawn in layers so a chain reads as one outline around joined centres:
+    dumbbell links between tracks, every ring's outline, every ring's inside
+    (which covers any neighbouring outline crossing it), then a strip in the
+    ring fill from the first centre to the last, through the outlines where
+    rings meet. *point* maps a cross-axis offset to a position; *vertical*
+    says the cross axis runs along y.
     """
     lw = theme.line_width
-    inner = theme.ring_inner_diameter * lw / 2
     stroke = theme.ring_stroke_width * lw
     half_bridge = theme.ring_bridge_width * lw / 2
     fill = theme.ring_fill or opaque_or_white(theme.background_color)
     color = theme.ring_color or theme.station_stroke
-    centres = [c for group in groups for c in group]
-    vertical = abs(centres[-1][0] - centres[0][0]) <= COORD_TOLERANCE_FINE
 
-    def _strip(
-        a: tuple[float, float], b: tuple[float, float], half: float
-    ) -> tuple[float, float, float, float]:
+    def _strip(a: float, b: float, half: float) -> tuple[float, float, float, float]:
+        (ax, ay), (bx, by) = point(a), point(b)
         if vertical:
-            return (a[0] - half, min(a[1], b[1]), 2 * half, abs(b[1] - a[1]))
-        return (min(a[0], b[0]), a[1] - half, abs(b[0] - a[0]), 2 * half)
+            return (ax - half, min(ay, by), 2 * half, abs(by - ay))
+        return (min(ax, bx), ay - half, abs(bx - ax), 2 * half)
 
-    ring_class = _maybe_muted_class("nf-metro-ring", muted)
     group_el = draw.Group(**station_data)
     for prev, nxt in zip(groups, groups[1:]):
         group_el.append(
             draw.Rectangle(
-                *_strip(prev[-1], nxt[0], half_bridge + stroke),
+                *_strip(prev.centres[-1], nxt.centres[0], half_bridge + stroke),
                 fill=color,
                 class_=_maybe_muted_class("nf-metro-ring-link", muted),
             )
         )
-    for cx, cy in centres:
+    rings = [(off, layout.inner) for layout in groups for off in layout.centres]
+    for off, inner in rings:
         group_el.append(
             draw.Circle(
-                cx,
-                cy,
+                *point(off),
                 inner + stroke / 2,
-                fill=fill,
+                fill="none",
                 stroke=color,
                 stroke_width=stroke,
-                class_=ring_class,
+                class_=_maybe_muted_class("nf-metro-ring", muted),
             )
         )
-    if len(centres) > 1:
+    for off, inner in rings:
+        group_el.append(
+            draw.Circle(*point(off), inner, fill=fill, class_=_ns("nf-metro-ring-hole"))
+        )
+    if len(rings) > 1:
         group_el.append(
             draw.Rectangle(
-                *_strip(centres[0], centres[-1], half_bridge),
+                *_strip(rings[0][0], rings[-1][0], half_bridge),
                 fill=fill,
                 class_=_ns("nf-metro-ring-bridge"),
             )
@@ -5324,11 +5344,16 @@ def _draw_line_station_glyph(
         d.append(draw.Rectangle(*box, fill=color, **{**station_data, **extra}))
         return True
     if theme.interchange_glyph == GLYPH_RING and len(lines) >= 2:
-        centres = [
-            bundle.point(off)
-            for off in ring_centre_offsets(bundle.min_off, bundle.max_off, theme)
-        ]
-        _draw_ring_chain(d, [centres], theme, station_data, muted)
+        layout = ring_layout(bundle.min_off, bundle.max_off, len(lines), theme)
+        _draw_ring_chain(
+            d,
+            [layout],
+            bundle.point,
+            not bundle.is_tb_vert,
+            theme,
+            station_data,
+            muted,
+        )
         return True
     return False
 

@@ -12,6 +12,8 @@ station_glyph: tick
 station_tick_width: 1
 station_tick_length: 1.5
 interchange_glyph: ring
+# A ring covers two lines on one track; three or more get a bridged chain.
+ring_max_lines: 2
 station_fill: "#ffffff"
 station_stroke: "#000000"
 station_stroke_width: 2.5
