@@ -155,15 +155,17 @@ An offset can move a line across a label, for example.
 
 `validate_render(svg)` checks the finished output.
 It reads station markers from the embedded manifest, routes from the drawn path elements, and labels from the drawn text elements.
-It then runs three checks:
+It then runs four checks:
 
 - **label-strike** finds lines drawn through station-label text, using `segment_strikes_label` at the rendered font size.
 - **marker-cross** flags a route segment through a non-consumer station's marker.
   A station that carries the line is exempt, as are rail interchanges, where lines are meant to pass through the markers.
 - **offset-collapse** flags two distinct lines drawn flush where the offset plan placed them at least one `OFFSET_STEP` apart.
   Lines assigned to the same slot may share a track by design.
+- **chevron-off-stroke** flags a `--directional` chevron whose centre is off its own line's painted centreline, or whose heading departs from that stroke's downstream tangent, or whose ink reaches into one of its line's bridge gaps.
+  The stroke is read back with its quadratic corners, so a chevron inside a rounded corner is measured against the curve.
 
-The label and marker checks need only the SVG, and they run in `validate-svg --geometry` and `render --validate`.
+The label, marker and chevron checks need only the SVG, and they run in `validate-svg --geometry` and `render --validate`.
 The offset check also needs the original `RenderPlan`.
 To enable it, call `validate_render(svg, plan=plan)`.
 

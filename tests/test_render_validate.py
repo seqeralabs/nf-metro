@@ -26,9 +26,11 @@ from nf_metro.parser.model import MetroGraph
 from nf_metro.render import build_render_plan, emit_render_plan, validate_render
 from nf_metro.render.manifest import read_manifest
 from nf_metro.render.validate import (
+    CHEVRON_OFF_STROKE,
     LABEL_STRIKE,
     MARKER_CROSS,
     OFFSET_COLLAPSE,
+    check_chevrons_on_stroke,
     check_marker_crossings,
     drawn_segments,
     parse_rail_station_ids,
@@ -77,6 +79,8 @@ def test_clean_corpus_has_no_render_geometry_findings(name: str) -> None:
     assert not crossings, f"{name}: {[f.message for f in crossings]}"
     collapses = [f for f in findings if f.kind == OFFSET_COLLAPSE]
     assert not collapses, f"{name}: {[f.message for f in collapses]}"
+    chevrons = [f for f in findings if f.kind == CHEVRON_OFF_STROKE]
+    assert not chevrons, f"{name}: {[f.message for f in chevrons]}"
 
 
 def _a_foreign_label(svg: str) -> tuple[str, float, float, str]:
@@ -138,6 +142,96 @@ def test_carried_line_overlap_is_exempt() -> None:
         (placement.x + 40, placement.y),
     )
     assert not validate_render(over)
+
+
+# Line ``a`` runs right, rounds a corner down through (55, 5), and lifts the pen
+# across a bridge gap from y=100 to y=120.
+_CHEVRON_ROUTE = (
+    '<path d="M0,0 L40,0 Q60,0,60,20 L60,100 M60,120 L60,200" '
+    'class="metro-line-a" data-line-id="a" />'
+)
+_DIAGONAL = (0.5**0.5, 0.5**0.5)
+
+
+def _chevron_svg(
+    centre: tuple[float, float],
+    heading: tuple[float, float],
+    line_id: str = "a",
+    size: float = 4.0,
+    stroke: float = 1.5,
+) -> str:
+    (cx, cy), (ux, uy) = centre, heading
+    bx, by = cx - ux * size, cy - uy * size
+    w1 = (bx - uy * size, by + ux * size)
+    w2 = (bx + uy * size, by - ux * size)
+    chevron = (
+        f'<path d="M{w1[0]},{w1[1]} L{cx + ux * size},{cy + uy * size} '
+        f'L{w2[0]},{w2[1]}" stroke-width="{stroke}" '
+        f'class="metro-direction-{line_id}" data-line-id="{line_id}" />'
+    )
+    return f"<svg>{_CHEVRON_ROUTE}{chevron}</svg>"
+
+
+@pytest.mark.parametrize(
+    ("centre", "heading"),
+    [
+        ((20.0, 0.0), (1.0, 0.0)),
+        ((55.0, 5.0), _DIAGONAL),
+        ((60.0, 94.0), (0.0, 1.0)),
+        ((60.0, 126.0), (0.0, 1.0)),
+    ],
+    ids=["straight-run", "on-rounded-corner", "clear-before-gap", "clear-after-gap"],
+)
+def test_chevron_on_its_drawn_stroke_is_clean(
+    centre: tuple[float, float], heading: tuple[float, float]
+) -> None:
+    """A chevron on its line's painted curve, heading along it, is accepted."""
+    assert check_chevrons_on_stroke(_chevron_svg(centre, heading)) == []
+
+
+@pytest.mark.parametrize(
+    ("centre", "heading", "line_id", "problem"),
+    [
+        ((55.0, 0.0), (1.0, 0.0), "a", "off its line's drawn stroke"),
+        ((55.0, 5.0), (1.0, 0.0), "a", "off its line's drawn tangent"),
+        ((20.0, 0.0), (-1.0, 0.0), "a", "off its line's drawn tangent"),
+        ((60.0, 110.0), (0.0, 1.0), "a", "bridge gap"),
+        ((60.0, 97.0), (0.0, 1.0), "a", "bridge gap"),
+        ((20.0, 0.0), (1.0, 0.0), "b", "no drawn stroke of its line"),
+    ],
+    ids=[
+        "leg-point-inside-corner",
+        "leg-heading-inside-corner",
+        "reversed",
+        "centred-in-gap",
+        "reaching-into-gap",
+        "on-another-line",
+    ],
+)
+def test_chevron_off_its_drawn_stroke_is_flagged(
+    centre: tuple[float, float],
+    heading: tuple[float, float],
+    line_id: str,
+    problem: str,
+) -> None:
+    """A chevron off its own line's ink, misaligned, or in a gap is a finding."""
+    findings = check_chevrons_on_stroke(_chevron_svg(centre, heading, line_id))
+    assert [f.kind for f in findings] == [CHEVRON_OFF_STROKE]
+    assert findings[0].line_id == line_id
+    assert problem in findings[0].message
+
+
+def test_validate_render_runs_the_chevron_check() -> None:
+    """An off-stroke chevron in a real render surfaces through validate_render."""
+    svg = _render("directional_flow.mmd")
+    assert not [f for f in validate_render(svg) if f.kind == CHEVRON_OFF_STROKE]
+    line_id = read_manifest(svg)["groups"][0]["id"]
+    stray = (
+        f'<path d="M-30,-30 L-22,-26 L-30,-22" stroke-width="1.5" '
+        f'class="metro-direction-{line_id}" data-line-id="{line_id}" />'
+    )
+    findings = validate_render(svg.replace("</svg>", stray + "</svg>"))
+    assert [f.line_id for f in findings if f.kind == CHEVRON_OFF_STROKE] == [line_id]
 
 
 def test_no_manifest_yields_no_findings() -> None:
