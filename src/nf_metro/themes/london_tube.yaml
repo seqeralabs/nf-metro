@@ -1,12 +1,15 @@
 # A schematic-transit look after the geometry of TfL's Line Diagram Standard:
-# square tabs for stations on one line, a bar across a line's end, rings (or a
+# tabs for stations on one line, a bar across a line's end, rings (or a
 # bridged chain of rings) at interchanges, bundled lines edge to edge, unboxed
-# sections and a humanist sans in navy. Tab, bar and ring sizes come from the
-# schema defaults, in multiples of line_width. Also the worked example of the
-# theme file format.
+# sections and a humanist sans in navy. Glyph sizes are multiples of
+# line_width. Also the worked example of the theme file format.
 name: london-tube
 
 station_glyph: tick
+# Track-weight tabs, heavier than the Line Diagram Standard's 0.66 square, so
+# a tab reads as a continuation of its line.
+station_tick_width: 1
+station_tick_length: 1.5
 interchange_glyph: ring
 station_fill: "#ffffff"
 station_stroke: "#000000"

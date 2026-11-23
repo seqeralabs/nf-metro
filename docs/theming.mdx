@@ -128,7 +128,8 @@ Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/n
   It sets every field the schema leaves without a default, so it is the template for a complete theme.
 - `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
 - `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
-  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width: a station tab is 0.66 line widths square, a terminus bar is 0.66 thick and overhangs the line by 0.66 each side, and an interchange ring has a 2-wide inside and a 0.5-wide outline.
+  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width: an interchange ring has a 2-wide inside and a 0.5-wide outline, and a chain of rings is bridged by a 0.5-wide strip.
+  The theme deliberately uses track-weight tabs rather than the standard's 0.66 square: a tab is 1 line width thick and reaches 1.5 past the line, so it reads as a continuation of the track, and the terminus bar matches it.
   Lines on a shared track are drawn edge to edge, as in the standard, so the theme sets no `track_gap`.
   Inactive lines are 30% grey.
 - `transparent.yaml` sets `fixed_mode: dark` and `background_color: none`, for maps embedded on a page that supplies its own background.
@@ -137,6 +138,8 @@ Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/n
 name: london-tube
 
 station_glyph: tick
+station_tick_width: 1 # track-weight tabs
+station_tick_length: 1.5
 interchange_glyph: ring
 line_width: 4
 label_font_weight: normal
@@ -226,7 +229,8 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | `station_stroke`       | colour           | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                                       |
 | `station_stroke_width` | number           | from `nfcore` | Station capsule outline width, px.                                                                                                                                                                            |
 | `station_radius`       | number           | `5`           | Station capsule end radius, px.                                                                                                                                                                               |
-| `station_tick_size`    | number           | `0.66`        | Side of a `tick` tab, and the thickness and overhang of a terminus bar, in multiples of `line_width`.                                                                                                         |
+| `station_tick_width`   | number           | `0.66`        | Thickness of a `tick` tab along its line, and of a terminus bar, in multiples of `line_width`.                                                                                                                |
+| `station_tick_length`  | number           | `0.66`        | How far a `tick` tab reaches past the edge of its line, and how far a terminus bar overhangs each side, in multiples of `line_width`.                                                                         |
 | `ring_inner_diameter`  | number           | `2`           | Inside diameter of an interchange ring, in multiples of `line_width`.                                                                                                                                         |
 | `ring_stroke_width`    | number           | `0.5`         | Interchange ring outline width, in multiples of `line_width`.                                                                                                                                                 |
 | `ring_bridge_width`    | number           | `0.5`         | Width of the strip bridging a chain of rings, in multiples of `line_width`.                                                                                                                                   |

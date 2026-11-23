@@ -285,10 +285,16 @@ class Theme:
     station_radius: float = _field(
         STATION_RADIUS_APPROX, doc="Station capsule end radius, px.", group="Stations"
     )
-    station_tick_size: float = _field(
+    station_tick_width: float = _field(
         0.66,
-        doc="Side of a `tick` tab, and the thickness and overhang of a "
-        "terminus bar, in multiples of `line_width`.",
+        doc="Thickness of a `tick` tab along its line, and of a terminus bar, "
+        "in multiples of `line_width`.",
+        group="Stations",
+    )
+    station_tick_length: float = _field(
+        0.66,
+        doc="How far a `tick` tab reaches past the edge of its line, and how "
+        "far a terminus bar overhangs each side, in multiples of `line_width`.",
         group="Stations",
     )
     ring_inner_diameter: float = _field(

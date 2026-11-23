@@ -5105,22 +5105,24 @@ def station_tab_box(
     is_tb_vert: bool,
     label_point: tuple[float, float] | None,
 ) -> tuple[float, float, float, float]:
-    """``(x, y, w, h)`` of a one-line station's square tab.
+    """``(x, y, w, h)`` of a one-line station's tab.
 
-    The tab is ``station_tick_size`` line widths square and sits on the edge
-    of the line facing the station's label. *line_axis* is the line's centre
-    across the flow (its y for LR/RL, its x for TB/BT). With no label to face
-    it sits above (LR/RL) or left (TB/BT).
+    The tab is ``station_tick_width`` line widths thick along the line and
+    reaches ``station_tick_length`` line widths past the edge of the line
+    facing the station's label. *line_axis* is the line's centre across the
+    flow (its y for LR/RL, its x for TB/BT). With no label to face it sits
+    above (LR/RL) or left (TB/BT).
     """
     lw = theme.line_width
-    side = theme.station_tick_size * lw
+    thick = theme.station_tick_width * lw
+    reach = theme.station_tick_length * lw
     if is_tb_vert:
         forward = label_point is not None and label_point[0] > line_axis
-        x = line_axis + lw / 2 if forward else line_axis - lw / 2 - side
-        return x, station.y - side / 2, side, side
+        x = line_axis + lw / 2 if forward else line_axis - lw / 2 - reach
+        return x, station.y - thick / 2, reach, thick
     forward = label_point is not None and label_point[1] > line_axis
-    y = line_axis + lw / 2 if forward else line_axis - lw / 2 - side
-    return station.x - side / 2, y, side, side
+    y = line_axis + lw / 2 if forward else line_axis - lw / 2 - reach
+    return station.x - thick / 2, y, thick, reach
 
 
 def terminus_bar_box(
@@ -5128,15 +5130,15 @@ def terminus_bar_box(
 ) -> tuple[float, float, float, float]:
     """``(x, y, w, h)`` of the bar across a one-line terminus (a buffer stop).
 
-    ``station_tick_size`` line widths thick along the line, and overhanging
-    the line by the same amount on each side.
+    As thick as a station tab, and overhanging the line by a tab's length on
+    each side.
     """
     lw = theme.line_width
-    size = theme.station_tick_size * lw
-    across = lw + 2 * size
+    thick = theme.station_tick_width * lw
+    across = lw + 2 * theme.station_tick_length * lw
     if is_tb_vert:
-        return line_axis - across / 2, station.y - size / 2, across, size
-    return station.x - size / 2, line_axis - across / 2, size, across
+        return line_axis - across / 2, station.y - thick / 2, across, thick
+    return station.x - thick / 2, line_axis - across / 2, thick, across
 
 
 def ring_centre_offsets(min_off: float, max_off: float, theme: Theme) -> list[float]:
