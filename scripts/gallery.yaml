@@ -562,9 +562,26 @@ gallery:
     category: Fan-out and Fan-in
     description:
       "Two sources share a column: Reads forks its QC line onto a branch station,
-      while Genome's Reference line runs on to Quantify. Genome sits clear of the lane
-      the QC branch peels into, so the Reference line never runs through the QC marker,
-      whichever of the two lines is declared first (#2192)."
+      while Genome's Reference line runs on to Quantify. Genome sits one row on the far
+      side of the trunk from the QC branch, so the Reference line never runs through the
+      QC marker or leaves an empty row, whichever of the two lines is declared first
+      (#2192, #2199)."
+  - id: source_vs_fed_fork_peel_lane
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The same fork one station down the trunk: Samples feeds Reads, which forks its QC
+      line onto a branch station, while Genome's Reference line runs on to Quantify.
+      Genome sits one row on the far side of the trunk from the QC branch, and the
+      Reference line takes the lane on that side where it joins at Quantify, so no line
+      crosses another (#2199)."
+  - id: source_vs_chain_fed_fork_peel_lane
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The same fork two stations down the trunk (Fetch, Samples, Reads): Genome's seat
+      and the Reference line's lane do not depend on how far down the trunk the fork
+      sits (#2199)."
   - id: root_fan_trunk_feeder_row
     source_dir: examples/topologies
     category: Fan-out and Fan-in

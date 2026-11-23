@@ -1283,6 +1283,30 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
     _reorder_reconvergence(ctx, section_local)
 
 
+def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
+    """Move each line a section pins to an end of its lane order onto that end.
+
+    Track assignment pins a line (``Section.lane_ends``) only in a section whose
+    lanes follow line priority, so the order it reorders is the priority order.
+    A section sharing a flat frame with a neighbour keeps its order: re-slotting
+    it alone would slope the lines running level across the boundary.
+    """
+    if ctx.compact:
+        return
+    component_size = Counter(ctx.frame_roots.values())
+    for sec_id, section in ctx.graph.sections.items():
+        if not section.lane_ends or component_size[ctx.frame_roots[sec_id]] > 1:
+            continue
+        order = sorted(
+            _section_present_line_set(ctx, sec_id),
+            key=lambda lid: ctx.line_priority.get(lid, 0),
+        )
+        ends = section.lane_ends
+        _apply_section_line_order(
+            ctx, sec_id, sorted(order, key=lambda lid: ends.get(lid, 0))
+        )
+
+
 def _entry_fed_in_section(graph: MetroGraph, sid: str, lid: str, sec_id: str) -> bool:
     """Whether *lid* reaches *sid* from this section's entry port.
 
@@ -5418,6 +5442,10 @@ def compute_station_offsets(
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
        sections and applies reconvergence ordering (non-compact only).
+    2a. **Lane ends** - moves each line track assignment pinned to one end
+       of its section's lane order (``Section.lane_ends``) onto that end, so
+       a line joining the bundle from beside the trunk reaches its lane
+       without crossing the lines it joins (non-compact only).
     2b. **Exit-only line reordering** - a line that originates at a
        multi-line station and exits to a port above takes the top slot,
        so it crosses nothing on the way out (non-compact LR/RL).
@@ -5530,6 +5558,7 @@ def compute_station_offsets(
     sec_layer_stations = _build_sec_layer_stations(graph)
     _compute_base_offsets(ctx)
     _reindex_section_local(ctx)
+    _seat_section_lane_ends(ctx)
     _assert_sections_anchored_on_trunk(ctx)
     _reorder_exit_only_lines(ctx)
     _reorder_fanout_divergence(ctx)

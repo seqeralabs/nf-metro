@@ -288,6 +288,7 @@ def _layout_single_section(
     # from the exit ports through in-section feeders).
     exit_reaching = _exit_reaching_nodes(graph, section)
     priority_lane_sign = _priority_lane_sign(section, graph)
+    section.lane_ends = {}
     tracks = assign_tracks(
         sub,
         layers,
@@ -297,6 +298,7 @@ def _layout_single_section(
         exit_reaching=exit_reaching,
         flow_horizontal=lanes_run_along_y(section.direction),
         priority_lane_sign=priority_lane_sign,
+        lane_ends=section.lane_ends,
     )
 
     if not layers:
