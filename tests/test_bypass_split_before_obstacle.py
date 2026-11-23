@@ -78,6 +78,9 @@ SPLITS = [
             ("bypass_split_lr_single", "reporting__entry_left_10"),
             ("bypass_split_lr_fan_beyond", "reporting__entry_left_10"),
             ("bypass_split_rl_fan_beyond", "reporting__entry_right_10"),
+            ("bypass_split_lr_fan_top_beyond", "reporting__entry_left_10"),
+            ("bypass_split_lr_fan_top_under", "reporting__entry_left_10"),
+            ("bypass_split_rl_fan_top_under", "reporting__entry_right_10"),
         )
     ),
 ]
@@ -87,6 +90,9 @@ FANS = [
     CANVAS_DATA / "bypass_split_lr_fan_beyond.mmd",
     CANVAS_DATA / "bypass_split_rl_fan_target_before.mmd",
     CANVAS_DATA / "bypass_split_rl_fan_beyond.mmd",
+    CANVAS_DATA / "bypass_split_lr_fan_top_beyond.mmd",
+    CANVAS_DATA / "bypass_split_lr_fan_top_under.mmd",
+    CANVAS_DATA / "bypass_split_rl_fan_top_under.mmd",
 ]
 
 # The fan every fan witness turns, and the section of its branch whose

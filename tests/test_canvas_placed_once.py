@@ -134,6 +134,9 @@ STRESS_MAPS: tuple[tuple[str, dict[str, object]], ...] = (
     ("bypass_split_lr_fan_target_before.mmd", {}),
     ("bypass_split_rl_fan_beyond.mmd", {}),
     ("bypass_split_rl_fan_target_before.mmd", {}),
+    ("bypass_split_lr_fan_top_beyond.mmd", {}),
+    ("bypass_split_lr_fan_top_under.mmd", {}),
+    ("bypass_split_rl_fan_top_under.mmd", {}),
 )
 
 PACKED_CELL_OPTIONS: dict[str, object] = {
