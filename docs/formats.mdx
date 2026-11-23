@@ -128,9 +128,9 @@ The same 12-second loop at 20fps, in each of the four containers:
   </TabItem>
 </Tabs>
 
-The frames are drawn, not screen-recorded. Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, so the exported motion closely follows the live SVG. The loop runs one full animation cycle and stops a frame short of repeating it, so it wraps without a stutter.
+The frames are drawn, not screen-recorded. Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, so the exported motion closely follows the live SVG. The loop runs one full animation loop and stops a frame short of repeating it, so it wraps without a stutter.
 
-`--fps` sets the frame rate and `--duration` sets the loop length, compressing the map's own animation cycle into it. Leaving `--duration` off keeps the balls at exactly the speed the SVG moves them, which for a large pipeline can be a 40-second loop. `--scale` and `--raster-width` size the frames as they size a PNG, except that a video defaults to natural size where a still doubles.
+`--fps` sets the frame rate and `--duration` sets the loop length, compressing the map's own animation loop into it. Leaving `--duration` off keeps the balls at exactly the speed the SVG moves them, which for a large pipeline can be a 40-second loop. `--scale` and `--raster-width` size the frames as they size a PNG, except that a video defaults to natural size where a still doubles.
 
 Nothing is capped. Every frame is a full rasterisation, so a long smooth loop of a large map costs real time; nf-metro quotes the frame count and frame size before it starts, then shows a progress bar. See [the CLI reference](/nf-metro/cli/#looping-video-of-the-animation) for the flags.
 

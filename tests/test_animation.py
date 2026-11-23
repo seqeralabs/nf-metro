@@ -154,61 +154,6 @@ def test_motion_path_segments_lie_on_rendered_geometry(fixture: Path):
     )
 
 
-def _edge_disjoint_coverage(graph) -> tuple[set[int], set[int]]:
-    """Return (covered, all) edge-id sets over the animation path enumeration.
-
-    Rebuilds the per-line adjacency exactly as ``_build_line_motion_paths``
-    does, then collects which edges the enumerated ball paths traverse.
-    ``all`` counts every line-edge whose line participates in animation and
-    whose line has a root to start a path from.
-    """
-    from nf_metro.render.animate import _find_edge_disjoint_paths
-
-    edges_by_line: dict[str, list] = {}
-    for edge in graph.edges:
-        edges_by_line.setdefault(edge.line_id, []).append(edge)
-
-    covered: set[int] = set()
-    all_edges: set[int] = set()
-    for line_id, edges in edges_by_line.items():
-        if line_id not in graph.lines:
-            continue
-        adj: dict[str, list[tuple[str, object]]] = {}
-        incoming: set[str] = set()
-        for edge in edges:
-            adj.setdefault(edge.source, []).append((edge.target, edge))
-            incoming.add(edge.target)
-        roots = set(adj.keys()) - incoming
-        if not roots:
-            continue
-        for edge in edges:
-            all_edges.add(id(edge))
-        for path in _find_edge_disjoint_paths(roots, adj):
-            for edge in path:
-                covered.add(id(edge))
-    return covered, all_edges
-
-
-@pytest.mark.parametrize("fixture", ANIMATION_FIXTURES, ids=ANIMATION_FIXTURE_IDS)
-def test_every_line_edge_gets_an_animated_ball(fixture: Path):
-    """Every line-edge must be traversed by at least one enumerated ball path.
-
-    A fork reachable only through a non-first branch at an earlier fork
-    must get a variant path, so none of its edges drop out of the
-    animation.
-    """
-    graph = parse_metro_mermaid(fixture.read_text())
-    graph.source_dir = str(fixture.parent)
-    compute_layout(graph)
-
-    covered, all_edges = _edge_disjoint_coverage(graph)
-    missing = all_edges - covered
-    assert not missing, (
-        f"{fixture.name}: {len(missing)} line-edge(s) are never traversed by "
-        f"any animated ball path"
-    )
-
-
 def _render_animated(fixture: Path, theme_key: str = "nfcore") -> str:
     graph = parse_metro_mermaid(fixture.read_text())
     graph.source_dir = str(fixture.parent)

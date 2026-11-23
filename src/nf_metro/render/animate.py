@@ -1,4 +1,4 @@
-"""Animation support: animated balls traveling along metro lines."""
+"""Animation support: animated dots traveling along metro lines."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ __all__ = [
     "FRAME_SLOT",
     "AnimationTimeline",
     "BallTrack",
+    "Dot",
     "animation_frame_markup",
     "build_animation_timeline",
     "render_animation",
@@ -14,19 +15,20 @@ __all__ = [
 import math
 import re
 from bisect import bisect_left
-from collections import deque
 from dataclasses import dataclass
 
 import drawsvg as draw
 
 from nf_metro.layout.routing import RoutedPath
 from nf_metro.layout.routing.common import (
+    SourceTurnout,
     apply_route_offsets,
     point_on_polyline,
     segment_direction,
 )
 from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
 from nf_metro.parser.model import Edge, MetroGraph
+from nf_metro.render.animation_waves import LineWaves, Route, plan_line_waves
 from nf_metro.render.constants import (
     ANIMATION_BALL_OPACITY,
     ANIMATION_CURVE_RADIUS,
@@ -41,10 +43,25 @@ from nf_metro.render.style import Theme
 # two-stop keyframe (no terminus hold), avoiding a degenerate hold of ~0s.
 _FULL_CYCLE_EPSILON = 0.001
 
+# Longest loop the dots are spread over when a line's routes need several
+# cycles to share a fork fairly; a single cycle longer than this is its own loop.
+_MAX_LOOP_SECONDS = 60.0
+
+# The CSS writes seconds to two decimals and keyframe percentages to two
+# decimals of a percent; the timeline holds exactly those values so a sampled
+# frame and the browser agree.
+_SECONDS_DECIMALS = 2
+_PERCENT_DECIMALS = 4
+_PERCENT_STEP = 10**-_PERCENT_DECIMALS
+
 
 def _fills_the_cycle(move_frac: float) -> bool:
     """Return whether a track travels for (near enough) the whole cycle."""
     return move_frac >= 1.0 - _FULL_CYCLE_EPSILON
+
+
+def _seconds(value: float) -> float:
+    return round(value, _SECONDS_DECIMALS)
 
 
 # Segments each quadratic corner is flattened into when sampling a ball's
@@ -61,17 +78,14 @@ FRAME_SLOT = "<!--nf-metro-animation-frame-->"
 
 @dataclass(frozen=True)
 class BallTrack:
-    """One ball path: its drawn ``d``, cycle share, and flattened geometry.
+    """The geometry one dot travels: its drawn ``d`` and the flattened polyline.
 
-    ``move_frac`` is the fraction of the shared cycle this track's ball spends
-    travelling; past it the ball holds at the terminus (see
-    :func:`_travel_keyframes`).  ``points``/``distances`` are the polyline the
-    quadratic corners flatten to and its cumulative arc length, which
-    :meth:`point_at` samples the way a browser samples ``offset-distance``.
+    ``points``/``distances`` are the polyline the quadratic corners flatten to
+    and its cumulative arc length, which :meth:`point_at` samples the way a
+    browser samples ``offset-distance``.
     """
 
     d_attr: str
-    move_frac: float
     points: tuple[tuple[float, float], ...]
     distances: tuple[float, ...]
 
@@ -89,47 +103,79 @@ class BallTrack:
         (x0, y0), (x1, y1) = self.points[index - 1], self.points[index]
         return (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
 
-    def distance_frac(self, progress: float) -> float:
-        """Map an animation *progress* (0-1) to a fraction of the track.
 
-        Reads the keyframes :func:`_travel_keyframes` writes for this track: a
-        linear ramp over ``move_frac`` of the cycle, then a hold at the
-        terminus for the remainder -- or, for a track that fills the cycle, a
-        ramp across the whole of it and no hold at all.
+@dataclass(frozen=True)
+class Dot:
+    """One dot: a piece of a route, when it leaves and how long it is visible.
+
+    The dot departs ``depart`` seconds into the loop, travels its track for
+    ``move_frac`` of its ``lifetime`` and then holds at the terminus until the
+    lifetime ends and it is hidden.  The loop wraps, so a dot departing late
+    may still be visible after the loop restarts.
+    """
+
+    line_id: str
+    track: BallTrack
+    depart: float
+    lifetime: float
+    move_frac: float
+
+    def stops(self, loop: float) -> tuple[float, float | None]:
+        """Return the (travel end, hidden from) fractions of *loop* the CSS
+        keyframes are written with; ``None`` when the dot is never hidden.
+
+        The dot is shown on ``[0, hidden_from)`` of its own animation, hidden
+        no later than its lifetime ends.  The travel ends at a keyframe
+        distinct from, and before, the last one shown.
         """
-        if _fills_the_cycle(self.move_frac):
-            return progress
-        if self.move_frac <= 0:
-            return 1.0
-        return min(progress / self.move_frac, 1.0)
+        step = _PERCENT_STEP
+        hidden_from = math.floor(self.lifetime / loop / step + 1e-9) * step
+        if hidden_from >= 1.0 - step / 2:
+            return self.move_frac, None
+        last_shown = round(hidden_from - step, _PERCENT_DECIMALS)
+        travel = round(self.move_frac * self.lifetime / loop, _PERCENT_DECIMALS)
+        if travel >= round(last_shown - step, _PERCENT_DECIMALS):
+            travel = last_shown
+        return max(travel, step), round(hidden_from, _PERCENT_DECIMALS)
 
 
 @dataclass(frozen=True)
 class AnimationTimeline:
-    """The ball geometry and timing one animated map cycles through.
+    """The dots and timing one animated map loops through.
 
     Built from the same motion paths the CSS animation uses, so a frame
-    sampled here places every ball within a small fraction of a pixel of
-    where a browser would draw it at that moment of the cycle (see the
-    corner-flattening note on ``_CURVE_FLATTEN_STEPS``).
+    sampled here places every dot within a small fraction of a pixel of
+    where a browser would draw it at that moment of the loop (see the
+    corner-flattening note on ``_CURVE_FLATTEN_STEPS``).  ``cycle`` is the
+    time the longest route takes to travel; ``loop`` is the whole animation,
+    a whole number of cycles long.
     """
 
     cycle: float
-    balls_per_line: int
-    tracks: tuple[BallTrack, ...]
+    loop: float
+    dots: tuple[Dot, ...]
 
     def ball_positions(self, phase: float) -> list[tuple[float, float]]:
-        """Return every ball's centre *phase* (0-1) through one cycle.
+        """Return the centre of every visible dot *phase* (0-1) through the loop.
 
-        The balls on a track are spread evenly across the cycle by the same
-        negative animation delays the CSS uses, so ``phase`` 0 and 1 give the
-        same picture and a frame sequence over ``[0, 1)`` loops seamlessly.
+        Phase 0 and 1 give the same picture, so a frame sequence over
+        ``[0, 1)`` loops seamlessly.
         """
+        now = (phase % 1.0) * self.loop
         centres: list[tuple[float, float]] = []
-        for track in self.tracks:
-            for index in range(self.balls_per_line):
-                progress = (phase + index / self.balls_per_line) % 1.0
-                centres.append(track.point_at(track.distance_frac(progress)))
+        for dot in self.dots:
+            travel, hidden_from = dot.stops(self.loop)
+            # Rounded so a dot due to vanish exactly now is not kept by float noise.
+            age = round(((now - dot.depart) / self.loop) % 1.0, 9)
+            if hidden_from is not None and age >= hidden_from:
+                continue
+            if _fills_the_cycle(travel):
+                progress = age
+            elif travel <= 0:
+                progress = 1.0
+            else:
+                progress = min(age / travel, 1.0)
+            centres.append(dot.track.point_at(progress))
         return centres
 
 
@@ -143,11 +189,11 @@ def render_animation(
     *,
     frame_slot: bool = False,
 ) -> None:
-    """Add animated balls traveling along each metro line.
+    """Add animated dots traveling along each metro line.
 
-    For each metro line, builds a continuous SVG path from its chained
-    edges, then emits a <circle> per ball driven along that path by a CSS
-    ``offset-path`` animation.
+    Each dot is a ``<circle>`` driven along its route by a CSS ``offset-path``
+    animation; :func:`build_animation_timeline` decides which routes the dots
+    take and when they depart.
 
     CSS animation is used rather than SMIL ``<animateMotion>`` because SMIL
     does not run when an SVG is injected into a host page via ``innerHTML``
@@ -172,21 +218,22 @@ def render_animation(
         graph, routes, station_offsets, theme, curve_radius
     )
     ball_prefix = _ball_prefix(theme)
-    max_dur = timeline.cycle
-    n_balls = timeline.balls_per_line
     keyframes: dict[str, str] = {}
     balls: list[str] = []
 
-    for track in timeline.tracks:
-        kf_name = _travel_keyframes(track.move_frac, keyframes)
-        for i in range(n_balls):
-            delay = -i * max_dur / n_balls
-            motion = (
-                f"offset-path: path('{track.d_attr}'); offset-rotate: 0deg; "
-                f"animation: {kf_name} {max_dur:.2f}s linear infinite; "
-                f"animation-delay: {delay:.2f}s;"
-            )
-            balls.append(f'{ball_prefix}style="{motion}"/>')
+    for dot in timeline.dots:
+        travel, hidden_from = dot.stops(timeline.loop)
+        if hidden_from is None:
+            kf_name = _travel_keyframes(travel, keyframes)
+        else:
+            kf_name = _visibility_keyframes(travel, hidden_from, keyframes)
+        delay = _seconds(dot.depart - timeline.loop)
+        motion = (
+            f"offset-path: path('{dot.track.d_attr}'); offset-rotate: 0deg; "
+            f"animation: {kf_name} {timeline.loop:.2f}s linear infinite; "
+            f"animation-delay: {delay:.2f}s;"
+        )
+        balls.append(f'{ball_prefix}style="{motion}"/>')
 
     # @keyframes must precede the inline animations that reference them.
     if keyframes:
@@ -216,7 +263,7 @@ def animation_frame_markup(
     """Return the static balls to substitute for :data:`FRAME_SLOT` at *phase*.
 
     Same circles the CSS animation drives, pinned at the centres they hold
-    *phase* (0-1) of the way through the cycle, so a rasterised frame closely
+    *phase* (0-1) of the way through the loop, so a rasterised frame closely
     approximates the moment a browser would draw.
     """
     ball_prefix = _ball_prefix(theme)
@@ -226,6 +273,18 @@ def animation_frame_markup(
     )
 
 
+@dataclass(frozen=True)
+class _LineRoutes:
+    """A line's wave plan and the geometry of the routes it sends dots down."""
+
+    line_id: str
+    plan: LineWaves
+    edges: list[Edge]
+    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]]
+    line_polylines: list[list[tuple[float, float]]]
+    line_turnouts: tuple[tuple[tuple[float, float], SourceTurnout], ...]
+
+
 def build_animation_timeline(
     graph: MetroGraph,
     routes: list[RoutedPath],
@@ -233,38 +292,214 @@ def build_animation_timeline(
     theme: Theme,
     curve_radius: float = ANIMATION_CURVE_RADIUS,
 ) -> AnimationTimeline:
-    """Build the ball paths and shared cycle for *graph*'s animation.
+    """Build the dots, their departures and the shared loop for *graph*.
 
-    All balls share one cycle (the longest line's at-speed duration) so they
-    stay in sync; a shorter line covers its path in the first part of the
-    cycle and holds at the terminus for the rest (see :func:`_travel_keyframes`),
-    rather than restarting mid-track while a longer line runs on.
+    Every dot is visible for one cycle (the longest route's at-speed travel
+    time): it travels at the theme's speed, holds at its terminus, then is
+    hidden.  A line whose waves need several cycles to share its forks fairly
+    stretches the loop to a whole number of cycles, never past
+    ``_MAX_LOOP_SECONDS`` unless one cycle alone is longer.  Each line sends
+    whole rounds of waves, departures spread evenly over the loop, so the loop
+    seam is exact.
     """
-    line_paths = _build_line_motion_paths(graph, routes, station_offsets, curve_radius)
-    durations = [
-        max(
-            _compute_path_length(d_attr) / theme.animation_speed, MIN_ANIMATION_DURATION
-        )
-        for _, d_attr in line_paths
-    ]
-    max_dur = max(durations, default=MIN_ANIMATION_DURATION)
+    lines = _plan_lines(graph, routes, station_offsets, curve_radius)
+    geometry: dict[tuple[str, tuple[tuple[str, str], ...]], list[str]] = {}
 
-    tracks: list[BallTrack] = []
-    for (_, d_attr), natural_dur in zip(line_paths, durations):
-        points, distances = _flatten_path(d_attr)
-        tracks.append(
-            BallTrack(
-                d_attr=d_attr,
-                move_frac=min(natural_dur / max_dur, 1.0) if max_dur > 0 else 1.0,
-                points=points,
-                distances=distances,
+    def pieces(line: _LineRoutes, route: Route) -> list[str]:
+        key = (line.line_id, tuple((e.source, e.target) for e in route))
+        if key not in geometry:
+            geometry[key] = _route_pieces(line, route, curve_radius)
+        return geometry[key]
+
+    durations: dict[str, float] = {}
+
+    def travel_time(d_attr: str) -> float:
+        if d_attr not in durations:
+            durations[d_attr] = max(
+                _compute_path_length(d_attr) / theme.animation_speed,
+                MIN_ANIMATION_DURATION,
+            )
+        return durations[d_attr]
+
+    def route_time(line: _LineRoutes, route: Route) -> float:
+        return sum(travel_time(d) for d in pieces(line, route))
+
+    balls = max(theme.animation_balls_per_line, 0)
+    longest = max(
+        (
+            route_time(line, route)
+            for line in lines
+            for wave in line.plan.waves(line.plan.round_waves)
+            for route in wave
+        ),
+        default=MIN_ANIMATION_DURATION,
+    )
+    # The waves a line sends depend on the loop, which depends on the cycle,
+    # which must cover every route those waves use; raise the cycle until the
+    # routes of the waves actually sent fit in it.
+    while True:
+        cycle = _seconds(longest)
+        rounds = max((line.plan.round_waves for line in lines), default=1)
+        cycles = max(1, min(rounds, math.floor(_MAX_LOOP_SECONDS / cycle + 1e-9)))
+        sent = {
+            id(line): line.plan.waves(
+                -(-cycles // line.plan.round_waves) * line.plan.round_waves * balls
+            )
+            for line in lines
+        }
+        needed = max(
+            (
+                route_time(line, route)
+                for line in lines
+                for wave in sent[id(line)]
+                for route in wave
+            ),
+            default=MIN_ANIMATION_DURATION,
+        )
+        if needed <= longest + 1e-9:
+            break
+        longest = needed
+    loop = _seconds(cycles * cycle)
+
+    dots: list[Dot] = []
+    tracks: dict[str, BallTrack] = {}
+    for line in lines:
+        waves = sent[id(line)]
+        for index, wave in enumerate(waves):
+            departure = _seconds(index * loop / len(waves))
+            for route in wave:
+                _route_dots(
+                    dots,
+                    line.line_id,
+                    [(d, travel_time(d)) for d in pieces(line, route)],
+                    departure,
+                    longest,
+                    loop,
+                    tracks,
+                )
+    return AnimationTimeline(cycle=cycle, loop=loop, dots=tuple(dots))
+
+
+def _route_dots(
+    dots: list[Dot],
+    line_id: str,
+    pieces: list[tuple[str, float]],
+    departure: float,
+    cycle: float,
+    loop: float,
+    tracks: dict[str, BallTrack],
+) -> None:
+    """Append the dots of one route: each piece departs as the one before it
+    arrives, and only the last holds at its terminus for the rest of the cycle."""
+    spent = 0.0
+    start = departure
+    for number, (d_attr, travel) in enumerate(pieces):
+        if d_attr not in tracks:
+            points, distances = _flatten_path(d_attr)
+            tracks[d_attr] = BallTrack(d_attr, points, distances)
+        if number == len(pieces) - 1:
+            remaining = cycle - spent
+            lifetime = _seconds(remaining)
+            move_frac = min(travel / remaining, 1.0) if remaining > 0 else 1.0
+        else:
+            lifetime = _seconds(travel)
+            move_frac = 1.0
+        dots.append(
+            Dot(
+                line_id,
+                tracks[d_attr],
+                _seconds(start % loop),
+                lifetime,
+                round(move_frac, _PERCENT_DECIMALS),
             )
         )
-    return AnimationTimeline(
-        cycle=max_dur,
-        balls_per_line=theme.animation_balls_per_line,
-        tracks=tuple(tracks),
-    )
+        spent += travel
+        start = _seconds(start + lifetime)
+
+
+def _plan_lines(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    station_offsets: dict[tuple[str, str], float],
+    curve_radius: float,
+) -> list[_LineRoutes]:
+    """Plan the waves of every animated line and gather its route geometry."""
+    # Single offset-applied polyline per route, reused below.
+    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]] = {}
+    for route in routes:
+        key = (route.edge.source, route.edge.target, route.line_id)
+        route_polylines[key] = apply_route_offsets(route, station_offsets)
+
+    edges_by_line: dict[str, list[Edge]] = {}
+    for edge in graph.edges:
+        edges_by_line.setdefault(edge.line_id, []).append(edge)
+
+    lines: list[_LineRoutes] = []
+    for line_id, edges in edges_by_line.items():
+        if line_id not in graph.lines:
+            continue
+        plan = plan_line_waves(edges)
+        if plan is None:
+            continue
+        lines.append(
+            _LineRoutes(
+                line_id=line_id,
+                plan=plan,
+                edges=edges,
+                route_polylines=route_polylines,
+                line_polylines=[
+                    pts for key, pts in route_polylines.items() if key[2] == line_id
+                ],
+                line_turnouts=tuple(
+                    (
+                        route_polylines[
+                            (route.edge.source, route.edge.target, route.line_id)
+                        ][0],
+                        route.source_turnout,
+                    )
+                    for route in routes
+                    if route.line_id == line_id and route.source_turnout is not None
+                ),
+            )
+        )
+    return lines
+
+
+def _route_pieces(line: _LineRoutes, route: Route, curve_radius: float) -> list[str]:
+    """Return the motion paths of one route: one per contiguous chunk of it."""
+    pieces: list[str] = []
+    for chunk in _chain_edge_points(
+        list(route), line.route_polylines, line.line_polylines
+    ):
+        if len(chunk) < 2:
+            continue
+        radii = None
+        for corner, turnout in line.line_turnouts:
+            corner_index = next(
+                (
+                    index
+                    for index in range(1, len(chunk) - 1)
+                    if _points_match(chunk[index], corner)
+                    and segment_direction(chunk[index - 1], chunk[index])
+                    is turnout.incoming_direction
+                    and segment_direction(chunk[index], chunk[index + 1])
+                    is turnout.outgoing_direction
+                ),
+                None,
+            )
+            if corner_index is None:
+                continue
+            chunk, radii, _shift = materialize_source_turnout(
+                chunk,
+                radii,
+                turnout,
+                corner_index=corner_index,
+                default_radius=curve_radius,
+            )
+        d_attr = _points_to_svg_path(chunk, curve_radius, route_curve_radii=radii)
+        if d_attr:
+            pieces.append(d_attr)
+    return pieces
 
 
 def _flatten_path(
@@ -346,263 +581,52 @@ def _travel_keyframes(move_frac: float, registry: dict[str, str]) -> str:
     return name
 
 
+def _visibility_keyframes(
+    travel: float, hidden_from: float, registry: dict[str, str]
+) -> str:
+    """Return the @keyframes name for a dot that travels for *travel* of the
+    loop, holds at the terminus, and is hidden from *hidden_from* on.
+
+    The dot is shown from the start of its own animation, so each dot's delay
+    places that start at its departure.  The hide is a step written as a
+    ``0.01%`` fade so every stop lies at a distinct percentage.
+    """
+    name = ns("nfm-dot-" + f"{travel:.4f}-{hidden_from:.4f}".replace(".", "_"))
+    if name not in registry:
+        shown = f"offset-distance:100%;opacity:{ANIMATION_BALL_OPACITY}"
+        last_shown = round(hidden_from - _PERCENT_STEP, _PERCENT_DECIMALS)
+        stops = [f"0%{{offset-distance:0%;opacity:{ANIMATION_BALL_OPACITY}}}"]
+        if travel < last_shown:
+            stops.append(f"{travel * 100:.2f}%{{{shown}}}")
+        stops.append(f"{last_shown * 100:.2f}%{{{shown}}}")
+        gone = "offset-distance:100%;opacity:0"
+        stops.append(f"{hidden_from * 100:.2f}%{{{gone}}}")
+        stops.append(f"100%{{{gone}}}")
+        registry[name] = f"@keyframes {name}{{{''.join(stops)}}}"
+    return name
+
+
 def _build_line_motion_paths(
     graph: MetroGraph,
     routes: list[RoutedPath],
     station_offsets: dict[tuple[str, str], float],
     curve_radius: float = ANIMATION_CURVE_RADIUS,
 ) -> list[tuple[str, str]]:
-    """Build continuous SVG motion paths for each metro line.
+    """Return the distinct motion paths dots travel, as (line_id, d_attr) pairs.
 
-    At diamond/bubble patterns (fork-join), produces separate paths for
-    each branch so balls travel both alternatives (e.g., FastP and
-    TrimGalore). Returns list of (line_id, d_attr) pairs -- a line_id
-    may appear multiple times when it has forking branches.
+    These are the paths of one round of each line's waves -- every route its
+    dots take, with a line_id appearing once per path.
     """
-    # Single offset-applied polyline per route, reused below.
-    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]] = {}
-    for route in routes:
-        key = (route.edge.source, route.edge.target, route.line_id)
-        route_polylines[key] = apply_route_offsets(route, station_offsets)
-
-    # Group edges by line
-    edges_by_line: dict[str, list[Edge]] = {}
-    for edge in graph.edges:
-        edges_by_line.setdefault(edge.line_id, []).append(edge)
-
-    result: list[tuple[str, str]] = []
-
-    for line_id, edges in edges_by_line.items():
-        if line_id not in graph.lines:
-            continue
-
-        # Build adjacency: source -> list of (target, edge)
-        adj: dict[str, list[tuple[str, Edge]]] = {}
-        incoming: set[str] = set()
-        for edge in edges:
-            adj.setdefault(edge.source, []).append((edge.target, edge))
-            incoming.add(edge.target)
-
-        # Find root nodes (no incoming edges for this line)
-        all_sources = set(adj.keys())
-        roots = all_sources - incoming
-        if not roots:
-            continue
-
-        # Build edge-disjoint paths: one greedy root-to-sink path
-        # first, then short paths for remaining diamond branches.
-        # This avoids combinatorial explosion (N diamonds -> 2^N paths)
-        # and ensures each edge is traversed by exactly one ball.
-        all_paths = _find_edge_disjoint_paths(roots, adj)
-
-        if not all_paths:
-            continue
-
-        line_polylines = [
-            pts for key, pts in route_polylines.items() if key[2] == line_id
-        ]
-        line_turnouts = tuple(
-            (
-                route_polylines[(route.edge.source, route.edge.target, route.line_id)][
-                    0
-                ],
-                route.source_turnout,
-            )
-            for route in routes
-            if route.line_id == line_id and route.source_turnout is not None
-        )
-
-        for path_edges in all_paths:
-            chunks = _chain_edge_points(
-                path_edges,
-                route_polylines,
-                line_polylines,
-            )
-            for chunk in chunks:
-                if len(chunk) < 2:
-                    continue
-                radii = None
-                for corner, turnout in line_turnouts:
-                    corner_index = next(
-                        (
-                            index
-                            for index in range(1, len(chunk) - 1)
-                            if _points_match(chunk[index], corner)
-                            and segment_direction(chunk[index - 1], chunk[index])
-                            is turnout.incoming_direction
-                            and segment_direction(chunk[index], chunk[index + 1])
-                            is turnout.outgoing_direction
-                        ),
-                        None,
-                    )
-                    if corner_index is None:
-                        continue
-                    chunk, radii, _shift = materialize_source_turnout(
-                        chunk,
-                        radii,
-                        turnout,
-                        corner_index=corner_index,
-                        default_radius=curve_radius,
-                    )
-                d_attr = _points_to_svg_path(
-                    chunk,
-                    curve_radius,
-                    route_curve_radii=radii,
-                )
-                if d_attr:
-                    result.append((line_id, d_attr))
-
-    return result
-
-
-def _find_edge_disjoint_paths(
-    roots: set[str],
-    adj: dict[str, list[tuple[str, Edge]]],
-) -> list[list[Edge]]:
-    """Build one full root-to-sink path per unique branch.
-
-    Instead of the cartesian product of all diamonds (which explodes
-    combinatorially), this produces:
-
-    1. One canonical path following the first branch at every fork.
-    2. For each alternative branch at each fork, one full root-to-sink
-       path that diverges only at that specific fork and follows the
-       canonical (first) branch everywhere else.
-
-    Result: for N forks with B_i branches each, produces
-    1 + sum(B_i - 1) paths instead of product(B_i).
-    E.g. 2 binary + 1 ternary fork -> 1+1+1+2 = 5 instead of 12.
-    """
-    # First find the canonical path (first branch at every fork)
-    canonical = _first_path(sorted(roots)[0] if roots else "", adj)
-    if not canonical:
-        return []
-
-    paths: list[list[Edge]] = [canonical]
-
-    # Build a set of canonical edge choices at each fork for quick lookup
-    canonical_set: set[int] = {id(e) for e in canonical}
-
-    # Find fork points: nodes in adj with >1 outgoing edge
-    for node, targets in adj.items():
-        if len(targets) <= 1:
-            continue
-        # The canonical path takes targets[0] (first branch).
-        # Create a variant path for each alternative branch.
-        for alt_target, alt_edge in targets:
-            if id(alt_edge) in canonical_set:
-                continue
-            # Build a full root-to-sink path that follows canonical
-            # everywhere except at this fork, where it takes alt_edge.
-            variant = _variant_path(
-                sorted(roots)[0] if roots else "",
-                adj,
-                fork_node=node,
-                forced_edge=alt_edge,
-                forced_target=alt_target,
-            )
-            if variant:
-                paths.append(variant)
-
+    paths: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for line in _plan_lines(graph, routes, station_offsets, curve_radius):
+        for wave in line.plan.waves(line.plan.round_waves):
+            for route in wave:
+                for d_attr in _route_pieces(line, route, curve_radius):
+                    if (line.line_id, d_attr) not in seen:
+                        seen.add((line.line_id, d_attr))
+                        paths.append((line.line_id, d_attr))
     return paths
-
-
-def _first_path(start: str, adj: dict[str, list[tuple[str, Edge]]]) -> list[Edge]:
-    """Follow the first outgoing edge at every node from start to sink."""
-    path: list[Edge] = []
-    current = start
-    visited: set[str] = set()
-    while current in adj and current not in visited:
-        visited.add(current)
-        target, edge = adj[current][0]
-        path.append(edge)
-        current = target
-    return path
-
-
-def _variant_path(
-    start: str,
-    adj: dict[str, list[tuple[str, Edge]]],
-    fork_node: str,
-    forced_edge: Edge,
-    forced_target: str,
-) -> list[Edge]:
-    """Build a root-to-sink path that takes forced_edge at fork_node.
-
-    The prefix from *start* to *fork_node* follows the first (canonical)
-    branch at every earlier fork. When that canonical walk cannot reach
-    *fork_node* -- because the only route to it runs through a non-first
-    branch at some earlier fork -- fall back to a breadth-first search over
-    the full adjacency to find any prefix that does. Without the fallback,
-    *forced_edge* is silently never emitted and its branch is dropped from
-    the animation.
-    """
-    prefix = _canonical_prefix_to(start, adj, fork_node)
-    if prefix is None:
-        prefix = _bfs_prefix_to(start, adj, fork_node)
-        if prefix is None:
-            return []
-
-    prefix_edges, visited = prefix
-    path = list(prefix_edges)
-    path.append(forced_edge)
-    current = forced_target
-    while current in adj and current not in visited:
-        visited.add(current)
-        target, edge = adj[current][0]
-        path.append(edge)
-        current = target
-    return path
-
-
-def _canonical_prefix_to(
-    start: str,
-    adj: dict[str, list[tuple[str, Edge]]],
-    fork_node: str,
-) -> tuple[list[Edge], set[str]] | None:
-    """Prefix from *start* to *fork_node* via the first branch at every fork.
-
-    Returns the prefix edges and the set of nodes visited (including
-    *fork_node*), or ``None`` if the canonical walk dead-ends before
-    reaching *fork_node*.
-    """
-    path: list[Edge] = []
-    current = start
-    visited: set[str] = set()
-    while current in adj and current not in visited:
-        visited.add(current)
-        if current == fork_node:
-            return path, visited
-        target, edge = adj[current][0]
-        path.append(edge)
-        current = target
-    return None
-
-
-def _bfs_prefix_to(
-    start: str,
-    adj: dict[str, list[tuple[str, Edge]]],
-    fork_node: str,
-) -> tuple[list[Edge], set[str]] | None:
-    """Shortest edge-path from *start* to *fork_node* over the full adjacency.
-
-    Returns the prefix edges and the set of nodes on that path (including
-    *fork_node*), or ``None`` if *fork_node* is unreachable from *start*.
-    """
-    queue: deque[tuple[str, list[Edge]]] = deque([(start, [])])
-    seen: set[str] = {start}
-    while queue:
-        node, edges = queue.popleft()
-        if node == fork_node:
-            visited = {start}
-            for edge in edges:
-                visited.add(edge.target)
-            return edges, visited
-        for target, edge in adj.get(node, []):
-            if target not in seen:
-                seen.add(target)
-                queue.append((target, [*edges, edge]))
-    return None
 
 
 def _chain_edge_points(

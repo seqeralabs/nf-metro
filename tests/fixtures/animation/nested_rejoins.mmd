@@ -1,0 +1,23 @@
+%%metro title: nested rejoins take turns level by level
+%%metro line: l1 | Line 1 | #2db572
+
+graph LR
+    src[Source]
+    x1[X 1]
+    x2[X 2]
+    z[Z]
+    w[W]
+    j1[Join 1]
+    j2[Join 2]
+    end_[End]
+    w_end[W end]
+    src -->|l1| x1
+    src -->|l1| x2
+    src -->|l1| z
+    src -->|l1| w
+    x1 -->|l1| j1
+    x2 -->|l1| j1
+    j1 -->|l1| j2
+    z -->|l1| j2
+    j2 -->|l1| end_
+    w -->|l1| w_end

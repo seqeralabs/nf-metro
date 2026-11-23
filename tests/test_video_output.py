@@ -11,7 +11,7 @@ from PIL import Image
 
 from nf_metro.cli import cli
 from nf_metro.render import video
-from nf_metro.render.animate import FRAME_SLOT, AnimationTimeline, BallTrack
+from nf_metro.render.animate import FRAME_SLOT, AnimationTimeline, BallTrack, Dot
 from nf_metro.render.video import _cost_note, _frame_ticks
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -41,11 +41,17 @@ def _frames(path: Path) -> list[Image.Image]:
         ]
 
 
-def _track(points: tuple[tuple[float, float], ...], move_frac: float) -> BallTrack:
+def _track(points: tuple[tuple[float, float], ...]) -> BallTrack:
     distances = [0.0]
     for (x0, y0), (x1, y1) in zip(points, points[1:]):
         distances.append(distances[-1] + ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5)
-    return BallTrack("", move_frac, points, tuple(distances))
+    return BallTrack("", points, tuple(distances))
+
+
+def _dot(
+    track: BallTrack, depart: float, lifetime: float, move_frac: float = 1.0
+) -> Dot:
+    return Dot("l1", track, depart, lifetime, move_frac)
 
 
 # --- the sampled geometry --------------------------------------------------
@@ -58,52 +64,73 @@ def test_point_at_walks_the_track_by_arc_length() -> None:
     track is halfway down it -- a waypoint-indexed sampler would answer the
     corner instead.
     """
-    track = _track(((0.0, 0.0), (30.0, 0.0), (30.0, 10.0)), 1.0)
+    track = _track(((0.0, 0.0), (30.0, 0.0), (30.0, 10.0)))
 
     assert track.point_at(0.0) == (0.0, 0.0)
     assert track.point_at(0.5) == pytest.approx((20.0, 0.0))
     assert track.point_at(1.0) == pytest.approx((30.0, 10.0))
 
 
-def test_a_short_line_holds_at_its_terminus_for_the_rest_of_the_cycle() -> None:
-    """move_frac is the share of the cycle spent moving, as in the keyframes."""
-    track = _track(((0.0, 0.0), (100.0, 0.0)), 0.5)
-
-    assert track.point_at(track.distance_frac(0.25)) == pytest.approx((50.0, 0.0))
-    assert track.point_at(track.distance_frac(0.5)) == pytest.approx((100.0, 0.0))
-    assert track.point_at(track.distance_frac(0.9)) == pytest.approx((100.0, 0.0))
-
-
-def test_balls_on_one_track_are_spread_evenly_across_the_cycle() -> None:
-    """Matching the negative animation-delays the CSS gives each ball."""
+def test_a_short_line_holds_at_its_terminus_for_the_rest_of_its_lifetime() -> None:
+    """move_frac is the share of the lifetime spent moving, as in the keyframes."""
+    track = _track(((0.0, 0.0), (100.0, 0.0)))
     timeline = AnimationTimeline(
-        cycle=10.0,
-        balls_per_line=4,
-        tracks=(_track(((0.0, 0.0), (100.0, 0.0)), 1.0),),
+        cycle=10.0, loop=10.0, dots=(_dot(track, 0.0, 10.0, move_frac=0.5),)
     )
 
-    expected = [(0.0, 0.0), (25.0, 0.0), (50.0, 0.0), (75.0, 0.0)]
+    positions = [timeline.ball_positions(phase)[0] for phase in (0.25, 0.5, 0.9)]
+    assert positions == pytest.approx([(50.0, 0.0), (100.0, 0.0), (100.0, 0.0)])
+
+
+def test_dots_on_one_track_are_spread_by_their_departures() -> None:
+    """The negative animation-delays the CSS gives each dot are its departure."""
+    track = _track(((0.0, 0.0), (100.0, 0.0)))
+    timeline = AnimationTimeline(
+        cycle=10.0,
+        loop=10.0,
+        dots=tuple(_dot(track, depart, 10.0) for depart in (0.0, 2.5, 5.0, 7.5)),
+    )
+
+    expected = [(0.0, 0.0), (75.0, 0.0), (50.0, 0.0), (25.0, 0.0)]
     actual = timeline.ball_positions(0.0)
-    assert len(actual) == len(expected)
     assert [c for p in actual for c in p] == pytest.approx(
         [c for p in expected for c in p]
     )
+
+
+def test_a_dot_is_hidden_once_its_lifetime_is_over() -> None:
+    track = _track(((0.0, 0.0), (100.0, 0.0)))
+    timeline = AnimationTimeline(cycle=10.0, loop=40.0, dots=(_dot(track, 20.0, 10.0),))
+
+    assert timeline.ball_positions(0.49) == []
+    assert timeline.ball_positions(0.5) == [(0.0, 0.0)]
+    assert len(timeline.ball_positions(0.7)) == 1
+    assert timeline.ball_positions(0.76) == []
+
+
+def test_a_dot_departing_late_in_the_loop_is_still_shown_after_the_wrap() -> None:
+    track = _track(((0.0, 0.0), (100.0, 0.0)))
+    timeline = AnimationTimeline(cycle=10.0, loop=40.0, dots=(_dot(track, 35.0, 10.0),))
+
+    assert timeline.ball_positions(0.0)[0] == pytest.approx((50.0, 0.0), abs=0.1)
+    assert timeline.ball_positions(0.2) == []
 
 
 def test_phase_one_is_phase_zero_again() -> None:
     """The seam a frame sequence over [0, 1) wraps across has to be invisible."""
     timeline = AnimationTimeline(
         cycle=10.0,
-        balls_per_line=3,
-        tracks=(
-            _track(((0.0, 0.0), (100.0, 0.0)), 1.0),
-            _track(((0.0, 20.0), (40.0, 20.0), (40.0, 60.0)), 0.4),
+        loop=20.0,
+        dots=(
+            _dot(_track(((0.0, 0.0), (100.0, 0.0))), 0.0, 10.0),
+            _dot(_track(((0.0, 0.0), (100.0, 0.0))), 15.0, 10.0),
+            _dot(_track(((0.0, 20.0), (40.0, 20.0), (40.0, 60.0))), 7.0, 20.0, 0.4),
         ),
     )
 
     seam = timeline.ball_positions(1.0)
     start = timeline.ball_positions(0.0)
-    assert len(seam) == len(start)
+    assert len(seam) == len(start) == 3
     assert [c for p in seam for c in p] == pytest.approx([c for p in start for c in p])
 
 
@@ -166,7 +193,7 @@ def test_a_video_animates_a_map_that_was_not_asked_to(tmp_path: Path) -> None:
     """
     frames = _frames(_render(tmp_path, "map.gif", *TINY))
 
-    assert frames[0].tobytes() != frames[2].tobytes()
+    assert frames[0].tobytes() != frames[1].tobytes()
 
 
 def test_the_last_frame_is_not_a_repeat_of_the_first(tmp_path: Path) -> None:
