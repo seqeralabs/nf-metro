@@ -571,8 +571,8 @@ def test_render_rnaseq_sections_example():
     graph.source_dir = str(examples)
     compute_layout(graph)
     svg = render_svg(graph, NFCORE_DARK_THEME)
-    # Title text is replaced by embedded logo, so check section labels
     assert "Pre-processing" in svg
+    assert "nf-core/rnaseq" in svg
     root = ET.fromstring(svg)
     assert root.tag.endswith("svg") or "svg" in root.tag
 

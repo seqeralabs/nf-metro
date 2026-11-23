@@ -1567,10 +1567,6 @@
   "note": "The group is only re-banded once its bands span more than (lines - 1) offset steps, and the targets pack the lines into exactly that span from the lowest band, so the highest band always differs from its target by more than the tolerance. Not reached by the corpus, the test fixtures, or 8000 generated maps.",
   "status": "defensive"
  },
- "normalize.py::if not moves:::#2": {
-  "note": "Every candidate re-seat of the descent group is obstructed, so the group keeps its handler channels. Reached by `tests/fixtures/hash_seed_determinism/seed_41.mmd`, `seed_77.mmd` and `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd`; a generated-map sweep reaches it (363 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
  "offsets.py::if abs(current - target) <= _OFFSET_EQ_TOLERANCE:::#1": {
   "note": "A fan-out peel-order slot the line already holds needs no swap. Reached by `tests/fixtures/hash_seed_determinism/seed_77.mmd`; a generated-map sweep reaches it (58 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"

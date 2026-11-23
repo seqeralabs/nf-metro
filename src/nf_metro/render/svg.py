@@ -27,6 +27,8 @@ import drawsvg as draw
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
+    LOGO_HEIGHT,
+    LOGO_Y_STANDALONE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
@@ -46,6 +48,7 @@ from nf_metro.layout.geometry import lanes_run_along_x, segment_intersects_bbox
 from nf_metro.layout.labels import (
     LabelPlacement,
     _label_bbox,
+    _label_ink_quad,
     place_labels,
 )
 from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
@@ -180,7 +183,6 @@ from nf_metro.render.constants import (
     LEGEND_GAP,
     LEGEND_INSET,
     LEGEND_ROUTE_CLEARANCE,
-    LOGO_Y_STANDALONE,
     MARKER_PILL_LENGTH_RATIO,
     RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
@@ -192,7 +194,10 @@ from nf_metro.render.constants import (
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
+    TEXT_VCENTER_EM,
+    TITLE_ASCENT_RATIO,
     TITLE_CANVAS_SAFETY_MARGIN,
+    TITLE_LOGO_GAP,
     WATERMARK_BARE_X_INSET,
     WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
@@ -358,7 +363,9 @@ def _content_origin(
     A map with no boxes has no such frame, and is never moved for one either,
     so its content edge is the canvas padding.  Station markers and labels
     reach past a bare station's coordinate, so reading one as an edge would
-    place a decoration inside the content it frames.
+    place a decoration inside the content it frames.  This therefore reads
+    station coordinates on purpose, unlike :func:`_leftmost_ink`, which reads
+    the ink actually painted.
     """
     boxes = [section for section in graph.sections.values() if section.bbox_w > 0]
     if not boxes:
@@ -390,15 +397,21 @@ def _canvas_margin_shift(
     (:data:`CANVAS_ORIGIN_MARGIN`), and the far margins absorb the move by
     growing the canvas.
 
+    The top margin is measured from the map's own canvas top
+    (``graph.title_band_lift``), which sits below any title/logo band.
+
     Zero on both axes for a map that draws nothing outside its box envelope.
     """
     boxes = [section for section in graph.sections.values() if section.bbox_w > 0]
     if not boxes:
         return 0.0, 0.0
     ink_x, ink_y = _drawn_ink_origin(graph, route_polylines, debug)
+    top = graph.title_band_lift
     return (
         _outboard_shortfall(min(s.bbox_x for s in boxes), ink_x, margins[0]),
-        _outboard_shortfall(min(s.bbox_y for s in boxes), ink_y, margins[1]),
+        _outboard_shortfall(
+            min(s.bbox_y for s in boxes) - top, ink_y - top, margins[1]
+        ),
     )
 
 
@@ -794,6 +807,8 @@ class _FinalPublishedGeometry(FinalCanvasGeometry):
     logo_y: float
     logo_w: float
     logo_h: float
+    title_x: float
+    title_y: float
     legend_logo_size: tuple[float, float] | None
     manifest: Mapping[str, object] | None
     debug: bool
@@ -835,6 +850,8 @@ _FINAL_RENDER_PLAN_FINGERPRINT_SOURCES = {
     "logo_y": "published.logo_y",
     "logo_w": "published.logo_w",
     "logo_h": "published.logo_h",
+    "title_x": "published.title_x",
+    "title_y": "published.title_y",
     "legend_logo_size": "published.legend_logo_size",
     "manifest": "published.manifest",
     "debug": "published.debug",
@@ -2397,9 +2414,7 @@ def _build_render_plan_scaled(
     # Whether this render draws the map title as standalone chrome: the one
     # predicate that both the canvas-sizing term and the title-draw block read,
     # so the two cannot drift and reintroduce a clipped or unmeasured title.
-    draws_standalone_title = (
-        not bare and bool(graph.title) and not logo_in_legend and not show_logo
-    )
+    draws_standalone_title = not bare and bool(graph.title)
 
     legend_x, legend_y, legend_w, legend_h, show_legend = _position_legend(
         graph,
@@ -2421,14 +2436,32 @@ def _build_render_plan_scaled(
         max_y = max(max_y, legend_y + legend_h)
 
     # Standalone logo positioning (only when no legend to embed it in)
+    positive_fan = frozenset(tb_positive_fan_sections(graph))
+    block_left = _leftmost_ink(
+        graph,
+        theme,
+        routes=routes,
+        route_polylines=route_polylines,
+        station_offsets=station_offsets,
+        positive_fan=positive_fan,
+        labels=labels,
+        header_placements=header_placements,
+        group_bands=group_bands,
+        legend_left=legend_x if show_legend else None,
+        caption_left=_watermark_x_inset(bare, padding) if graph.caption else None,
+        debug=debug,
+    )
+    block_left = padding if block_left is None else max(block_left, 0.0)
     logo_x = 0.0
     logo_y = 0.0
+    standalone_logo_box: tuple[float, float, float, float] | None = None
     if show_logo and not show_legend:
         logo_w *= graph.logo_scale
         logo_h *= graph.logo_scale
-        logo_x = padding
+        logo_x = block_left
         logo_y = LOGO_Y_STANDALONE
         max_x = max(max_x, logo_x + logo_w)
+        standalone_logo_box = (logo_x, logo_y, logo_w, logo_h)
 
     # Right margin: one padding width in full mode; none in bare mode so the
     # canvas hugs the content.  Bottom margin is always just enough room for
@@ -2436,9 +2469,12 @@ def _build_render_plan_scaled(
     auto_width = max_x + (0.0 if bare else padding)
     auto_height = max_y + WATERMARK_Y_INSET * 2 + WATERMARK_FONT_SIZE
 
-    # The title is authored text drawn at x=padding but never folded into the
-    # content extent, so a title wider than the map is clipped at the right
-    # edge.  Grow the canvas to its true glyph advance plus a small margin.
+    title_x, title_y = _title_origin(
+        block_left, theme.title_font_size, standalone_logo_box
+    )
+
+    # Content bounds ignore the title, so a title wider than the map would be
+    # clipped at the right edge: grow the canvas to its true glyph advance.
     if draws_standalone_title:
         title_advance = DEFAULT_TEXT_METRICS.advance(
             graph.title,
@@ -2446,7 +2482,7 @@ def _build_render_plan_scaled(
             TextRole.TITLE,
         )
         auto_width = max(
-            auto_width, padding + title_advance + TITLE_CANVAS_SAFETY_MARGIN
+            auto_width, title_x + title_advance + TITLE_CANVAS_SAFETY_MARGIN
         )
 
     # A relocated header may sit past the box; let it use the margins already
@@ -2462,7 +2498,6 @@ def _build_render_plan_scaled(
     svg_width = width or int(auto_width)
     svg_height = height or int(auto_height)
 
-    positive_fan = frozenset(tb_positive_fan_sections(graph))
     manifest = None
     if graph.embed_manifest:
         boxes: dict[str, dict[str, float]] = {}
@@ -2515,6 +2550,8 @@ def _build_render_plan_scaled(
         logo_y=logo_y,
         logo_w=logo_w,
         logo_h=logo_h,
+        title_x=title_x,
+        title_y=title_y,
         legend_logo_size=legend_logo_size,
         manifest=manifest,
         debug=debug,
@@ -2595,6 +2632,8 @@ def _build_render_plan_scaled(
         logo_y=published_geometry.logo_y,
         logo_w=published_geometry.logo_w,
         logo_h=published_geometry.logo_h,
+        title_x=published_geometry.title_x,
+        title_y=published_geometry.title_y,
         legend_logo_size=published_geometry.legend_logo_size,
         manifest=(
             freeze_render_value(published_geometry.manifest)
@@ -2728,7 +2767,12 @@ def _emit_render_plan(
 
     # Title / Logo (omitted in bare mode; standalone logo only when not in legend)
     if not bare:
-        if show_logo and not logo_in_legend:
+        standalone_logo_box = (
+            (logo_x, logo_y, logo_w, logo_h)
+            if show_logo and not logo_in_legend
+            else None
+        )
+        if standalone_logo_box is not None:
             if adaptive_logo:
                 _render_adaptive_logo(
                     d,
@@ -2741,13 +2785,13 @@ def _emit_render_plan(
                 )
             else:
                 _render_logo(d, effective_logo, logo_x, logo_y, logo_w, logo_h)
-        elif plan.draws_standalone_title:
+        if plan.draws_standalone_title:
             d.append(
                 draw.Text(
                     graph.title,
                     theme.title_font_size,
-                    padding,
-                    title_baseline_y(theme.title_font_size),
+                    plan.title_x,
+                    plan.title_y,
                     fill=theme.title_color,
                     font_family=theme.label_font_family,
                     font_weight="bold",
@@ -2825,9 +2869,7 @@ def _emit_render_plan(
         )
 
     # Attribution watermark
-    watermark_x_inset = (
-        WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
-    )
+    watermark_x_inset = _watermark_x_inset(bare, padding)
     d.append(
         draw.Text(
             f"created with nf-metro {_version_string()}",
@@ -2988,6 +3030,97 @@ def _effective_logo_path(graph: MetroGraph, mode: str) -> str:
     return graph.logo_path
 
 
+def _watermark_x_inset(bare: bool, padding: float) -> float:
+    """Distance of the watermark and the caption from the canvas side edges."""
+    return WATERMARK_BARE_X_INSET if bare else padding * WATERMARK_PADDING_RATIO
+
+
+def _leftmost_ink(
+    graph: MetroGraph,
+    theme: Theme,
+    *,
+    routes: list[RoutedPath],
+    route_polylines: Sequence[Sequence[tuple[float, float]]],
+    station_offsets: dict[tuple[str, str], float],
+    positive_fan: set[str] | frozenset[str],
+    labels: Sequence[LabelPlacement],
+    header_placements: dict[str, SectionHeaderPlacement],
+    group_bands: Sequence[_GroupBand],
+    legend_left: float | None,
+    caption_left: float | None,
+    debug: bool,
+) -> float | None:
+    """Smallest x the settled geometry paints, or ``None`` when it paints nothing.
+
+    Reads every drawn element but the map title, a standalone logo, the
+    attribution watermark and the debug overlay: section boxes and headers,
+    line strokes, station markers, station labels, group captions, the caption
+    and the legend.  A stroke reaches half its width past its path, and a
+    quadratic corner stays inside the hull of its control points, so a
+    polyline's vertices bound its curves.  Terminus icons are held inside their
+    section box by a layout guard, so the box covers them.
+    """
+    reach: list[float] = []
+    for section in graph.sections.values():
+        if not section.is_drawn_box:
+            continue
+        reach.append(section.bbox_x - SECTION_STROKE_WIDTH / 2)
+        placement = header_placements[section.id]
+        if section.has_badge:
+            reach.append(placement.badge_cx - SECTION_NUM_CIRCLE_R_LARGE)
+        reach.append(
+            placement.keepout[0] if placement.label_rotation else placement.label_x
+        )
+    reach.extend(x - theme.line_width / 2 for line in route_polylines for x, _ in line)
+    if graph.directional:
+        for route in routes:
+            reach.extend(
+                x - _chevron_stroke_width(theme) / 2
+                for vertices in _route_chevrons(
+                    apply_route_offsets(route, station_offsets), theme
+                )
+                for x, _ in vertices
+            )
+    fan_sections = set(positive_fan)
+    for station in _drawn_stations(graph, debug):
+        cx, _, width, _, _ = station_marker_box(
+            graph, theme, station, station_offsets, fan_sections
+        )
+        reach.append(cx - width / 2 - theme.station_stroke_width / 2)
+    halo = max(theme.label_halo_width, 0.0) / 2
+    reach.extend(x - halo for label in labels for x, _ in _label_ink_quad(label))
+    caption_style = text_style(theme.label_font_size * GROUP_LABEL_FONT_SCALE, "bold")
+    for band in group_bands:
+        caption_width = DEFAULT_TEXT_METRICS.advance(
+            band.label, caption_style, TextRole.GROUP_CAPTION
+        )
+        reach.append(band.x_left - GROUP_LABEL_UNDERLINE_WIDTH / 2)
+        reach.append((band.x_left + band.x_right - caption_width) / 2)
+    reach.extend(x for x in (legend_left, caption_left) if x is not None)
+    return min(reach, default=None)
+
+
+def _title_origin(
+    left: float,
+    title_font_size: float,
+    standalone_logo: tuple[float, float, float, float] | None,
+) -> tuple[float, float]:
+    """``(x, baseline_y)`` of the map title.
+
+    Top-left at ``left`` on its own; beside a standalone logo (given as
+    ``(x, y, w, h)``) it sits to the logo's right, vertically centred on it,
+    with its baseline kept low enough that the glyphs never rise off the top.
+    """
+    if standalone_logo is None:
+        return left, title_baseline_y(title_font_size)
+    logo_x, logo_y, logo_w, logo_h = standalone_logo
+    centred = logo_y + logo_h / 2 + title_font_size * TEXT_VCENTER_EM
+    return (
+        logo_x + logo_w + TITLE_LOGO_GAP,
+        max(centred, title_font_size * TITLE_ASCENT_RATIO),
+    )
+
+
 def _is_adaptive_mode(graph: MetroGraph) -> bool:
     """True when the %%metro logo: directive used pipe syntax (one or both variants)."""
     return bool(graph.logo_path_light) or bool(graph.logo_path_dark)
@@ -3036,7 +3169,7 @@ def _resolve_logo(
 
 def compute_logo_dimensions(
     logo_path: str,
-    logo_height: float = 80.0,
+    logo_height: float = LOGO_HEIGHT,
 ) -> tuple[float, float]:
     """Compute logo display dimensions preserving aspect ratio."""
     img = open_logo_image(logo_path)
@@ -3520,13 +3653,6 @@ def _render_directional_markers(
     are spaced by arc length and kept sparse and subtle by default, in the
     spirit of a one-way transit line's direction-of-travel arrows.
     """
-    size = theme.directional_marker_size
-    spacing = max(theme.directional_marker_spacing, 1.0)
-    opacity = theme.directional_marker_opacity
-    # A route shorter than one chevron carries no useful direction cue.
-    min_length = 2 * size
-    stroke_width = max(theme.line_width * 0.5, 1.0)
-
     for route in routes:
         pts = apply_route_offsets(route, station_offsets)
         if len(pts) < 2:
@@ -3536,18 +3662,33 @@ def _render_directional_markers(
             line, theme, inactive_line_ids, theme.directional_marker_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
-        for point, heading in _chevron_samples(pts, spacing, min_length):
+        for vertices in _route_chevrons(pts, theme):
             _draw_chevron(
                 d,
-                point,
-                heading,
+                vertices,
                 color,
-                size,
-                stroke_width,
-                opacity,
+                _chevron_stroke_width(theme),
+                theme.directional_marker_opacity,
                 class_name,
                 route.line_id,
             )
+
+
+def _chevron_stroke_width(theme: Theme) -> float:
+    return max(theme.line_width * 0.5, 1.0)
+
+
+def _route_chevrons(
+    pts: list[tuple[float, float]], theme: Theme
+) -> list[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]]:
+    """``(wing, apex, wing)`` of every chevron riding the polyline *pts*."""
+    size = theme.directional_marker_size
+    spacing = max(theme.directional_marker_spacing, 1.0)
+    # A route shorter than one chevron carries no useful direction cue.
+    return [
+        _chevron_vertices(point, heading, size)
+        for point, heading in _chevron_samples(pts, spacing, 2 * size)
+    ]
 
 
 def _chevron_samples(
@@ -3585,18 +3726,10 @@ def _chevron_samples(
     return samples
 
 
-def _draw_chevron(
-    d: draw.Drawing,
-    point: tuple[float, float],
-    heading: tuple[float, float],
-    color: str,
-    size: float,
-    stroke_width: float,
-    opacity: float,
-    class_name: str,
-    line_id: str,
-) -> None:
-    """Draw one open ``>`` chevron centred at *point*, apex along *heading*."""
+def _chevron_vertices(
+    point: tuple[float, float], heading: tuple[float, float], size: float
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """``(wing, apex, wing)`` of an open chevron at *point* pointing along *heading*."""
     px, py = point
     ux, uy = heading
     perp = (-uy, ux)
@@ -3604,7 +3737,20 @@ def _draw_chevron(
     back = (px - ux * size, py - uy * size)
     wing1 = (back[0] + perp[0] * size, back[1] + perp[1] * size)
     wing2 = (back[0] - perp[0] * size, back[1] - perp[1] * size)
+    return wing1, apex, wing2
 
+
+def _draw_chevron(
+    d: draw.Drawing,
+    vertices: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
+    color: str,
+    stroke_width: float,
+    opacity: float,
+    class_name: str,
+    line_id: str,
+) -> None:
+    """Draw one open ``>`` chevron through *vertices*."""
+    wing1, apex, wing2 = vertices
     path = draw.Path(
         stroke=color,
         stroke_width=stroke_width,

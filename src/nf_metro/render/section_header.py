@@ -56,6 +56,7 @@ from typing import Literal, NamedTuple
 
 from nf_metro.layout.constants import SAME_COORD_TOLERANCE, SECTION_HEADER_PROTRUSION
 from nf_metro.layout.geometry import point_to_polyline_distance
+from nf_metro.layout.title_band import title_band_bottom
 from nf_metro.parser.model import MetroGraph, Section
 from nf_metro.render.constants import (
     HEADER_WRAP_CLEARANCE,
@@ -65,6 +66,7 @@ from nf_metro.render.constants import (
     SECTION_LABEL_TEXT_OFFSET,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_Y_OFFSET,
+    TITLE_DESCENT_RATIO,
     title_baseline_y,
 )
 from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
@@ -337,16 +339,17 @@ def _single_line_protrusion(font_size: float) -> float:
 def _upward_ceiling(
     graph: MetroGraph, section: Section, title_font_size: float | None
 ) -> float:
-    """Y of the lowest thing standing above ``section``'s box: the map title,
-    another section's box, or the canvas top."""
+    """Y of the lowest thing standing above ``section``'s box: the map title
+    or standalone logo, another section's box, or the canvas top."""
     ceiling = 0.0
-    if title_font_size is not None and graph.title:
-        # A quarter of the title's font size approximates its descender depth
-        # below the baseline (mirrors the layout side's TITLE_BAND_BOTTOM,
-        # calibrated the same way for a fixed title size).
-        ceiling = max(
-            ceiling, title_baseline_y(title_font_size) + title_font_size * 0.25
-        )
+    if title_font_size is not None:
+        ceiling = title_band_bottom(graph)
+        if graph.title:
+            ceiling = max(
+                ceiling,
+                title_baseline_y(title_font_size)
+                + title_font_size * TITLE_DESCENT_RATIO,
+            )
     above_bottom = _nearest_section_above(graph, section)
     if above_bottom is not None:
         ceiling = max(ceiling, above_bottom)
@@ -728,7 +731,7 @@ def resolve_all_section_headers(
             graph, section, label_font_size, polylines, title_font_size
         )
         for section in graph.sections.values()
-        if section.bbox_w > 0 and section.bbox_h > 0 and section.draws_box
+        if section.is_drawn_box
     }
 
 
