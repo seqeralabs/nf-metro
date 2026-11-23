@@ -204,32 +204,25 @@ GIF frames are palette-indexed (`pal8`) with a shared palette Pillow quantises f
 The per-frame delay for GIF and WebP comes from the presentation timestamps in `_frame_ticks`, which round the running total rather than each frame, keeping the loop the length that was asked for.
 That tick time base has to be set on the stream's codec context: set on the stream instead, the muxer rescales from the nominal frame rate and an 8-second loop plays for 66.
 
-## Theming (`style.py`)
+## Theming (`style.py`, `themes/`)
 
-`Theme` is a keyword-only dataclass of visual properties: colors, font sizes, line widths, station radii, animation speed, and legend layout.
+`Theme` in `style.py` is the theme schema: one keyword-only dataclass whose fields are every visual setting a theme can carry.
+Each field's metadata records its description and reference group, whether it is a color, its allowed values, and for chrome colors the SVG class and property it paints and the `--nfm-map-*` custom property that overrides it.
+Three things derive from that metadata rather than from hand-kept lists: theme file validation, the chrome CSS in `_inject_chrome_css`, and the field reference in `docs/theming.mdx` (`themes/reference.py`, checked by `tests/test_theme_reference.py`).
 
-Brand identity and display mode are orthogonal axes.
-Built-in themes live in `src/nf_metro/themes/`:
+Built-in themes are YAML files in `src/nf_metro/themes/` (`nfcore.yaml`, `seqera.yaml`, `london_tube.yaml`, `transparent.yaml`), loaded by the same loader as user theme files (`themes/stack.py`).
+A `style`/`--theme` value is a stack of names and files.
+`resolve_stack` lays the stack over the `nfcore` base and merges each mode separately into an immutable `ResolvedTheme` holding the light theme, the dark theme, the stack's layout options, and any fixed or pinned mode.
+`resolve_theme(theme, graph, mode)` picks one theme from it.
+A stack of built-in names is memoised, so a name always resolves to the same objects.
 
-- `nfcore.py` holds the nf-core brand as a light/dark pair, `NFCORE_LIGHT_THEME` and `NFCORE_DARK_THEME`.
-  They share one set of fonts and one line and station geometry, and differ only in the chrome palette.
-- `seqera.py` holds the Seqera Platform brand, likewise as a light/dark pair.
-- `light.py` holds `LIGHT_THEME`, the transparent embed theme with `background_color="none"`.
-  It belongs to no brand family and has no mode counterpart.
+A resolved theme with both palettes carries `mode_colors`, the light and dark value of every color field, so the renderer emits chrome as CSS `light-dark(<light>, <dark>)` without looking anything up.
+A single-palette theme (`fixed_mode` set, as `transparent` does) carries none and renders one baked palette.
+`--no-chrome-css` bakes one concrete palette for consumers that cannot parse `light-dark()`.
 
-`themes/__init__.py` holds two registries.
-`THEME_MODES` maps a brand name to its `{light, dark}` pair.
-`THEMES` is the flat by-name registry that direct selection looks up, covering the bare brand names resolved at `DEFAULT_MODE`, the mode-suffixed names such as `nfcore-light` and `seqera-dark`, and `light`.
-`resolve_theme(theme, graph, mode)` combines the two axes.
-Brand comes from the explicit name or the graph's `style`, where `dark` is an alias for `nfcore`, and mode comes from the explicit argument, `%%metro mode:` or `DEFAULT_MODE`.
+A theme's `layout:` block is applied by `api.apply_theme_layout` before layout: it writes the options the map's directives left unset (`MetroGraph.directive_options`), and explicit caller options are applied after it, so layout itself never reads a `Theme`.
 
-Because the axes are separable, one render carries both palettes.
-`mode_pair(theme)` recovers a brand's light and dark variants, and the chrome colors emit as CSS `light-dark(<light>, <dark>)`.
-A single SVG therefore adapts to the viewer's `color-scheme`.
-`--no-chrome-css` bakes one concrete palette instead, for consumers that cannot parse `light-dark()`.
-
-To add a brand, define a light and a dark `Theme` sharing one `brand` value, register the pair under `THEME_MODES`, and add its names to `THEMES`.
-It is then selectable through `%%metro style: <brand>` and `%%metro mode: <mode>`, or the `--theme` and `--mode` options.
+To add a built-in theme, add a YAML file, list it in `_BUILTIN_FILES` in `themes/__init__.py`, and add a gallery example.
 
 ## Module map
 

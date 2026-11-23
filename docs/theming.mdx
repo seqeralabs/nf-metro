@@ -1,6 +1,6 @@
 ---
 title: "Theming"
-description: Built-in themes, stacking themes, writing your own theme file, and how one SVG adapts to a light or dark viewer.
+description: Themes, theme stacks, writing your own theme file, every theme field, and how one SVG adapts to a light or dark viewer.
 ---
 
 import Metro from "@components/Metro.astro";
@@ -9,9 +9,28 @@ import { Aside } from "@astrojs/starlight/components";
 A theme decides how a map looks: colors, fonts, station glyphs, section boxes, the legend frame, and optionally layout spacing.
 It never changes what the map says.
 
-## Picking a theme
+## Concepts
 
-Set it in the map or on the command line:
+**Theme.** A named set of [fields](#field-reference), written as a YAML file.
+Every built-in theme is such a file in `src/nf_metro/themes/`, loaded and checked exactly like one you write yourself.
+
+**Mode.** Most themes have a light and a dark palette.
+An SVG carries both and follows the viewer's `color-scheme` (see [Light and dark in one SVG](#light-and-dark-in-one-svg)).
+`%%metro mode:` or `--mode` picks the palette baked into a PNG or a single-palette export.
+
+**Stack.** A theme value is a comma-separated list of themes, applied left to right.
+A later theme wins for every field it sets, and the light and dark palettes merge separately.
+A single name is a stack of one.
+
+**Base.** Every stack starts from the `nfcore` theme, so a theme only needs to set the fields it changes.
+A map with no `%%metro style:` renders with `nfcore` alone.
+
+**Layout block.** A theme can also set some layout options, such as spacing.
+The order of precedence is: a command-line flag, then a `%%metro` directive in the map, then the theme, then the built-in default.
+
+## Using a theme
+
+Set the theme in the map, or on the command line:
 
 ```text
 %%metro style: london-tube
@@ -21,51 +40,48 @@ Set it in the map or on the command line:
 nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 ```
 
+`--theme` replaces the map's `%%metro style:` entirely.
+
 | Theme         | Look                                                                                                    |
 | ------------- | ------------------------------------------------------------------------------------------------------- |
-| `nfcore`      | The default: bold labels, filled section boxes with number badges, white station pills.                 |
+| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.    |
 | `seqera`      | Seqera brand colors and Inter type.                                                                     |
 | `london-tube` | A schematic transit look: ticks for one-line stations, outlined interchange capsules, unboxed sections. |
-| `light`       | A transparent background with one palette, for embedding.                                               |
+| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                   |
 
-Each of `nfcore`, `seqera` and `london-tube` has a light and a dark palette (see [Light and dark in one SVG](#light-and-dark-in-one-svg)).
-Add `-light` or `-dark` to a name to pin one palette.
+Add `-light` or `-dark` to `nfcore`, `seqera` or `london-tube` to pin the baked palette, for example `nfcore-light`.
+The older names `dark` (for `nfcore`) and `light` (for `transparent`) are still accepted.
 
 <Metro src="examples/rnaseq_london_tube.mmd" />
 
 ## Stacking themes
 
-A theme value can be a comma-separated list.
-The themes apply left to right, and a later theme wins for every property it sets:
-
 ```text
 %%metro style: seqera, london-tube
 ```
 
-This map takes the station glyphs, section style and fonts from `london-tube`, and every property `london-tube` leaves unset from `seqera`.
-The light and dark palettes merge separately.
-A list that starts with a theme which sets only a few properties is laid over `nfcore`.
+This map takes the station glyphs, section style and fonts from `london-tube`, and every field `london-tube` leaves unset from `seqera`.
+Under both lies the `nfcore` base, which supplies anything neither sets.
 
-`--theme` takes the same list, and replaces the map's `%%metro style:` entirely.
+A built-in theme sets only the fields its file lists.
+`london-tube, nfcore` therefore keeps the `london-tube` station ticks, because `nfcore` does not set `station_glyph`, but takes the `nfcore` colors.
 
-## Writing a theme file
+## Writing your own theme
 
-A stack entry that ends in `.yaml` or `.yml` is a theme file.
-In `%%metro style:` the path is relative to the `.mmd` file, and on the command line it is relative to the working directory:
-
-```text
-%%metro style: nfcore, house_style.yaml
-```
+1. Create a YAML file whose name ends in `.yaml` or `.yml`.
+2. Give it a `name`, then set the fields you want to change.
+   Top-level fields apply to both palettes, and `light:` and `dark:` blocks override them for one palette.
+3. Optionally, start from another theme with `extends:`, and set layout options in a `layout:` block.
+4. Add the file to a stack.
+   In `%%metro style:` the path is relative to the `.mmd` file; on the command line it is relative to the working directory.
 
 ```yaml title="house_style.yaml"
 name: house-style
-extends: london-tube # optional: a name or a list, stacked before this file
+extends: london-tube # optional: a name, a file, or a list
 
-# Top-level fields apply to both palettes.
 label_font_size: 13
 station_glyph: tick
 
-# Per-palette fields override the top-level ones for that palette.
 light:
   label_color: "#5a2d82"
   legend_stroke: "#5a2d82"
@@ -73,56 +89,195 @@ dark:
   label_color: "#e5d4f5"
   legend_stroke: "#e5d4f5"
 
-# Layout options, applied where the map does not set them itself.
 layout:
   y_spacing: 45
 ```
 
-`extends:` is shorthand for listing those themes earlier in the stack, so `%%metro style: house_style.yaml` is the same as `%%metro style: london-tube, house_style.yaml`.
-The built-in `london-tube` theme is written in this format: see `src/nf_metro/themes/london_tube.yaml`.
+```text
+%%metro style: house_style.yaml
+```
+
+`extends:` is shorthand for listing those themes earlier in the stack, so the line above is the same as `%%metro style: london-tube, house_style.yaml`.
+
+A theme with one palette sets `fixed_mode: light` or `fixed_mode: dark`.
+It then renders that palette whatever mode is asked for, and its SVG does not adapt to the viewer.
 
 nf-metro checks the whole file before it renders anything.
-An unknown field, a value of the wrong type, or a color it cannot read stops the render with an error that names the field.
-
-### Fields
-
-Every field of the `Theme` class (`src/nf_metro/render/style.py`) can be set.
-These control the shapes and type:
-
-| Field                                                       | Values                  | Effect                                                         |
-| ----------------------------------------------------------- | ----------------------- | -------------------------------------------------------------- |
-| `station_glyph`                                             | `pill`, `tick`          | `tick` draws a station on one line as a bar towards its label. |
-| `station_tick_length`                                       | px                      | How far a tick reaches past its line.                          |
-| `station_fill`, `station_stroke`, `station_stroke_width`    | color, color, px        | The station pills and interchange capsules.                    |
-| `line_width`                                                | px                      | Route stroke width.                                            |
-| `label_font_family`, `label_font_weight`, `label_color`     | CSS font, weight, color | Station labels, and the font for all other text.               |
-| `section_fill`, `section_stroke`, `section_stroke_width`    | color, color, px        | The section boxes. Use `transparent` for no fill.              |
-| `section_stroke_dasharray`, `section_corner_radius`         | SVG dash list, px       | Dashed outlines and corner rounding.                           |
-| `section_badges`                                            | `true`, `false`         | The numbered circles beside section titles.                    |
-| `section_label_uppercase`, `section_label_letter_spacing`   | `true`/`false`, px      | Section title case and tracking.                               |
-| `section_label_font_weight`, `section_label_font_size`      | weight, px              | Section title weight and size.                                 |
-| `legend_background`, `legend_stroke`, `legend_stroke_width` | color, color, px        | The legend box and its frame.                                  |
-| `legend_corner_radius`                                      | px                      | Legend corner rounding.                                        |
-| `background_color`, `title_color`, `section_label_color`    | color                   | Canvas, title and section title colors.                        |
+An unknown field, a value of the wrong type, a color it cannot read, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the problem.
 
 <Aside type="caution" title="Label size">
 
-Layout reserves space for station labels from the map's own settings, not the theme.
-A theme that sets `label_font_size` much above 13 can make labels collide; use the layout option `font_scale` instead, which layout does account for.
+Layout reserves room for station labels from the map's own settings, not the theme.
+A theme that sets `label_font_size` much above 13 can make labels collide.
+Use the layout option `font_scale` instead, which layout does account for.
 
 </Aside>
-
-### Layout options
-
-The `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height` and `legend_logo_gap`.
-
-A theme value applies only where the map has no directive for that option, and a command-line flag beats both.
 
 ### Fonts
 
 The SVG names the theme's font and the viewer's browser draws it, so name a font your readers have, followed by fallbacks.
 `london-tube` asks for Gill Sans, which macOS and Windows with Office have.
-PNG output, `--embed-font` and `--text-to-paths` draw every theme in the bundled Inter face so the output is the same on any machine.
+PNG output, `--embed-font` and `--text-to-paths` draw every theme in the bundled Inter face, so the output is the same on any machine.
+
+## The built-in themes
+
+The built-in themes are the best worked examples of the format.
+Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/nf-metro/tree/main/src/nf_metro/themes).
+
+- `nfcore.yaml` is the base.
+  It sets every field the schema leaves without a default, so it is the template for a complete theme.
+- `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
+- `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
+- `transparent.yaml` sets `fixed_mode: dark` and `background_color: none`, for maps embedded on a page that supplies its own background.
+
+```yaml title="london_tube.yaml (abridged)"
+name: london-tube
+
+station_glyph: tick
+station_fill: "#ffffff"
+station_stroke: "#000000"
+station_stroke_width: 2.5
+line_width: 4
+label_font_weight: normal
+section_stroke_dasharray: "2 4"
+section_badges: false
+section_label_uppercase: true
+legend_stroke_width: 1.5
+
+light:
+  background_color: "#ffffff"
+  label_color: "#1c3f94"
+  section_fill: transparent
+  legend_stroke: "#000000"
+dark:
+  background_color: "#10141c"
+  label_color: "#dfe6ff"
+  section_fill: transparent
+  legend_stroke: "#ffffff"
+```
+
+## Field reference
+
+Every field of the `Theme` schema (`src/nf_metro/render/style.py`) can be set in a theme file.
+**Default** is the schema's own default, and the `nfcore` base overrides some of these.
+A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `transparent` or `none`.
+
+{/* theme-field-reference:start */}
+
+### Canvas and text
+
+| Field               | Value  | Default       | Effect                                                                                                                                                    |
+| ------------------- | ------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `background_color`  | colour | from `nfcore` | Canvas fill. `none` leaves the canvas transparent.                                                                                                        |
+| `title_color`       | colour | from `nfcore` | Map title text.                                                                                                                                           |
+| `title_font_size`   | number | from `nfcore` | Map title size, px.                                                                                                                                       |
+| `label_color`       | colour | from `nfcore` | Station label text.                                                                                                                                       |
+| `label_font_family` | text   | from `nfcore` | CSS font stack for station labels, and for every other text element.                                                                                      |
+| `label_font_size`   | number | from `nfcore` | Station label size, px. Layout reserves label room from the map's own settings, so keep this near 13 and use the `font_scale` layout option to grow text. |
+| `label_font_weight` | text   | from `nfcore` | Station label weight (`bold`, `normal`, `600`, ...).                                                                                                      |
+| `label_halo_width`  | number | `3`           | Width of the knockout halo behind station labels, px. 0 disables it.                                                                                      |
+| `label_halo_color`  | colour | empty         | Halo colour. Empty takes the background, or white on a transparent canvas.                                                                                |
+
+### Sections
+
+| Field                          | Value             | Default       | Effect                                                                                          |
+| ------------------------------ | ----------------- | ------------- | ----------------------------------------------------------------------------------------------- |
+| `section_fill`                 | colour            | from `nfcore` | Section box fill. `transparent` draws an outline only.                                          |
+| `section_stroke`               | colour            | from `nfcore` | Section box outline.                                                                            |
+| `section_label_color`          | colour            | from `nfcore` | Section titles and group captions.                                                              |
+| `section_label_font_size`      | number            | from `nfcore` | Section title size, px.                                                                         |
+| `section_label_font_weight`    | text              | `bold`        | Section title weight.                                                                           |
+| `section_label_uppercase`      | `true` \| `false` | `false`       | Draw section titles in capitals.                                                                |
+| `section_label_letter_spacing` | number            | `0`           | Extra space between section title letters, px.                                                  |
+| `section_stroke_width`         | number            | `1`           | Section box outline width, px.                                                                  |
+| `section_stroke_dasharray`     | text              | empty         | SVG dash pattern for the section outline (`2 4`). Empty is solid.                               |
+| `section_corner_radius`        | number            | `8`           | Section box corner radius, px.                                                                  |
+| `section_badges`               | `true` \| `false` | `true`        | Draw the numbered circle beside each section title. Off, titles start where the badge would be. |
+
+### Legend
+
+| Field                  | Value  | Default       | Effect                                  |
+| ---------------------- | ------ | ------------- | --------------------------------------- |
+| `legend_background`    | colour | from `nfcore` | Legend box fill.                        |
+| `legend_stroke`        | colour | empty         | Legend box outline. Empty draws none.   |
+| `legend_text_color`    | colour | from `nfcore` | Legend text.                            |
+| `legend_font_size`     | number | from `nfcore` | Legend text size, px.                   |
+| `legend_stroke_width`  | number | `0`           | Legend outline width, px. 0 draws none. |
+| `legend_corner_radius` | number | `6`           | Legend box corner radius, px.           |
+
+### Stations
+
+| Field                  | Value            | Default       | Effect                                                                                                                                                                                     |
+| ---------------------- | ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `marker_stroke`        | colour           | empty         | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                               |
+| `marker_open_fill`     | colour           | empty         | Inside of `open` markers. Empty takes the background, or white on a transparent canvas.                                                                                                    |
+| `station_glyph`        | `pill` \| `tick` | `pill`        | `pill` draws every station as a capsule across its lines. `tick` draws a station on one line as a bar in the line's colour, pointing at its label, and keeps the capsule for interchanges. |
+| `station_fill`         | colour           | from `nfcore` | Station capsule fill.                                                                                                                                                                      |
+| `station_stroke`       | colour           | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                    |
+| `station_stroke_width` | number           | from `nfcore` | Station capsule outline width, px.                                                                                                                                                         |
+| `station_radius`       | number           | `5`           | Station capsule end radius, px.                                                                                                                                                            |
+| `station_tick_length`  | number           | `6`           | How far a `tick` reaches past the edge of its line, px.                                                                                                                                    |
+
+### Lines
+
+| Field                        | Value             | Default       | Effect                                                                                                |
+| ---------------------------- | ----------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `line_width`                 | number            | from `nfcore` | Route stroke width, px.                                                                               |
+| `muted_line_color`           | colour            | `#888888`     | Grey for inactive lines and the stations, labels and icons only they touch. One value for both modes. |
+| `bridge_glyph`               | `true` \| `false` | `true`        | Break the lower line where two unrelated lines cross.                                                 |
+| `directional_marker_size`    | number            | `4`           | Half-size of `--directional` chevrons, px.                                                            |
+| `directional_marker_spacing` | number            | `64`          | Distance between chevrons along a route, px.                                                          |
+| `directional_marker_opacity` | number            | `0.75`        | Chevron opacity, 0 to 1.                                                                              |
+| `directional_marker_color`   | colour            | empty         | Chevron colour. Empty takes the line's colour.                                                        |
+
+### File icons
+
+| Field                    | Value  | Default | Effect                                                  |
+| ------------------------ | ------ | ------- | ------------------------------------------------------- |
+| `terminus_width`         | number | `28`    | File icon width, px.                                    |
+| `terminus_height`        | number | `32`    | File icon height, px.                                   |
+| `terminus_fold_size`     | number | `8`     | Size of the folded corner, px.                          |
+| `terminus_fill`          | colour | empty   | Icon fill. Empty takes `station_fill`.                  |
+| `terminus_stroke`        | colour | empty   | Icon outline. Empty takes `station_stroke`.             |
+| `terminus_stroke_width`  | number | `1.5`   | Icon outline width, px.                                 |
+| `terminus_corner_radius` | number | `2`     | Icon corner radius, px.                                 |
+| `terminus_font_size`     | number | `7.5`   | Size of the format label inside the icon, px.           |
+| `terminus_font_color`    | colour | empty   | Format label colour. Empty takes the built-in dark ink. |
+
+### Animation
+
+| Field                         | Value        | Default   | Effect                             |
+| ----------------------------- | ------------ | --------- | ---------------------------------- |
+| `animation_ball_radius`       | number       | `3`       | Radius of `--animate` balls, px.   |
+| `animation_ball_color`        | colour       | `#ffffff` | Ball fill.                         |
+| `animation_ball_stroke`       | colour       | empty     | Ball outline. Empty draws none.    |
+| `animation_ball_stroke_width` | number       | `1`       | Ball outline width, px.            |
+| `animation_balls_per_line`    | whole number | `1`       | Balls travelling along each route. |
+| `animation_speed`             | number       | `80`      | Ball speed, px per second.         |
+
+{/* theme-field-reference:end */}
+
+### Chrome colors and host overrides
+
+These colors also emit a CSS custom property, so a page that inlines the SVG can recolor them (see [`var()` for host overrides](#var-for-host-overrides-optional)):
+
+| Field                 | Custom property                 |
+| --------------------- | ------------------------------- |
+| `background_color`    | `--nfm-map-bg`                  |
+| `title_color`         | `--nfm-map-title-color`         |
+| `label_color`         | `--nfm-map-label-color`         |
+| `section_fill`        | `--nfm-map-section-fill`        |
+| `section_stroke`      | `--nfm-map-section-stroke`      |
+| `section_label_color` | `--nfm-map-section-label-color` |
+| `legend_background`   | `--nfm-map-legend-bg`           |
+| `legend_stroke`       | `--nfm-map-legend-stroke`       |
+| `legend_text_color`   | `--nfm-map-legend-text-color`   |
+| `marker_stroke`       | `--nfm-map-marker-stroke`       |
+
+### Layout options
+
+A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`.
+A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
 
 ## Light and dark in one SVG
 
@@ -182,6 +337,7 @@ A page embedding the SVG (the **host page**) can set `--my-bg` on a wrapper to o
 If it doesn't, the light/dark pair still runs.
 This layer is optional, because `light-dark()` plus `color-scheme` is the whole mechanism.
 nf-metro calls the properties it exposes this way **chrome**: background, title, labels, section boxes, and legend.
+[Chrome colors and host overrides](#chrome-colors-and-host-overrides) lists the custom property for each.
 Line and route colors carry meaning, and they stay fixed.
 
 ## Where `color-scheme` should live
@@ -272,8 +428,7 @@ They then follow the page's mode rather than the OS setting.
 
 <Aside type="note" title="One theme opts out of all of this on purpose">
 
-nf-metro ships one theme with no light/dark sibling at all: `light` (`THEME_MODES`, `src/nf_metro/themes/__init__.py`).
-For it, `mode_pair(theme)` returns `None`.
+nf-metro ships one theme with no light/dark pair at all: `transparent` (also accepted as `light`), whose file sets `fixed_mode`.
 Every `--nfm-*` fallback is a single baked value, no `light-dark()` appears anywhere, and `self_color_scheme` has nothing to do, because no `color-scheme` gets declared either way.
 The media query described earlier is the only adaptation such a theme gets.
 Choose it deliberately rather than by leaving `--theme` or `%%metro style:` unset.
