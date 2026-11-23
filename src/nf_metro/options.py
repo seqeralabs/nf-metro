@@ -11,7 +11,8 @@ Each option targets a field on :class:`~nf_metro.parser.model.MetroGraph` of
 the same name (or :attr:`LayoutOption.attr`): the directive writes that field
 during parsing, an explicitly-set CLI flag overwrites it afterwards, and the
 layout engine and renderer read it. Precedence is uniform: CLI flag (when set)
-> ``%%metro`` directive > built-in default.
+> ``%%metro`` directive > the theme's ``layout:`` block (for the options
+:data:`nf_metro.themes.stack.THEMEABLE_LAYOUT_OPTIONS` lists) > built-in default.
 """
 
 from __future__ import annotations

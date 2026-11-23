@@ -187,7 +187,6 @@ from nf_metro.render.constants import (
     MARKER_PILL_LENGTH_RATIO,
     RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
-    SECTION_BOX_RADIUS,
     SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_FONT_SIZE,
@@ -2375,7 +2374,11 @@ def _build_render_plan_scaled(
     # Resolve headers against the final section bboxes (label and group
     # reservations above can grow a box, moving where its header sits).
     header_placements = resolve_all_section_headers(
-        graph, theme.section_label_font_size, header_polylines, theme.title_font_size
+        graph,
+        theme.section_label_font_size,
+        header_polylines,
+        theme.title_font_size,
+        badges=theme.section_badges,
     )
     _guard_section_headers_clear_routes(header_placements, header_polylines)
     _guard_section_headers_fit_box_width(graph, header_placements)
@@ -2851,7 +2854,18 @@ def _emit_render_plan(
         )
 
     # Draw stations (all circles, skip ports)
-    _render_stations(d, graph, theme, station_offsets, positive_fan, inactive_line_ids)
+    label_points: dict[str, tuple[float, float]] = {}
+    for label in labels:
+        label_points.setdefault(label.station_id, (label.x, label.y))
+    _render_stations(
+        d,
+        graph,
+        theme,
+        station_offsets,
+        positive_fan,
+        inactive_line_ids,
+        label_points,
+    )
 
     # Draw labels
     _render_labels(d, labels, theme, graph, inactive_line_ids)
@@ -3082,7 +3096,7 @@ def _leftmost_ink(
             continue
         reach.append(section.bbox_x - SECTION_STROKE_WIDTH / 2)
         placement = header_placements[section.id]
-        if section.has_badge:
+        if section.has_badge and theme.section_badges:
             reach.append(placement.badge_cx - SECTION_NUM_CIRCLE_R_LARGE)
         reach.append(
             placement.keepout[0] if placement.label_rotation else placement.label_x
@@ -3466,7 +3480,7 @@ def _draw_section_badge(
     theme: Theme,
 ) -> None:
     """Draw the section's number badge; an unnumbered section draws none."""
-    if not section.has_badge:
+    if not (section.has_badge and theme.section_badges):
         return
     d.append(
         draw.Circle(
@@ -3517,19 +3531,23 @@ def _render_first_class_sections(
             "data-section-lines": ",".join(sorted(section_lines)),
         }
 
+        box_style: dict[str, object] = {}
+        if theme.section_stroke_dasharray:
+            box_style["stroke_dasharray"] = theme.section_stroke_dasharray
         d.append(
             draw.Rectangle(
                 section.bbox_x,
                 section.bbox_y,
                 section.bbox_w,
                 section.bbox_h,
-                rx=SECTION_BOX_RADIUS,
-                ry=SECTION_BOX_RADIUS,
+                rx=theme.section_corner_radius,
+                ry=theme.section_corner_radius,
                 fill=theme.section_fill,
                 stroke=theme.section_stroke,
-                stroke_width=SECTION_STROKE_WIDTH,
+                stroke_width=theme.section_stroke_width,
                 class_=_ns("nf-metro-section-box"),
                 **section_data,
+                **box_style,
             )
         )
 
@@ -3548,16 +3566,21 @@ def _render_first_class_sections(
                 f"rotate({placement.label_rotation} "
                 f"{placement.label_x} {placement.label_y})"
             )
+        if theme.section_label_letter_spacing:
+            label_kwargs["letter_spacing"] = theme.section_label_letter_spacing
+        label_lines = placement.label_lines
+        if theme.section_label_uppercase:
+            label_lines = tuple(line.upper() for line in label_lines)
         section_label_style = text_style(theme.section_label_font_size, "bold")
         d.append(
             draw.Text(
-                "\n".join(placement.label_lines),
+                "\n".join(label_lines),
                 theme.section_label_font_size,
                 placement.label_x,
                 placement.label_y,
                 fill=theme.section_label_color,
                 font_family=theme.label_font_family,
-                font_weight="bold",
+                font_weight=theme.section_label_font_weight,
                 dy=TEXT_VCENTER_DY,
                 line_height=(
                     DEFAULT_TEXT_METRICS.line_height(
@@ -4889,6 +4912,7 @@ def _render_stations(
     station_offsets: dict[tuple[str, str], float] | None = None,
     positive_fan: set[str] | None = None,
     inactive_line_ids: frozenset[str] = frozenset(),
+    label_points: Mapping[str, tuple[float, float]] | None = None,
 ) -> None:
     """Render stations as pill shapes.
 
@@ -4911,18 +4935,33 @@ def _render_stations(
             continue
         muted = station_is_muted(graph, station.id, inactive_line_ids)
         station_theme = muted_theme if muted else theme_view
+        label_point = (label_points or {}).get(station.id)
         if graph.embed_manifest:
             attrs = _station_group_attrs(
                 graph, theme_view, station, station_offsets, positive_fan
             )
             g = draw.Group(**attrs)
             _render_station_into(
-                g, graph, station_theme, station, station_offsets, positive_fan, muted
+                g,
+                graph,
+                station_theme,
+                station,
+                station_offsets,
+                positive_fan,
+                muted,
+                label_point,
             )
             d.append(g)
         else:
             _render_station_into(
-                d, graph, station_theme, station, station_offsets, positive_fan, muted
+                d,
+                graph,
+                station_theme,
+                station,
+                station_offsets,
+                positive_fan,
+                muted,
+                label_point,
             )
 
 
@@ -4934,6 +4973,7 @@ def _render_station_into(
     station_offsets: dict[tuple[str, str], float] | None,
     positive_fan: set[str],
     muted: bool,
+    label_point: tuple[float, float] | None = None,
 ) -> None:
     """Draw one station's glyph and terminus icons into a container.
 
@@ -5054,6 +5094,19 @@ def _render_station_into(
         _draw_blank_terminus_nub(
             d, station, r, min_off, max_off, station_data, theme, is_tb_vert
         )
+    elif (
+        theme.station_glyph == "tick"
+        and not station.is_terminus
+        and len(lines := graph.station_lines(station.id)) == 1
+    ):
+        color = effective_line_color(
+            graph.lines.get(lines[0]),
+            theme,
+            frozenset(lines) if muted else frozenset(),
+        )
+        _draw_station_tick(
+            d, station, theme, color, min_off, is_tb_vert, label_point, station_data
+        )
     else:
         d.append(
             draw.Rectangle(
@@ -5072,6 +5125,37 @@ def _render_station_into(
 
     if station.is_terminus:
         _append_terminus_icons(d, station, graph, theme, r, min_off, max_off, muted)
+
+
+def _draw_station_tick(
+    d: draw.Group | draw.Drawing,
+    station: Station,
+    theme: Theme,
+    color: str,
+    offset: float,
+    is_tb_vert: bool,
+    label_point: tuple[float, float] | None,
+    station_data: dict[str, str],
+) -> None:
+    """Draw a one-line station as a bar off its line, towards its label.
+
+    The bar starts on the line's centre and reaches ``station_tick_length``
+    past the stroke's edge. With no label to point at it hangs up (LR/RL) or
+    left (TB/BT).
+    """
+    half = theme.line_width / 2
+    reach = half + theme.station_tick_length
+    if is_tb_vert:
+        line_x = station.x + offset
+        forward = label_point is not None and label_point[0] > line_x
+        x = line_x if forward else line_x - reach
+        box = (x, station.y - half, reach, theme.line_width)
+    else:
+        line_y = station.y + offset
+        forward = label_point is not None and label_point[1] > line_y
+        y = line_y if forward else line_y - reach
+        box = (station.x - half, y, theme.line_width, reach)
+    d.append(draw.Rectangle(*box, fill=color, **station_data))
 
 
 def caption_aware_icon_step(

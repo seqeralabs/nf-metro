@@ -11,7 +11,12 @@ from nf_metro.layout.constants import (
     STATION_RADIUS_APPROX,
     TERMINUS_WIDTH,
 )
-from nf_metro.render.constants import FALLBACK_LINE_COLOR
+from nf_metro.render.constants import (
+    FALLBACK_LINE_COLOR,
+    LEGEND_BORDER_RADIUS,
+    SECTION_BOX_RADIUS,
+    SECTION_STROKE_WIDTH,
+)
 
 
 @dataclass(kw_only=True)
@@ -31,6 +36,12 @@ class Theme:
     station_stroke: str
     station_radius: float = STATION_RADIUS_APPROX
     station_stroke_width: float
+    # ``pill`` draws every station as a capsule spanning its bundle; ``tick``
+    # draws a station served by exactly one line as a short bar in that line's
+    # colour, on its label's side, and keeps the capsule for interchanges.
+    station_glyph: str = "pill"
+    # How far a tick reaches past the edge of its line's stroke.
+    station_tick_length: float = 6.0
     line_width: float
     # Fixed grey stroke for lines rendered inactive (via --inactive-lines) and
     # for the stations/labels/icons touched only by inactive lines. A flat hex,
@@ -49,11 +60,21 @@ class Theme:
     title_font_size: float
     section_fill: str
     section_stroke: str
+    section_stroke_width: float = SECTION_STROKE_WIDTH
+    section_stroke_dasharray: str = ""
+    section_corner_radius: float = SECTION_BOX_RADIUS
+    section_badges: bool = True
     section_label_color: str
     section_label_font_size: float
+    section_label_font_weight: str = "bold"
+    section_label_uppercase: bool = False
+    section_label_letter_spacing: float = 0.0
     legend_background: str
     legend_text_color: str
     legend_font_size: float
+    legend_stroke: str = ""
+    legend_stroke_width: float = 0.0
+    legend_corner_radius: float = LEGEND_BORDER_RADIUS
     # Animation settings
     animation_ball_radius: float = 3.0
     animation_ball_color: str = "#ffffff"

@@ -72,10 +72,16 @@ def _dir_title(value: str, graph: MetroGraph) -> None:
 def _dir_style(value: str, graph: MetroGraph) -> None:
     # Imported here because the theme registry reaches the render package,
     # which imports the parser back.
-    from nf_metro.themes import STYLE_NAMES
+    from nf_metro.themes import STYLE_NAMES, ThemeError, check_stack
 
-    if value.strip().lower() not in STYLE_NAMES:
-        _warn_malformed("style", value, "/".join(sorted(STYLE_NAMES)))
+    try:
+        check_stack(value)
+    except ThemeError:
+        _warn_malformed(
+            "style",
+            value,
+            "/".join(sorted(STYLE_NAMES)) + ", .yaml theme files, or a comma list",
+        )
         return
     graph.style = value
 
@@ -699,6 +705,7 @@ def _make_layout_option_handler(
             _warn_malformed(opt.name, value, expected)
         else:
             setattr(graph, opt.target_attr, result)
+            graph.directive_options.add(opt.name)
             if opt.name == "line_order":
                 assert is_line_order(result)
                 graph.layout_provenance.record_authored_line_order(result)

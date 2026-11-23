@@ -37,7 +37,6 @@ from nf_metro.parser.model import (
     MetroLine,
 )
 from nf_metro.render.constants import (
-    LEGEND_BORDER_RADIUS,
     LEGEND_LINE_HEIGHT,
     LEGEND_MARKER_GAP,
     LEGEND_MARKER_PILL_RATIO,
@@ -400,17 +399,23 @@ def render_legend(
         graph, theme, logo_size=logo_size, rows=rows
     )
 
-    # Background
+    frame: dict[str, object] = {}
+    if theme.legend_stroke and theme.legend_stroke_width:
+        frame = {
+            "stroke": theme.legend_stroke,
+            "stroke_width": theme.legend_stroke_width,
+        }
     d.append(
         draw.Rectangle(
             x,
             y,
             legend_width,
             legend_height,
-            rx=LEGEND_BORDER_RADIUS,
-            ry=LEGEND_BORDER_RADIUS,
+            rx=theme.legend_corner_radius,
+            ry=theme.legend_corner_radius,
             fill=theme.legend_background,
             class_=_ns("nf-metro-legend-bg"),
+            **frame,
         )
     )
 

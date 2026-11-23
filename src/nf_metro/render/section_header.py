@@ -604,6 +604,7 @@ def resolve_section_header_placement(
     label_font_size: float,
     polylines: list[Polyline] | None = None,
     title_font_size: float | None = None,
+    badges: bool = True,
 ) -> SectionHeaderPlacement:
     """Pick a clash-free position for ``section``'s header (see module docstring).
 
@@ -613,9 +614,10 @@ def resolve_section_header_placement(
     default above-left position is returned (used only where routes are not yet
     available).  ``title_font_size`` sizes the map title's clearance band for an
     ``above``/``nudge`` header wrapping upward; omit it for an untitled map or
-    when the caller doesn't know the theme yet."""
+    when the caller doesn't know the theme yet.  ``badges`` False (a theme
+    without number badges) lays every header out as an unnumbered one."""
     circle_r = SECTION_NUM_CIRCLE_R_LARGE
-    badge_r = circle_r if section.has_badge else 0.0
+    badge_r = circle_r if badges and section.has_badge else 0.0
     num_y = SECTION_NUM_Y_OFFSET
     gap = SECTION_HEADER_SIDE_GAP
 
@@ -724,11 +726,12 @@ def resolve_all_section_headers(
     label_font_size: float,
     polylines: list[Polyline],
     title_font_size: float | None = None,
+    badges: bool = True,
 ) -> dict[str, SectionHeaderPlacement]:
     """Resolve every drawn section's header placement once, keyed by section id."""
     return {
         section.id: resolve_section_header_placement(
-            graph, section, label_font_size, polylines, title_font_size
+            graph, section, label_font_size, polylines, title_font_size, badges
         )
         for section in graph.sections.values()
         if section.is_drawn_box

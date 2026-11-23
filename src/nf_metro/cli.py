@@ -21,6 +21,7 @@ from nf_metro import __version__
 from nf_metro.api import (
     RenderConfig,
     _parse_source,
+    apply_theme_layout,
     prepare_graph,
     render_graph_result,
     resolve_theme,
@@ -76,7 +77,15 @@ from nf_metro.parser.model import (
 from nf_metro.render import validate_render
 from nf_metro.render.constants import LOGO_GAP
 from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
-from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
+from nf_metro.themes import (
+    DEFAULT_MODE,
+    STYLE_NAMES,
+    THEMES,
+    ThemeError,
+    check_stack,
+    resolve_style,
+)
+from nf_metro.themes.stack import is_theme_file_entry
 
 RenderFormat = Literal["svg", "html", "png", "gif", "webp", "mp4", "webm"]
 _RENDER_FORMATS: tuple[str, ...] = get_args(RenderFormat)
@@ -307,21 +316,48 @@ def _layout_opts_for(
 
 
 def _graph_key(
-    out_format: RenderFormat, layout_opts: Mapping[str, object]
-) -> tuple[Literal["svg", "html"], bool]:
+    out_format: RenderFormat,
+    layout_opts: Mapping[str, object],
+    theme: str | None = None,
+) -> tuple[Literal["svg", "html"], bool, str | None]:
     """Return the cache key for the graph *out_format* is rendered from.
 
-    Two outputs share a prepared graph only when they share both a backend and
-    an animation state - whether the animation came from the run's own
+    Two outputs share a prepared graph only when they share a backend, an
+    animation state - whether the animation came from the run's own
     --animate, from a video format forcing it on, or from one output's
-    ``%%metro output: ... | animate`` override. Mode and theme are absent on
-    purpose: they are baked when the graph is serialised, not laid out, so a
-    static SVG and a light/dark PNG pair still share a single layout run.
+    ``%%metro output: ... | animate`` override - and a theme stack, since a
+    theme can set layout options. Mode is absent on purpose: it is baked when
+    the graph is serialised, not laid out, so a static SVG and a light/dark PNG
+    pair share a single layout run.
     """
     animated = bool(layout_opts.get("animate")) or _forces_animation(
         out_format, layout_opts
     )
-    return _svg_format_for(out_format), animated
+    return _svg_format_for(out_format), animated, theme
+
+
+class _ThemeStack(click.ParamType[str]):
+    """A theme stack: built-in names and existing .yaml theme files."""
+
+    name = "theme"
+
+    def get_metavar(  # type: ignore[override]
+        self, param: click.Parameter, ctx: click.Context | None = None
+    ) -> str:
+        return "[" + "|".join(sorted(STYLE_NAMES)) + "|FILE.yaml][,...]"
+
+    def convert(
+        self, value: object, param: click.Parameter | None, ctx: click.Context | None
+    ) -> str:
+        text = str(value)
+        try:
+            entries = check_stack(text)
+        except ThemeError as e:
+            self.fail(str(e), param, ctx)
+        for entry in entries:
+            if is_theme_file_entry(entry) and not Path(entry).expanduser().is_file():
+                self.fail(f"theme file not found: {entry}", param, ctx)
+        return text
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -764,11 +800,14 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--theme",
-    type=click.Choice(sorted(STYLE_NAMES)),
+    type=_ThemeStack(),
     default=None,
     cls=_DescribedDefault,
     default_text="from %%metro style, else nfcore",
-    help="Visual theme.",
+    help=(
+        "Visual theme: a built-in name, a .yaml theme file, or a comma list "
+        "of both, merged left to right."
+    ),
 )
 @click.option(
     "--mode",
@@ -942,6 +981,9 @@ def render(
             return layout_opts
         return {**layout_opts, "animate": overrides["animate"]}
 
+    def _job_theme(overrides: Mapping[str, object]) -> str | None:
+        return cast("str | None", overrides.get("theme", theme))
+
     def _job(
         input_file: Path,
         out_path: Path,
@@ -964,7 +1006,7 @@ def render(
             raster_width=job_raster_width,
             fps=fps,
             duration=duration,
-            theme=cast("str | None", overrides.get("theme", theme)),
+            theme=_job_theme(overrides),
             mode=cast("str | None", overrides.get("mode", mode)),
             debug=debug,
             logo=logo,
@@ -1054,10 +1096,10 @@ def render(
         lets every job in this call skip its own read+parse, whether they
         share a layout or not.
         """
-        graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
+        graphs: dict[tuple[Literal["svg", "html"], bool, str | None], MetroGraph] = {}
         job_opts = [_job_layout_opts(job.overrides) for job in jobs]
         keys = [
-            _graph_key(job.format, opts)
+            _graph_key(job.format, opts, _job_theme(job.overrides))
             for job, opts in zip(jobs, job_opts, strict=True)
         ]
         if len(jobs) > 1:
@@ -1080,6 +1122,7 @@ def render(
                                 svg_format=key[0],
                                 error_prefix=_error_prefix(source, quiet=True),
                                 parsed=parsed,
+                                theme=_job_theme(job.overrides),
                             )
                 finally:
                     _report_render_warnings(
@@ -1268,6 +1311,7 @@ def _prepare_graph_for_render(
     svg_format: Literal["svg", "html"],
     error_prefix: str,
     parsed: MetroGraph | None = None,
+    theme: str | None = None,
 ) -> MetroGraph:
     """Lay out *input_file*, reporting a typed failure via `_clean_error`.
 
@@ -1291,6 +1335,7 @@ def _prepare_graph_for_render(
             source_dir=str(input_file.resolve().parent),
             bare=bare,
             output_format=svg_format,
+            theme=theme,
         )
     except _SOURCE_ERRORS as e:
         _clean_error(e, error_prefix)
@@ -1346,6 +1391,7 @@ def _render_one_unsafe(
             svg_format=svg_format,
             error_prefix=error_prefix,
             parsed=parsed,
+            theme=theme,
         )
 
     if format_ in _RASTER_FORMATS:
@@ -1842,11 +1888,11 @@ def explain(
 )
 @click.option(
     "--theme",
-    type=click.Choice(sorted(STYLE_NAMES)),
+    type=_ThemeStack(),
     default=None,
     cls=_DescribedDefault,
     default_text="from %%metro style, else nfcore",
-    help="Visual theme for a [code].mmd[/] input.",
+    help="Visual theme for a [code].mmd[/] input, the same values as render's.",
 )
 @click.option(
     "--overlay",
@@ -1920,6 +1966,8 @@ def serve(
     else:
         try:
             graph = parse_metro_mermaid(input_file.read_text())
+            graph.source_dir = str(input_file.resolve().parent)
+            apply_theme_layout(graph, theme, graph.source_dir)
             compute_layout(graph)
         except (ValueError, PhaseInvariantError) as e:
             raise click.ClickException(str(e))

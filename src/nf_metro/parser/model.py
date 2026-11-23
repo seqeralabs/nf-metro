@@ -526,6 +526,9 @@ class MetroGraph:
     layout_provenance: LayoutProvenance = field(
         default_factory=LayoutProvenance, repr=False
     )
+    # Registry options a ``%%metro`` directive set, so a theme's layout options
+    # fill only the ones the map left unset.
+    directive_options: set[str] = field(default_factory=set, repr=False)
     # Multi-section grid cells: a ``%%metro grid:`` directive may name several
     # comma-separated sections that share one cell.  Keyed by (col, row); each
     # value is the listed-order member ids, which pack side-by-side along the

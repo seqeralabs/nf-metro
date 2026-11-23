@@ -77,9 +77,7 @@ See the [precedence table](/nf-metro/guide/#cli-flags-and-directive-precedence) 
 
 #### Per-output render overrides
 
-A `%%metro output:` path may carry its own render settings after a `|`, so one
-`nf-metro render` pass writes several differently-configured files with no CLI
-flags at all:
+A `%%metro output:` path may carry its own render settings after a `|`, so one `nf-metro render` pass writes several differently-configured files with no CLI flags at all:
 
 ```metro
 %%metro output: nf-core-demo_metro_map.svg
@@ -90,12 +88,9 @@ flags at all:
 %%metro output: nf-core-demo_metro_map_light.png    | mode=light
 ```
 
-Right of the first `|` is a space- or comma-separated list of `key=value`
-tokens; `animate` may also be written bare, meaning `animate=true`. An
-override applies to every path on its own line and beats the matching global
-flag for that output alone. Only options that change how the map is _drawn_
-are accepted — nothing here can change what the map _is_, so every declared
-output is the same diagram:
+Right of the first `|` is a space- or comma-separated list of `key=value` tokens; `animate` may also be written bare, meaning `animate=true`.
+An override applies to every path on its own line and beats the matching global flag for that output alone.
+Only options that change how the map is _drawn_ are accepted — nothing here can change what the map _is_, so every declared output is the same diagram:
 
 | Key            | Equivalent flag  | Example                    |
 | -------------- | ---------------- | -------------------------- |
@@ -105,22 +100,21 @@ output is the same diagram:
 | `scale`        | `--scale`        | `scale=3`                  |
 | `raster_width` | `--raster-width` | `raster_width=800`         |
 
-An unknown key, or a value the matching flag would reject, is warned about and
-ignored; the output itself still renders under the run's global options.
+An unknown key, or a value the matching flag would reject, is warned about and ignored; the output itself still renders under the run's global options.
 
-`mode` and `theme` are baked when the SVG is serialized rather than when the
-map is laid out, so the static SVG and both PNGs above share a single layout
-run — only the animated SVG needs one of its own. Four files, two layouts.
+`mode` is baked when the SVG is serialized rather than when the map is laid out, so the static SVG and both PNGs above share a single layout run — only the animated SVG needs one of its own.
+Four files, two layouts.
+Outputs with different `theme` values are laid out separately, because a theme can set layout options.
 
 ### Theme and branding
 
-| Option                                                                                        | Default                      | Description                                                                                                                                                                                                                                                                                                                                        |
-| --------------------------------------------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--theme [dark\|light\|nfcore\|nfcore-dark\|nfcore-light\|seqera\|seqera-dark\|seqera-light]` | from `style:`, else `nfcore` | Visual theme. A bare brand name (`nfcore`, `seqera`) takes the mode from `--mode`, and the suffixed names pin a mode. `dark` is a legacy alias for `nfcore`. Takes the same names as its directive twin `%%metro style:`, but exactly as spelled here. An unknown or wrong-case name exits with an error, where the directive warns and falls back |
-| `--mode [light\|dark]`                                                                        | from `mode:`, else `dark`    | Display mode, independent of the brand. Bakes the chosen mode's palette. Use it for light or dark PNG export. Directive twin: `%%metro mode:`                                                                                                                                                                                                      |
-| `--logo PATH`                                                                                 | none                         | Logo image path (errors if the path does not exist). Directive twin: `%%metro logo:`                                                                                                                                                                                                                                                               |
-| `--title TEXT`                                                                                | from `title:`                | Pipeline title. Directive twin: `%%metro title:`                                                                                                                                                                                                                                                                                                   |
-| `--caption TEXT`                                                                              | none                         | Free-text caption or attribution line rendered bottom-left of the map (for example, `Adapted from Author et al., Journal (Year)`). Directive twin: `%%metro caption:`                                                                                                                                                                              |
+| Option                 | Default                      | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--theme THEMES`       | from `style:`, else `nfcore` | Visual theme: a built-in name (`nfcore`, `seqera`, `london-tube`, `light`), a `.yaml` theme file, or a comma-separated list of both, merged left to right (see [Theming](/nf-metro/theming/)). A bare brand name takes the mode from `--mode`, and the `-light`/`-dark` suffixed names pin a mode. `dark` is a legacy alias for `nfcore`. Takes the same values as its directive twin `%%metro style:`, whose theme files resolve against the `.mmd` rather than the working directory. An unknown name or missing file exits with an error, where the directive warns and falls back |
+| `--mode [light\|dark]` | from `mode:`, else `dark`    | Display mode, independent of the brand. Bakes the chosen mode's palette. Use it for light or dark PNG export. Directive twin: `%%metro mode:`                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `--logo PATH`          | none                         | Logo image path (errors if the path does not exist). Directive twin: `%%metro logo:`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `--title TEXT`         | from `title:`                | Pipeline title. Directive twin: `%%metro title:`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `--caption TEXT`       | none                         | Free-text caption or attribution line rendered bottom-left of the map (for example, `Adapted from Author et al., Journal (Year)`). Directive twin: `%%metro caption:`                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 `--theme light` is the transparent embed theme rather than a brand.
 Because it has no light/dark pair, `--mode` does not apply to it.
@@ -306,7 +300,7 @@ Each job is an object with the required `input` and `output` keys, plus any subs
 | `input`                | Path to the source `.mmd` file (required)                                                                                                                                    |
 | `output`               | Path for the output file (required)                                                                                                                                          |
 | `format`               | `"svg"` (default) or `"html"`                                                                                                                                                |
-| `theme`                | Theme name (`nfcore`, `light`, `seqera`, and the mode-suffixed variants)                                                                                                     |
+| `theme`                | Theme name (`nfcore`, `light`, `seqera`, `london-tube`, and the mode-suffixed variants)                                                                                      |
 | `mode`                 | `"light"` or `"dark"`. Bakes a concrete palette                                                                                                                              |
 | `debug`                | Show the debug overlay (default `false`)                                                                                                                                     |
 | `logo`                 | Logo image path (overrides `%%metro logo:`)                                                                                                                                  |
@@ -429,16 +423,16 @@ nf-metro serve [OPTIONS] INPUT_FILE [-- LAUNCH_CMD...]
 `%%metro process:` directives in the map tie stations to processes, and only mapped stations change state.
 [Live progress](/nf-metro/live/) covers the event format, the overlay styles, and the endpoints.
 
-| Option                                                                                        | Default       | Description                                                                                            |
-| --------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
-| `--port INTEGER`                                                                              | 8080          | Port to listen on                                                                                      |
-| `--host TEXT`                                                                                 | `127.0.0.1`   | Interface to bind. The default is local only. Use `0.0.0.0` to accept connections from other hosts     |
-| `--theme [dark\|light\|nfcore\|nfcore-dark\|nfcore-light\|seqera\|seqera-dark\|seqera-light]` | from `style:` | Visual theme, the same choices as `render --theme`                                                     |
-| `--overlay [ring\|pulse\|dot\|led]`                                                           | `ring`        | Status-overlay style shown until a viewer picks another in the page                                    |
-| `--token TEXT`                                                                                | none          | If set, `/events` POSTs must supply `?token=...` or an `X-Metro-Token` header                          |
-| `--open`                                                                                      | off           | Open the live page in a browser                                                                        |
-| `--shutdown-after-complete`                                                                   | off           | Stop the server shortly after the run's completed or error event (or after the launched command exits) |
-| `--shutdown-grace FLOAT`                                                                      | 10            | Seconds to keep the map up after the run finishes, with `--shutdown-after-complete`                    |
+| Option                              | Default       | Description                                                                                            |
+| ----------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `--port INTEGER`                    | 8080          | Port to listen on                                                                                      |
+| `--host TEXT`                       | `127.0.0.1`   | Interface to bind. The default is local only. Use `0.0.0.0` to accept connections from other hosts     |
+| `--theme THEMES`                    | from `style:` | Visual theme, the same values as `render --theme`                                                      |
+| `--overlay [ring\|pulse\|dot\|led]` | `ring`        | Status-overlay style shown until a viewer picks another in the page                                    |
+| `--token TEXT`                      | none          | If set, `/events` POSTs must supply `?token=...` or an `X-Metro-Token` header                          |
+| `--open`                            | off           | Open the live page in a browser                                                                        |
+| `--shutdown-after-complete`         | off           | Stop the server shortly after the run's completed or error event (or after the launched command exits) |
+| `--shutdown-grace FLOAT`            | 10            | Seconds to keep the map up after the run finishes, with `--shutdown-after-complete`                    |
 
 With an SVG input the map is served exactly as drawn.
 `--theme` therefore applies only to a `.mmd` input.

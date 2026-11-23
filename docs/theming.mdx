@@ -1,10 +1,130 @@
 ---
 title: "Theming"
-description: One SVG that adapts to a light or dark viewer, and how to reuse the technique outside nf-metro.
+description: Built-in themes, stacking themes, writing your own theme file, and how one SVG adapts to a light or dark viewer.
 ---
 
 import Metro from "@components/Metro.astro";
 import { Aside } from "@astrojs/starlight/components";
+
+A theme decides how a map looks: colors, fonts, station glyphs, section boxes, the legend frame, and optionally layout spacing.
+It never changes what the map says.
+
+## Picking a theme
+
+Set it in the map or on the command line:
+
+```text
+%%metro style: london-tube
+```
+
+```bash
+nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
+```
+
+| Theme         | Look                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------- |
+| `nfcore`      | The default: bold labels, filled section boxes with number badges, white station pills.                 |
+| `seqera`      | Seqera brand colors and Inter type.                                                                     |
+| `london-tube` | A schematic transit look: ticks for one-line stations, outlined interchange capsules, unboxed sections. |
+| `light`       | A transparent background with one palette, for embedding.                                               |
+
+Each of `nfcore`, `seqera` and `london-tube` has a light and a dark palette (see [Light and dark in one SVG](#light-and-dark-in-one-svg)).
+Add `-light` or `-dark` to a name to pin one palette.
+
+<Metro src="examples/rnaseq_london_tube.mmd" />
+
+## Stacking themes
+
+A theme value can be a comma-separated list.
+The themes apply left to right, and a later theme wins for every property it sets:
+
+```text
+%%metro style: seqera, london-tube
+```
+
+This map takes the station glyphs, section style and fonts from `london-tube`, and every property `london-tube` leaves unset from `seqera`.
+The light and dark palettes merge separately.
+A list that starts with a theme which sets only a few properties is laid over `nfcore`.
+
+`--theme` takes the same list, and replaces the map's `%%metro style:` entirely.
+
+## Writing a theme file
+
+A stack entry that ends in `.yaml` or `.yml` is a theme file.
+In `%%metro style:` the path is relative to the `.mmd` file, and on the command line it is relative to the working directory:
+
+```text
+%%metro style: nfcore, house_style.yaml
+```
+
+```yaml title="house_style.yaml"
+name: house-style
+extends: london-tube # optional: a name or a list, stacked before this file
+
+# Top-level fields apply to both palettes.
+label_font_size: 13
+station_glyph: tick
+
+# Per-palette fields override the top-level ones for that palette.
+light:
+  label_color: "#5a2d82"
+  legend_stroke: "#5a2d82"
+dark:
+  label_color: "#e5d4f5"
+  legend_stroke: "#e5d4f5"
+
+# Layout options, applied where the map does not set them itself.
+layout:
+  y_spacing: 45
+```
+
+`extends:` is shorthand for listing those themes earlier in the stack, so `%%metro style: house_style.yaml` is the same as `%%metro style: london-tube, house_style.yaml`.
+The built-in `london-tube` theme is written in this format: see `src/nf_metro/themes/london_tube.yaml`.
+
+nf-metro checks the whole file before it renders anything.
+An unknown field, a value of the wrong type, or a color it cannot read stops the render with an error that names the field.
+
+### Fields
+
+Every field of the `Theme` class (`src/nf_metro/render/style.py`) can be set.
+These control the shapes and type:
+
+| Field                                                       | Values                  | Effect                                                         |
+| ----------------------------------------------------------- | ----------------------- | -------------------------------------------------------------- |
+| `station_glyph`                                             | `pill`, `tick`          | `tick` draws a station on one line as a bar towards its label. |
+| `station_tick_length`                                       | px                      | How far a tick reaches past its line.                          |
+| `station_fill`, `station_stroke`, `station_stroke_width`    | color, color, px        | The station pills and interchange capsules.                    |
+| `line_width`                                                | px                      | Route stroke width.                                            |
+| `label_font_family`, `label_font_weight`, `label_color`     | CSS font, weight, color | Station labels, and the font for all other text.               |
+| `section_fill`, `section_stroke`, `section_stroke_width`    | color, color, px        | The section boxes. Use `transparent` for no fill.              |
+| `section_stroke_dasharray`, `section_corner_radius`         | SVG dash list, px       | Dashed outlines and corner rounding.                           |
+| `section_badges`                                            | `true`, `false`         | The numbered circles beside section titles.                    |
+| `section_label_uppercase`, `section_label_letter_spacing`   | `true`/`false`, px      | Section title case and tracking.                               |
+| `section_label_font_weight`, `section_label_font_size`      | weight, px              | Section title weight and size.                                 |
+| `legend_background`, `legend_stroke`, `legend_stroke_width` | color, color, px        | The legend box and its frame.                                  |
+| `legend_corner_radius`                                      | px                      | Legend corner rounding.                                        |
+| `background_color`, `title_color`, `section_label_color`    | color                   | Canvas, title and section title colors.                        |
+
+<Aside type="caution" title="Label size">
+
+Layout reserves space for station labels from the map's own settings, not the theme.
+A theme that sets `label_font_size` much above 13 can make labels collide; use the layout option `font_scale` instead, which layout does account for.
+
+</Aside>
+
+### Layout options
+
+The `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height` and `legend_logo_gap`.
+
+A theme value applies only where the map has no directive for that option, and a command-line flag beats both.
+
+### Fonts
+
+The SVG names the theme's font and the viewer's browser draws it, so name a font your readers have, followed by fallbacks.
+`london-tube` asks for Gill Sans, which macOS and Windows with Office have.
+PNG output, `--embed-font` and `--text-to-paths` draw every theme in the bundled Inter face so the output is the same on any machine.
+
+## Light and dark in one SVG
 
 An nf-metro SVG has no separate light and dark version, and nf-metro never re-renders it when the viewer's theme changes.
 Every themeable color is baked into the file as a pair, and native CSS picks the right half at display time:

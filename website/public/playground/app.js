@@ -612,7 +612,7 @@ function zoomFit() {
 // The selector picks the brand (palette identity); light/dark is the separate
 // Mode control, so brand and mode stay independent. Legacy sources may still
 // carry `%%metro style: dark`, which reads back as the nfcore brand.
-const THEME_KEYS = ["nfcore", "seqera"];
+const THEME_KEYS = ["nfcore", "seqera", "london-tube"];
 const STYLE_ALIASES = { dark: "nfcore" };
 
 // [control id, directive key, kind]
@@ -678,10 +678,18 @@ function applyDirectiveControl(id, key, kind) {
   doRender();
 }
 
+// A stack (`nfcore, london-tube`) passes through when every entry is a
+// built-in brand; the selector then shows no single brand.
 function themeKeyFromSource() {
-  const value = (readDirective("style") || "").toLowerCase();
-  const key = STYLE_ALIASES[value] || value;
-  return THEME_KEYS.includes(key) ? key : "nfcore";
+  const entries = (readDirective("style") || "")
+    .toLowerCase()
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => STYLE_ALIASES[entry] || entry);
+  if (entries.length && entries.every((key) => THEME_KEYS.includes(key)))
+    return entries.join(", ");
+  return "nfcore";
 }
 
 function setThemeDirective(themeKey) {

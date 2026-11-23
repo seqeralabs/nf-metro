@@ -18,6 +18,14 @@ gallery:
       how explicit directives can fine-tune placement.
 
   # ── Feature Showcase ───────────────────────────────────────────────────────
+  - id: rnaseq_london_tube
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "The rnaseq map under the built-in `london-tube` theme (`%%metro style: london-tube`):
+      ticks for stations on one line, outlined capsules for interchanges, unboxed sections and
+      a humanist sans. Themes stack left to right (`%%metro style: nfcore, london-tube`) and
+      can be [user-defined YAML files](/nf-metro/theming/)."
   - id: directional_flow
     source_dir: examples
     category: Feature Showcase
