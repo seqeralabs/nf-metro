@@ -3020,11 +3020,7 @@ def _effective_logo_path(graph: MetroGraph, mode: str) -> str:
 def _drawn_section_left(graph: MetroGraph) -> float | None:
     """Left edge of the leftmost section box the render draws, or ``None``."""
     return min(
-        (
-            section.bbox_x
-            for section in graph.sections.values()
-            if section.bbox_w > 0 and section.bbox_h > 0 and section.draws_box
-        ),
+        (section.bbox_x for section in graph.sections.values() if section.is_drawn_box),
         default=None,
     )
 

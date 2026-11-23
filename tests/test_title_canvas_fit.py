@@ -1,8 +1,8 @@
 """The canvas is wide enough to hold the map title.
 
-The title is authored text drawn at ``plan.title_x``; a canvas sized from section
-content alone clips it at the right edge with no warning. These tests hold that
-the title's drawn right edge stays within the canvas width.
+The title is authored text drawn at ``plan.title_x``; a canvas sized from
+section content alone clips it at the right edge with no warning. These tests
+hold that the title's drawn right edge stays within the canvas width.
 """
 
 from __future__ import annotations

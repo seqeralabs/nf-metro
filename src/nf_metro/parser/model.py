@@ -404,6 +404,11 @@ class Section:
         return not (self.is_implicit or self.is_hidden)
 
     @property
+    def is_drawn_box(self) -> bool:
+        """Whether the section renders a box with a non-empty extent."""
+        return self.bbox_w > 0 and self.bbox_h > 0 and self.draws_box
+
+    @property
     def has_badge(self) -> bool:
         """Whether the section draws a number badge: it draws a box and its
         number is positive (0 means none)."""

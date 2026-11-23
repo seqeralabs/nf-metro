@@ -470,7 +470,7 @@ def test_rail_mode_lifts_clear_of_standalone_logo(scale: float) -> None:
 def _drawn_box_left(root: ET.Element) -> float:
     """Left x of the leftmost section box the SVG draws."""
     return min(
-        float(el.get("x", "nan"))
+        float(el.attrib["x"])
         for el in root.iter(f"{SVG_NS}rect")
         if "nf-metro-section-box" in el.get("class", "").split()
     )
@@ -517,7 +517,6 @@ def test_title_block_aligns_with_leftmost_section_box(name: str, mode: str) -> N
         assert title_x >= plan.logo_x + plan.logo_w, f"{label}: title overlaps logo"
     else:
         assert abs(title_x - box_left) <= 0.5, label
-    assert plan.svg_width >= title_x + _title_advance(plan), label
 
 
 def test_flat_map_title_keeps_padding_without_drawn_boxes() -> None:
