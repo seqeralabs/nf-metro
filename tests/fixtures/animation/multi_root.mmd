@@ -1,0 +1,14 @@
+%%metro title: every root of a line is animated
+%%metro line: l1 | Line 1 | #2db572
+
+graph LR
+    r1[Root 1]
+    r2[Root 2]
+    r3[Root 3]
+    mid[Middle]
+    end_[End]
+    lone[Lone]
+    r1 -->|l1| mid
+    r2 -->|l1| mid
+    mid -->|l1| end_
+    r3 -->|l1| lone
