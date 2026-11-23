@@ -53,6 +53,10 @@ history.
   `style: light`.
 - The Python API raises `ThemeError` (an `NfMetroError` and `ValueError`) for
   an unknown theme name instead of falling back to `nfcore`.
+- Layout measures file icons and their captions with the theme the map
+  renders with, including `--theme` and a per-output `theme=`, rather than
+  the map's own style or `nfcore`. A map rendered with a theme whose icons or
+  captions are larger gets room for them.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,
   embed dialog) and the copyable inline-HTML snippet now follow the map's mode
   instead of always being dark. `--mode` or `%%metro mode:` fixes both light

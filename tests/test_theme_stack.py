@@ -773,3 +773,20 @@ def test_playground_lists_the_paired_built_in_themes():
     page = (_ROOT / "website" / "src" / "pages" / "playground.astro").read_text()
     picker = re.search(r'<select id="opt-theme">(.*?)</select>', page, re.S).group(1)
     assert re.findall(r'<option value="([^"]+)"', picker) == list(PAIRED_THEMES)
+
+
+def test_layout_measures_file_icons_with_the_render_theme(tmp_path):
+    """Larger icon offset and captions in the render theme widen the layout."""
+    path = _ROOT / "examples" / "topologies" / "render_labelwrap_row_gap.mmd"
+    roomy = _write(
+        tmp_path, "roomy.yaml", "name: roomy\nstation_radius: 6\nlabel_font_size: 14\n"
+    )
+
+    def qc_width(theme: str | None) -> float:
+        graph = prepare_graph(
+            path.read_text(), theme=theme, source_dir=str(path.parent)
+        )
+        return graph.sections["qc_sec"].bbox_w
+
+    assert qc_width(None) == pytest.approx(qc_width("nfcore"))
+    assert qc_width(str(roomy)) > qc_width("nfcore") + 10

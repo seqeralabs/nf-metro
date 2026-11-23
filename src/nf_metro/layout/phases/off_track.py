@@ -1180,10 +1180,10 @@ def _line_crossed_file_icon_sinks(graph: MetroGraph) -> set[str]:
         route_edges,
     )
     from nf_metro.render.svg import _icon_obstacles_by_station
-    from nf_metro.themes import THEMES
+    from nf_metro.themes import layout_theme
 
     offsets = compute_station_offsets(graph)
-    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, layout_theme(graph), offsets)
     leaf_sinks = {
         sid
         for sid in icon_boxes

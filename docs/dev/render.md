@@ -244,8 +244,8 @@ A single-palette theme (`fixed_mode` set, as `transparent` does) carries none an
 
 `prepare_graph` resolves the stack once: the caller's `--theme` (or a per-output `theme=`), else the map's `%%metro style:`.
 `bind_graph_stack` records that stack on the graph (`MetroGraph.theme_stack`, `theme_dir`) and `api.apply_theme_layout` writes the stack's `layout:` options the map's directives left unset (`MetroGraph.directive_options`); explicit caller options are applied after it.
-Layout reads no `Theme` field for its own decisions, but four passes borrow render geometry and measure with a fixed theme: the terminus-icon obstacles in label spacing (`phases/spacing.py`) and the final render-plan check at the end of `compute_layout` (`engine.py`) use the map's own `%%metro style:` theme (`themes.style_theme`), and the off-track leaf-sink check (`phases/off_track.py`) and the icon and label guards (`phases/guards.py`) use `nfcore`.
-None of them follow `--theme` or a per-output `theme=`, so a map lays out the same whatever theme the caller renders it with.
+Layout reads no `Theme` field for its own decisions, but four passes borrow render geometry, and they measure with the resolved render theme (`themes.layout_theme`, the bound stack in the render's mode): the terminus-icon obstacles in label spacing (`phases/spacing.py`), the off-track leaf-sink check (`phases/off_track.py`), the icon and label guards (`phases/guards.py`), and the final render-plan check at the end of `compute_layout` (`engine.py`).
+So a map is laid out for the theme it is drawn with, including `--theme` and a per-output `theme=`: a theme with a larger station radius or caption size moves the file icons, and layout makes room for them.
 
 To add a built-in theme, add a YAML file, list it in `_BUILTIN_FILES` in `themes/__init__.py`, and add a gallery example.
 
