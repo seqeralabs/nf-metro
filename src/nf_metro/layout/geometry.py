@@ -357,6 +357,21 @@ def section_lane_sign(
     return AxisFrame.secondary_sign_for(section.direction)
 
 
+def section_lanes_follow_line_priority(graph: MetroGraph, section: Section) -> bool:
+    """Whether *section* stacks its lanes in line-priority order.
+
+    A seam delivering several lines imposes its own lane order; with at most one
+    line entering, ``offsets._reorder_reconvergence`` leaves the lanes on
+    priority.
+    """
+    entering = {
+        edge.line_id
+        for port_id in section.entry_ports
+        for edge in graph.edges_to(port_id)
+    }
+    return len(entering) <= 1
+
+
 def flow_port_sides(direction: str) -> tuple[PortSide, PortSide]:
     """Return the flow-start and flow-end boundary sides for a direction."""
     from nf_metro.parser.model import PortSide

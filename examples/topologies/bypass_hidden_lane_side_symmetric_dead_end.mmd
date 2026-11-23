@@ -1,0 +1,15 @@
+%%metro title: Dead-end branch on its line's lane side (symmetric diamonds)
+%%metro style: dark
+%%metro diamond_style: symmetric
+%%metro line: line1 | Line 1 | #d0006f
+%%metro line: line2 | Line 2 | #f0ab00
+graph LR
+    subgraph s [Section]
+        step1[step1]
+        step2[step2]
+        step3[step3]
+        dead[dead]
+        step1 -->|line1,line2| step2
+        step2 -->|line1,line2| step3
+        step1 -->|line1| dead
+    end

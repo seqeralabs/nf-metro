@@ -172,13 +172,28 @@ is the hard floor a titled map must never breach; a map already at or below it
 already clear.
 """
 
-TITLE_BAND_CLEARANCE: float = TITLE_BAND_OVERLAP_FLOOR + 8.0
-"""``bbox_y`` a titled map's topmost drawn section is lifted to when it overlaps.
+TITLE_BAND_HEADER_GAP: float = 8.0
+"""Visible gap left between the canvas-top band and a lifted header badge."""
 
-Only a map whose header actually overlaps the title (top above
-``TITLE_BAND_OVERLAP_FLOOR``) is moved, and it lands here -- a small band above
-the floor so the badge sits a visible gap below the title rather than flush
-against it.  Untitled maps keep the tighter ``SECTION_Y_PADDING`` top.
+LOGO_HEIGHT: float = 80.0
+"""Height a logo is drawn at before ``logo_scale``; its width follows its aspect."""
+
+LOGO_Y_STANDALONE: float = 5.0
+"""Top of a standalone logo (one not folded into the legend)."""
+
+CANVAS_ORIGIN_MARGIN: tuple[float, float] = (
+    X_OFFSET - SECTION_X_PADDING,
+    Y_OFFSET - SECTION_Y_PADDING - SECTION_HEADER_PROTRUSION,
+)
+"""Room between the canvas edge and the first drawn element, left and top.
+
+The layout seats the first section against these two lines: its box edge one
+section padding inboard of the first layer, and above its top, one section
+padding inboard of the first track, the header badge that protrudes from it.
+Ink drawn outside the box envelope is settled against the same lines, so one
+boundary reads per side whether a box or a run defines it.  The far sides are
+not framed this way: nothing is placed against them, so they simply grow
+``CANVAS_PADDING`` past whatever they end up holding.
 """
 
 # ---------------------------------------------------------------------------

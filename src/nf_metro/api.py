@@ -22,6 +22,7 @@ from typing import Literal
 
 from nf_metro.errors import EmptyGraphError, UnknownInactiveLineError
 from nf_metro.layout import PhaseInvariantError, compute_layout
+from nf_metro.layout.title_band import resolve_title_band_bottom
 from nf_metro.options import LAYOUT_OPTIONS, is_line_order
 from nf_metro.parser import parse_metro_mermaid
 from nf_metro.parser.commitments import (
@@ -32,7 +33,7 @@ from nf_metro.parser.directives import apply_legend_directive
 from nf_metro.parser.model import LineSpread, MetroGraph, PermissiveGuardWarning
 from nf_metro.render.font_embed import apply_font_portability
 from nf_metro.render.html import emit_render_plan_html
-from nf_metro.render.legend import logo_certainly_shows, logo_is_resolvable
+from nf_metro.render.legend import logo_is_resolvable
 from nf_metro.render.ns import class_prefix_context
 from nf_metro.render.plan import RenderPlan
 from nf_metro.render.style import Theme
@@ -301,7 +302,7 @@ def _prepare_graph_state(
 
     if source_dir:
         graph.source_dir = source_dir
-        for attr in ("logo_path", "logo_path_light", "logo_path_dark"):
+        for attr in MetroGraph.LOGO_PATH_FIELDS:
             raw: str = getattr(graph, attr)
             if not raw:
                 continue
@@ -322,7 +323,7 @@ def _prepare_graph_state(
     if title is not None:
         graph.title = title
 
-    for attr in ("logo_path", "logo_path_light", "logo_path_dark"):
+    for attr in MetroGraph.LOGO_PATH_FIELDS:
         raw = getattr(graph, attr)
         if raw and not logo_is_resolvable(raw):
             # `logo=` (the CLI's --logo) is applied after the source-directory
@@ -334,9 +335,11 @@ def _prepare_graph_state(
             origin = "logo=" if from_parameter else "%%metro logo:"
             raise ValueError(f"{origin} path {raw!r} not found")
 
-    logo_in_legend = logo_certainly_shows(graph) and graph.legend_position != "none"
-    graph.reserve_title_band = output_format == "html" or (
-        not bare and not logo_in_legend
+    html = output_format == "html"
+    graph.title_band_bottom = resolve_title_band_bottom(
+        graph,
+        draws_chrome=html or not bare,
+        legend_drawn=not html and graph.legend_position != "none",
     )
     return graph
 
@@ -368,11 +371,11 @@ def prepare_graph(
 
     ``bare`` and ``output_format`` mirror the eventual render call (the CLI's
     ``--bare``/``--format`` flags): used here only to resolve
-    ``graph.reserve_title_band`` before layout runs, so the title-band
-    clearance in ``layout/phases/canvas.py`` doesn't reserve space for a
-    header the render won't actually draw. HTML output always draws its own
-    title/logo band regardless of ``bare``/``%%metro legend:`` (its embedded
-    SVG forces the legend off and ignores ``bare``), so it always reserves.
+    ``graph.title_band_bottom`` before layout runs, so the title-band
+    clearance in ``layout/title_band.py`` reserves exactly the canvas-top
+    title and standalone logo the render will draw. HTML output always draws
+    that band regardless of ``bare``, and its embedded SVG forces the legend
+    off, so a configured logo is always standalone there.
 
     Returns the settled graph.
 
