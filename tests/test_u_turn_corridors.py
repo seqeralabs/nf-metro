@@ -255,16 +255,20 @@ def test_opposite_runs_on_one_band_take_opposite_sides() -> None:
             assert max(ys) > max(s.bbox_y + s.bbox_h for s in band), key
 
 
-def test_a_loop_never_encloses_another_line_into_its_entry() -> None:
+def test_a_feeder_starting_beyond_a_traverse_closes_that_corridor() -> None:
     """f8404507's l2 reaches sec3's LEFT entry from the row above, beyond the
-    over-the-top corridor of the sec2 loop into the same entry: that corridor
-    would enclose l2's start, so the loop is recorded and drawn below."""
+    traverse of the over-the-top corridor of the sec2 loop into the same entry,
+    so where the lane plan reads them only the corridor below is clear.  The
+    two corridors are not equally long, so the direct turn-round keeps its
+    turn-round side: recorded and drawn below."""
     laid = _laid(CANVAS_DATA / "f8404507.mmd")
     graph = laid.drawn
     key = ("sec3__entry_left_5", "sec2__exit_left_2")
+    assert _approach(graph, key).rule is SideRule.TURN_ROUND
     assert _screen(graph, key) == "below"
     right, left = _corridors(laid.sealed, key)
     assert right.feasible and not left.feasible
+    assert abs(right.detour - left.detour) > SAME_Y_TOLERANCE
     target = graph.sections[graph.ports[key[0]].section_id]
     ys = [
         y

@@ -795,50 +795,50 @@ Gates with an un-exercised arm:
 | 5788 | `for je in ctx.graph.edges_to(src.id):` | `->L5800` |  |
 | 5790 | `if js.is_port:` | `->L5788` |  |
 | 5791 | `if abs(js.x - src.x) <= COORD_TOLERANCE:` | `->L5794` |  |
-| 6239 | `if src_section and src_section.bbox_w > 0:` | `->L6240` |  |
-| 6350 | `if src_col is None:` | `->L6351` |  |
-| 6646 | `if src_sec is not None:` | `->L6677` | **defensive** -- Defensive guard in the fanned entry-wrap source-clearance lift: a fan-out junction always resolves to its source section, so the None arm is unreachable in practice. |
-| 6683 | `if tgt_col is not None:` | `->L6691` | **defensive** -- tgt_col from _resolve_section_col on a valid LEFT entry port is always non-None (sections get grid_col>=0 after auto-layout). |
-| 6685 | `if shared_vx is not None:` | `->L6691` | **defensive** -- _fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0. |
-| 6817 | `if entry_side is PortSide.LEFT:` | `->L6820` |  |
-| 6885 | `if entry_port is None:` | `->L6886` | **defensive** -- _route_around_section_below is always called with a non-None entry_port (both dispatch sites pass a checked station). |
-| 6896 | `if trunk_src is None or trunk_src == edge.source:` | `->L6898` | **needs-review** -- Reachable only via a defective render (merge-junction tangle); see #721. |
-| 6948 | `if not _sections_in_col(ctx.graph, tgt_col):` | `->L6949` | **defensive** -- In _fan_left_entry_descent_x: the column has no measurable left edge only when it holds no section, and the target's own column always holds its section. |
-| 6985 | `if entry_port is None:` | `->L6986` | **defensive** -- Every caller of _corridor_is_viable passes a non-None entry_port. |
-| 6992 | `if src_row is None or ep_row is None or src_col is None or ep_col is None:` | `->L6993` | **defensive** -- _resolve_section_colrow returns (None,None) only for a station with no section; valid entry ports always have a section with non-negative grid coords. |
-| 7079 | `if fan is not None and corridor is not None and corridor.band_y is not None:` | `->L7083` | **needs-review** -- Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch. |
-| 7083 | `elif fan is not None:` | `->L7087`, `->L7092` | **needs-review** -- Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised. |
-| 7092 | `elif gap_bottom > gap_top:` | `->L7093`, `->L7097` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 7102 | `if fan is None and gap_bottom > gap_top:` | `->L7103` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 7116 | `if fan is not None and ep_col is not None:` | `->L7118` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 7118 | `if vx is None:` | `->L7119` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
-| 7220 | `if ep_section and ep_section.bbox_w > 0:` | `->L7223` | **defensive** -- entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires. |
-| 7521 | `for claim in ctx.convergences.prior_channel_claims_for_edge(edge):` | `->L7522` |  |
-| 7522 | `if claim.line_id != edge.line_id or claim.owner_source == edge.source:` | `->L7523`, `->L7524` |  |
-| 7524 | `if not (corner_x - COORD_TOLERANCE <= claim.x <= gap_right + COORD_TOLERANCE):` | `->L7525`, `->L7526` |  |
-| 7526 | `if min(hi, claim.y_hi) - max(lo, claim.y_lo) > COORD_TOLERANCE:` | `->L7521`, `->L7527` |  |
-| 7600 | `if _leadout_self_meets_sibling_descent(ctx, edge, corner_x, f.sy, hy, gap_right):` | `->L7601` |  |
-| 7681 | `if loops_round_right_entry(f):` | `->L7682` | **needs-review** -- In _route_right_entry_wrap: the arm routes a same-row RIGHT entry wrap that the approach record sends round below the target row around below it. Only the direct turn-round room tie-break records a RIGHT entry's loop round below, and no swept map has a RIGHT turn-round whose two clear corridors tie on length with room on the lower side alone. |
-| 7788 | `if not fits(f):` | `->L7789` | **defensive** -- In _takes_gap_above: the fail-closed raise for a connector recorded round above whose wrap cannot traverse the band. The record's owner admits a corridor side only where its legs cross no other section, so no swept map reaches it. |
-| 7794 | `if side == "below":` | `->L7795` | **needs-review** -- In _takes_gap_above: a connector the approach record sends round below reaching a gap-above predicate. tests/data/canvas_placement/f8401267.mmd and tests/fixtures/regressions/outward_loop_bottom_right_entry.mmd reach it (a RIGHT entry's bypass U-turn recorded below), but the sweep's corpus roots include neither. |
-| 7822 | `if not _gap_above_holds_run(graph, tgt_row):` | `->L7823` | **needs-review** -- In _right_entry_gap_above_fits: the canvas headroom above the topmost row always holds the run, and below another row the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable. |
-| 7927 | `or section is None` | `->L7932` |  |
-| 7928 | `or section.bbox_w <= 0` | `->L7932` |  |
-| 7929 | `or src.x > _section_left_edge(graph, src) + COORD_TOLERANCE` | `->L7932` |  |
-| 7930 | `or corner_x < _section_right_edge(graph, src)` | `->L7932` |  |
-| 7941 | `if (` | `->L7946` |  |
-| 8005 | `if not _gap_above_holds_run(graph, f.tgt_row):` | `->L8006` | **needs-review** -- In _left_entry_gap_above_fits: a LEFT entry fed from a higher row always has a section above its row, so the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable. |
-| 8014 | `if f.v_segment_crosses_other_section(vx, gy, tgt.y):` | `->L8015` |  |
-| 8105 | `if source is None or source.bbox_w <= 0:` | `->L8106` |  |
-| 8118 | `if cellmate_left is None or other.bbox_x < cellmate_left:` | `->L8112` |  |
-| 8158 | `if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):` | `->L8159` |  |
-| 8160 | `if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):` | `->L8161` |  |
-| 8162 | `if band1_top <= band0_bottom + COORD_TOLERANCE:` | `->L8163` |  |
-| 8178 | `if f.v_segment_crosses_other_section(corner_x, band0_y, band1_y, exclude):` | `->L8179` |  |
-| 8235 | `if geom is None:` | `->L8236` |  |
-| 8238 | `if f.v_segment_crosses_other_section(geom.lead_x, src.y, geom.band0_y):` | `->L8239` |  |
-| 8240 | `if f.h_segment_crosses_other_section(geom.lead_x, geom.corner_x, geom.band0_y):` | `->L8241` |  |
-| 8242 | `if f.h_segment_crosses_other_section(geom.corner_x, geom.vx, geom.band1_y):` | `->L8243` |  |
+| 6236 | `if src_section and src_section.bbox_w > 0:` | `->L6237` |  |
+| 6347 | `if src_col is None:` | `->L6348` |  |
+| 6643 | `if src_sec is not None:` | `->L6674` | **defensive** -- Defensive guard in the fanned entry-wrap source-clearance lift: a fan-out junction always resolves to its source section, so the None arm is unreachable in practice. |
+| 6680 | `if tgt_col is not None:` | `->L6688` | **defensive** -- tgt_col from _resolve_section_col on a valid LEFT entry port is always non-None (sections get grid_col>=0 after auto-layout). |
+| 6682 | `if shared_vx is not None:` | `->L6688` | **defensive** -- _fan_left_entry_descent_x returns None only when col_left<=0; col_left_edge for the target's own column is always >0. |
+| 6814 | `if entry_side is PortSide.LEFT:` | `->L6817` |  |
+| 6882 | `if entry_port is None:` | `->L6883` | **defensive** -- _route_around_section_below is always called with a non-None entry_port (both dispatch sites pass a checked station). |
+| 6893 | `if trunk_src is None or trunk_src == edge.source:` | `->L6895` | **needs-review** -- Reachable only via a defective render (merge-junction tangle); see #721. |
+| 6945 | `if not _sections_in_col(ctx.graph, tgt_col):` | `->L6946` | **defensive** -- In _fan_left_entry_descent_x: the column has no measurable left edge only when it holds no section, and the target's own column always holds its section. |
+| 6982 | `if entry_port is None:` | `->L6983` | **defensive** -- Every caller of _corridor_is_viable passes a non-None entry_port. |
+| 6989 | `if src_row is None or ep_row is None or src_col is None or ep_col is None:` | `->L6990` | **defensive** -- _resolve_section_colrow returns (None,None) only for a station with no section; valid entry ports always have a section with non-negative grid coords. |
+| 7076 | `if fan is not None and corridor is not None and corridor.band_y is not None:` | `->L7080` | **needs-review** -- Corridor-feeder shared inter-row band gate: the corpus's corridor feeders belong to fans whose corridor carries a band_y, so the short-circuit past it (no corridor or bypass-only) is unexercised; it falls to the elif fan-is-not-None global-band branch. |
+| 7080 | `elif fan is not None:` | `->L7084`, `->L7089` | **needs-review** -- Corridor-feeder fallback for a fan whose junction earned no corridor (its in-column gap below does not fit the bundle); the corpus's fans all earn a corridor, so this global-band branch is unexercised. |
+| 7089 | `elif gap_bottom > gap_top:` | `->L7090`, `->L7094` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 7099 | `if fan is None and gap_bottom > gap_top:` | `->L7100` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 7113 | `if fan is not None and ep_col is not None:` | `->L7115` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 7115 | `if vx is None:` | `->L7116` | **needs-review** -- Reachable only via a defective render (inter-row corridor on a <78px gap); see #722. |
+| 7217 | `if ep_section and ep_section.bbox_w > 0:` | `->L7220` | **defensive** -- entry_port.section_id is always set and the section has bbox_w>0 after layout; the else arm never fires. |
+| 7518 | `for claim in ctx.convergences.prior_channel_claims_for_edge(edge):` | `->L7519` |  |
+| 7519 | `if claim.line_id != edge.line_id or claim.owner_source == edge.source:` | `->L7520`, `->L7521` |  |
+| 7521 | `if not (corner_x - COORD_TOLERANCE <= claim.x <= gap_right + COORD_TOLERANCE):` | `->L7522`, `->L7523` |  |
+| 7523 | `if min(hi, claim.y_hi) - max(lo, claim.y_lo) > COORD_TOLERANCE:` | `->L7518`, `->L7524` |  |
+| 7597 | `if _leadout_self_meets_sibling_descent(ctx, edge, corner_x, f.sy, hy, gap_right):` | `->L7598` |  |
+| 7674 | `if loops_round_right_entry(f):` | `->L7675` | **needs-review** -- In _route_right_entry_wrap: the arm routes a same-row RIGHT entry wrap that the approach record sends round below the target row around below it. Only the direct turn-round room tie-break records a RIGHT entry's loop round below, and no swept map has a RIGHT turn-round whose two clear corridors tie on length with room on the lower side alone. |
+| 7778 | `if not fits(f):` | `->L7779` | **needs-review** -- In _takes_gap_above: the fail-closed raise for a connector recorded round above whose wrap cannot traverse the band above its target row. Reachable: the 6.12 side owner's clear-corridor test checks the legs against section boxes but has no term for the leaf's band test, so a ranked hop held above (by its bundle, a single clear side, or the neither-clear turn-round side) can reach a leaf whose band is negative. 8k map w2_01944 does: (z4__entry_right_6, z2__exit_right_2) is held above by its sibling z3__exit_right_3, its source z2 spans rows 0-1, gap_above_row(g, 1) is the negative band (298, 220), and routing raises rather than drawing over the record. No swept fixture reaches it. |
+| 7784 | `if side == "below":` | `->L7785` | **needs-review** -- In _takes_gap_above: a connector the approach record sends round below reaching a gap-above predicate. tests/data/canvas_placement/f8401267.mmd and tests/fixtures/regressions/outward_loop_bottom_right_entry.mmd reach it (a RIGHT entry's bypass U-turn recorded below), but the sweep's corpus roots include neither. |
+| 7812 | `if not _gap_above_holds_run(graph, tgt_row):` | `->L7813` | **needs-review** -- In _right_entry_gap_above_fits: the canvas headroom above the topmost row always holds the run, and below another row the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable. |
+| 7917 | `or section is None` | `->L7922` |  |
+| 7918 | `or section.bbox_w <= 0` | `->L7922` |  |
+| 7919 | `or src.x > _section_left_edge(graph, src) + COORD_TOLERANCE` | `->L7922` |  |
+| 7920 | `or corner_x < _section_right_edge(graph, src)` | `->L7922` |  |
+| 7931 | `if (` | `->L7936` |  |
+| 7995 | `if not _gap_above_holds_run(graph, f.tgt_row):` | `->L7996` | **needs-review** -- In _left_entry_gap_above_fits: a LEFT entry fed from a higher row always has a section above its row, so the band is the inter-row gap, which the row-gap enforcer widens to fit an inter-row bundle; no fixture leaves it too narrow. Not proven unreachable. |
+| 8004 | `if f.v_segment_crosses_other_section(vx, gy, tgt.y):` | `->L8005` |  |
+| 8095 | `if source is None or source.bbox_w <= 0:` | `->L8096` |  |
+| 8108 | `if cellmate_left is None or other.bbox_x < cellmate_left:` | `->L8102` |  |
+| 8148 | `if band0_bottom <= band0_top or not _inter_row_band_fits(band0_top, band0_bottom):` | `->L8149` |  |
+| 8150 | `if band1_bottom <= band1_top or not _inter_row_band_fits(band1_top, band1_bottom):` | `->L8151` |  |
+| 8152 | `if band1_top <= band0_bottom + COORD_TOLERANCE:` | `->L8153` |  |
+| 8168 | `if f.v_segment_crosses_other_section(corner_x, band0_y, band1_y, exclude):` | `->L8169` |  |
+| 8225 | `if geom is None:` | `->L8226` |  |
+| 8228 | `if f.v_segment_crosses_other_section(geom.lead_x, src.y, geom.band0_y):` | `->L8229` |  |
+| 8230 | `if f.h_segment_crosses_other_section(geom.lead_x, geom.corner_x, geom.band0_y):` | `->L8231` |  |
+| 8232 | `if f.h_segment_crosses_other_section(geom.corner_x, geom.vx, geom.band1_y):` | `->L8233` |  |
 
 ## `intra_handlers.py`
 
@@ -1236,7 +1236,7 @@ Gates with an un-exercised arm:
 | 62 | `if self.hi < self.lo - COORD_TOLERANCE:` | `->L63` | **defensive** -- The invariant the router relies on: a band handed to _center_inter_row_channel or centre_inter_column_channel always holds a channel, so the narrow-gap fallback cannot be reached for a claimed corridor. build_reserved_corridors filters an empty intersection out before constructing a band, so the raise guards direct construction only. |
 | 64 | `if self.allocation is not None and not math.isfinite(self.allocation):` | `->L65` | **defensive** -- Published allocations originate from finite observed route coordinates plus finite reservation translations. A non-finite value can only reach ReservedBand through malformed direct construction; the guard keeps invalid coordinates out of planner seating. |
 | 186 | `if band is None or band.hi < band.lo - COORD_TOLERANCE:` | `->L187` |  |
-| 203 | `if boundary is None:` | `->L204` | **defensive** -- Optional-boundary convenience for callers carrying an unresolved grid index (_left_exit_wrap_over_top_y takes tgt_row: int \| None). Such a caller returns before it needs a band -- with no target row there is no gap above it to measure, so the wrap is rejected first -- leaving this arm a type-level accommodation no topology reaches. |
+| 203 | `if boundary is None:` | `->L204` | **defensive** -- Optional-boundary convenience in ReservedBands.at's signature: every caller (in common.py and inter_section_handlers.py) passes a grid row or column it has already resolved to an int, so this arm is a type-level accommodation no topology reaches. |
 | 308 | `if lower > upper + COORD_TOLERANCE:` | `->L309` |  |
 | 411 | `if realised is None:` | `->L412` | **defensive** -- realise_reservation returns None only for a canvas-side corridor measured without canvas bounds; this loop has already narrowed to row-gap or column-gap claims, which always measure. The arm satisfies the optional return type rather than a reachable state. |
 | 544 | `if band is None:` | `->L545` | **defensive** -- Every record for one edge and segment rank observes the same physical route segment. Disjoint clearance intervals for that key therefore require a fabricated or inconsistent reservation ledger; the raise protects the published claim view from contradictory corridor bounds. |

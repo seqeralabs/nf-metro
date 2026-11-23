@@ -1152,7 +1152,7 @@
     "status": "defensive"
   },
   "reserved_bands.py::if boundary is None:::#1": {
-    "note": "Optional-boundary convenience for callers carrying an unresolved grid index (_left_exit_wrap_over_top_y takes tgt_row: int | None). Such a caller returns before it needs a band -- with no target row there is no gap above it to measure, so the wrap is rejected first -- leaving this arm a type-level accommodation no topology reaches.",
+    "note": "Optional-boundary convenience in ReservedBands.at's signature: every caller (in common.py and inter_section_handlers.py) passes a grid row or column it has already resolved to an int, so this arm is a type-level accommodation no topology reaches.",
     "status": "defensive"
   },
   "reserved_bands.py::if realised is None:::#1": {
@@ -1988,8 +1988,8 @@
     "status": "needs-review"
   },
   "inter_section_handlers.py::if not fits(f):::#1": {
-    "note": "In _takes_gap_above: the fail-closed raise for a connector recorded round above whose wrap cannot traverse the band. The record's owner admits a corridor side only where its legs cross no other section, so no swept map reaches it.",
-    "status": "defensive"
+    "note": "In _takes_gap_above: the fail-closed raise for a connector recorded round above whose wrap cannot traverse the band above its target row. Reachable: the 6.12 side owner's clear-corridor test checks the legs against section boxes but has no term for the leaf's band test, so a ranked hop held above (by its bundle, a single clear side, or the neither-clear turn-round side) can reach a leaf whose band is negative. 8k map w2_01944 does: (z4__entry_right_6, z2__exit_right_2) is held above by its sibling z3__exit_right_3, its source z2 spans rows 0-1, gap_above_row(g, 1) is the negative band (298, 220), and routing raises rather than drawing over the record. No swept fixture reaches it.",
+    "status": "needs-review"
   },
   "inter_section_handlers.py::if side == \"below\":::#1": {
     "note": "In _takes_gap_above: a connector the approach record sends round below reaching a gap-above predicate. tests/data/canvas_placement/f8401267.mmd and tests/fixtures/regressions/outward_loop_bottom_right_entry.mmd reach it (a RIGHT entry's bypass U-turn recorded below), but the sweep's corpus roots include neither.",
