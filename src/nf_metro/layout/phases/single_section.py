@@ -40,7 +40,7 @@ from nf_metro.layout.labels import (
     label_text_width,
 )
 from nf_metro.layout.layers import assign_layers
-from nf_metro.layout.ordering import assign_tracks
+from nf_metro.layout.ordering import assign_tracks, peel_lane_ends
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
     icon_half_height_approx,
@@ -288,7 +288,6 @@ def _layout_single_section(
     # from the exit ports through in-section feeders).
     exit_reaching = _exit_reaching_nodes(graph, section)
     priority_lane_sign = _priority_lane_sign(section, graph)
-    section.lane_ends = {}
     tracks = assign_tracks(
         sub,
         layers,
@@ -298,8 +297,8 @@ def _layout_single_section(
         exit_reaching=exit_reaching,
         flow_horizontal=lanes_run_along_y(section.direction),
         priority_lane_sign=priority_lane_sign,
-        lane_ends=section.lane_ends,
     )
+    section.lane_ends = peel_lane_ends(sub, layers, tracks, priority_lane_sign)
 
     if not layers:
         return None
