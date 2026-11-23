@@ -11,8 +11,8 @@ station_stroke_width: 2.5
 line_width: 4
 label_font_family: "'Gill Sans', 'Gill Sans MT', 'Hammersmith One', Calibri, 'Trebuchet MS', sans-serif"
 label_font_weight: normal
-section_stroke_width: 1
-section_stroke_dasharray: "2 4"
+section_stroke_width: 1.5
+section_stroke_dasharray: "6 4"
 section_badges: false
 section_label_font_size: 13
 section_label_font_weight: normal
@@ -27,7 +27,7 @@ light:
   title_color: "#000000"
   marker_stroke: "#000000"
   section_fill: transparent
-  section_stroke: "#c9cdd6"
+  section_stroke: "#8b919c"
   section_label_color: "#7a8291"
   legend_background: "#ffffff"
   legend_text_color: "#111111"
@@ -39,7 +39,7 @@ dark:
   title_color: "#ffffff"
   marker_stroke: "#f0f0f0"
   section_fill: transparent
-  section_stroke: "#3a4152"
+  section_stroke: "#5f6779"
   section_label_color: "#9aa3b5"
   legend_background: "#10141c"
   legend_text_color: "#e6e6e6"

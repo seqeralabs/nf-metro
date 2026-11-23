@@ -356,7 +356,7 @@ def test_sections_are_unboxed_with_plain_uppercase_titles(tube_svg):
         for el in tube_svg.iter(f"{_SVG_NS}rect")
         if "nf-metro-section-box" in (el.get("class") or "")
     ]
-    assert boxes and all(b.get("stroke-dasharray") == "2 4" for b in boxes)
+    assert boxes and all(b.get("stroke-dasharray") == "6 4" for b in boxes)
     titles = [
         el.text
         for el in tube_svg.iter(f"{_SVG_NS}text")
