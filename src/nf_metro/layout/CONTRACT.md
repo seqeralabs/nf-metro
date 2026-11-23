@@ -1576,8 +1576,8 @@ against a canvas top at y=0, exactly as for a map with no band.
 
 Horizontally, render starts the title (or a standalone logo, with the title
 beside it) at the leftmost ink the settled geometry paints (section boxes and
-headers, line strokes, station markers and labels, group captions, the legend),
-clamped to the canvas; a map that paints nothing falls back to the canvas
+headers, line strokes, station markers and labels, group captions, the caption,
+the legend), clamped to the canvas; a map that paints nothing falls back to the canvas
 padding.
 
 - **Helper**: `apply_title_band_lift` (`layout/title_band.py`), called by

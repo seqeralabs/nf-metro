@@ -3052,13 +3052,13 @@ def _leftmost_ink(
 ) -> float | None:
     """Smallest x the settled geometry paints, or ``None`` when it paints nothing.
 
-    Reads every drawn element but the map title, a standalone logo and the
-    attribution watermark: section boxes and headers, line strokes, station
-    markers, station labels, group captions, the caption and the legend.  A
-    stroke reaches half its width past its path, and a quadratic corner stays
-    inside the hull of its control points, so a polyline's vertices bound its
-    curves.  Terminus icons are held inside their section box by a layout
-    guard, so the box covers them.
+    Reads every drawn element but the map title, a standalone logo, the
+    attribution watermark and the debug overlay: section boxes and headers,
+    line strokes, station markers, station labels, group captions, the caption
+    and the legend.  A stroke reaches half its width past its path, and a
+    quadratic corner stays inside the hull of its control points, so a
+    polyline's vertices bound its curves.  Terminus icons are held inside their
+    section box by a layout guard, so the box covers them.
     """
     reach: list[float] = []
     for section in graph.sections.values():
