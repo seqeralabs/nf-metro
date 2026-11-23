@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from nf_metro.api import render_string, resolve_input_format
+from nf_metro.api import _resolve_input_format, render_string
 from nf_metro.cli import cli
 from nf_metro.convert import (
     ExperimentalInputWarning,
@@ -146,7 +146,7 @@ def test_unknown_input_format_is_rejected():
 
 def test_from_nextflow_contradicting_input_format_is_rejected():
     with pytest.raises(ValueError, match="contradicts"):
-        resolve_input_format("snakemake", True)
+        _resolve_input_format("snakemake", True)
 
 
 @pytest.mark.parametrize("workflow", WORKFLOWS)

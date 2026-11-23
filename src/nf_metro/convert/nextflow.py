@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from nf_metro.convert._core import _DagGroup, _DagNode, _ParsedDag, dag_to_mmd
+from nf_metro.convert._core import DagGroup, DagNode, ParsedDag, dag_to_mmd
 
 # ---------------------------------------------------------------------------
 # Regex patterns for Nextflow mermaid format
@@ -45,9 +45,9 @@ _NF_FLOWCHART = re.compile(r"^flowchart\s+", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 # Parsing
 # ---------------------------------------------------------------------------
-def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
+def _parse_nextflow_mermaid(text: str) -> ParsedDag:
     """Parse a Nextflow ``-with-dag`` mermaid file into an intermediate DAG."""
-    dag = _ParsedDag()
+    dag = ParsedDag()
     lines = text.strip().split("\n")
 
     current_subgraph: str | None = None  # key into dag.subgraphs, or None
@@ -86,9 +86,7 @@ def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
 
             sg_key = f"sg_{subgraph_counter}"
             subgraph_counter += 1
-            dag.subgraphs[sg_key] = _DagGroup(
-                full_name=full_name, short_name=short_name
-            )
+            dag.subgraphs[sg_key] = DagGroup(full_name=full_name, short_name=short_name)
             current_subgraph = sg_key
             continue
 
@@ -100,7 +98,7 @@ def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
         # Stadium node (process)
         m = _NF_STADIUM.match(line)
         if m:
-            node = _DagNode(id=m.group(1), label=m.group(2), shape="stadium")
+            node = DagNode(id=m.group(1), label=m.group(2), shape="stadium")
             if current_subgraph:
                 node.subgraph = current_subgraph
                 dag.subgraphs[current_subgraph].node_ids.append(node.id)
@@ -110,7 +108,7 @@ def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
         # Square bracket node (value/channel)
         m = _NF_SQUARE.match(line)
         if m:
-            node = _DagNode(id=m.group(1), label=m.group(2), shape="square")
+            node = DagNode(id=m.group(1), label=m.group(2), shape="square")
             if current_subgraph:
                 node.subgraph = current_subgraph
             dag.nodes[node.id] = node
@@ -119,7 +117,7 @@ def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
         # Circle node (operator)
         m = _NF_CIRCLE.match(line)
         if m:
-            node = _DagNode(id=m.group(1), label=m.group(2), shape="circle")
+            node = DagNode(id=m.group(1), label=m.group(2), shape="circle")
             if current_subgraph:
                 node.subgraph = current_subgraph
             dag.nodes[node.id] = node

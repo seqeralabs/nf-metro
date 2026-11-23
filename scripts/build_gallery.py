@@ -442,25 +442,38 @@ def build_gallery() -> None:
         print(f"  {stem}: {status}")
 
 
+def _render_conversions(
+    sources: dict[str, Path], input_format: str, section: str
+) -> None:
+    """Render each DAG export in *sources* (output stem -> path) via conversion."""
+    for name, path in sources.items():
+        svg_path = RENDERS_DIR / f"{name}.svg"
+        if _skip_render(path):
+            _manifest[svg_path.name] = section
+            continue
+        try:
+            render_mmd(path, svg_path, input_format=input_format)
+            _manifest[svg_path.name] = section
+            print(f"  {name}: OK")
+        except Exception as e:
+            print(f"  {name}: FAIL - {e}")
+            _drop(name, str(e))
+
+
 def render_nextflow_examples() -> None:
     """Render Nextflow DAG fixtures and hand-tuned example to docs/assets/renders/."""
     RENDERS_DIR.mkdir(parents=True, exist_ok=True)
     section = "Nextflow Conversions"
     print("Nextflow examples:")
 
-    # Auto-converted renders from Nextflow DAG fixtures
-    for mmd_path in sorted(NEXTFLOW_FIXTURES_DIR.glob("*.mmd")):
-        svg_path = RENDERS_DIR / f"nf_{mmd_path.stem}.svg"
-        if _skip_render(mmd_path):
-            _manifest[svg_path.name] = section
-            continue
-        try:
-            render_mmd(mmd_path, svg_path, input_format="nextflow")
-            _manifest[svg_path.name] = section
-            print(f"  nf_{mmd_path.stem}: OK")
-        except Exception as e:
-            print(f"  nf_{mmd_path.stem}: FAIL - {e}")
-            _drop(f"nf_{mmd_path.stem}", str(e))
+    _render_conversions(
+        {
+            f"nf_{path.stem}": path
+            for path in sorted(NEXTFLOW_FIXTURES_DIR.glob("*.mmd"))
+        },
+        "nextflow",
+        section,
+    )
 
     for entry in _config["render_only"]["nextflow_conversions"]:
         src_path = EXAMPLES_DIR / f"{entry['id']}.mmd"
@@ -492,20 +505,14 @@ def render_snakemake_examples() -> None:
     section = "Snakemake Conversions (experimental)"
     print("Snakemake examples:")
 
-    for dot_path in sorted(SNAKEMAKE_FIXTURES_DIR.glob("*.rulegraph.dot")):
-        name = f"smk_{dot_path.name.removesuffix('.rulegraph.dot')}"
-        svg_path = RENDERS_DIR / f"{name}.svg"
-        if _skip_render(dot_path):
-            _manifest[svg_path.name] = section
-            continue
-        try:
-            render_mmd(dot_path, svg_path, input_format="snakemake")
-            _manifest[svg_path.name] = section
-            print(f"  {name}: OK")
-        except Exception as e:
-            print(f"  {name}: FAIL - {e}")
-            _drop(name, str(e))
-
+    _render_conversions(
+        {
+            f"smk_{path.name.removesuffix('.rulegraph.dot')}": path
+            for path in sorted(SNAKEMAKE_FIXTURES_DIR.glob("*.rulegraph.dot"))
+        },
+        "snakemake",
+        section,
+    )
     print()
 
 

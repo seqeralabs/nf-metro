@@ -18,7 +18,10 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from nf_metro.convert import InputFormat
 
 from nf_metro.errors import EmptyGraphError, UnknownInactiveLineError
 from nf_metro.layout import PhaseInvariantError, compute_layout
@@ -208,7 +211,9 @@ def _resolve_commitment_options(
     return opts
 
 
-def resolve_input_format(input_format: str | None, from_nextflow: bool) -> str | None:
+def _resolve_input_format(
+    input_format: InputFormat | None, from_nextflow: bool
+) -> InputFormat | None:
     """Fold the ``from_nextflow`` shorthand into an ``input_format`` name.
 
     ``from_nextflow=True`` means ``input_format="nextflow"``; naming a
@@ -226,7 +231,7 @@ def resolve_input_format(input_format: str | None, from_nextflow: bool) -> str |
 def _parse_source(
     text: str,
     *,
-    input_format: str | None = None,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     layout_options: Mapping[str, object] | None = None,
@@ -273,7 +278,7 @@ def _parse_source(
 def _prepare_graph_state(
     text: str | MetroGraph,
     *,
-    input_format: str | None = None,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     logo: str | None = None,
@@ -363,7 +368,7 @@ def _prepare_graph_state(
 def prepare_graph(
     text: str | MetroGraph,
     *,
-    input_format: str | None = None,
+    input_format: InputFormat | None = None,
     from_nextflow: bool = False,
     title: str | None = None,
     line_spread: str | None = None,
@@ -440,7 +445,7 @@ def prepare_graph(
     """
     graph = _prepare_graph_state(
         text,
-        input_format=resolve_input_format(input_format, from_nextflow),
+        input_format=_resolve_input_format(input_format, from_nextflow),
         title=title,
         line_spread=line_spread,
         logo=logo,
@@ -474,7 +479,7 @@ def render_string(
     theme: str | None = None,
     mode: str | None = None,
     output_format: Literal["svg", "html"] = "svg",
-    input_format: str | None = None,
+    input_format: InputFormat | None = None,
     from_nextflow: bool = False,
     title: str | None = None,
     line_spread: str | None = None,
@@ -582,7 +587,8 @@ def render_string(
     effective_cfg = config or flat
     graph = prepare_graph(
         text,
-        input_format=resolve_input_format(input_format, from_nextflow),
+        input_format=input_format,
+        from_nextflow=from_nextflow,
         title=title,
         line_spread=line_spread,
         logo=logo,

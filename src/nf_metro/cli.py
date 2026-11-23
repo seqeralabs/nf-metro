@@ -32,6 +32,7 @@ from nf_metro.console import (
     print_banner,
     progress_bar,
 )
+from nf_metro.convert import INPUT_FORMATS, InputFormat
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import (
     build_info,
@@ -1183,7 +1184,7 @@ def _print_render_result(sources: list[Path], paths: list[Path]) -> None:
 
 def _input_format_from_flags(
     *, from_nextflow: bool, from_snakemake: bool
-) -> str | None:
+) -> InputFormat | None:
     """Map the mutually exclusive ``--from-*`` flags to an ``input_format``."""
     if from_nextflow and from_snakemake:
         raise click.UsageError(
@@ -1211,7 +1212,7 @@ def _render_one(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    input_format: str | None,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -1287,7 +1288,7 @@ def _render_one(
 def _prepare_graph_for_render(
     input_file: Path,
     *,
-    input_format: str | None,
+    input_format: InputFormat | None,
     title: str | None,
     line_spread: str | None,
     logo: Path | None,
@@ -1340,7 +1341,7 @@ def _render_one_unsafe(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    input_format: str | None,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -1656,7 +1657,7 @@ def render_many(manifest_file: Path) -> None:
 @click.option(
     "--from",
     "input_format",
-    type=click.Choice(["nextflow", "snakemake"]),
+    type=click.Choice(INPUT_FORMATS),
     default=None,
     cls=_DescribedDefault,
     default_text="detected from the input",
@@ -1666,7 +1667,7 @@ def convert(
     input_file: Path,
     output: Path | None,
     title: str | None,
-    input_format: str | None,
+    input_format: InputFormat | None,
 ) -> None:
     """Convert a workflow manager's DAG export to nf-metro format.
 

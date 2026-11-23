@@ -1,7 +1,7 @@
 """Format-neutral back end shared by the workflow-DAG converters.
 
 Each front end (``nextflow``, ``snakemake``) parses its tool's export into a
-:class:`_ParsedDag` and picks the nodes worth keeping as stations;
+:class:`ParsedDag` and picks the nodes worth keeping as stations;
 :func:`dag_to_mmd` does the rest: reconnects edges around dropped nodes,
 breaks cycles, maps groups to sections, assigns main/bypass/spur lines, and
 emits a ``graph LR`` nf-metro ``.mmd`` file.
@@ -48,10 +48,10 @@ travels with the converted file without changing what it renders.
 
 
 class FeedbackEdgesDroppedWarning(UserWarning):
-    """Warns that converting a cyclic Nextflow DAG had to remove edges.
+    """Warns that converting a cyclic workflow DAG had to remove edges.
 
-    nf-metro's layout engine requires an acyclic graph, so a pipeline whose
-    process graph loops cannot be converted edge-for-edge. The converter
+    nf-metro's layout engine requires an acyclic graph, so a workflow whose
+    step graph loops cannot be converted edge-for-edge. The converter
     removes a deterministic set of back edges; this warning names them, so the
     loop is reported to the caller instead of vanishing.
 
@@ -76,18 +76,18 @@ class ExperimentalInputWarning(UserWarning):
 # Format-neutral intermediate DAG, filled by each front end
 # ---------------------------------------------------------------------------
 @dataclass
-class _DagNode:
+class DagNode:
     """A node parsed from a workflow manager's DAG export."""
 
     id: str
     label: str
-    shape: str  # front-end specific, e.g. Nextflow "stadium" (process) vs "circle"
+    shape: str  # set by the front end, e.g. Nextflow "stadium" for a process
     subgraph: str | None = None  # named subgraph, None if outside or in " "
 
 
 @dataclass
-class _DagGroup:
-    """A named node group (a Nextflow subworkflow) that becomes a section."""
+class DagGroup:
+    """A named node group, such as a Nextflow subworkflow, that becomes a section."""
 
     full_name: str  # e.g. "NFCORE_RNASEQ:RNASEQ:PREPROCESS"
     short_name: str  # e.g. "PREPROCESS" (from [SHORT_NAME])
@@ -95,12 +95,12 @@ class _DagGroup:
 
 
 @dataclass
-class _ParsedDag:
+class ParsedDag:
     """Intermediate representation of a parsed workflow DAG."""
 
-    nodes: dict[str, _DagNode] = field(default_factory=dict)
+    nodes: dict[str, DagNode] = field(default_factory=dict)
     edges: list[tuple[str, str]] = field(default_factory=list)
-    subgraphs: dict[str, _DagGroup] = field(default_factory=dict)
+    subgraphs: dict[str, DagGroup] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -110,10 +110,10 @@ class _ParsedDag:
 class _Reconnection:
     """Edges stitched through dropped nodes, and the self-loops that leaves.
 
-    ``edges`` is the process-to-process graph every later pass consumes.
+    ``edges`` is the kept-node graph every later pass consumes.
     ``self_loops`` holds the ``(node, node)`` pairs the stitching cannot
-    express: a process that reaches itself through channel or operator nodes.
-    They are returned rather than dropped, so a single-process feedback round
+    express: a kept node that reaches itself through dropped nodes.
+    They are returned rather than dropped, so a single-node feedback round
     is reported instead of disappearing.
     """
 
@@ -218,7 +218,7 @@ class _SectionAssignment:
 
 
 def _assign_sections(
-    kept_ids: set[str], dag: _ParsedDag, title: str
+    kept_ids: set[str], dag: ParsedDag, title: str
 ) -> _SectionAssignment:
     """Group kept process nodes into sections.
 
@@ -322,7 +322,7 @@ def _flow_depths(graph: nx.DiGraph[str], latest: bool) -> dict[str, int]:
 
 
 def _split_cyclic_sections(
-    sections: _SectionAssignment, edges: list[tuple[str, str]], dag: _ParsedDag
+    sections: _SectionAssignment, edges: list[tuple[str, str]], dag: ParsedDag
 ) -> _SectionAssignment:
     """Split sections that form a cycle into acyclic groups by flow depth.
 
@@ -524,11 +524,11 @@ def _allocate_unique_id(name: str, used: set[str], fallback: str) -> str:
 def _allocate_station_ids(
     section_order: list[str],
     section_node_order: dict[str, list[str]],
-    nodes: dict[str, _DagNode],
+    nodes: dict[str, DagNode],
 ) -> dict[str, str]:
-    """Assign a unique station ID to every kept Nextflow node.
+    """Assign a unique station ID to every kept node.
 
-    Two `_DagNode`s can share a label (e.g. `SAMTOOLS_SORT` reused across
+    Two `DagNode`s can share a label (e.g. `SAMTOOLS_SORT` reused across
     several subworkflows). Sanitising the label alone collapses them onto
     one station ID, producing duplicate declarations and self-loop edges
     that crash layout. Walk sections in topological order and suffix
@@ -684,7 +684,7 @@ def _emit_mmd(
     intra_edges: dict[str, list[tuple[str, str]]],
     lines: _LineAssignment,
     station_ids: dict[str, str],
-    nodes: dict[str, _DagNode],
+    nodes: dict[str, DagNode],
     dropped_feedback: list[tuple[str, str]] | None = None,
 ) -> str:
     """Assemble the nf-metro ``.mmd`` text from the resolved layout.
@@ -770,9 +770,9 @@ def _format_feedback_pair(
 
 
 def _warn_feedback_edges_dropped(
-    dropped: list[tuple[str, str]], nodes: dict[str, _DagNode]
+    dropped: list[tuple[str, str]], nodes: dict[str, DagNode]
 ) -> None:
-    """Report the back edges removed to make the process graph acyclic."""
+    """Report the back edges removed to make the kept graph acyclic."""
 
     def describe(node: str) -> str:
         return _humanize_label(nodes[node].label)
@@ -792,7 +792,7 @@ def _warn_feedback_edges_dropped(
     )
 
 
-def dag_to_mmd(dag: _ParsedDag, kept_ids: set[str], title: str = "") -> str:
+def dag_to_mmd(dag: ParsedDag, kept_ids: set[str], title: str = "") -> str:
     """Convert a parsed DAG to nf-metro ``.mmd`` text, keeping only *kept_ids*.
 
     Edges that ran through dropped nodes are reconnected between the kept

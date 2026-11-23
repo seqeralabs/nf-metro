@@ -15,9 +15,9 @@ import re
 import warnings
 
 from nf_metro.convert._core import (
+    DagNode,
     ExperimentalInputWarning,
-    _DagNode,
-    _ParsedDag,
+    ParsedDag,
     dag_to_mmd,
 )
 
@@ -41,14 +41,23 @@ def _rule_name(label: str) -> str:
     return m.group(0) if m else label.strip()
 
 
-def _parse_lines(
-    text: str, node_re: re.Pattern[str], edge_re: re.Pattern[str]
-) -> _ParsedDag:
-    """Collect rule nodes and rule-to-rule edges from one export's lines."""
-    dag = _ParsedDag()
+def _dialect(text: str) -> tuple[re.Pattern[str], re.Pattern[str]] | None:
+    """The (node, edge) patterns for *text*'s export syntax, or ``None``."""
+    if _DOT_HEADER.search(text):
+        return _DOT_NODE, _DOT_EDGE
+    if _MERMAID_FLOWCHART.search(text) and any(
+        _MERMAID_NODE.match(line) for line in text.splitlines()
+    ):
+        return _MERMAID_NODE, _MERMAID_EDGE
+    return None
+
+
+def _parse_snakemake(text: str) -> ParsedDag:
+    """Collect rule nodes and rule-to-rule edges from an export."""
+    node_re, edge_re = _dialect(text) or (_MERMAID_NODE, _MERMAID_EDGE)
+    dag = ParsedDag()
     job_rule: dict[str, str] = {}
     rule_node: dict[str, str] = {}
-    seen_edges: set[tuple[str, str]] = set()
 
     for line in text.splitlines():
         m = node_re.match(line)
@@ -57,33 +66,21 @@ def _parse_lines(
             if rule not in rule_node:
                 nid = f"r{len(rule_node):04d}"
                 rule_node[rule] = nid
-                dag.nodes[nid] = _DagNode(id=nid, label=rule, shape="rule")
+                dag.nodes[nid] = DagNode(id=nid, label=rule, shape="rule")
             job_rule[m.group(1)] = rule_node[rule]
             continue
         m = edge_re.match(line)
         if m and m.group(1) in job_rule and m.group(2) in job_rule:
             edge = (job_rule[m.group(1)], job_rule[m.group(2)])
             # Two jobs of one rule chained together are not a rule-level loop.
-            if edge[0] != edge[1] and edge not in seen_edges:
-                seen_edges.add(edge)
+            if edge[0] != edge[1]:
                 dag.edges.append(edge)
     return dag
 
 
-def _parse_snakemake(text: str) -> _ParsedDag:
-    if _DOT_HEADER.search(text):
-        return _parse_lines(text, _DOT_NODE, _DOT_EDGE)
-    return _parse_lines(text, _MERMAID_NODE, _MERMAID_EDGE)
-
-
 def is_snakemake_dag(text: str) -> bool:
     """Check whether text looks like Snakemake ``--rulegraph``/``--dag`` output."""
-    if _DOT_HEADER.search(text):
-        return True
-    return bool(
-        _MERMAID_FLOWCHART.search(text)
-        and any(_MERMAID_NODE.match(line) for line in text.splitlines())
-    )
+    return _dialect(text) is not None
 
 
 def convert_snakemake_dag(text: str, title: str = "") -> str:

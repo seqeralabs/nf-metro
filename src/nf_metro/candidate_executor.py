@@ -27,7 +27,7 @@ from nf_metro.api import (
     _prepare_graph_state,
     resolve_theme,
 )
-from nf_metro.convert import INPUT_FORMATS
+from nf_metro.convert import INPUT_FORMATS, InputFormat
 from nf_metro.layout import compute_layout
 from nf_metro.layout.route_plan import (
     EmissionMemberId,
@@ -192,7 +192,7 @@ class LayoutCandidate:
 class CandidateExecutionRequest:
     source: str
     source_dir: str = ""
-    input_format: str | None = None
+    input_format: InputFormat | None = None
     title: str | None = None
     line_spread: str | None = None
     logo: str | None = None
@@ -293,7 +293,7 @@ class _InjectedWorkerError(RuntimeError):
 class _ProductionInput:
     source: str
     source_dir: str
-    input_format: str | None
+    input_format: InputFormat | None
     title: str | None
     line_spread: str | None
     logo: str | None
