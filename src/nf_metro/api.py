@@ -18,7 +18,10 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from nf_metro.convert import InputFormat
 
 from nf_metro.errors import EmptyGraphError, UnknownInactiveLineError
 from nf_metro.layout import PhaseInvariantError, compute_layout
@@ -219,10 +222,27 @@ def _resolve_commitment_options(
     return opts
 
 
+def _resolve_input_format(
+    input_format: InputFormat | None, from_nextflow: bool
+) -> InputFormat | None:
+    """Fold the ``from_nextflow`` shorthand into an ``input_format`` name.
+
+    ``from_nextflow=True`` means ``input_format="nextflow"``; naming a
+    different format alongside it is a contradiction and raises.
+    """
+    if not from_nextflow:
+        return input_format
+    if input_format not in (None, "nextflow"):
+        raise ValueError(
+            f"from_nextflow=True contradicts input_format={input_format!r}"
+        )
+    return "nextflow"
+
+
 def _parse_source(
     text: str,
     *,
-    from_nextflow: bool = False,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     layout_options: Mapping[str, object] | None = None,
@@ -233,7 +253,8 @@ def _parse_source(
     Runs the grammar, directives, and pre-layout inference, applying the
     parse-time half of the option cascade (``fold_threshold``,
     ``auto_process``, ``process_scope``, ``line_order`` provenance,
-    ``line_spread``) and the ``--from-nextflow`` conversion, but never
+    ``line_spread``) and the *input_format* conversion (``--from-nextflow``,
+    ``--from-snakemake``), but never
     :func:`~nf_metro.layout.compute_layout`.
 
     Hand the result to :func:`prepare_graph` to finish the job (there, as
@@ -241,10 +262,10 @@ def _parse_source(
     """
     opts = _resolve_commitment_options(layout_options, layout_commitments)
 
-    if from_nextflow:
-        from nf_metro.convert import convert_nextflow_dag
+    if input_format is not None:
+        from nf_metro.convert import convert_dag
 
-        text = convert_nextflow_dag(text, title=title or "")
+        text = convert_dag(text, input_format, title=title or "")
 
     fold = opts.get("fold_threshold")
     auto_process = opts.get("auto_process")
@@ -268,7 +289,7 @@ def _parse_source(
 def _prepare_graph_state(
     text: str | MetroGraph,
     *,
-    from_nextflow: bool = False,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     logo: str | None = None,
@@ -297,7 +318,7 @@ def _prepare_graph_state(
     else:
         graph = _parse_source(
             text,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             line_spread=line_spread,
             layout_options=layout_options,
@@ -361,6 +382,7 @@ def _prepare_graph_state(
 def prepare_graph(
     text: str | MetroGraph,
     *,
+    input_format: InputFormat | None = None,
     from_nextflow: bool = False,
     title: str | None = None,
     line_spread: str | None = None,
@@ -377,7 +399,7 @@ def prepare_graph(
 
     *text* is the map's text, or an already-parsed graph, for a caller that
     needs the same source laid out more than once (e.g. an SVG and an HTML
-    output of one map) without re-reading or re-parsing it: ``from_nextflow``,
+    output of one map) without re-reading or re-parsing it: ``input_format``,
     ``line_spread``, and the parse-time layout options have already been
     consumed by that parse and are ignored here, and ``layout_commitments``
     is rejected outright (it can only apply during parsing). Layout settles
@@ -443,7 +465,7 @@ def prepare_graph(
     """
     graph = _prepare_graph_state(
         text,
-        from_nextflow=from_nextflow,
+        input_format=_resolve_input_format(input_format, from_nextflow),
         title=title,
         line_spread=line_spread,
         logo=logo,
@@ -478,6 +500,7 @@ def render_string(
     theme: str | None = None,
     mode: str | None = None,
     output_format: Literal["svg", "html"] = "svg",
+    input_format: InputFormat | None = None,
     from_nextflow: bool = False,
     title: str | None = None,
     line_spread: str | None = None,
@@ -585,6 +608,7 @@ def render_string(
     effective_cfg = config or flat
     graph = prepare_graph(
         text,
+        input_format=input_format,
         from_nextflow=from_nextflow,
         title=title,
         line_spread=line_spread,

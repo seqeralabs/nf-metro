@@ -109,6 +109,16 @@ def _line_hint(line: int | None) -> str:
 
 def _check_unsupported_input(text: str) -> None:
     """Detect common unsupported input formats and raise helpful errors."""
+    from nf_metro.convert import detect_input_format
+
+    if detect_input_format(text) == "snakemake":
+        raise ValueError(
+            "This looks like raw Snakemake --rulegraph or --dag output. Use "
+            "'nf-metro convert' to convert it to nf-metro format first, or "
+            "pass '--from-snakemake' (experimental) to 'nf-metro render'.\n\n"
+            "See: https://seqeralabs.github.io/nf-metro/latest/snakemake/"
+        )
+
     lines = text.strip().split("\n")
     has_flowchart = any(line.strip().startswith("flowchart ") for line in lines)
     has_metro_directives = any(line.strip().startswith("%%metro") for line in lines)

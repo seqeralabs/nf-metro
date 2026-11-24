@@ -1,0 +1,24 @@
+digraph snakemake_dag {
+    graph[bgcolor=white, margin=0];
+    node[shape=box, style=rounded, fontname=sans,                 fontsize=10, penwidth=2];
+    edge[penwidth=2, color=grey];
+	0[label = "all", color = "0.11 0.6 0.85", style="rounded"];
+	1[label = "multiqc", color = "0.33 0.6 0.85", style="rounded"];
+	2[label = "fastqc\nsample: s1", color = "0.22 0.6 0.85", style="rounded"];
+	3[label = "fastqc\nsample: s2", color = "0.22 0.6 0.85", style="rounded"];
+	4[label = "sort_bam", color = "0.44 0.6 0.85", style="rounded"];
+	5[label = "align", color = "0.00 0.6 0.85", style="rounded"];
+	6[label = "trim_reads\nsample: s1", color = "0.56 0.6 0.85", style="rounded"];
+	7[label = "sort_bam", color = "0.44 0.6 0.85", style="rounded"];
+	8[label = "align", color = "0.00 0.6 0.85", style="rounded"];
+	9[label = "trim_reads\nsample: s2", color = "0.56 0.6 0.85", style="rounded"];
+	1 -> 0
+	2 -> 1
+	3 -> 1
+	4 -> 1
+	7 -> 1
+	5 -> 4
+	6 -> 5
+	8 -> 7
+	9 -> 8
+}

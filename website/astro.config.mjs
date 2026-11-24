@@ -285,6 +285,11 @@ export default defineConfig({
             { label: "Data manifest", slug: "manifest" },
             { label: "Live progress", slug: "live" },
             { label: "Nextflow import", slug: "nextflow" },
+            {
+              label: "Snakemake import",
+              slug: "snakemake",
+              badge: "Experimental",
+            },
             { label: "CI & automation", slug: "automation" },
             { label: "How it's built", slug: "how-its-built" },
           ],

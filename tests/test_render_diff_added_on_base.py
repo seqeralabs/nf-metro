@@ -100,7 +100,7 @@ def test_driver_renders_what_the_pr_adds_and_records_what_aborts(tmp_path):
     _write(pr, "existing.svg", 1)
     _write(pr, "good.svg", 1)
     _write(pr, "bad.svg", 1)
-    params = {"debug": False, "self_color_scheme": False, "from_nextflow": False}
+    params = {"debug": False, "self_color_scheme": False, "input_format": None}
     (pr / "sources.json").write_text(
         json.dumps(
             {

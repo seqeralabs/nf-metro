@@ -2,7 +2,7 @@
 import { join } from "node:path";
 import { Code } from "@astrojs/starlight/components";
 import ZoomableSVG from "@components/ZoomableSVG.astro";
-import { renderMetroBinary, REPO_ROOT } from "../lib/render-metro.mjs";
+import { INPUT_FORMATS, renderMetroBinary, REPO_ROOT } from "../lib/render-metro.mjs";
 import { base } from "../site";
 
 // One primitive for every nf-metro map in the docs. It renders up to three
@@ -50,6 +50,12 @@ interface Props {
   debug?: boolean;
   // Treat the source as a Nextflow DAG and convert it (--from-nextflow).
   fromNextflow?: boolean;
+  // Treat the source as Snakemake --rulegraph DOT and convert it
+  // (--from-snakemake, experimental).
+  fromSnakemake?: boolean;
+  // With fromNextflow or fromSnakemake: convert with `nf-metro convert --lines`
+  // to show the other line mode from the format's default. SVG only.
+  lines?: "graph" | "sections";
   // Output format. "svg" (default) keeps the inline, theme-following render;
   // "png" and the four looping-video formats render live via nf-metro and
   // are embedded as a static <img>/<video>.
@@ -90,6 +96,8 @@ const {
   render,
   debug = false,
   fromNextflow = false,
+  fromSnakemake = false,
+  lines,
   format = "svg",
   animate = false,
   duration,
@@ -107,17 +115,31 @@ const mmdState = clean ? false : (mmd ?? preset.mmd);
 const commandState = clean ? false : (command ?? preset.command);
 const renderState = clean ? "open" : (render ?? preset.render);
 
-if (fromNextflow && debug) {
-  // No combined `?metro&nextflow&debug` glob exists; fail loudly rather than
-  // silently render one mode and drop the other.
+if (fromNextflow && fromSnakemake) {
   throw new Error(
-    `<Metro src="${src}">: \`debug\` and \`fromNextflow\` cannot be combined.`,
+    `<Metro src="${src}">: \`fromNextflow\` and \`fromSnakemake\` cannot be combined.`,
   );
 }
-if (animate && (debug || fromNextflow) && !isBinary) {
-  // Same reasoning: no combined `?metro&animate&{debug,nextflow}` glob exists.
+const inputFormat = fromNextflow ? "nextflow" : fromSnakemake ? "snakemake" : null;
+// Each render mode has its own glob, and no glob combines two modes, so a
+// combination fails loudly rather than silently rendering one and dropping the other.
+if (inputFormat && debug) {
   throw new Error(
-    `<Metro src="${src}">: \`animate\` cannot be combined with \`debug\` or \`fromNextflow\`.`,
+    `<Metro src="${src}">: \`debug\` cannot be combined with \`fromNextflow\` or \`fromSnakemake\`.`,
+  );
+}
+if (lines && lines !== "graph" && lines !== "sections") {
+  throw new Error(`<Metro src="${src}">: \`lines\` must be "graph" or "sections", not "${lines}".`);
+}
+if (lines && (!inputFormat || isBinary)) {
+  throw new Error(
+    `<Metro src="${src}">: \`lines\` needs \`fromNextflow\` or \`fromSnakemake\` and format="svg".`,
+  );
+}
+const linesMode = inputFormat && lines !== INPUT_FORMATS[inputFormat].lines ? lines : undefined;
+if (animate && (debug || inputFormat) && !isBinary) {
+  throw new Error(
+    `<Metro src="${src}">: \`animate\` cannot be combined with \`debug\`, \`fromNextflow\` or \`fromSnakemake\`.`,
   );
 }
 
@@ -130,6 +152,7 @@ if (animate && (debug || fromNextflow) && !isBinary) {
 //   - debug overlay: only examples/ and examples/guide/, never examples/topologies/.
 //   - animated: same scope as debug.
 //   - Nextflow conversion: only the DAG fixtures.
+//   - Snakemake conversion: only the rule-graph DOT fixtures.
 //
 // A build resolves every module a glob can reach, whether or not any page's
 // `resolve()` call ever looks it up - so debug/animate deliberately exclude
@@ -138,6 +161,10 @@ if (animate && (debug || fromNextflow) && !isBinary) {
 const rawSources = {
   ...import.meta.glob("../../../examples/**/*.mmd", { query: "?raw", import: "default" }),
   ...import.meta.glob("../../../tests/fixtures/**/*.mmd", { query: "?raw", import: "default" }),
+  ...import.meta.glob("../../../tests/fixtures/snakemake/*.rulegraph.dot", {
+    query: "?raw",
+    import: "default",
+  }),
 };
 const svgSources = {
   ...import.meta.glob("../../../examples/**/*.mmd", { query: "?metro", import: "default" }),
@@ -156,6 +183,21 @@ const svgNextflowSources = import.meta.glob(
   { query: "?metro&nextflow", import: "default" },
 );
 
+const svgSnakemakeSources = import.meta.glob(
+  "../../../tests/fixtures/snakemake/*.rulegraph.dot",
+  { query: "?metro&snakemake", import: "default" },
+);
+
+const svgNextflowGraphSources = import.meta.glob(
+  "../../../tests/fixtures/nextflow/**/*.mmd",
+  { query: "?metro&nextflow&lines=graph", import: "default" },
+);
+
+const svgSnakemakeSectionsSources = import.meta.glob(
+  "../../../tests/fixtures/snakemake/*.rulegraph.dot",
+  { query: "?metro&snakemake&lines=sections", import: "default" },
+);
+
 // Each render mode pairs its source map with the scope named in the not-found
 // error, so the selection and the message can't drift apart.
 type Sources = Record<string, () => Promise<unknown>>;
@@ -167,8 +209,18 @@ const RENDER_MODES: Record<string, { mods: Sources; scope: string }> = {
   debug: { mods: svgDebugSources, scope: "examples/*.mmd and examples/guide/*.mmd" },
   animate: { mods: svgAnimateSources, scope: "examples/*.mmd and examples/guide/*.mmd" },
   nextflow: { mods: svgNextflowSources, scope: "tests/fixtures/nextflow/**" },
+  snakemake: {
+    mods: svgSnakemakeSources,
+    scope: "tests/fixtures/snakemake/*.rulegraph.dot",
+  },
+  "nextflow:graph": { mods: svgNextflowGraphSources, scope: "tests/fixtures/nextflow/**" },
+  "snakemake:sections": {
+    mods: svgSnakemakeSectionsSources,
+    scope: "tests/fixtures/snakemake/*.rulegraph.dot",
+  },
 };
-const renderMode = fromNextflow ? "nextflow" : debug ? "debug" : animate ? "animate" : "plain";
+const formatMode = linesMode ? `${inputFormat}:${linesMode}` : inputFormat;
+const renderMode = formatMode ?? (debug ? "debug" : animate ? "animate" : "plain");
 
 const key = `../../../${src}`;
 
@@ -188,7 +240,7 @@ const source =
     ? ((await resolve(
         rawSources,
         "source",
-        "examples/** and tests/fixtures/**",
+        "examples/**, tests/fixtures/** and tests/fixtures/snakemake/*.rulegraph.dot",
       )) as string)
     : null;
 
@@ -199,7 +251,7 @@ if (renderState !== false) {
     const { path } = renderMetroBinary(join(REPO_ROOT, src), {
       format,
       debug,
-      fromNextflow,
+      inputFormat,
       animate,
       duration,
       fps,
@@ -213,10 +265,13 @@ if (renderState !== false) {
   }
 }
 
-const stem = src.split("/").pop()?.replace(/\.mmd$/, "") ?? "map";
-let cliCommand = `nf-metro render ${src} -o ${stem}.${format}`;
+const stem = src.split("/").pop()?.replace(/\.(mmd|rulegraph\.dot)$/, "") ?? "map";
+let cliCommand = linesMode
+  ? `nf-metro convert ${src} --lines ${linesMode} -o ${stem}.mmd\n` +
+    `nf-metro render ${stem}.mmd -o ${stem}.${format}`
+  : `nf-metro render ${src} -o ${stem}.${format}`;
 if (debug) cliCommand += " --debug";
-if (fromNextflow) cliCommand += " --from-nextflow";
+if (inputFormat && !linesMode) cliCommand += ` ${INPUT_FORMATS[inputFormat].flag}`;
 if (animate && !isBinary) cliCommand += " --animate";
 if (duration != null) cliCommand += ` --duration ${duration}`;
 if (fps != null) cliCommand += ` --fps ${fps}`;
@@ -254,9 +309,9 @@ const codeTitle = title ?? src;
             <summary>Mermaid source</summary>
             <Code
               code={source}
-              lang="metro"
+              lang={inputFormat ? INPUT_FORMATS[inputFormat].lang : "metro"}
               title={codeTitle}
-              meta={fromNextflow ? undefined : 'playground="metro"'}
+              meta={inputFormat ? undefined : 'playground="metro"'}
             />
           </details>
         )
