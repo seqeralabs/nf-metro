@@ -413,7 +413,7 @@ An element that sets its own `color-scheme` therefore stops inheriting and start
 That matters once the SVG is embedded, because the host page and the SVG can disagree about who owns the decision.
 nf-metro has two modes, controlled by `self_color_scheme` on `render_svg` (`--no-self-color-scheme` on the CLI):
 
-**Standalone (the default).** The root `<svg>` declares its own `color-scheme` (`src/nf_metro/render/svg.py:2595-2597`):
+**Standalone (the default).** The root `<svg>` declares its own `color-scheme` (`_emit_render_plan` in `src/nf_metro/render/svg.py`):
 
 ```html
 <svg style="color-scheme: light dark"></svg>
@@ -423,7 +423,7 @@ nf-metro has two modes, controlled by `self_color_scheme` on `render_svg` (`--no
 That is the right behavior for a file opened on its own, or dropped into a page that has no opinion about theme.
 
 **Embedded in a page that already manages theme.** Passing `--no-self-color-scheme` omits that declaration, and the `<svg>` inherits `color-scheme` from its host instead.
-Every `<Metro>` embed on this docs site uses it (`website/src/lib/render-metro.mjs:277`).
+Every `<Metro>` embed on this docs site uses it (`renderMetroFile` in `website/src/lib/render-metro.mjs`).
 This site's theme picker sets `color-scheme` on `<html>`:
 
 ```css title="reset.css (Starlight)"
@@ -453,7 +453,7 @@ Both have to be right for an embedded map to stay theme-adaptive.
 
 <Aside type="tip" title="What this docs site itself passes">
 
-From `renderMetroFile` (`website/src/lib/render-metro.mjs:254-296`):
+From `renderMetroFile` in `website/src/lib/render-metro.mjs`:
 
 | Flag                     | `<Metro>` embed | OG image export |
 | ------------------------ | --------------- | --------------- |
