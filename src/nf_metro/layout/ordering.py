@@ -841,22 +841,23 @@ def _stack_contender_runs(
 ) -> None:
     """Lay the bypass helpers of seated contender *node*'s runs as a stack.
 
-    The run reaching its join first keeps the contender's row and each later
-    run takes the next row toward *outward* clear of every station it passes,
-    so a run never steps across the trunk or across a run that leaves it
-    later.
+    Runs reaching the same join are one bundle and share a row.  The bundle
+    reaching its join first keeps the contender's row and each later one takes
+    the next row toward *outward* clear of every station it passes, so a run
+    never steps across the trunk or across a run that leaves it later.
     """
-    runs: list[tuple[int, list[str]]] = []
+    bundles: dict[frozenset[str], list[str]] = defaultdict(list)
     for lead in G.successors(node):
-        if not is_bypass_v(lead):
-            continue
-        joins, rest = _run_joins(lead, G)
-        join = min(layers.get(c, 0) for c in joins)
-        runs.append((join, [lead, *rest]))
+        if is_bypass_v(lead):
+            joins, rest = _run_joins(lead, G)
+            bundles[frozenset(joins)] += [lead, *rest]
     row = tracks[node]
-    for i, (join, helpers) in enumerate(sorted(runs, key=lambda run: run[0])):
+    by_join = sorted(bundles.items(), key=lambda b: min(layers.get(c, 0) for c in b[0]))
+    for i, (ends, helpers) in enumerate(by_join):
         if i:
-            span = _span_tracks(node, join, graph, layers, tracks)
+            span = _span_tracks(
+                node, min(layers.get(c, 0) for c in ends), graph, layers, tracks
+            )
             row = next(
                 t
                 for k in range(1, len(span) + 2)

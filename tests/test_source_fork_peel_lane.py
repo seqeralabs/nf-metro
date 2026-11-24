@@ -347,6 +347,52 @@ def test_contender_shapes_stay_clear(shape: str, orientation: Orientation) -> No
     assert not crossings, f"lines cross: {crossings}"
 
 
+_BUNDLE_TO_ONE_JOIN = _one_section(
+    "".join(
+        f"%%metro line: l{i} | l{i} | #{c}\n"
+        for i, c in enumerate(
+            ("e41a1c", "377eb8", "4daf4a", "984ea3", "ff7f00", "a65628")
+        )
+    ),
+    "".join(
+        f"        {a} -->|{lid}| {b}\n"
+        for a, lid, b in (
+            ("n1", "l0", "n2"),
+            ("n2", "l0", "n3"),
+            ("n3", "l0", "n4"),
+            ("n4", "l0", "n5"),
+            ("n6", "l1,l2", "n5"),
+            ("n5", "l1,l2", "n7"),
+            ("n1", "l3", "n10"),
+            ("n10", "l3", "n5"),
+            ("n5", "l3", "n11"),
+            ("n12", "l4", "n13"),
+            ("n13", "l4", "n5"),
+            ("n14", "l5", "n15"),
+            ("n15", "l5", "n16"),
+        )
+    ),
+    "%%metro line_spread: centered\n%%metro compact_offsets: true\n",
+)
+
+
+@pytest.mark.parametrize("orientation", list(all_orientations()), ids=lambda o: o.name)
+def test_contender_lines_to_one_join_share_a_row(orientation: Orientation) -> None:
+    """A contender's lines bound for the same join stay one bundle past the peel.
+
+    Each line runs around the trunk through its own bypass helpers, so the
+    bundle holds only while every layer's helpers share one position.
+    """
+    graph, _, downgrades = render_with_downgrades(
+        transform_source(_BUNDLE_TO_ONE_JOIN, orientation)
+    )
+    assert not downgrades, downgrades
+    helpers = [st for sid, st in graph.stations.items() if "_n6_" in sid]
+    assert len(helpers) == 6, sorted(graph.stations)
+    spots = {(round(st.x), round(st.y)) for st in helpers}
+    assert len(spots) == 3, f"'n6' lines split across rows: {sorted(spots)}"
+
+
 @contextmanager
 def _deadline(seconds: int) -> Iterator[None]:
     """Fail the enclosing block if it runs longer than *seconds*."""
