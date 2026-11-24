@@ -3356,10 +3356,32 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     has nothing for them to match, so it ships without them.
     """
 
-    def _rule(cls: str, props: str, *also: str) -> str:
-        selector = "".join(f".{_ns(c)}" for c in (cls, *also))
-        return f"{selector} {{ {props}; }}"
+    lines = _chrome_binding_rules(theme)
+    # The label halo is a knockout of the background, so it tracks --nfm-map-bg
+    # and must flip with the mode too; otherwise a dark-baked halo blots out
+    # labels in light mode. Disabled-halo themes draw no halo, so emit nothing.
+    bg_light, bg_dark = color_pair(theme, "background_color")
+    halo_light_set, halo_dark_set = color_pair(theme, "label_halo_color")
+    halo_light = _label_halo_color_for(theme.label_halo_width, halo_light_set, bg_light)
+    halo_dark = _label_halo_color_for(theme.label_halo_width, halo_dark_set, bg_dark)
+    if halo_light is not None and halo_dark is not None:
+        halo_val = f"var(--nfm-map-bg, {adaptive_value(halo_light, halo_dark)})"
+        lines.append(
+            _css_rule("nf-metro-label-halo", f"fill: {halo_val}; stroke: {halo_val}")
+        )
+    if any_inactive:
+        lines += _muted_chrome_rules(theme)
+    d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
 
+
+def _css_rule(cls: str, props: str, *also: str) -> str:
+    """A CSS rule setting *props* on elements carrying *cls* and every *also*."""
+    selector = "".join(f".{_ns(c)}" for c in (cls, *also))
+    return f"{selector} {{ {props}; }}"
+
+
+def _chrome_binding_rules(theme: Theme) -> list[str]:
+    """One rule per element class the theme's chrome bindings paint."""
     rules: dict[str, list[str]] = {}
     for binding in chrome_bindings():
         baked = baked_binding(theme, binding)
@@ -3371,45 +3393,35 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
         for target in binding.targets:
             if target_applies(theme, binding, target):
                 rules.setdefault(target.cls, []).append(f"{target.prop}: {value}")
-    lines = [_rule(cls, "; ".join(props)) for cls, props in rules.items()]
-    # The label halo is a knockout of the background, so it tracks --nfm-map-bg
-    # and must flip with the mode too; otherwise a dark-baked halo blots out
-    # labels in light mode. Disabled-halo themes draw no halo, so emit nothing.
-    bg_light, bg_dark = color_pair(theme, "background_color")
-    halo_light_set, halo_dark_set = color_pair(theme, "label_halo_color")
-    halo_light = _label_halo_color_for(theme.label_halo_width, halo_light_set, bg_light)
-    halo_dark = _label_halo_color_for(theme.label_halo_width, halo_dark_set, bg_dark)
-    if halo_light is not None and halo_dark is not None:
-        halo_val = f"var(--nfm-map-bg, {adaptive_value(halo_light, halo_dark)})"
-        lines.append(
-            _rule("nf-metro-label-halo", f"fill: {halo_val}; stroke: {halo_val}")
-        )
-    # A muted element carries its grey as a presentation attribute, which any
-    # author rule outranks, so the full-strength rules above would repaint it.
-    # Each muted state therefore needs a selector that outranks its own plain
-    # rule, and its own property so a host can recolor the two states apart.
-    if any_inactive:
-        muted_val = (
-            "var(--nfm-map-muted-color, "
-            f"{adaptive_value(*color_pair(theme, 'muted_line_color'))})"
-        )
-        muted_rules: dict[str, list[str]] = {}
-        for binding in chrome_bindings():
-            for target in binding.targets:
-                if target.muted and target_applies(theme, binding, target):
-                    muted_rules.setdefault(target.cls, []).append(
-                        f"{target.prop}: {muted_val}"
-                    )
+    return [_css_rule(cls, "; ".join(props)) for cls, props in rules.items()]
+
+
+def _muted_chrome_rules(theme: Theme) -> list[str]:
+    """Rules greying the elements a muted line touches.
+
+    A muted element carries its grey as a presentation attribute, which any
+    author rule outranks, so the full-strength binding rules would repaint it.
+    Each muted state therefore needs a selector that outranks its own plain
+    rule, and its own property so a host can recolor the two states apart.
+    """
+    muted_val = (
+        "var(--nfm-map-muted-color, "
+        f"{adaptive_value(*color_pair(theme, 'muted_line_color'))})"
+    )
+    rules: dict[str, list[str]] = {}
+    for binding in chrome_bindings():
+        for target in binding.targets:
+            if target.muted and target_applies(theme, binding, target):
+                rules.setdefault(target.cls, []).append(f"{target.prop}: {muted_val}")
+    lines = [
+        _css_rule(cls, "; ".join(props), _MUTED_CLASS) for cls, props in rules.items()
+    ]
+    if muted_adapts(theme):
         lines += [
-            _rule(cls, "; ".join(props), _MUTED_CLASS)
-            for cls, props in muted_rules.items()
+            _css_rule(MUTED_STROKE_CLASS, f"stroke: {muted_val}"),
+            _css_rule(MUTED_FILL_CLASS, f"fill: {muted_val}"),
         ]
-        if muted_adapts(theme):
-            lines += [
-                _rule(MUTED_STROKE_CLASS, f"stroke: {muted_val}"),
-                _rule(MUTED_FILL_CLASS, f"fill: {muted_val}"),
-            ]
-    d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
+    return lines
 
 
 def _inject_dark_mode_style(
