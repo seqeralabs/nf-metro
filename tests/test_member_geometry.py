@@ -922,7 +922,6 @@ def test_reservation_reroute_keeps_identity_and_reuses_settled_template() -> Non
     graph, first = _observe(ROOT / "examples" / "genomeassembly.mmd")
     routes, _moves, second_plan = _route_edges(
         graph,
-        DIAGONAL_RUN,
         CURVE_RADIUS,
         compute_station_offsets(graph),
         observe_plan=True,

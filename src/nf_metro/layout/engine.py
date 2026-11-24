@@ -550,14 +550,7 @@ def compute_layout(
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
 
-    from nf_metro.layout.pass_metrics import (
-        ThemeMetrics,
-        font_scale_context,
-        layout_metrics_context,
-        stroke_scale_context,
-        theme_metrics_context,
-    )
-    from nf_metro.themes import layout_theme
+    from nf_metro.layout.pass_metrics import graph_layout_context
 
     def _layout_pass(validate_pass: bool) -> None:
         _compute_layout_scaled(
@@ -573,12 +566,7 @@ def compute_layout(
             validate=validate_pass,
         )
 
-    with (
-        font_scale_context(graph.font_scale),
-        stroke_scale_context(graph.stroke_scale),
-        theme_metrics_context(ThemeMetrics.of(layout_theme(graph))),
-        layout_metrics_context(layout_metrics),
-    ):
+    with graph_layout_context(graph):
         # Topology-blind bypass insertion (parse time) can miss a line drawn
         # through a marker it doesn't consume; the geometric pass re-lays out
         # with bypass helpers for any such crossing it can cleanly fix.  Every

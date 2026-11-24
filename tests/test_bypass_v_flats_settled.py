@@ -14,6 +14,7 @@ import pytest
 
 from nf_metro.api import prepare_graph
 from nf_metro.layout.engine import _bypass_label_rakes
+from nf_metro.layout.pass_metrics import graph_layout_context
 from nf_metro.layout.phases.spacing import (
     _bypass_label_obstacles,
     _bypass_v_collapsed_flat_gaps,
@@ -56,11 +57,12 @@ def _settled(relative_path: str) -> MetroGraph:
 def test_settled_bypass_v_flats_and_labels_are_clear(relative_path: str) -> None:
     graph = _settled(relative_path)
 
-    assert graph.bypass_label_obstacles == _bypass_label_obstacles(graph)
-    assert _bypass_v_collapsed_flat_gaps(graph) == set()
-    struck, collinear, flat_gaps = _label_clearance_issues(graph)
-    assert (struck, collinear, flat_gaps) == (set(), False, set())
-    assert _bypass_label_rakes(graph) == set()
+    with graph_layout_context(graph):
+        assert graph.bypass_label_obstacles == _bypass_label_obstacles(graph)
+        assert _bypass_v_collapsed_flat_gaps(graph) == set()
+        struck, collinear, flat_gaps = _label_clearance_issues(graph)
+        assert (struck, collinear, flat_gaps) == (set(), False, set())
+        assert _bypass_label_rakes(graph) == set()
 
 
 @pytest.mark.parametrize("relative_path", FLAT_LEVER_CONFLICTS)
@@ -69,6 +71,7 @@ def test_settled_labels_are_clear_when_flat_levers_conflict(
 ) -> None:
     graph = _settled(relative_path)
 
-    struck, collinear, _flat_gaps = _label_clearance_issues(graph)
-    assert (struck, collinear) == (set(), False)
-    assert _bypass_label_rakes(graph) == set()
+    with graph_layout_context(graph):
+        struck, collinear, _flat_gaps = _label_clearance_issues(graph)
+        assert (struck, collinear) == (set(), False)
+        assert _bypass_label_rakes(graph) == set()

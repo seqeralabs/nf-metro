@@ -25,15 +25,7 @@ from nf_metro.layout.geometry import (
     shift_section,
 )
 from nf_metro.layout.labels import label_text_width
-from nf_metro.layout.pass_metrics import (
-    LayoutMetrics,
-    ThemeMetrics,
-    active_layout_metrics,
-    font_scale_context,
-    layout_metrics_context,
-    stroke_scale_context,
-    theme_metrics_context,
-)
+from nf_metro.layout.pass_metrics import active_layout_metrics, graph_layout_context
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _column_contiguous_row_groups,
@@ -590,17 +582,10 @@ def _predict_section_content_bottom(
         from nf_metro.layout.routing import compute_station_offsets
 
         offsets = compute_station_offsets(graph)
-    # The label-reach and marker-footprint metrics scale with the graph's font
-    # and stroke; bind both from the graph so the prediction is reproducible
-    # whether or not a layout-wide scale context is active at the call site.
-    from nf_metro.themes import layout_theme
-
-    with (
-        font_scale_context(graph.font_scale),
-        stroke_scale_context(graph.stroke_scale),
-        theme_metrics_context(ThemeMetrics.of(layout_theme(graph))),
-        layout_metrics_context(LayoutMetrics.of(graph)),
-    ):
+    # The label-reach and marker-footprint metrics follow the graph's theme and
+    # scales; bind them from the graph so the prediction is reproducible whether
+    # or not a layout-wide context is active at the call site.
+    with graph_layout_context(graph):
         content_bots = [
             graph.stations[sid].y
             + max(

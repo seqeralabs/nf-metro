@@ -27,6 +27,7 @@ __all__ = [
     "active_theme_metrics",
     "canvas_edge_clearance",
     "font_scale_context",
+    "graph_layout_context",
     "icon_half_height_approx",
     "label_font_size_approx",
     "station_radius_approx",
@@ -38,7 +39,7 @@ __all__ = [
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator, NamedTuple
+from typing import TYPE_CHECKING, Iterator, NamedTuple
 
 from nf_metro.layout.constants import (
     DEFAULT_LINE_WIDTH,
@@ -55,6 +56,9 @@ from nf_metro.layout.constants import (
     TERMINUS_WIDTH,
     WIDEST_THEME_LINE_WIDTH,
 )
+
+if TYPE_CHECKING:
+    from nf_metro.parser.model import MetroGraph
 
 
 class ThemeMetrics(NamedTuple):
@@ -230,3 +234,17 @@ def layout_metrics_context(metrics: LayoutMetrics) -> Iterator[None]:
 def diagonal_label_offset() -> float:
     """Extra drop for an angled label, kept in proportion to the label offset."""
     return active_layout_metrics().label_offset * DIAGONAL_LABEL_OFFSET / LABEL_OFFSET
+
+
+@contextmanager
+def graph_layout_context(graph: MetroGraph) -> Iterator[None]:
+    """Bind every metric a layout pass over *graph* reserves against."""
+    from nf_metro.themes import layout_theme
+
+    with (
+        font_scale_context(graph.font_scale),
+        stroke_scale_context(graph.stroke_scale),
+        theme_metrics_context(ThemeMetrics.of(layout_theme(graph))),
+        layout_metrics_context(LayoutMetrics.of(graph)),
+    ):
+        yield
