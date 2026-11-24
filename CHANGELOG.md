@@ -29,10 +29,10 @@ history.
   number badges, title case and tracking, and a legend frame.
 - `terminus_glyph` theme setting for a line end shared by several lines:
   `nub` (the default square box), `bar` (a track-weight buffer-stop bar
-  across the bundle, in a colour that follows the viewer's light or dark
-  mode) or `ring`.
-- `capsule_stroke` and `capsule_fill` theme settings give station capsules
-  and interchanges colours that follow the viewer's light or dark mode.
+  across the bundle) or `ring`.
+- `glyph_stroke` and `capsule_fill` theme settings give interchange rings,
+  bar line ends, station capsules and interchanges colours that follow the
+  viewer's light or dark mode, muted lines included.
 - `london-tube` built-in theme: a schematic transit look after the geometry of
   TfL's Line Diagram Standard, with track-weight station tabs, terminus bars,
   bold capsules at interchanges, bundled lines edge to edge and a 30% grey for
@@ -65,6 +65,9 @@ history.
   apart through the whole turn at every angle, closing the thin seam that a
   right-angle bundle turn showed between touching lines. Every rounded corner
   on every map redraws very slightly fuller.
+- Animated dots ride the drawn strokes: each dot turns about a corner with its
+  lane's own radius, so dots keep to their lines through concentric turns and
+  source turnouts. Animation timing is measured on the unrounded geometry.
 - The transparent embed theme is named `transparent`; `light` is an accepted
   alias. `nf-metro info` reports `style: transparent` for a map written with
   `style: light`.
