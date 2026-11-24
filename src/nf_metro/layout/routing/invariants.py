@@ -5387,10 +5387,11 @@ def check_no_hanging_routes(
     from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 
     positive_fan = tb_positive_fan_sections(graph)
-    anchors = [
-        drawn_lane_span(graph, st, offsets, positive_fan)
-        for st in graph.stations.values()
-    ]
+    anchor_by_station = {
+        sid: drawn_lane_span(graph, st, offsets, positive_fan)
+        for sid, st in graph.stations.items()
+    }
+    anchors = list(anchor_by_station.values())
     rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
     polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
 
@@ -5401,6 +5402,12 @@ def check_no_hanging_routes(
         ends = (("source", pts[0], r.edge.source), ("target", pts[-1], r.edge.target))
         for which, end, node in ends:
             if graph.station_is_rail(node):
+                continue
+            own = anchor_by_station.get(node)
+            if (
+                own is not None
+                and point_to_polyline_distance(end, own) <= _hanging_route_tol()
+            ):
                 continue
             d_marker = min(
                 (point_to_polyline_distance(end, anchor) for anchor in anchors),
