@@ -8,6 +8,9 @@ onto their rule, so a rule appears as one station however many jobs it runs.
 The graph export carries no grouping, so every rule lands in one section. The
 ``all`` target rule only gathers inputs and is dropped. Rule names are used in
 full as station labels.
+
+Lines come from the rule graph's shape (see :func:`branch_line_planner`): a
+trunk into the main final rule, and a line for each other chain of rules.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from nf_metro.convert._core import (
     ParsedDag,
     _break_cycles,
     _humanize_label,
+    branch_line_planner,
     dag_to_mmd,
 )
 from nf_metro.graph_views import directed_graph
@@ -148,4 +152,4 @@ def convert_snakemake_dag(text: str, title: str = "") -> str:
         for nid, node in dag.nodes.items()
         if not (node.label == _TARGET_RULE and nid not in has_outgoing)
     }
-    return dag_to_mmd(dag, kept_ids, title)
+    return dag_to_mmd(dag, kept_ids, title, branch_line_planner(dag.nodes))

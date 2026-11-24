@@ -20,7 +20,8 @@ history.
 - Experimental Snakemake input: `nf-metro render --from-snakemake` and
   `nf-metro convert` turn `snakemake --rulegraph` or `--dag` output (DOT or
   mermaid-js) into a metro map. `nf-metro convert` detects the input format,
-  or takes `--from nextflow|snakemake`.
+  or takes `--from nextflow|snakemake`. Lines follow the rule graph: a
+  `main` trunk into the final rule, and a line for each other chain of rules.
   From Python, pass `input_format="snakemake"` to `render_string` or
   `prepare_graph`.
 - `%%metro number: 0` hides a section's number badge and starts its title where

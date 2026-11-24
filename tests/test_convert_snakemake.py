@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
 import warnings
 from pathlib import Path
 
@@ -35,6 +38,16 @@ def _convert(text: str, title: str = "") -> str:
 
 def _edges(mmd: str) -> set[tuple[str, str]]:
     return {(s, t) for s, t in re.findall(r"(\w+) -->\|[^|]+\| (\w+)", mmd)}
+
+
+def _edge_lines(mmd: str) -> dict[tuple[str, str], str]:
+    return {
+        (s, t): line for s, line, t in re.findall(r"(\w+) -->\|([^|]+)\| (\w+)", mmd)
+    }
+
+
+def _declared_lines(mmd: str) -> list[tuple[str, str]]:
+    return re.findall(r"^%%metro line: (\w+) \| ([^|]+?) \|", mmd, flags=re.MULTILINE)
 
 
 def _stations(mmd: str) -> list[str]:
@@ -133,6 +146,74 @@ def test_input_without_rules_is_rejected():
 def test_rule_names_are_not_shortened():
     mmd = _convert((FIXTURES / "variant_calling.rulegraph.dot").read_text())
     assert "([Gatk Haplotypecaller])" in mmd
+
+
+def test_the_trunk_runs_into_the_final_rule_and_each_other_chain_gets_a_line():
+    mmd = _convert((FIXTURES / "variant_calling.rulegraph.dot").read_text())
+
+    assert _declared_lines(mmd) == [
+        ("main", "Main"),
+        ("gatk_haplotypecaller", "Gatk Haplotypecaller"),
+        ("fastqc", "Fastqc"),
+    ]
+    assert _edge_lines(mmd) == {
+        ("bwa_mem", "samtools_index"): "main",
+        ("samtools_index", "deepvariant"): "main",
+        ("deepvariant", "bcftools_stats"): "main",
+        ("bcftools_stats", "multiqc"): "main",
+        ("samtools_index", "gatk_haplotypecaller"): "gatk_haplotypecaller",
+        ("gatk_haplotypecaller", "bcftools_stats"): "gatk_haplotypecaller",
+        ("fastqc", "multiqc"): "fastqc",
+    }
+
+
+def test_the_trunk_ends_at_the_sink_with_the_most_inputs():
+    mmd = _convert((FIXTURES / "two_terminals.rulegraph.dot").read_text())
+
+    lines = _edge_lines(mmd)
+    assert lines[("sort_bam", "multiqc")] == "main"
+    assert lines[("sort_bam", "index_bam")] == "index_bam"
+    assert lines[("fastqc", "multiqc")] == "fastqc"
+
+
+def test_a_branch_line_is_named_after_its_first_rule_off_the_trunk():
+    rules = ["a", "b", "c", "d", "e", "side_one", "side_two"]
+    dot = "digraph snakemake_dag {\n"
+    dot += "".join(
+        f'\t{i}[label = "{r}", color = "0 0 0", style="rounded"];\n'
+        for i, r in enumerate(rules)
+    )
+    edges = [("a", "b"), ("b", "c"), ("c", "d"), ("d", "e")]
+    edges += [("a", "side_one"), ("side_one", "side_two"), ("side_two", "e")]
+    dot += "".join(f"\t{rules.index(s)} -> {rules.index(t)}\n" for s, t in edges)
+    dot += "}\n"
+
+    mmd = _convert(dot)
+    assert _declared_lines(mmd) == [("main", "Main"), ("side_one", "Side One")]
+    lines = _edge_lines(mmd)
+    assert lines[("a", "side_one")] == lines[("side_two", "e")] == "side_one"
+    assert lines[("d", "e")] == "main"
+
+
+@pytest.mark.parametrize("workflow", WORKFLOWS)
+def test_the_line_plan_does_not_depend_on_hash_order(workflow):
+    script = (
+        "import sys, warnings; warnings.simplefilter('ignore');"
+        "from nf_metro.convert import convert_snakemake_dag;"
+        "sys.stdout.write(convert_snakemake_dag(open(sys.argv[1]).read()))"
+    )
+    src = FIXTURES / f"{workflow}.rulegraph.dot"
+    outputs = {
+        subprocess.run(
+            [sys.executable, "-c", script, str(src)],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for seed in ("0", "1", "123")
+    }
+    assert len(outputs) == 1
 
 
 def test_every_rule_shares_one_section():

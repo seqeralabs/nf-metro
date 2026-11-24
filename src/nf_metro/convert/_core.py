@@ -565,6 +565,26 @@ class _LineAssignment:
     spur: tuple[str, str, str] | None
     bypass_lines: dict[tuple[str, str], tuple[str, str, str]]
     edge_line: dict[tuple[str, str], str]
+    side: list[tuple[str, str, str]] = field(default_factory=list)
+
+
+LinePlan = list[tuple[tuple[str, str, str], list[tuple[str, str]]]]
+"""Lines a front end draws itself: each ``(id, name, colour)`` with its edges.
+
+The first line is the trunk. Edges absent from every line go on the trunk.
+"""
+
+
+def _planned_lines(plan: LinePlan) -> _LineAssignment:
+    (main, _), *side = plan
+    edge_line = {edge: line[0] for line, line_edges in plan for edge in line_edges}
+    return _LineAssignment(
+        main=main,
+        spur=None,
+        bypass_lines={},
+        edge_line=edge_line,
+        side=[line for line, _ in side],
+    )
 
 
 def _assign_lines(
@@ -709,6 +729,8 @@ def _emit_mmd(
     if lines.spur:
         spur_id, spur_name, spur_color = lines.spur
         out.append(f"%%metro line: {spur_id} | {spur_name} | {spur_color}")
+    for lid, lname, lcolor in lines.side:
+        out.append(f"%%metro line: {lid} | {lname} | {lcolor}")
     for (_src_sec, _tgt_sec), (lid, lname, lcolor) in sorted(
         lines.bypass_lines.items(), key=lambda x: x[1][0]
     ):
@@ -797,12 +819,85 @@ def _warn_feedback_edges_dropped(
     )
 
 
-def dag_to_mmd(dag: ParsedDag, kept_ids: set[str], title: str = "") -> str:
+def _longest_path(
+    graph: nx.DiGraph[str], key: Callable[[str], str], end: str | None = None
+) -> list[str]:
+    """The longest path in *graph*, ending at *end* if given, ties by *key*."""
+    best: dict[str, tuple[int, str | None]] = {}
+    for node in nx.lexicographical_topological_sort(graph, key=key):
+        preds = sorted(graph.predecessors(node), key=lambda p: (-best[p][0], key(p)))
+        best[node] = (best[preds[0]][0] + 1, preds[0]) if preds else (0, None)
+    if end is None:
+        end = min(best, key=lambda n: (-best[n][0], key(n)))
+    path = [end]
+    while (prev := best[path[-1]][1]) is not None:
+        path.append(prev)
+    return path[::-1]
+
+
+def branch_line_planner(
+    nodes: dict[str, DagNode],
+) -> Callable[[list[tuple[str, str]]], LinePlan]:
+    """Plan lines from the graph's shape rather than from its sections.
+
+    The trunk, ``main``, is the longest chain into the main sink: the sink with
+    the most direct inputs, ties going to the one with more upstream nodes,
+    then to the first by label. Each remaining chain, longest first, becomes
+    its own line, named after its first node not already on a line. Ties
+    break on node labels, so the plan does not depend on hash order.
+    """
+
+    def label(nid: str) -> str:
+        return nodes[nid].label
+
+    def plan(edges: list[tuple[str, str]]) -> LinePlan:
+        if not edges:
+            return []
+        graph = directed_graph(sorted({n for edge in edges for n in edge}), edges)
+        sink = min(
+            (n for n in graph if graph.out_degree(n) == 0),
+            key=lambda n: (-graph.in_degree(n), -len(nx.ancestors(graph, n)), label(n)),
+        )
+        path = _longest_path(graph, label, sink)
+        lines: LinePlan = []
+        used_ids: set[str] = set()
+        on_line: set[str] = set()
+        while True:
+            path_edges = list(zip(path, path[1:], strict=False))
+            if lines:
+                first = next((n for n in path if n not in on_line), path[-1])
+                line_id = _allocate_unique_id(label(first), used_ids, "line")
+                name = _display_label(nodes[first])
+            else:
+                line_id, name = "main", "Main"
+                used_ids.add(line_id)
+            color = LINE_COLORS[len(lines) % len(LINE_COLORS)]
+            lines.append(((line_id, name, color), path_edges))
+            on_line.update(path)
+            graph.remove_edges_from(path_edges)
+            graph.remove_nodes_from([n for n in list(graph) if graph.degree(n) == 0])
+            if not graph:
+                return lines
+            path = _longest_path(graph, label)
+
+    return plan
+
+
+def dag_to_mmd(
+    dag: ParsedDag,
+    kept_ids: set[str],
+    title: str = "",
+    plan_lines: Callable[[list[tuple[str, str]]], LinePlan] | None = None,
+) -> str:
     """Convert a parsed DAG to nf-metro ``.mmd`` text, keeping only *kept_ids*.
 
     Edges that ran through dropped nodes are reconnected between the kept
     nodes they linked. Kept nodes inside a named group become that group's
     section; the rest share one synthesised section.
+
+    *plan_lines*, when given, receives the final acyclic edges and returns the
+    map's lines. Without it, or when it plans none, edges go on ``main`` with
+    ``spur`` and ``bypass`` lines derived from the sections.
 
     Warns
     -----
@@ -827,14 +922,19 @@ def dag_to_mmd(dag: ParsedDag, kept_ids: set[str], title: str = "") -> str:
     )
 
     intra_edges, inter_edges = _classify_edges(edges, sections.node_section)
-    lines = _assign_lines(
-        kept_ids,
-        edges,
-        intra_edges,
-        inter_edges,
-        sections.node_section,
-        sections.names,
-        section_order,
+    plan = plan_lines(edges) if plan_lines else []
+    lines = (
+        _planned_lines(plan)
+        if plan
+        else _assign_lines(
+            kept_ids,
+            edges,
+            intra_edges,
+            inter_edges,
+            sections.node_section,
+            sections.names,
+            section_order,
+        )
     )
 
     section_node_order = _order_section_nodes(sections.nodes, edges)
