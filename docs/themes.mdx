@@ -24,8 +24,8 @@ A theme whose colors match in both palettes renders the same in either.
 A later theme wins for every field it sets, and the light and dark palettes merge separately.
 A single name is a stack of one.
 
-**Base.** Every stack starts from the `nfcore` theme, so a theme only needs to set the fields it changes.
-A map with no `%%metro style:` renders with `nfcore` alone.
+**Base.** Every stack starts from the `default` theme, so a theme only needs to set the fields it changes.
+A map with no `%%metro style:` renders with `default` alone.
 
 **Layout block.** A theme can also set some layout options, such as spacing.
 The order of precedence is: a command-line flag, then a `%%metro` directive in the map, then the theme, then the built-in default.
@@ -42,11 +42,11 @@ Set the theme in the map, or on the command line:
 nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 ```
 
-`--theme` replaces the map's `%%metro style:` entirely.
+`--theme` replaces the map's `%%metro style:` entirely, so `--theme default` renders a map in the base theme whatever its own style says.
 
 | Theme         | Look                                                                                                                                            |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.                                            |
+| `default`     | The base every stack starts from: bold labels, filled section boxes with number badges, white station pills.                                    |
 | `seqera`      | Seqera brand colors and Inter type.                                                                                                             |
 | `london-tube` | A schematic transit look: track-weight tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, unboxed sections. |
 | `transparent` | One palette on a transparent canvas, for embedding. Looks the same in either mode.                                                              |
@@ -62,10 +62,11 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 ```
 
 This map takes the station glyphs, section style and fonts from `london-tube`, and every field `london-tube` leaves unset from `seqera`.
-Under both lies the `nfcore` base, which supplies anything neither sets.
+Under both lies `default`, which supplies anything neither sets.
+Every stack starts from `default`; list only the themes you add on top.
 
 A built-in theme sets only the fields its file lists.
-`london-tube, nfcore` therefore keeps the `london-tube` station tabs and capsules, because `nfcore` does not set `station_glyph` or `interchange_glyph`, but takes the `nfcore` colors.
+`london-tube, seqera` therefore keeps the `london-tube` station tabs and capsules, because `seqera` does not set `station_glyph` or `interchange_glyph`, but takes the `seqera` colors and fonts.
 
 ## Writing your own theme
 
@@ -101,6 +102,7 @@ layout:
 ```
 
 `extends:` is shorthand for listing those themes earlier in the stack, so the line above is the same as `%%metro style: london-tube, house_style.yaml`.
+A theme without `extends:` sits directly on `default`, like every stack.
 
 A color left empty takes the field its description names: icon and badge colors take the station colors, the marker outline takes `station_stroke`, and `knockout_fill` (label halos and `open` markers) takes the background, or white on a transparent canvas.
 
@@ -150,7 +152,7 @@ PNG output, `--embed-font` and `--text-to-paths` draw every theme in the bundled
 The built-in themes are the best worked examples of the format.
 Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/nf-metro/tree/main/src/nf_metro/themes).
 
-- `nfcore.yaml` is the base.
+- `default.yaml` is the base.
   It sets every field the schema leaves without a default, so it is the template for a complete theme.
 - `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
 - `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
@@ -195,7 +197,7 @@ dark:
 ## Field reference
 
 Every field of the `Theme` schema (`src/nf_metro/render/style.py`) can be set in a theme file.
-**Default** is the schema's own default, and the `nfcore` base overrides some of these.
+**Default** is the schema's own default, which the `default` theme overrides for some fields.
 A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `transparent` or `none`.
 
 {/* theme-field-reference:start */}
@@ -204,14 +206,14 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 | Field               | Value                                                                                                                        | Default                     | Effect                                                                                                                     |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `background_fill`   | colour                                                                                                                       | from `nfcore`               | Canvas fill. `none` leaves the canvas transparent.                                                                         |
-| `title_color`       | colour                                                                                                                       | from `nfcore`               | Map title text.                                                                                                            |
-| `title_font_size`   | number                                                                                                                       | from `nfcore`               | Map title size, px.                                                                                                        |
+| `background_fill`   | colour                                                                                                                       | from `default`              | Canvas fill. `none` leaves the canvas transparent.                                                                         |
+| `title_color`       | colour                                                                                                                       | from `default`              | Map title text.                                                                                                            |
+| `title_font_size`   | number                                                                                                                       | from `default`              | Map title size, px.                                                                                                        |
 | `title_font_weight` | `normal` \| `bold` \| `bolder` \| `lighter` \| `100` \| `200` \| `300` \| `400` \| `500` \| `600` \| `700` \| `800` \| `900` | `bold`                      | Map title weight.                                                                                                          |
-| `label_color`       | colour                                                                                                                       | from `nfcore`               | Station label text.                                                                                                        |
-| `label_font_family` | text                                                                                                                         | from `nfcore`               | CSS font stack for station labels, and for every other text element.                                                       |
-| `label_font_size`   | number                                                                                                                       | from `nfcore`               | Station label size, px.                                                                                                    |
-| `label_font_weight` | `normal` \| `bold` \| `bolder` \| `lighter` \| `100` \| `200` \| `300` \| `400` \| `500` \| `600` \| `700` \| `800` \| `900` | from `nfcore`               | Station label weight (`bold`, `normal`, `600`, ...).                                                                       |
+| `label_color`       | colour                                                                                                                       | from `default`              | Station label text.                                                                                                        |
+| `label_font_family` | text                                                                                                                         | from `default`              | CSS font stack for station labels, and for every other text element.                                                       |
+| `label_font_size`   | number                                                                                                                       | from `default`              | Station label size, px.                                                                                                    |
+| `label_font_weight` | `normal` \| `bold` \| `bolder` \| `lighter` \| `100` \| `200` \| `300` \| `400` \| `500` \| `600` \| `700` \| `800` \| `900` | from `default`              | Station label weight (`bold`, `normal`, `600`, ...).                                                                       |
 | `label_halo_width`  | number                                                                                                                       | `3`                         | Width of the knockout halo behind station labels, px. 0 disables it.                                                       |
 | `knockout_fill`     | colour                                                                                                                       | empty                       | Halo behind station labels and the inside of `open` markers. Empty takes the background, or white on a transparent canvas. |
 | `caption_color`     | colour                                                                                                                       | `rgba(200, 200, 200, 0.85)` | `%%metro caption:` text.                                                                                                   |
@@ -221,74 +223,74 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Sections
 
-| Field                          | Value                                                                                                                        | Default       | Effect                                                                                         |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------- |
-| `section_fill`                 | colour                                                                                                                       | from `nfcore` | Section box fill. `transparent` draws an outline only.                                         |
-| `section_stroke`               | colour                                                                                                                       | from `nfcore` | Section box outline.                                                                           |
-| `section_label_color`          | colour                                                                                                                       | from `nfcore` | Section titles and group captions.                                                             |
-| `section_label_font_size`      | number                                                                                                                       | from `nfcore` | Section title size, px.                                                                        |
-| `section_label_font_weight`    | `normal` \| `bold` \| `bolder` \| `lighter` \| `100` \| `200` \| `300` \| `400` \| `500` \| `600` \| `700` \| `800` \| `900` | `bold`        | Section title weight.                                                                          |
-| `uppercase_section_labels`     | `true` \| `false`                                                                                                            | `false`       | Draw section titles in capitals.                                                               |
-| `section_label_letter_spacing` | number                                                                                                                       | `0`           | Extra space between section title letters, px.                                                 |
-| `section_stroke_width`         | number                                                                                                                       | `1`           | Section box outline width, px.                                                                 |
-| `section_stroke_dasharray`     | text                                                                                                                         | empty         | SVG dash pattern for the section outline, px (`2 4`). Empty is solid.                          |
-| `section_corner_radius`        | number                                                                                                                       | `8`           | Section box corner radius, px.                                                                 |
-| `number_sections`              | `true` \| `false`                                                                                                            | `true`        | Draw the numbered badge beside each section title. Off, titles start where the badge would be. |
-| `section_badge_fill`           | colour                                                                                                                       | empty         | Number badge fill. Empty takes `station_stroke`.                                               |
-| `section_badge_text_color`     | colour                                                                                                                       | empty         | Number badge digit. Empty takes `station_fill`.                                                |
-| `section_badge_font_size`      | number                                                                                                                       | `12`          | Number badge digit size, px.                                                                   |
-| `group_rule_width`             | number                                                                                                                       | `1.5`         | Width of the rule under a station group's caption, px.                                         |
-| `group_rule_opacity`           | number                                                                                                                       | `0.45`        | Opacity of the rule under a station group's caption, 0 to 1.                                   |
+| Field                          | Value                                                                                                                        | Default        | Effect                                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------- |
+| `section_fill`                 | colour                                                                                                                       | from `default` | Section box fill. `transparent` draws an outline only.                                         |
+| `section_stroke`               | colour                                                                                                                       | from `default` | Section box outline.                                                                           |
+| `section_label_color`          | colour                                                                                                                       | from `default` | Section titles and group captions.                                                             |
+| `section_label_font_size`      | number                                                                                                                       | from `default` | Section title size, px.                                                                        |
+| `section_label_font_weight`    | `normal` \| `bold` \| `bolder` \| `lighter` \| `100` \| `200` \| `300` \| `400` \| `500` \| `600` \| `700` \| `800` \| `900` | `bold`         | Section title weight.                                                                          |
+| `uppercase_section_labels`     | `true` \| `false`                                                                                                            | `false`        | Draw section titles in capitals.                                                               |
+| `section_label_letter_spacing` | number                                                                                                                       | `0`            | Extra space between section title letters, px.                                                 |
+| `section_stroke_width`         | number                                                                                                                       | `1`            | Section box outline width, px.                                                                 |
+| `section_stroke_dasharray`     | text                                                                                                                         | empty          | SVG dash pattern for the section outline, px (`2 4`). Empty is solid.                          |
+| `section_corner_radius`        | number                                                                                                                       | `8`            | Section box corner radius, px.                                                                 |
+| `number_sections`              | `true` \| `false`                                                                                                            | `true`         | Draw the numbered badge beside each section title. Off, titles start where the badge would be. |
+| `section_badge_fill`           | colour                                                                                                                       | empty          | Number badge fill. Empty takes `station_stroke`.                                               |
+| `section_badge_text_color`     | colour                                                                                                                       | empty          | Number badge digit. Empty takes `station_fill`.                                                |
+| `section_badge_font_size`      | number                                                                                                                       | `12`           | Number badge digit size, px.                                                                   |
+| `group_rule_width`             | number                                                                                                                       | `1.5`          | Width of the rule under a station group's caption, px.                                         |
+| `group_rule_opacity`           | number                                                                                                                       | `0.45`         | Opacity of the rule under a station group's caption, 0 to 1.                                   |
 
 ### Legend
 
-| Field                  | Value  | Default       | Effect                                  |
-| ---------------------- | ------ | ------------- | --------------------------------------- |
-| `legend_fill`          | colour | from `nfcore` | Legend box fill.                        |
-| `legend_stroke`        | colour | empty         | Legend box outline. Empty draws none.   |
-| `legend_text_color`    | colour | from `nfcore` | Legend text.                            |
-| `legend_font_size`     | number | from `nfcore` | Legend text size, px.                   |
-| `legend_stroke_width`  | number | `0`           | Legend outline width, px. 0 draws none. |
-| `legend_corner_radius` | number | `6`           | Legend box corner radius, px.           |
-| `legend_padding`       | number | `12`          | Space inside the legend box, px.        |
-| `legend_line_height`   | number | `24`          | Height of each legend row, px.          |
-| `legend_swatch_width`  | number | `24`          | Length of each line swatch, px.         |
+| Field                  | Value  | Default        | Effect                                  |
+| ---------------------- | ------ | -------------- | --------------------------------------- |
+| `legend_fill`          | colour | from `default` | Legend box fill.                        |
+| `legend_stroke`        | colour | empty          | Legend box outline. Empty draws none.   |
+| `legend_text_color`    | colour | from `default` | Legend text.                            |
+| `legend_font_size`     | number | from `default` | Legend text size, px.                   |
+| `legend_stroke_width`  | number | `0`            | Legend outline width, px. 0 draws none. |
+| `legend_corner_radius` | number | `6`            | Legend box corner radius, px.           |
+| `legend_padding`       | number | `12`           | Space inside the legend box, px.        |
+| `legend_line_height`   | number | `24`           | Height of each legend row, px.          |
+| `legend_swatch_width`  | number | `24`           | Length of each line swatch, px.         |
 
 ### Stations
 
-| Field                  | Value                    | Default       | Effect                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------- | ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `station_fill`         | colour                   | from `nfcore` | Inside of station capsules, interchange rings and the strip bridging a chain of them.                                                                                                                                                                                                                                                       |
-| `station_stroke`       | colour                   | from `nfcore` | Outline of station capsules and interchange rings, and the `bar` line end.                                                                                                                                                                                                                                                                  |
-| `station_stroke_width` | number                   | from `nfcore` | Station capsule outline width, px.                                                                                                                                                                                                                                                                                                          |
-| `station_radius`       | number                   | `5`           | Station capsule end radius, px.                                                                                                                                                                                                                                                                                                             |
-| `marker_stroke`        | colour                   | empty         | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                                                                                                                                                                                |
-| `station_glyph`        | `pill` \| `tick`         | `pill`        | How a station on one line is drawn. `pill` draws a capsule. `tick` draws a tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.                                                                                                                                                     |
-| `interchange_glyph`    | `pill` \| `ring`         | `pill`        | How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one.                                                                                                                               |
-| `terminus_glyph`       | `nub` \| `bar` \| `ring` | `nub`         | How a line end shared by several lines is drawn. `nub` is a square-cornered box across the lines in the station colours; `bar` is a buffer-stop bar across the whole bundle, as thick as a tab and overhanging the outermost lines by a tab's length; `ring` draws the interchange glyph. A line end with one line follows `station_glyph`. |
-| `station_tick_width`   | number                   | `0.66`        | Thickness of a `tick` tab along its line, and of a terminus bar, × `line_width`.                                                                                                                                                                                                                                                            |
-| `station_tick_length`  | number                   | `0.66`        | How far a `tick` tab reaches past the edge of its line, and how far a terminus bar overhangs each side, × `line_width`.                                                                                                                                                                                                                     |
-| `ring_inner_diameter`  | number                   | `2`           | Inside diameter of an interchange ring, × `line_width`.                                                                                                                                                                                                                                                                                     |
-| `ring_stroke_width`    | number                   | `0.5`         | Interchange ring outline width, × `line_width`.                                                                                                                                                                                                                                                                                             |
-| `ring_bridge_width`    | number                   | `0.5`         | Width of the strip bridging a chain of rings, × `line_width`.                                                                                                                                                                                                                                                                               |
-| `ring_max_lines`       | whole number             | `3`           | Most lines on one track a single ring of `ring_inner_diameter` covers, a count; a wider bundle follows `ring_overflow`.                                                                                                                                                                                                                     |
-| `ring_overflow`        | `chain` \| `grow`        | `chain`       | What a bundle wider than `ring_max_lines` gets: `chain`, a bridged chain of rings, or `grow`, one ring whose inside widens to cover it.                                                                                                                                                                                                     |
+| Field                  | Value                    | Default        | Effect                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | ------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `station_fill`         | colour                   | from `default` | Inside of station capsules, interchange rings and the strip bridging a chain of them.                                                                                                                                                                                                                                                       |
+| `station_stroke`       | colour                   | from `default` | Outline of station capsules and interchange rings, and the `bar` line end.                                                                                                                                                                                                                                                                  |
+| `station_stroke_width` | number                   | from `default` | Station capsule outline width, px.                                                                                                                                                                                                                                                                                                          |
+| `station_radius`       | number                   | `5`            | Station capsule end radius, px.                                                                                                                                                                                                                                                                                                             |
+| `marker_stroke`        | colour                   | empty          | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                                                                                                                                                                                |
+| `station_glyph`        | `pill` \| `tick`         | `pill`         | How a station on one line is drawn. `pill` draws a capsule. `tick` draws a tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.                                                                                                                                                     |
+| `interchange_glyph`    | `pill` \| `ring`         | `pill`         | How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one.                                                                                                                               |
+| `terminus_glyph`       | `nub` \| `bar` \| `ring` | `nub`          | How a line end shared by several lines is drawn. `nub` is a square-cornered box across the lines in the station colours; `bar` is a buffer-stop bar across the whole bundle, as thick as a tab and overhanging the outermost lines by a tab's length; `ring` draws the interchange glyph. A line end with one line follows `station_glyph`. |
+| `station_tick_width`   | number                   | `0.66`         | Thickness of a `tick` tab along its line, and of a terminus bar, × `line_width`.                                                                                                                                                                                                                                                            |
+| `station_tick_length`  | number                   | `0.66`         | How far a `tick` tab reaches past the edge of its line, and how far a terminus bar overhangs each side, × `line_width`.                                                                                                                                                                                                                     |
+| `ring_inner_diameter`  | number                   | `2`            | Inside diameter of an interchange ring, × `line_width`.                                                                                                                                                                                                                                                                                     |
+| `ring_stroke_width`    | number                   | `0.5`          | Interchange ring outline width, × `line_width`.                                                                                                                                                                                                                                                                                             |
+| `ring_bridge_width`    | number                   | `0.5`          | Width of the strip bridging a chain of rings, × `line_width`.                                                                                                                                                                                                                                                                               |
+| `ring_max_lines`       | whole number             | `3`            | Most lines on one track a single ring of `ring_inner_diameter` covers, a count; a wider bundle follows `ring_overflow`.                                                                                                                                                                                                                     |
+| `ring_overflow`        | `chain` \| `grow`        | `chain`        | What a bundle wider than `ring_max_lines` gets: `chain`, a bridged chain of rings, or `grow`, one ring whose inside widens to cover it.                                                                                                                                                                                                     |
 
 ### Lines
 
-| Field              | Value             | Default       | Effect                                                                      |
-| ------------------ | ----------------- | ------------- | --------------------------------------------------------------------------- |
-| `line_width`       | number            | from `nfcore` | Route stroke width, px.                                                     |
-| `line_cap`         | `round` \| `butt` | `round`       | End caps of route strokes: `round` or `butt`.                               |
-| `dashed_dasharray` | text              | `8,4`         | SVG dash pattern of a `dashed` line, px.                                    |
-| `dotted_dasharray` | text              | `2,4`         | SVG dash pattern of a `dotted` line, px.                                    |
-| `muted_line_color` | colour            | `#888888`     | Grey for inactive lines and the stations, labels and icons only they touch. |
-| `bridge_lines`     | `true` \| `false` | `true`        | Break the lower line where two unrelated lines cross.                       |
-| `bridge_gap`       | number            | `12`          | Gap a line leaves either side of a line it hops over, px.                   |
-| `chevron_size`     | number            | `4`           | Half-length and half-width of `--directional` chevrons, px.                 |
-| `chevron_spacing`  | number            | `64`          | Distance between chevrons along a route, px.                                |
-| `chevron_opacity`  | number            | `0.75`        | Chevron opacity, 0 to 1.                                                    |
-| `chevron_color`    | colour            | empty         | Chevron colour. Empty takes the line's colour.                              |
+| Field              | Value             | Default        | Effect                                                                      |
+| ------------------ | ----------------- | -------------- | --------------------------------------------------------------------------- |
+| `line_width`       | number            | from `default` | Route stroke width, px.                                                     |
+| `line_cap`         | `round` \| `butt` | `round`        | End caps of route strokes: `round` or `butt`.                               |
+| `dashed_dasharray` | text              | `8,4`          | SVG dash pattern of a `dashed` line, px.                                    |
+| `dotted_dasharray` | text              | `2,4`          | SVG dash pattern of a `dotted` line, px.                                    |
+| `muted_line_color` | colour            | `#888888`      | Grey for inactive lines and the stations, labels and icons only they touch. |
+| `bridge_lines`     | `true` \| `false` | `true`         | Break the lower line where two unrelated lines cross.                       |
+| `bridge_gap`       | number            | `12`           | Gap a line leaves either side of a line it hops over, px.                   |
+| `chevron_size`     | number            | `4`            | Half-length and half-width of `--directional` chevrons, px.                 |
+| `chevron_spacing`  | number            | `64`           | Distance between chevrons along a route, px.                                |
+| `chevron_opacity`  | number            | `0.75`         | Chevron opacity, 0 to 1.                                                    |
+| `chevron_color`    | colour            | empty          | Chevron colour. Empty takes the line's colour.                              |
 
 ### File icons
 

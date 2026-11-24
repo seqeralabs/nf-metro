@@ -75,7 +75,7 @@ stays decoupled from the theme layer.
 STATION_STROKE_APPROX: float = 1.5
 """Approximate station marker stroke width for layout spacing calculations.
 
-Matches the nfcore theme; other themes use 2 px, a difference small enough to
+Matches the default theme; other themes use 2 px, a difference small enough to
 absorb in the label-clearance math (mirrors :data:`DEFAULT_LINE_WIDTH`).  A
 plain marker's outline is centred on its radius (outer edge at
 ``radius + stroke/2``); an interchange knob's outline is drawn outside the knob
@@ -264,7 +264,7 @@ OFFSET_STEP: float = 4.0
 DEFAULT_LINE_WIDTH: float = 3.0
 """Stroke width used when converting a visual *track_gap* to an offset step.
 
-Matches the nfcore theme (3 px). The seqera theme uses 4 px; that 1 px
+Matches the default theme (3 px). The seqera theme uses 4 px; that 1 px
 difference is absorbed by rounding elsewhere in the layout pipeline.
 """
 

@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=theme.schema.json
 # The reference look and the base every theme stack starts from, so it sets
 # every field that has no default in the Theme schema.
-name: nfcore
+name: default
 
 station_fill: "#ffffff"
 station_stroke: "#333333"

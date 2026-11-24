@@ -13,8 +13,8 @@ from nf_metro.cli import cli
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.style import color_pair, is_adaptive
 from nf_metro.themes import (
-    NFCORE_DARK_THEME,
-    NFCORE_LIGHT_THEME,
+    DEFAULT_DARK_THEME,
+    DEFAULT_LIGHT_THEME,
     SEQERA_LIGHT_THEME,
     STYLE_NAMES,
     THEMES,
@@ -35,7 +35,7 @@ _TUBE = resolve_stack("london-tube")
 
 def test_a_bound_stack_resolves_to_the_registered_objects():
     graph = parse_metro_mermaid(MMD)
-    assert resolve_theme(graph, mode="dark") is NFCORE_DARK_THEME
+    assert resolve_theme(graph, mode="dark") is DEFAULT_DARK_THEME
     bound_stack(graph, "seqera")
     assert resolve_theme(graph, mode="light") is SEQERA_LIGHT_THEME
 
@@ -44,7 +44,9 @@ def test_the_registry_holds_every_built_in():
     assert set(THEMES) == STYLE_NAMES
 
 
-@pytest.mark.parametrize("name", ["dark", "light", "nfcore-light", "seqera-dark"])
+@pytest.mark.parametrize(
+    "name", ["dark", "light", "nfcore", "nfcore-light", "seqera-dark"]
+)
 def test_modes_are_not_theme_names(name):
     with pytest.raises(ThemeError, match="unknown theme"):
         check_stack(name)
@@ -55,14 +57,14 @@ def test_default_themes_set_no_layout_options():
         assert resolve_stack(name).layout == {}
 
 
-def test_london_tube_sets_its_look_and_inherits_the_rest_from_nfcore():
+def test_london_tube_sets_its_look_and_inherits_the_rest_from_default():
     light = _TUBE.light
     assert light.station_glyph == "tick"
     assert light.number_sections is False
     assert light.uppercase_section_labels is True
     assert light.label_color == "#1c3f94"
-    assert light.title_font_size == NFCORE_LIGHT_THEME.title_font_size
-    assert light.icon_width == NFCORE_LIGHT_THEME.icon_width
+    assert light.title_font_size == DEFAULT_LIGHT_THEME.title_font_size
+    assert light.icon_width == DEFAULT_LIGHT_THEME.icon_width
     assert color_pair(light, "label_color") == ("#1c3f94", "#dfe6ff")
 
 
@@ -79,7 +81,7 @@ def test_empty_derived_colours_take_their_source_field(tmp_path):
     for theme in (stack.light, stack.dark):
         assert theme.icon_stroke == theme.section_badge_fill == "#123456"
         assert theme.icon_fill == theme.station_fill
-    assert stack.light.marker_stroke == NFCORE_LIGHT_THEME.marker_stroke
+    assert stack.light.marker_stroke == DEFAULT_LIGHT_THEME.marker_stroke
 
 
 # ---------------------------------------------------------------------------
@@ -88,13 +90,14 @@ def test_empty_derived_colours_take_their_source_field(tmp_path):
 
 
 def test_later_entry_wins_per_property():
-    over_nfcore = resolve_stack("nfcore, london-tube").light
-    assert over_nfcore.station_glyph == "tick"
-    assert over_nfcore.label_color == _TUBE.light.label_color
+    seqera = resolve_stack("seqera").light
+    over_seqera = resolve_stack("seqera, london-tube").light
+    assert over_seqera.station_glyph == "tick"
+    assert over_seqera.label_color == _TUBE.light.label_color
 
-    under_nfcore = resolve_stack("london-tube, nfcore").light
-    assert under_nfcore.label_color == NFCORE_LIGHT_THEME.label_color
-    assert under_nfcore.station_glyph == "tick", "nfcore does not set the glyph"
+    under_seqera = resolve_stack("london-tube, seqera").light
+    assert under_seqera.label_color == seqera.label_color
+    assert under_seqera.station_glyph == "tick", "seqera does not set the glyph"
 
 
 def test_properties_a_later_entry_leaves_unset_come_from_the_earlier_one():
@@ -185,12 +188,12 @@ def test_a_stacked_theme_carries_both_palettes():
 
 def test_unknown_builtin_in_a_stack_is_rejected():
     with pytest.raises(ThemeError, match="unknown theme 'bogus'"):
-        check_stack("nfcore, bogus")
+        check_stack("seqera, bogus")
 
 
 def test_missing_theme_file_is_rejected(tmp_path):
     with pytest.raises(ThemeError, match="not found"):
-        resolve_stack(f"nfcore, {tmp_path / 'absent.yaml'}")
+        resolve_stack(f"seqera, {tmp_path / 'absent.yaml'}")
 
 
 def test_extends_cycle_is_rejected(tmp_path):
@@ -202,8 +205,8 @@ def test_extends_cycle_is_rejected(tmp_path):
 
 def test_directive_with_an_unknown_entry_warns_and_keeps_the_default():
     with pytest.warns(UserWarning, match="ignoring"):
-        graph = parse_metro_mermaid("%%metro style: nfcore, bogus\n" + MMD)
-    assert graph.style == "nfcore"
+        graph = parse_metro_mermaid("%%metro style: seqera, bogus\n" + MMD)
+    assert graph.style == "default"
 
 
 def test_directive_accepts_a_stack():
@@ -286,7 +289,7 @@ def test_cli_option_beats_directive_and_theme(spacing_theme):
 
 
 def test_directive_theme_file_sets_layout_relative_to_the_map(spacing_theme):
-    text = f"%%metro style: nfcore, {spacing_theme.name}\n" + MMD
+    text = f"%%metro style: {spacing_theme.name}\n" + MMD
     graph = prepare_graph(text, source_dir=str(spacing_theme.parent))
     assert graph.x_spacing == 91
 

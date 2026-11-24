@@ -24,4 +24,4 @@ legend_text_color: "#333333"
 legend_font_size: 16
 animation_ball_stroke: "#333333"
 animation_ball_stroke_width: 1.5
-marker_stroke: "" # one outline on any page, not nfcore's pair for its own canvases
+marker_stroke: "" # one outline on any page, not the default theme's pair for its own canvases

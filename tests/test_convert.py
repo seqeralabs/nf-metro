@@ -533,7 +533,7 @@ class TestRoundtrip:
         mmd = convert_nextflow_dag(text)
         graph = parse_metro_mermaid(mmd)
         compute_layout(graph, x_spacing=60.0, y_spacing=40.0)
-        svg = render_svg(graph, THEMES["nfcore"])
+        svg = render_svg(graph, THEMES["default"])
 
         assert "<svg" in svg
         assert "metro" in svg.lower() or "station" in svg.lower() or "<circle" in svg

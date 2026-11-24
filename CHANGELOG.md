@@ -20,14 +20,21 @@ history.
 - `jsonschema` is a core dependency, and the `validate` extra is gone:
   `pip install nf-metro` brings everything `nf-metro validate-svg` and theme
   files need, and `pip install "nf-metro[validate]"` no longer names an extra.
+- The `nfcore` theme is renamed `default`, with no alias. It is the base
+  every stack starts from, so a map drops `%%metro style: nfcore` and writes
+  only the themes it adds (`london-tube`, not `nfcore, london-tube`). A map
+  that still names `nfcore` warns and renders with `default`, which looks the
+  same; `--theme nfcore` exits with an error. The action's `theme` input
+  and the pre-commit hook's `--theme` default to `default`. Python: `NFCORE_LIGHT_THEME` and
+  `NFCORE_DARK_THEME` are `DEFAULT_LIGHT_THEME` and `DEFAULT_DARK_THEME`.
 - Theme names: the `light` theme is `transparent`; the `dark` and `light`
   aliases and the mode-suffixed names (`nfcore-light`, `nfcore-dark`,
   `seqera-light`, `seqera-dark`) are gone, so `%%metro style:`, `--theme`
-  and `theme=` take only `nfcore`, `seqera`, `london-tube`, `transparent` and
-  theme files. Pick the palette with `--mode` or `%%metro mode:`. A map with
-  no style has `MetroGraph.style == "nfcore"`.
+  and `theme=` take only `default`, `seqera`, `london-tube`, `transparent`
+  and theme files. Pick the palette with `--mode` or `%%metro mode:`. A map
+  with no style has `MetroGraph.style == "default"`.
 - An unknown theme name raises `ThemeError` (an `NfMetroError` and
-  `ValueError`) instead of falling back to `nfcore`, and `nf-metro info`
+  `ValueError`) instead of falling back to `default`, and `nf-metro info`
   reports a map's style as written.
 - Theme fields renamed: `background_color` to `background_fill`,
   `legend_background` to `legend_fill`, `animation_ball_color` to
@@ -63,7 +70,7 @@ history.
 
 - Theme stacks and theme files (#2195): `%%metro style:`, `--theme` and a
   per-output `theme=` take a comma-separated list of built-in names and YAML
-  theme files, merged left to right over the `nfcore` base. A theme file sets
+  theme files, merged left to right over the `default` base. A theme file sets
   any field of the theme schema for both palettes and colors per light/dark
   palette, extends other themes, and sets look-related layout options in a
   `layout:` block, which sits below `%%metro` directives and CLI flags. Every
@@ -138,7 +145,7 @@ light.png | dark.png`) in a PNG.
   `london-tube`'s 1.5px outline moves its title 0.25px left.
 - Layout measures file icons and their captions with the theme the map
   renders with, including `--theme` and a per-output `theme=`, rather than
-  the map's own style or `nfcore`. A map rendered with a theme whose icons or
+  the map's own style or `default`. A map rendered with a theme whose icons or
   captions are larger gets room for them on every side of their section,
   including a stacked `files:` icon's back page and the caption under it.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,

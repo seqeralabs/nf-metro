@@ -386,7 +386,7 @@ def render_with_downgrades(source: str) -> tuple[MetroGraph, str, list[str]]:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         graph = prepare_graph(source)
-        svg = render_graph(graph, THEMES["nfcore"], RenderConfig())
+        svg = render_graph(graph, THEMES["default"], RenderConfig())
     downgrades = [
         str(w.message) for w in caught if issubclass(w.category, PermissiveGuardWarning)
     ]

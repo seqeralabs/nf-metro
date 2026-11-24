@@ -4254,7 +4254,7 @@ def test_off_track_output_icon_clears_on_track_markers(fixture):
     (their marker boxes don't overlap).  Assert no on-track same-section marker
     overlaps the icon box in both axes.
     """
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     icon_half_w = theme.icon_width / 2
     icon_half_h = theme.icon_height / 2
     r = theme.station_radius
@@ -4373,7 +4373,7 @@ def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
     placements = place_labels(
         graph,
@@ -4786,7 +4786,7 @@ def test_downward_off_track_output_route_clears_producer_label(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
     placements = place_labels(
         graph,
@@ -4893,7 +4893,7 @@ def _segments_crossing_icons(
 
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    boxes = _icon_obstacles_by_station(graph, THEMES["default"], offsets)
     hits: list[tuple[str, str, str, str]] = []
     for r in routes:
         pts = apply_route_offsets(r, offsets)
@@ -4960,7 +4960,7 @@ def _exit_corridor_runs_over_icon(
     """
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    box = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)[sink_id]
+    box = _icon_obstacles_by_station(graph, THEMES["default"], offsets)[sink_id]
     icon_x_lo, _, icon_x_hi, icon_bottom = box
     section = graph.sections[graph.stations[sink_id].section_id]
     exit_ports = flow_axis_exit_ports(section, graph)
@@ -5034,7 +5034,7 @@ def test_off_track_output_icons_do_not_overlap(fixture):
     boxes = {
         sid: b
         for sid, b in _icon_obstacles_by_station(
-            graph, THEMES["nfcore"], offsets
+            graph, THEMES["default"], offsets
         ).items()
         if sid in sinks
     }
@@ -5066,7 +5066,7 @@ def test_captioned_sibling_outputs_clear_caption_band():
     boxes = {
         sid: b
         for sid, b in _icon_obstacles_by_station(
-            graph, THEMES["nfcore"], offsets
+            graph, THEMES["default"], offsets
         ).items()
         if sid in sinks
     }
@@ -5096,7 +5096,7 @@ def test_off_track_output_route_clears_non_producer_markers(fixture):
     The producer's trunk gap widens to fit the output, so the only marker an
     output route may touch is its own producer's.
     """
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     r = theme.station_radius
     graph = _layout(fixture)
     junction_ids = set(graph.junctions)
@@ -5182,7 +5182,7 @@ def test_off_track_output_clears_station_labels(fixture):
         pytest.skip(f"{fixture}: no off-track output sinks")
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["default"], offsets)
     labels = place_labels(
         graph,
         station_offsets=offsets,
@@ -7001,12 +7001,12 @@ def test_lr_section_all_perpendicular_ports_lays_out_in_its_box():
     assert not _bbox_spilled_stations(graph)
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     assert not [w for w in record if "Tier-A invariants" in str(w.message)]
 
     strict_graph = _laid_out()
     strict_graph.strict = True
-    render_svg(strict_graph, THEMES["nfcore"])
+    render_svg(strict_graph, THEMES["default"])
 
 
 def _bbox_spilled_stations(graph: MetroGraph) -> list[str]:
@@ -11238,7 +11238,7 @@ def test_wrapped_label_clears_foreign_trunk(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
     placements = place_labels(
         graph,

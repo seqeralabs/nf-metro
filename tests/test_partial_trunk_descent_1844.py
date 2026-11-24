@@ -48,7 +48,6 @@ SIDE_BRANCH_PARTIAL = "down"
 # descent onto the carrier slot.  A blind re-add would double-apply it.
 EXPLICIT_GRID_MMD = """\
 %%metro title: Adjacent Direct Partial Descent
-%%metro style: nfcore
 %%metro compact_offsets: true
 %%metro line: main | Main | #4CAF50
 %%metro line: side | Side | #ff9800
@@ -120,7 +119,7 @@ def test_partial_exit_port_rides_its_own_trunk():
 def test_partial_handover_connector_is_flat():
     """The rendered truth line runs level out of the partial's exit port."""
     graph = _layout()
-    plan = build_render_plan(graph, THEMES["nfcore"])
+    plan = build_render_plan(graph, THEMES["default"])
     svg = emit_render_plan(plan)
     exit_x = round(graph.stations[PARTIAL_EXIT].x, 1)
     exit_y = round(graph.stations[PARTIAL_EXIT].y, 1)

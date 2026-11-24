@@ -207,7 +207,7 @@ def test_track_gap_zero_renders_touching_lines():
 
     graph = parse_metro_mermaid("%%metro track_gap: 0\n" + _TWO_LINE)
     compute_layout(graph)
-    svg = render_svg(graph, THEMES["nfcore"])
+    svg = render_svg(graph, THEMES["default"])
     assert svg  # just checking it doesn't raise
 
 
@@ -224,7 +224,7 @@ def test_track_gap_widens_bundle_offsets():
     default_offsets = compute_station_offsets(default)
     gapped_offsets = compute_station_offsets(
         gapped,
-        offset_step=resolve_offset_step(gapped.track_gap, THEMES["nfcore"].line_width),
+        offset_step=resolve_offset_step(gapped.track_gap, THEMES["default"].line_width),
     )
     # At least one station should have a wider spread with track_gap=3.
     default_spread = (
@@ -238,10 +238,10 @@ def test_track_gap_widens_bundle_offsets():
 
 def test_style_directive_selects_theme_and_cli_overrides():
     assert resolve_theme(MetroGraph(style="transparent")) is THEMES["transparent"]
-    assert resolve_theme(MetroGraph()) is THEMES["nfcore"]
+    assert resolve_theme(MetroGraph()) is THEMES["default"]
     graph = MetroGraph(style="transparent")
-    bound_stack(graph, "nfcore")
-    assert resolve_theme(graph) is THEMES["nfcore"]
+    bound_stack(graph, "default")
+    assert resolve_theme(graph) is THEMES["default"]
 
 
 def test_html_output_honours_graph_width_and_animate():
@@ -254,6 +254,6 @@ def test_html_output_honours_graph_width_and_animate():
     compute_layout(via_directive)
     via_arg = parse_metro_mermaid(_FLAT)
     compute_layout(via_arg)
-    assert render_html(via_directive, THEMES["nfcore"]) == render_html(
-        via_arg, THEMES["nfcore"], width=1234, animate=True
+    assert render_html(via_directive, THEMES["default"]) == render_html(
+        via_arg, THEMES["default"], width=1234, animate=True
     )

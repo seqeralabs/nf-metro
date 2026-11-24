@@ -804,10 +804,10 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     callback=_theme_stack,
     default=None,
     cls=_DescribedDefault,
-    default_text="from %%metro style, else nfcore",
+    default_text="from %%metro style, else default",
     help=(
-        "Visual theme: nfcore, seqera, london-tube or transparent, a .yaml "
-        "theme file, or a comma list of these merged left to right."
+        "Visual theme: default, seqera, london-tube or transparent, a .yaml "
+        "theme file, or a comma list of these stacked left to right on default."
     ),
 )
 @click.option(
@@ -1896,7 +1896,7 @@ def explain(
     callback=_theme_stack,
     default=None,
     cls=_DescribedDefault,
-    default_text="from %%metro style, else nfcore",
+    default_text="from %%metro style, else default",
     help="Visual theme for a [code].mmd[/] input, the same values as render's.",
 )
 @click.option(
@@ -2031,7 +2031,7 @@ def serve(
     "--theme",
     metavar="THEMES",
     callback=_theme_stack,
-    default="nfcore",
+    default="default",
     show_default=True,
     help="Visual theme applied to every map registered with this server.",
 )

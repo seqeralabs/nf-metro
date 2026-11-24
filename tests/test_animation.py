@@ -44,7 +44,7 @@ def _build(fixture: Path):
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    timeline = build_animation_timeline(graph, routes, offsets, THEMES["nfcore"])
+    timeline = build_animation_timeline(graph, routes, offsets, THEMES["default"])
     motion_paths = sorted({(d.line_id, d.track.d_attr) for d in timeline.dots})
     return graph, routes, offsets, motion_paths
 
@@ -152,7 +152,7 @@ def test_motion_path_segments_lie_on_rendered_geometry(fixture: Path):
     )
 
 
-def _render_animated(fixture: Path, theme_key: str = "nfcore") -> str:
+def _render_animated(fixture: Path, theme_key: str = "default") -> str:
     graph = parse_metro_mermaid(fixture.read_text())
     graph.source_dir = str(fixture.parent)
     compute_layout(graph)
@@ -194,11 +194,11 @@ def test_every_ball_animation_resolves_to_a_keyframes(fixture: Path):
     )
 
 
-def test_nfcore_balls_carry_a_stroke():
+def test_default_balls_carry_a_stroke():
     """nf-core balls render with a dark stroke so the white fill stays
     visible on both light and dark backgrounds."""
-    svg = _render_animated(EXAMPLES_DIR / "rnaseq_sections.mmd", "nfcore")
-    theme = THEMES["nfcore"]
+    svg = _render_animated(EXAMPLES_DIR / "rnaseq_sections.mmd", "default")
+    theme = THEMES["default"]
     assert theme.animation_ball_stroke
     assert f'stroke="{theme.animation_ball_stroke}"' in svg
 

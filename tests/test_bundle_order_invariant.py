@@ -120,7 +120,6 @@ def test_cross_column_perp_entry_preserves_bundle_order(stem: str) -> None:
 
 _LEFT_ENTRY_WRAP = """\
 %%metro title: Left-entry wrap {direction}
-%%metro style: nfcore
 %%metro line: w1 | W1 | #e63946
 %%metro line: w2 | W2 | #0570b0
 %%metro grid: left_tgt | 0,{tgt_row}

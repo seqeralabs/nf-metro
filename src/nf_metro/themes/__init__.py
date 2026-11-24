@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
 
 #: The theme every stack starts from, and the look of a map with no style.
-BASE_THEME = "nfcore"
+BASE_THEME = "default"
 
 #: Mode baked when none is chosen (e.g. PNG export). SVG output carries both
 #: palettes and adapts at view time, so this governs only a baked render.
@@ -39,7 +39,7 @@ DEFAULT_MODE = DARK
 
 _BUILTIN_DIR = Path(__file__).parent
 _BUILTIN_FILES = {
-    "nfcore": "nfcore.yaml",
+    "default": "default.yaml",
     "seqera": "seqera.yaml",
     "london-tube": "london_tube.yaml",
     "transparent": "transparent.yaml",
@@ -167,8 +167,8 @@ def resolve_theme(graph: MetroGraph, mode: str | None = None) -> Theme:
 
 # Concrete themes for callers without a graph, resolved on first use.
 _NAMED_THEMES = {
-    "NFCORE_LIGHT_THEME": ("nfcore", LIGHT),
-    "NFCORE_DARK_THEME": ("nfcore", DARK),
+    "DEFAULT_LIGHT_THEME": ("default", LIGHT),
+    "DEFAULT_DARK_THEME": ("default", DARK),
     "SEQERA_LIGHT_THEME": ("seqera", LIGHT),
     "SEQERA_DARK_THEME": ("seqera", DARK),
     "TRANSPARENT_THEME": ("transparent", DEFAULT_MODE),
@@ -201,8 +201,8 @@ __all__ = [
     "resolve_mode",
     "resolve_stack",
     "resolve_theme",
-    "NFCORE_LIGHT_THEME",
-    "NFCORE_DARK_THEME",
+    "DEFAULT_LIGHT_THEME",
+    "DEFAULT_DARK_THEME",
     "SEQERA_LIGHT_THEME",
     "SEQERA_DARK_THEME",
     "TRANSPARENT_THEME",

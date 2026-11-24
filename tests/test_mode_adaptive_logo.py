@@ -86,7 +86,7 @@ def test_empty_when_no_logo_set():
 
 
 def test_effective_logo_path_honors_mode_independent_of_brand_style():
-    """``%%metro style:`` selects the brand (nfcore/seqera); the light/dark
+    """``%%metro style:`` selects the theme (default/seqera); the light/dark
     display mode is an independent axis. The logo variant returned should
     track the resolved mode passed by the caller, not the brand style."""
     g = _graph_with_logo(logo_path_light="light.png", logo_path_dark="dark.png")
@@ -365,8 +365,8 @@ def _embedded_image_bytes(svg: str) -> bytes:
 
 def test_baked_mode_embeds_matching_logo_variant(tmp_path):
     """A concrete ``--mode`` bake (``chrome_css=False``) must embed that
-    mode's logo variant. The pipeline's brand style (nfcore/seqera, set here
-    via ``dark`` which aliases nfcore) must not influence the choice."""
+    mode's logo variant. The map's theme (``seqera`` here) must not
+    influence the choice."""
     light_file = tmp_path / "light.png"
     dark_file = tmp_path / "dark.png"
     _write_png(light_file, color=(255, 0, 0))
@@ -374,7 +374,7 @@ def test_baked_mode_embeds_matching_logo_variant(tmp_path):
 
     text = (
         f"%%metro logo: {light_file} | {dark_file}\n"
-        "%%metro style: nfcore\n"
+        "%%metro style: seqera\n"
         "%%metro line: main | Main | #0570b0\n"
         "graph LR\n"
         "    a[A] -->|main| b[B]\n"

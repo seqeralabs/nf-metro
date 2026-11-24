@@ -427,12 +427,12 @@ def test_render_per_output_theme_override(tmp_path):
     _declare(
         mmd,
         "%%metro output: seqera.svg | theme=seqera",
-        "%%metro output: nfcore.svg | theme=nfcore",
+        "%%metro output: default.svg | theme=default",
     )
     result = CliRunner().invoke(cli, ["render", str(mmd)])
     assert result.exit_code == 0, result.output
     assert (tmp_path / "seqera.svg").read_text() != (
-        tmp_path / "nfcore.svg"
+        tmp_path / "default.svg"
     ).read_text()
 
 
@@ -1720,10 +1720,10 @@ def test_info_verbose_carries_warnings_once(tmp_path):
 @pytest.mark.parametrize(
     "style, expected",
     [
-        ("", "nfcore"),
+        ("", "default"),
         ("%%metro style: seqera\n", "seqera"),
         ("%%metro style: seqera, london-tube\n", "seqera, london-tube"),
-        ("%%metro style: nonesuch\n", "nfcore"),
+        ("%%metro style: nonesuch\n", "default"),
     ],
 )
 def test_info_reports_the_resolved_theme(tmp_path, style, expected):

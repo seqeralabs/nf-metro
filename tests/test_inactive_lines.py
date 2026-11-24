@@ -20,9 +20,9 @@ from nf_metro.render.constants import (
 )
 from nf_metro.render.plan import FrozenRecord, freeze_render_value
 from nf_metro.render.svg import _muted_line_theme, render_svg
-from nf_metro.themes import NFCORE_DARK_THEME, resolve_theme
+from nf_metro.themes import DEFAULT_DARK_THEME, resolve_theme
 
-MUTED = NFCORE_DARK_THEME.muted_line_color
+MUTED = DEFAULT_DARK_THEME.muted_line_color
 
 # Two lines, three stations: x touches only line a, z only line b, y both.
 TWO_LINE_MAP = (
@@ -83,7 +83,7 @@ def _icon_label_fill(svg, station_id, label):
 
 
 def test_muted_line_color_defaults_to_fallback_grey():
-    assert NFCORE_DARK_THEME.muted_line_color == FALLBACK_LINE_COLOR
+    assert DEFAULT_DARK_THEME.muted_line_color == FALLBACK_LINE_COLOR
 
 
 def test_effective_line_color_mutes_inactive_only():
@@ -91,10 +91,10 @@ def test_effective_line_color_mutes_inactive_only():
     a = graph.lines["a"]
     b = graph.lines["b"]
     inactive = frozenset({"a"})
-    assert effective_line_color(a, NFCORE_DARK_THEME, inactive) == MUTED
-    assert effective_line_color(b, NFCORE_DARK_THEME, inactive) == b.color
+    assert effective_line_color(a, DEFAULT_DARK_THEME, inactive) == MUTED
+    assert effective_line_color(b, DEFAULT_DARK_THEME, inactive) == b.color
     assert (
-        effective_line_color(None, NFCORE_DARK_THEME, inactive) == FALLBACK_LINE_COLOR
+        effective_line_color(None, DEFAULT_DARK_THEME, inactive) == FALLBACK_LINE_COLOR
     )
 
 
@@ -151,8 +151,8 @@ def test_station_touched_by_active_line_not_muted():
     # y and z each touch an active line -> full-strength stroke + label.
     assert MUTED not in rects["y"]
     assert MUTED not in rects["z"]
-    assert labels["y"] == NFCORE_DARK_THEME.label_color
-    assert labels["z"] == NFCORE_DARK_THEME.label_color
+    assert labels["y"] == DEFAULT_DARK_THEME.label_color
+    assert labels["z"] == DEFAULT_DARK_THEME.label_color
 
 
 def test_muted_station_keeps_fill():
@@ -161,7 +161,7 @@ def test_muted_station_keeps_fill():
     for el in root.iter():
         if el.tag.endswith("rect") and el.get("data-station-id") == "x":
             # Fill is the theme station fill, not the muted grey.
-            assert el.get("fill") == NFCORE_DARK_THEME.station_fill
+            assert el.get("fill") == DEFAULT_DARK_THEME.station_fill
 
 
 TERMINUS_MAP = (
@@ -472,7 +472,7 @@ def _mode_colors(value):
 # The muted rules are built from the theme, and a single-mode theme emits a bare
 # colour where a light/dark pair emits ``light-dark()``, so both shapes are worth
 # covering.
-@pytest.mark.parametrize("brand", ["nfcore", "seqera", "transparent"])
+@pytest.mark.parametrize("brand", ["default", "seqera", "transparent"])
 def test_chrome_css_and_presentation_attribute_agree_on_muting(brand):
     # A presentation attribute loses to every author rule, so what a browser
     # paints is the winning rule, not the attribute.  The two must therefore
@@ -564,7 +564,7 @@ def test_render_svg_unknown_inactive_line_raises():
 
 
 def test_muted_theme_overrides_every_field_on_a_frozen_theme():
-    frozen = freeze_render_value(NFCORE_DARK_THEME)
+    frozen = freeze_render_value(DEFAULT_DARK_THEME)
     assert isinstance(frozen, FrozenRecord)
     muted = _muted_line_theme(frozen)
     assert muted.station_stroke == MUTED
@@ -572,4 +572,4 @@ def test_muted_theme_overrides_every_field_on_a_frozen_theme():
     assert muted.icon_stroke == MUTED
     assert muted.icon_text_color == MUTED
     assert muted.label_color == MUTED
-    assert muted.station_fill == NFCORE_DARK_THEME.station_fill
+    assert muted.station_fill == DEFAULT_DARK_THEME.station_fill

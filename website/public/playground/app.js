@@ -49,7 +49,7 @@ const SAMPLE_NEXTFLOW_DAG = `flowchart TB
 const SOURCE_COMPLETIONS = [
   ["%%metro title: ", "Map title"],
   ["%%metro line: id | Name | #19b7a5", "Define a route"],
-  ["%%metro style: nfcore", "Map brand"],
+  ["%%metro style: seqera", "Map theme"],
   ["%%metro mode: light", "Light or dark output"],
   ["%%metro direction: LR", "Section direction"],
   ["%%metro grid: section | 0,0", "Place a section"],
@@ -609,9 +609,9 @@ function zoomFit() {
 // it, so the change is saved with the map and travels with export/share. (The
 // animate/chevrons/debug toggles are preview overlays handled separately.)
 
-// The selector picks the brand (palette identity); light/dark is the separate
-// Mode control, so brand and mode stay independent.
-const THEME_KEYS = ["nfcore", "seqera", "london-tube"];
+// The selector picks the theme; light/dark is the separate Mode control, so
+// theme and mode stay independent.
+const THEME_KEYS = ["default", "seqera", "london-tube"];
 
 // [control id, directive key, kind]
 const DIRECTIVE_CONTROLS = [
@@ -676,8 +676,8 @@ function applyDirectiveControl(id, key, kind) {
   doRender();
 }
 
-// A stack (`nfcore, london-tube`) passes through when every entry is a
-// built-in brand; the selector then shows no single brand.
+// A stack (`seqera, london-tube`) passes through when every entry is a
+// built-in theme; the selector then shows no single theme.
 function themeKeyFromSource() {
   const entries = (readDirective("style") || "")
     .toLowerCase()
@@ -686,11 +686,12 @@ function themeKeyFromSource() {
     .filter(Boolean);
   if (entries.length && entries.every((key) => THEME_KEYS.includes(key)))
     return entries.join(", ");
-  return "nfcore";
+  return "default";
 }
 
+// Every stack starts from `default`, so picking it drops the directive.
 function setThemeDirective(themeKey) {
-  setDirective("style", themeKey);
+  setDirective("style", themeKey === "default" ? null : themeKey);
   doRender();
 }
 

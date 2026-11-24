@@ -135,7 +135,7 @@ def test_render_emits_single_connector_and_suppresses_duplicate_pill():
     g = _layout(
         _PARALLEL.format(directive="%%metro interchange: dedup | tumor | normal\n")
     )
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     # The interchange link bar carries the rail-connector class, keyed to the
     # node id (drawn once for the whole glyph).
     assert svg.count('data-station-id="dedup"') >= 1
@@ -231,7 +231,7 @@ def test_directive_bundles_multiple_lines_on_one_rail():
     assert members["dedup"] == {"a", "b"}
     assert set().union(*members.values()) == {"a", "b", "c"}
     # One knob per (member, line) pair, so all three lines are knobbed.
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     assert svg.count('class="nf-metro-rail-knob"') >= 3
 
 
@@ -290,7 +290,7 @@ def test_marked_interchange_renders_as_a_tinted_interchange():
         )
     )
     g = _layout(src)
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     assert "nf-metro-rail-connector" in svg
     assert "#4CAF50" in svg
 

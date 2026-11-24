@@ -93,7 +93,7 @@ def test_render_string_honours_theme_and_layout_options() -> None:
     src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
     where = str(EXAMPLES)
     light = render_string(src, source_dir=where, theme="transparent")
-    dark = render_string(src, source_dir=where, theme="nfcore")
+    dark = render_string(src, source_dir=where, theme="default")
     assert light != dark
 
     narrow = render_string(src, source_dir=where, layout_options={"x_spacing": 60.0})

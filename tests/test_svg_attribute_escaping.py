@@ -12,7 +12,7 @@ import pytest
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 _BREAKOUT = 'red" onload="alert(1)'
 
@@ -34,7 +34,7 @@ def test_line_color_breakout_is_escaped_in_edge_and_legend_swatch():
     )
     graph = parse_metro_mermaid(src)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
 
     _no_injected_attribute(svg)
     assert "alert(1)" in svg
@@ -54,7 +54,7 @@ def test_marker_fill_breakout_is_escaped_in_station_and_marker_legend():
     )
     graph = parse_metro_mermaid(src)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
 
     _no_injected_attribute(svg)
     assert "alert(1)" in svg
@@ -77,7 +77,7 @@ def test_legitimate_colors_render_unescaped(color):
     )
     graph = parse_metro_mermaid(src)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
 
     assert color in svg
     assert "&amp;" not in svg

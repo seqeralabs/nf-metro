@@ -1,6 +1,6 @@
 """Brand and mode are orthogonal axes.
 
-Brand (nfcore, seqera) picks identity; mode (light, dark) picks the chrome
+Brand (default, seqera) picks identity; mode (light, dark) picks the chrome
 palette. No brand is intrinsically light or dark - an unspecified mode falls to
 a single global default for every brand alike.
 """
@@ -11,9 +11,9 @@ from nf_metro.api import resolve_theme
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.style import color_pair, is_adaptive
 from nf_metro.themes import (
+    DEFAULT_DARK_THEME,
+    DEFAULT_LIGHT_THEME,
     DEFAULT_MODE,
-    NFCORE_DARK_THEME,
-    NFCORE_LIGHT_THEME,
     SEQERA_DARK_THEME,
     SEQERA_LIGHT_THEME,
     STYLE_NAMES,
@@ -24,7 +24,7 @@ from nf_metro.themes import (
 _MMD = "%%metro line: main | Main | #ff0000\ngraph LR\n    a -->|main| b\n"
 
 
-def _graph(style="nfcore", mode=""):
+def _graph(style="default", mode=""):
     g = parse_metro_mermaid(_MMD)
     g.style = style
     g.mode = mode
@@ -36,17 +36,17 @@ def _graph(style="nfcore", mode=""):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("style", ["nfcore", "seqera", "transparent"])
+@pytest.mark.parametrize("style", ["default", "seqera", "transparent"])
 def test_unspecified_mode_uses_global_default_for_every_brand(style):
     resolved = resolve_theme(_graph(style=style))
     assert resolved.mode == DEFAULT_MODE
 
 
 def test_brands_share_one_default_mode_not_a_per_brand_one():
-    """nfcore and seqera resolve to the same mode when none is given."""
-    nfcore = resolve_theme(_graph(style="nfcore"))
+    """default and seqera resolve to the same mode when none is given."""
+    default = resolve_theme(_graph(style="default"))
     seqera = resolve_theme(_graph(style="seqera"))
-    assert nfcore.mode == seqera.mode == DEFAULT_MODE
+    assert default.mode == seqera.mode == DEFAULT_MODE
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +57,8 @@ def test_brands_share_one_default_mode_not_a_per_brand_one():
 @pytest.mark.parametrize(
     "style,mode,expected",
     [
-        ("nfcore", "light", NFCORE_LIGHT_THEME),
-        ("nfcore", "dark", NFCORE_DARK_THEME),
+        ("default", "light", DEFAULT_LIGHT_THEME),
+        ("default", "dark", DEFAULT_DARK_THEME),
         ("seqera", "light", SEQERA_LIGHT_THEME),
         ("seqera", "dark", SEQERA_DARK_THEME),
     ],
@@ -68,7 +68,7 @@ def test_brand_and_mode_combine_independently(style, mode, expected):
 
 
 def test_explicit_mode_arg_overrides_directive():
-    assert resolve_theme(_graph(mode="dark"), mode="light") is NFCORE_LIGHT_THEME
+    assert resolve_theme(_graph(mode="dark"), mode="light") is DEFAULT_LIGHT_THEME
 
 
 def test_directive_mode_used_when_no_arg():
@@ -104,10 +104,10 @@ def test_every_theme_resolves_to_one_theme_per_mode():
 
 
 def test_paired_theme_carries_both_palettes():
-    assert is_adaptive(NFCORE_DARK_THEME)
-    assert color_pair(NFCORE_DARK_THEME, "background_fill") == (
-        NFCORE_LIGHT_THEME.background_fill,
-        NFCORE_DARK_THEME.background_fill,
+    assert is_adaptive(DEFAULT_DARK_THEME)
+    assert color_pair(DEFAULT_DARK_THEME, "background_fill") == (
+        DEFAULT_LIGHT_THEME.background_fill,
+        DEFAULT_DARK_THEME.background_fill,
     )
 
 
@@ -121,5 +121,5 @@ def test_a_theme_with_one_palette_does_not_adapt():
 
 
 def test_bare_brand_names_resolve_to_default_mode():
-    assert THEMES["nfcore"].mode == DEFAULT_MODE
+    assert THEMES["default"].mode == DEFAULT_MODE
     assert THEMES["seqera"].mode == DEFAULT_MODE

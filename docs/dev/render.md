@@ -233,9 +233,9 @@ Each field's metadata records its description and reference group, whether it is
 `themes/schema.py` generates the JSON Schema theme files are validated against from it, and `scripts/theme_docs.py` writes that schema to `themes/theme.schema.json` and the field reference into `docs/themes.mdx` (both checked by `tests/test_theme_schema.py`).
 `CHROME` beside the dataclass maps each chrome color to its `--nfm-map-*` custom property and the classes and properties it paints, for `_inject_chrome_css`.
 
-Built-in themes are YAML files in `src/nf_metro/themes/` (`nfcore.yaml`, `seqera.yaml`, `london_tube.yaml`, `transparent.yaml`), loaded by the same loader as user theme files (`themes/stack.py`), without re-validation (the test suite validates them).
+Built-in themes are YAML files in `src/nf_metro/themes/` (`default.yaml`, `seqera.yaml`, `london_tube.yaml`, `transparent.yaml`), loaded by the same loader as user theme files (`themes/stack.py`), without re-validation (the test suite validates them).
 A `style`/`--theme` value is a stack of names and files.
-`resolve_stack` lays the stack over the `nfcore` base and merges each mode separately into an immutable `ResolvedTheme` holding the light theme, the dark theme and the stack's layout options.
+`resolve_stack` lays the stack over the `default` base and merges each mode separately into an immutable `ResolvedTheme` holding the light theme, the dark theme and the stack's layout options.
 `merge_layers` fills every empty derived color (icon and badge colors from the station colors, `knockout_fill` from the opaque background), so a resolved `Theme`'s fields are all concrete and the renderer reads them directly.
 A stack of built-in names is memoised, so a name always resolves to the same objects.
 

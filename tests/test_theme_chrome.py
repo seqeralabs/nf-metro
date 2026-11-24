@@ -11,10 +11,10 @@ from theme_helpers import MMD, RNASEQ, ROOT, classed, station_glyphs, write
 from nf_metro.api import prepare_graph, render_string
 from nf_metro.render import render_svg
 from nf_metro.render.style import CHROME, colors_adapt
-from nf_metro.themes import NFCORE_DARK_THEME, THEMES, resolve_stack
+from nf_metro.themes import DEFAULT_DARK_THEME, THEMES, resolve_stack
 
 _TUBE = resolve_stack("london-tube")
-_MAP = RNASEQ.read_text().replace("%%metro style: nfcore", "")
+_MAP = RNASEQ.read_text()
 
 _MMD_TWO_STATIONS = MMD + "    d -->|alt| e\n"
 
@@ -126,8 +126,8 @@ def test_inactive_styling_follows_the_mode_in_the_default_svg():
     assert "nf-metro-muted-fill" in station_glyphs(root)["d"].get("class")
 
 
-def test_nfcore_inactive_render_adds_no_switching_classes():
-    svg = render_string(MMD, theme="nfcore", inactive_line_ids=frozenset({"alt"}))
+def test_default_inactive_render_adds_no_switching_classes():
+    svg = render_string(MMD, theme="default", inactive_line_ids=frozenset({"alt"}))
     assert "nf-metro-muted-stroke" not in svg
     assert "nf-metro-muted-fill" not in svg
 
@@ -212,7 +212,7 @@ def test_file_icon_banners_take_the_theme_colours(tmp_path):
 
 def test_free_text_reaches_svg_attributes_escaped():
     theme = replace(
-        NFCORE_DARK_THEME,
+        DEFAULT_DARK_THEME,
         label_font_family='x"/><script>alert(1)</script>',
         dashed_dasharray='4"/><script>',
         title_font_weight="bold</style><script>",

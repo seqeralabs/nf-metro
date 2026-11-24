@@ -580,7 +580,7 @@ def test_empty_section_removed_render():
     """
     from nf_metro.layout.engine import compute_layout
     from nf_metro.render.svg import render_svg
-    from nf_metro.themes import NFCORE_DARK_THEME
+    from nf_metro.themes import DEFAULT_DARK_THEME
 
     text = (
         "%%metro line: dna | DNA | #004b86\n"
@@ -601,7 +601,7 @@ def test_empty_section_removed_render():
         graph = parse_metro_mermaid(text)
 
     compute_layout(graph)
-    svg_str = render_svg(graph, NFCORE_DARK_THEME)
+    svg_str = render_svg(graph, DEFAULT_DARK_THEME)
 
     # All station labels should appear in the SVG output
     assert "cat" in svg_str
@@ -635,7 +635,7 @@ def test_hidden_section_render():
     """A hidden section participates in layout but its section box is not rendered."""
     from nf_metro.layout.engine import compute_layout
     from nf_metro.render.svg import render_svg
-    from nf_metro.themes import NFCORE_DARK_THEME
+    from nf_metro.themes import DEFAULT_DARK_THEME
 
     text = (
         "%%metro line: line | My line | #756bb1\n"
@@ -652,7 +652,7 @@ def test_hidden_section_render():
     graph = parse_metro_mermaid(text)
 
     compute_layout(graph)
-    svg_str = render_svg(graph, NFCORE_DARK_THEME)
+    svg_str = render_svg(graph, DEFAULT_DARK_THEME)
 
     # The hidden section remains part of the graph and participates in layout.
     assert "_hidden" in graph.sections
@@ -722,11 +722,11 @@ def test_hidden_section_reported_by_info():
 
 def test_hidden_section_outlined_in_debug_overlay():
     from nf_metro.render.svg import render_svg
-    from nf_metro.themes import NFCORE_DARK_THEME
+    from nf_metro.themes import DEFAULT_DARK_THEME
 
     graph = _laid_out_hidden_middle()
-    plain = render_svg(graph, NFCORE_DARK_THEME)
-    debug = render_svg(graph, NFCORE_DARK_THEME, debug=True)
+    plain = render_svg(graph, DEFAULT_DARK_THEME)
+    debug = render_svg(graph, DEFAULT_DARK_THEME, debug=True)
     assert ">_middle<" not in plain
     assert ">_middle<" in debug
 
@@ -1590,10 +1590,10 @@ graph LR
 def test_parse_style_unknown_warns_and_keeps_default():
     with pytest.warns(UserWarning, match=r"%%metro style: ignoring 'bogus'"):
         graph = parse_metro_mermaid("%%metro style: bogus\ngraph LR\n")
-    assert graph.style == "nfcore"
+    assert graph.style == "default"
 
 
-@pytest.mark.parametrize("name", ["nfcore", "seqera", "nfcore, london-tube"])
+@pytest.mark.parametrize("name", ["default", "seqera", "seqera, london-tube"])
 def test_parse_style_accepted_names_are_silent(name):
     with warnings.catch_warnings():
         warnings.simplefilter("error")

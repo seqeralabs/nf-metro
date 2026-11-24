@@ -135,7 +135,7 @@ def test_render_html_lines_json_escapes_script_close_in_label():
         "graph LR\n    a[A] -->|evil| b[B]\n"
     )
     compute_layout(graph)
-    html_out = render_html(graph, THEMES["nfcore"])
+    html_out = render_html(graph, THEMES["default"])
 
     match = re.search(r"lines: (\[.*?\]),\n  embed:", html_out)
     assert match, "expected a `lines: [...]` JS literal in the standalone page"
@@ -179,7 +179,7 @@ def test_driver_js_escapes_untrusted_values_at_every_dom_sink():
 def test_render_html_embedded_svg_matches_standalone_render():
     """Embedded SVG matches the canonical legend-less SVG render for the input."""
     text = RNASEQ_MMD.read_text()
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
 
     graph_html = parse_metro_mermaid(text)
     graph_html.source_dir = str(EXAMPLES_DIR)
@@ -200,7 +200,7 @@ def test_render_html_title_in_markup():
     graph = parse_metro_mermaid(text)
     graph.source_dir = str(EXAMPLES_DIR)
     compute_layout(graph)
-    html_out = render_html(graph, THEMES["nfcore"])
+    html_out = render_html(graph, THEMES["default"])
 
     assert graph.title
     assert graph.title in html_out
@@ -218,8 +218,8 @@ def test_render_html_forwards_font_portability_embed():
     graph.source_dir = str(EXAMPLES_DIR)
     compute_layout(graph)
 
-    plain = render_html(graph, THEMES["nfcore"])
-    embedded = render_html(graph, THEMES["nfcore"], font_portability="embed")
+    plain = render_html(graph, THEMES["default"])
+    embedded = render_html(graph, THEMES["default"], font_portability="embed")
 
     assert "@font-face" not in plain
     assert "@font-face" in embedded
@@ -294,7 +294,7 @@ def test_render_html_normalises_mode_for_chrome_and_map():
         "%%metro line: l | L | #ff0000\ngraph LR\n    a[A] -->|l| b[B]\n"
     )
     compute_layout(graph)
-    html_out = render_html(graph, THEMES["nfcore"], baked_mode=" Dark ")
+    html_out = render_html(graph, THEMES["default"], baked_mode=" Dark ")
     assert _color_schemes(html_out) == ("dark", "dark")
     assert re.search(r"<svg[^>]*color-scheme: dark", html_out)
 

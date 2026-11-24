@@ -247,7 +247,7 @@ def test_flow_exit_fed_junction_freezes_its_cross_member_source_turn() -> None:
 
 def test_source_turnout_animation_uses_the_same_concentric_radii() -> None:
     graph, offsets, routes = _routed("same_destination_short_overlap")
-    timeline = build_animation_timeline(graph, routes, offsets, THEMES["nfcore"])
+    timeline = build_animation_timeline(graph, routes, offsets, THEMES["default"])
     paths = {(d.line_id, d.track.d_attr) for d in timeline.dots}
 
     assert any(

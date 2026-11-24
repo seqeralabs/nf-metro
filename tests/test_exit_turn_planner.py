@@ -68,7 +68,7 @@ from nf_metro.parser.model import LineSpread, PortSide
 from nf_metro.parser.route_topology import build_route_topology_query
 from nf_metro.render.plan import freeze_render_value
 from nf_metro.render.svg import station_marker_box
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 ROOT = Path(__file__).parents[1]
 TOPOLOGIES = ROOT / "examples" / "topologies"
@@ -864,10 +864,10 @@ def test_adjacent_local_terminator_does_not_inflate_entry_frame_pills() -> None:
 
     for station_id in ("before", "split"):
         _cx, _cy, _width, height, _radius = station_marker_box(
-            graph, NFCORE_DARK_THEME, graph.stations[station_id], offsets
+            graph, DEFAULT_DARK_THEME, graph.stations[station_id], offsets
         )
         assert height == pytest.approx(
-            inherited_span + 2 * NFCORE_DARK_THEME.station_radius
+            inherited_span + 2 * DEFAULT_DARK_THEME.station_radius
         )
 
 

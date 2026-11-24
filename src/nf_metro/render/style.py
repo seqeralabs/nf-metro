@@ -128,7 +128,7 @@ class Theme:
     """Visual theme for a metro map, resolved for one display mode.
 
     Fields without a default are set by the base theme every stack starts
-    from (``nfcore``). A colour whose doc says it takes another field when
+    from (``default``). A colour whose doc says it takes another field when
     empty is filled in when the stack is resolved, so a resolved theme's
     fields are all concrete.
     """

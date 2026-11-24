@@ -31,7 +31,7 @@ FIXTURE_FILE = EXAMPLES[0]
 def _render(fixture: Path, font_portability: str | None = None) -> str:
     graph = parse_metro_mermaid_file(fixture)
     compute_layout(graph)
-    return render_svg(graph, THEMES["nfcore"], font_portability=font_portability)  # type: ignore[arg-type]
+    return render_svg(graph, THEMES["default"], font_portability=font_portability)  # type: ignore[arg-type]
 
 
 # ── embed ────────────────────────────────────────────────────────────────────

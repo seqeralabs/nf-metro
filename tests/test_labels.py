@@ -324,7 +324,7 @@ graph LR
 
 def _drawn_label_texts(graph: MetroGraph) -> dict[str, str]:
     """Station id -> the name-label text the renderer will draw, wraps included."""
-    plan = build_render_plan(graph, THEMES["nfcore"])
+    plan = build_render_plan(graph, THEMES["default"])
     return {p.station_id: p.text for p in plan.labels if p.station_id}
 
 
@@ -524,7 +524,7 @@ class TestReflowedBesidePillLabelsKeepTheirPill:
         self, fixture: str, x_spacing: float | None
     ) -> None:
         graph = _laid_out(fixture, x_spacing)
-        plan = build_render_plan(graph, THEMES["nfcore"])
+        plan = build_render_plan(graph, THEMES["default"])
         markers = _station_marker_boxes(graph, plan.station_offsets)
         checked: list[str] = []
         for placement in plan.labels:

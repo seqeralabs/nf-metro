@@ -62,7 +62,7 @@ def _layout(rel_name: str) -> MetroGraph:
 @lru_cache(maxsize=None)
 def _render(rel_name: str) -> str:
     graph = _layout(rel_name)
-    theme_name = graph.style if graph.style in THEMES else "nfcore"
+    theme_name = graph.style if graph.style in THEMES else "default"
     plan = build_render_plan(graph, THEMES[theme_name])
     _PLANS[rel_name] = plan
     return emit_render_plan(plan)

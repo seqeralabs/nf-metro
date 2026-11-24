@@ -20,10 +20,10 @@ from nf_metro.render.glyphs import (
     ring_layout,
     station_tab_box,
 )
-from nf_metro.themes import NFCORE_LIGHT_THEME, resolve_stack
+from nf_metro.themes import DEFAULT_LIGHT_THEME, resolve_stack
 
 _TUBE_DARK = resolve_stack("london-tube").dark
-_MAP = RNASEQ.read_text().replace("%%metro style: nfcore", "")
+_MAP = RNASEQ.read_text()
 
 
 def _render(theme: str, **kwargs) -> ET.Element:
@@ -135,8 +135,8 @@ def test_sections_are_unboxed_with_plain_uppercase_titles(tube_svg):
     assert "PRE-PROCESSING" in titles
 
 
-def test_nfcore_render_is_untouched_by_the_shape_fields():
-    root = _render("nfcore")
+def test_default_render_is_untouched_by_the_shape_fields():
+    root = _render("default")
     assert station_glyphs(root)["rsem"].get("rx") is not None
     assert classed(root, "circle", "nf-metro-section-num-circle")
 
@@ -152,7 +152,7 @@ class _At:
 
 
 _LW = 4.0
-_GEOM = replace(NFCORE_LIGHT_THEME, line_width=_LW)
+_GEOM = replace(DEFAULT_LIGHT_THEME, line_width=_LW)
 
 
 @pytest.mark.parametrize("label_below", [True, False])

@@ -85,7 +85,7 @@ def _generated_offset_exit_climb(span: int) -> str:
     )
     chain += f"    {blockers[-1]}_a -->|l1| d1\n"
     return (
-        "%%metro title: gen\n%%metro style: nfcore\n"
+        "%%metro title: gen\n"
         "%%metro line: l1 | L1 | #f5c542\n"
         "%%metro line: l2 | L2 | #e63946\n"
         f"{grids}\n\ngraph LR\n"

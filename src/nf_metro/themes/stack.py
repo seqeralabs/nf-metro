@@ -13,7 +13,7 @@ A theme file is YAML. Every key except ``name`` is optional::
       y_spacing: 45           # layout options, below directives and CLI flags
 
 A stack is an ordered list of theme names and files. It always starts from the
-base theme (``nfcore``), then applies each entry in turn; a later entry wins
+base theme (``default``), then applies each entry in turn; a later entry wins
 for every field it sets, and light and dark merge independently.
 """
 

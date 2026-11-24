@@ -17,7 +17,7 @@ from nf_metro.render.validate import (
     parse_route_strokes,
     stroke_arcs,
 )
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 EXAMPLES_DIR = pathlib.Path(__file__).parent.parent / "examples"
 
@@ -38,7 +38,7 @@ def _laid_out(stem: str):
 def _render(stem: str, *, directional: bool) -> str:
     graph = _laid_out(stem)
     graph.directional = directional
-    return render_svg(graph, NFCORE_DARK_THEME)
+    return render_svg(graph, DEFAULT_DARK_THEME)
 
 
 def test_directional_off_by_default_emits_no_chevrons():

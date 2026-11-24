@@ -19,7 +19,7 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import svg as S
 from nf_metro.render.constants import CANVAS_PADDING
 from nf_metro.render.section_header import resolve_all_section_headers
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 EXAMPLE_TOPOLOGIES = EXAMPLES / "topologies"
@@ -65,7 +65,7 @@ def _place(text: str, source_dir: Path):
     )
     res = S._position_legend(
         graph,
-        NFCORE_DARK_THEME,
+        DEFAULT_DARK_THEME,
         max_x,
         max_y,
         CANVAS_PADDING,

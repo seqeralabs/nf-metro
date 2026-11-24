@@ -43,7 +43,7 @@ def _graph(src: str = MMD):
 
 
 def _model(src: str = MMD) -> MapModel:
-    return MapModel(_graph(src), THEMES["nfcore"])
+    return MapModel(_graph(src), THEMES["default"])
 
 
 def _ev(event, task_id, process, status=""):
@@ -67,7 +67,7 @@ def test_declared_inactive_line_is_muted_in_served_svg():
         "    input[In] -->|a| trim[Trim]\n"
         "    trim -->|b| qc[QC]\n"
     )
-    muted = THEMES["nfcore"].muted_line_color
+    muted = THEMES["default"].muted_line_color
     assert 'stroke="#0000ff"' not in model.svg_body
     assert f'stroke="{muted}"' in model.svg_body
 
@@ -156,11 +156,11 @@ def test_overlay_marks_match_the_drawn_station_pill():
 
     graph = _graph()
     offsets = compute_station_offsets(graph)
-    model = MapModel(graph, THEMES["nfcore"])
+    model = MapModel(graph, THEMES["default"])
     page = build_page(model)
     for st in model.stations:
         cx, cy, w, h, rx = station_marker_box(
-            graph, THEMES["nfcore"], graph.stations[st["id"]], offsets
+            graph, THEMES["default"], graph.stations[st["id"]], offsets
         )
         # The dot rect is the marker box exactly (within rounding).
         assert st["w"] == round(w, 1) and st["h"] == round(h, 1)
@@ -200,7 +200,7 @@ def test_unknown_overlay_falls_back_to_default():
 
 
 def test_dark_theme_page_uses_dark_chrome():
-    page = build_page(MapModel(_graph(), THEMES["nfcore"]))
+    page = build_page(MapModel(_graph(), THEMES["default"]))
     assert "color-scheme: dark" in page
 
 
@@ -222,7 +222,7 @@ def test_http_smoke(token):
         warnings.simplefilter("ignore")
         graph = parse_metro_mermaid(MMD)
     compute_layout(graph)
-    httpd = serve(graph, THEMES["nfcore"], host="127.0.0.1", port=0, token=token)
+    httpd = serve(graph, THEMES["default"], host="127.0.0.1", port=0, token=token)
     port = httpd.server_address[1]
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
@@ -420,7 +420,7 @@ def test_serve_rejects_unknown_overlay():
 def test_registry_register_and_listing():
     from nf_metro.live.server import RunRegistry
 
-    reg = RunRegistry(resolve_stack("nfcore"))
+    reg = RunRegistry(resolve_stack("default"))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         rid = reg.register(MMD, name="run-a")
@@ -435,7 +435,7 @@ def test_registry_register_and_listing():
 def test_multi_server_http_smoke():
     from nf_metro.live.server import serve_multi
 
-    httpd = serve_multi(resolve_stack("nfcore"), host="127.0.0.1", port=0)
+    httpd = serve_multi(resolve_stack("default"), host="127.0.0.1", port=0)
     port = httpd.server_address[1]
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()

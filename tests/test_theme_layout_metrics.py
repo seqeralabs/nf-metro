@@ -17,27 +17,27 @@ from nf_metro.themes import THEMES, resolve_stack, resolve_theme
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
-# Its label reservations are tight enough that measuring the nfcore layout
+# Its label reservations are tight enough that measuring the default layout
 # with a 14px-label theme's metrics trips a routing invariant.
 CROSS_THEME_MAP = EXAMPLES / "genomic_pipeline.mmd"
 
 
 @pytest.fixture(scope="module")
-def nfcore_layout():
+def default_layout():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return prepare_graph(CROSS_THEME_MAP.read_text(), source_dir=str(EXAMPLES))
 
 
-def test_compute_layout_records_the_metrics_it_laid_out_with(nfcore_layout) -> None:
-    metrics = nfcore_layout.layout_metrics
-    assert metrics == LayoutMetrics.of(nfcore_layout, THEMES["nfcore"])
-    assert metrics.label_font_size == THEMES["nfcore"].label_font_size
+def test_compute_layout_records_the_metrics_it_laid_out_with(default_layout) -> None:
+    metrics = default_layout.layout_metrics
+    assert metrics == LayoutMetrics.of(default_layout, THEMES["default"])
+    assert metrics.label_font_size == THEMES["default"].label_font_size
 
 
 @pytest.mark.parametrize("name", ["seqera", "transparent", "london-tube"])
-def test_a_layout_renders_in_another_theme(nfcore_layout, name: str) -> None:
-    svg = render_svg(copy.deepcopy(nfcore_layout), THEMES[name])
+def test_a_layout_renders_in_another_theme(default_layout, name: str) -> None:
+    svg = render_svg(copy.deepcopy(default_layout), THEMES[name])
     assert svg.startswith("<?xml") or svg.startswith("<svg")
 
 
@@ -74,9 +74,7 @@ def test_serve_multi_applies_its_stacks_layout_block(tmp_path, monkeypatch) -> N
 
 
 def test_a_posted_map_cannot_name_a_theme_file(tmp_path, monkeypatch) -> None:
-    text = CROSS_THEME_MAP.read_text().replace(
-        "%%metro style: nfcore", f"%%metro style: {tmp_path / 'absent.yaml'}"
-    )
+    text = f"%%metro style: {tmp_path / 'absent.yaml'}\n" + CROSS_THEME_MAP.read_text()
     graph = _register("seqera", monkeypatch, text)
     assert graph.resolved_theme is resolve_stack("seqera")
 
@@ -110,8 +108,8 @@ def test_layout_measures_file_icons_with_the_theme(tmp_path):
         )
         return graph.sections["qc_sec"].bbox_w
 
-    assert qc_width(None) == pytest.approx(qc_width("nfcore"))
-    assert qc_width(str(roomy)) > qc_width("nfcore")
+    assert qc_width(None) == pytest.approx(qc_width("default"))
+    assert qc_width(str(roomy)) > qc_width("default")
 
 
 def test_uppercase_tracked_titles_are_measured_wider():
