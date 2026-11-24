@@ -281,6 +281,11 @@
           "type": "number",
           "exclusiveMinimum": 0
         },
+        "curve_radius_ratio": {
+          "description": "Corner radius at the line centre, in multiples of the line width.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "font_scale": {
           "description": "Scale text sizes and label metrics.",
           "type": "number",

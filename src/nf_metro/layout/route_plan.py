@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, NewType, TypeAlias, TypeVar
 from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.fan_geometry import fan_lane_offsets
 from nf_metro.layout.geometry import AxisFrame
+from nf_metro.layout.pass_metrics import active_curve_radius
 from nf_metro.layout.routing.common import (
     Direction,
     GapSlot,
@@ -2441,6 +2442,9 @@ class RoutePlan:
     reservation_diagnostics: tuple[RouteReservationDiagnostic, ...]
     bindings: tuple[EmissionBinding, ...]
     provenance: RoutePlanProvenance
+    curve_radius: float
+    """The corner radius the plan was routed at, which sizes its reservations'
+    clearances; a reader outside the routing pass validates them against it."""
     diagnostics: tuple[RoutePlanDiagnostic, ...] = ()
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = ()
     """Every exit-turn plan's frozen verdict, keyed by plan id.
@@ -3253,6 +3257,7 @@ def _build_route_plan(
             reservation_diagnostics=(),
             bindings=(),
             provenance=_plan_provenance(graph, ()),
+            curve_radius=active_curve_radius(),
             diagnostics=fan_diagnostics,
         )
 
@@ -3534,6 +3539,7 @@ def _build_route_plan(
         reservation_diagnostics=(),
         bindings=tuple(bindings),
         provenance=provenance,
+        curve_radius=active_curve_radius(),
         diagnostics=(
             tuple(diagnostics)
             + observer.exit_turn_diagnostics

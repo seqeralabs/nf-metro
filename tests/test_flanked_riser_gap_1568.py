@@ -10,7 +10,7 @@ that gap must settle clear of it.
 
 Covers:
 
-* The issue reproducer seats the riser at least ``_MIN_RISER_EDGE_CLEARANCE``
+* The issue reproducer seats the riser at least ``_min_riser_edge_clearance()``
   off both flanking walls, and does not abort.
 * ``stacked_top_entry_flanked_riser_crossline`` runs a distinct line up the same
   flanked gap, overlapping the riser in Y, and the two counter-running
@@ -29,9 +29,9 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
 )
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.pass_metrics import min_corridor_y_overlap
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import (
     RoutedPath,
@@ -174,7 +174,7 @@ def test_crossline_counter_running_lines_keep_bundle_clearance() -> None:
         for line_b, xb, blo, bhi, bdown in gap_channels
         if line_a != line_b
         and adown is not bdown
-        and min(ahi, bhi) - max(alo, blo) > MIN_CORRIDOR_Y_OVERLAP
+        and min(ahi, bhi) - max(alo, blo) > min_corridor_y_overlap()
     ]
     assert separations, "expected counter-running distinct lines overlapping in Y"
     assert min(separations) >= BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE

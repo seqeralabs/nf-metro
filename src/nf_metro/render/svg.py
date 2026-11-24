@@ -53,8 +53,10 @@ from nf_metro.layout.labels import (
     _label_ink_quad,
     place_labels,
 )
-from nf_metro.layout.pass_metrics import graph_layout_context
-from nf_metro.layout.phases._common import _station_bundle_offset_span
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    graph_layout_context,
+)
 from nf_metro.layout.phases.bbox import measure_row_gap_clearance
 from nf_metro.layout.phases.canvas import translate_graph
 from nf_metro.layout.phases.guards import (
@@ -117,6 +119,7 @@ from nf_metro.layout.routing.corners import (
     cubic_tangent,
     curve_tangents,
     flatten_cubic,
+    padded_curve_radii,
     resolve_curve_radii,
 )
 from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
@@ -125,6 +128,7 @@ from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
 )
+from nf_metro.layout.routing.offsets import drawn_bundle_span
 from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.layout.routing.system_emission import (
@@ -188,7 +192,6 @@ from nf_metro.render.constants import (
     RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
-    SVG_CURVE_RADIUS,
     TEXT_VCENTER_DY,
     TEXT_VCENTER_EM,
     TITLE_ASCENT_RATIO,
@@ -2368,13 +2371,20 @@ def _build_render_plan_scaled(
     # A canvas claim is measured only once the render has sized its canvas, so
     # it needs this projection to land on the geometry the canvas encloses.
     settlement_translations = settled.settlement.coordinate_translations
-    route_polylines, route_curve_radii, route_segment_shifts = (
+    radius = active_curve_radius()
+    route_polylines, materialized_radii, route_segment_shifts = (
         materialize_source_turnout_paths(
             routes,
             route_polylines,
-            default_radius=SVG_CURVE_RADIUS,
+            default_radius=radius,
         )
     )
+    # Every corner carries its radius, so drawing the plan later, outside this
+    # map's metrics, bends each corner exactly as it was laid out.
+    route_curve_radii: list[list[float] | None] = [
+        padded_curve_radii(list(points), radii, radius)
+        for points, radii in zip(route_polylines, materialized_radii, strict=True)
+    ]
     line_priority = {line_id: index for index, line_id in enumerate(graph.lines)}
     edge_routes = sorted(
         routes, key=lambda route: -line_priority.get(route.line_id, -1)
@@ -2388,7 +2398,7 @@ def _build_render_plan_scaled(
             graph,
             edge_routes,
             edge_polylines,
-            curve_radius=SVG_CURVE_RADIUS,
+            curve_radius=radius,
             curve_radii=edge_radii,
             gap_half=theme.bridge_gap / 2,
         )
@@ -3654,7 +3664,7 @@ class _DrawnPiece(NamedTuple):
 def _drawn_pieces(
     pts: Sequence[tuple[float, float]],
     radii: Sequence[float] | None,
-    curve_radius: float = SVG_CURVE_RADIUS,
+    curve_radius: float | None = None,
 ) -> list[_DrawnPiece]:
     """The straight runs and rounded corners a route's stroke is drawn as.
 
@@ -3663,6 +3673,8 @@ def _drawn_pieces(
     :func:`~nf_metro.layout.routing.corners.curve_tangents` points.  A route
     of fewer than two points has no pieces.
     """
+    if curve_radius is None:
+        curve_radius = active_curve_radius()
     pts = list(pts)
     resolved = resolve_curve_radii(
         pts, None if radii is None else list(radii), default_radius=curve_radius
@@ -3697,12 +3709,14 @@ def _render_edges(
     drawable_radii: Sequence[Sequence[float] | None],
     bridge_breaks: tuple[tuple[BridgeBreak, ...], ...],
     theme: Theme,
-    curve_radius: float = SVG_CURVE_RADIUS,
+    curve_radius: float | None = None,
     *,
     inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Render metro line edges with smooth curves at direction changes."""
 
+    if curve_radius is None:
+        curve_radius = active_curve_radius()
     for route, pts, route_radii, breaks in zip(
         routes, polylines, drawable_radii, bridge_breaks, strict=True
     ):
@@ -4479,32 +4493,6 @@ def _render_bridged_edge(
     d.append(path)
 
 
-def _drawn_bundle_span(
-    graph: MetroGraph,
-    station: Station,
-    station_offsets: dict[tuple[str, str], float],
-    positive_fan: set[str],
-) -> tuple[float, float]:
-    """Min/max of a station's per-line offsets *as drawn*.
-
-    A vertical-flow (TB) section is the 90-degree rotation of a horizontal one:
-    a line rides ``x - offset`` where an LR line rides ``y + offset`` (matching
-    :func:`_tb_x_offset`).  Spanning the marker over the drawn offsets keeps it
-    centred on the lines that actually pass through the station, so a one-line or
-    off-trunk-subset station does not leave its glyph beside its own track.
-    """
-    raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
-    if not graph.station_lines(station.id):
-        return 0.0, 0.0
-    sec = graph.sections.get(station.section_id) if station.section_id else None
-    if sec is not None and sec.direction == "TB":
-        sign = 1.0 if station.section_id in positive_fan else -1.0
-        drawn = [sign * raw_min, sign * raw_max]
-    else:
-        drawn = [raw_min, raw_max]
-    return min(drawn), max(drawn)
-
-
 def _pill_box(
     station: Station,
     r: float,
@@ -4561,7 +4549,7 @@ def station_marker_box(
         used = station.rail_used_ys or [station.y]
         min_off, max_off = min(used) - station.y, max(used) - station.y
     elif station_offsets and not graph.station_is_rail(station.id):
-        min_off, max_off = _drawn_bundle_span(
+        min_off, max_off = drawn_bundle_span(
             graph, station, station_offsets, positive_fan
         )
     else:
@@ -5124,7 +5112,7 @@ def _render_station_into(
     # marked single-rail station's glyph must seat on the rail rather than
     # ride the bundle's mid-offset.
     if station_offsets and not graph.station_is_rail(station.id):
-        min_off, max_off = _drawn_bundle_span(
+        min_off, max_off = drawn_bundle_span(
             graph, station, station_offsets, positive_fan
         )
     else:

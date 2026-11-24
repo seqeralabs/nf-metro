@@ -24,11 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import (
-    CURVE_RADIUS,
-    INTER_ROW_HEADER_CLEARANCE,
-)
+from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.pass_metrics import inter_row_header_clearance
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 
@@ -38,7 +36,7 @@ FIXTURE = "examples/topologies/top_entry_left_neighbour.mmd"
 # A clean drop-in clears only the target's own header badge; rising a full
 # inter-row header band above the top edge is the overshoot into the shared
 # channel.  The bound is that full band.
-_MAX_RISE_ABOVE_TOP = INTER_ROW_HEADER_CLEARANCE
+_MAX_RISE_ABOVE_TOP = inter_row_header_clearance()
 
 
 def _layout(*, validate: bool):

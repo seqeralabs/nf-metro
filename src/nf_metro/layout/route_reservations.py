@@ -15,10 +15,7 @@ from nf_metro.layout.constants import (
     CANVAS_EDGE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
     SAME_COORD_TOLERANCE,
     SECTION_HEADER_ROUTE_CLEARANCE,
 )
@@ -30,7 +27,12 @@ from nf_metro.layout.geometry import (
     section_row_span,
     spans_share_corridor,
 )
-from nf_metro.layout.pass_metrics import canvas_edge_clearance
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    canvas_edge_clearance,
+    inter_row_edge_clearance,
+    inter_row_header_clearance,
+)
 from nf_metro.layout.route_plan import (
     BindingKind,
     ConvergenceDisposition,
@@ -1040,13 +1042,14 @@ def canvas_corridor_clearance_band(
             return GapCorridorBand(
                 None,
                 -math.inf,
-                min(section.bbox_y for section in sections) - INTER_ROW_EDGE_CLEARANCE,
+                min(section.bbox_y for section in sections)
+                - inter_row_edge_clearance(),
             )
         if coordinate > extents.bottom:
             return GapCorridorBand(
                 None,
                 max(section.bbox_y + section.bbox_h for section in sections)
-                + INTER_ROW_EDGE_CLEARANCE,
+                + inter_row_edge_clearance(),
                 math.inf,
             )
         return None
@@ -1741,13 +1744,17 @@ def _topology_gap_regions_from_plan(
 
 
 def _clearances(
-    orientation: CorridorOrientation, region: CorridorRegion
+    orientation: CorridorOrientation,
+    region: CorridorRegion,
+    radius: float | None = None,
 ) -> tuple[float, float, tuple[KeepOutClass, ...]]:
+    """The clearance policy of a corridor in *region*, for corners of *radius*
+    (the active radius when omitted)."""
     if orientation is CorridorOrientation.HORIZONTAL:
         if isinstance(region, CanvasRegion) and region.side is CanvasSide.TOP:
             return (
                 canvas_edge_clearance(),
-                INTER_ROW_EDGE_CLEARANCE,
+                inter_row_edge_clearance(radius),
                 (
                     KeepOutClass.CANVAS,
                     KeepOutClass.HEADER,
@@ -1758,7 +1765,7 @@ def _clearances(
             )
         if isinstance(region, CanvasRegion):
             return (
-                INTER_ROW_EDGE_CLEARANCE,
+                inter_row_edge_clearance(radius),
                 canvas_edge_clearance(),
                 (
                     KeepOutClass.SECTION,
@@ -1769,8 +1776,8 @@ def _clearances(
                 ),
             )
         return (
-            INTER_ROW_EDGE_CLEARANCE,
-            INTER_ROW_HEADER_CLEARANCE,
+            inter_row_edge_clearance(radius),
+            inter_row_header_clearance(radius),
             (
                 KeepOutClass.SECTION,
                 KeepOutClass.HEADER,
@@ -2020,7 +2027,7 @@ def _lane_separation(first: _BoundaryLane, second: _BoundaryLane) -> float:
     return cotravelling_lane_clearance(
         same_line=first.leg.line_id == second.leg.line_id,
         counter_running=first.leg.direction is not second.leg.direction,
-        curve_radius=CURVE_RADIUS,
+        curve_radius=active_curve_radius(),
     )
 
 
@@ -2441,7 +2448,7 @@ def _canvas_region_measurement(
         CanvasSide.LEFT: SECTION_LEFT_BLOCKER,
     }[region.side]
     box_clearance = (
-        INTER_ROW_EDGE_CLEARANCE if allocates_y else EDGE_TO_BUNDLE_CLEARANCE
+        inter_row_edge_clearance() if allocates_y else EDGE_TO_BUNDLE_CLEARANCE
     )
 
     candidates: list[_ContentBoundary] = []
@@ -2997,13 +3004,14 @@ def _validate_reservation_record(
         raise ValueError("reservation region is not crossed by its connectors")
 
     expected_negative, expected_positive, expected_keepouts = _clearances(
-        reservation.orientation, reservation.region
+        reservation.orientation, reservation.region, plan.curve_radius
     )
     if isinstance(reservation.region, CanvasRegion):
         # The margin against the canvas edge is the one policy term that tracks
-        # the render's ``stroke_scale``: the stroke widens with it, the direction
-        # chevron's arms do not.  A query is built without knowing which pass
-        # measured the ledger, so this term is held to its unscaled floor.
+        # the render's ``stroke_scale`` other than through the plan's radius: the
+        # stroke widens with it, the direction chevron's arms do not.  A query is
+        # built without knowing which pass measured the ledger, so this term is
+        # held to its unscaled floor.
         on_negative = reservation.region.side in CANVAS_EDGE_ON_NEGATIVE_SIDE
         reserved_margin = (
             reservation.negative_side_clearance
@@ -3696,7 +3704,7 @@ def expected_convergence_foreign_references(
                 and first.trunk_axis.axis is second.trunk_axis.axis
                 and spans[first.id].overlaps(spans[second.id])
                 and abs(first.trunk_axis.coordinate - second.trunk_axis.coordinate)
-                < CURVE_RADIUS
+                < active_curve_radius()
             ):
                 add(first.id, second.shared_reference_ids[0])
                 add(second.id, first.shared_reference_ids[0])
@@ -3724,7 +3732,7 @@ def expected_convergence_foreign_references(
                 or not span.overlaps(demands[exit_turn.demand_ids[0]].span)
             ):
                 continue
-            clearance = max(exit_turn.spacing, CURVE_RADIUS)
+            clearance = max(exit_turn.spacing, active_curve_radius())
             if exit_turn.source_axis is trunk.axis:
                 conflicts = any(
                     longitudinal_start - clearance
@@ -3765,7 +3773,7 @@ def expected_convergence_foreign_references(
                 or not span.overlaps(reservation.span)
                 or not any(
                     abs(convergence.trunk_axis.coordinate - claim.allocation_coordinate)
-                    < max(CURVE_RADIUS, reservation.peer_clearance)
+                    < max(active_curve_radius(), reservation.peer_clearance)
                     for claim in reservation.claims
                 )
             ):

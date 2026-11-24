@@ -49,6 +49,7 @@ THEMEABLE_LAYOUT_OPTIONS: dict[str, LayoutOption] = {
         "label_angle",
         "label_offset",
         "diagonal_run",
+        "curve_radius_ratio",
         "directional",
         "font_scale",
         "stroke_scale",

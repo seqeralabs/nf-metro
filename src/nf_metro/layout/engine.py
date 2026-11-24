@@ -22,11 +22,9 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
-    CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
     ICON_STACK_LABEL_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
     LABEL_OVERLAP_TOL,
     MIN_Y_SPACING_FLOOR,
     SAME_COORD_TOLERANCE,
@@ -41,7 +39,9 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
 from nf_metro.layout.pass_metrics import (
     LayoutMetrics,
+    active_curve_radius,
     active_metrics,
+    inter_row_edge_clearance,
     label_height_approx,
 )
 
@@ -241,11 +241,8 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     run_validate_guards,
 )
 from nf_metro.layout.phases.junctions import (  # noqa: F401
-    _junction_incoming_line_count,
-    _junction_outgoing_line_count,
     _position_junctions,
     _position_merge_junction,
-    _required_junction_margin,
     _resolve_source_section_id,
     _resolve_source_xy,
 )
@@ -469,7 +466,7 @@ def _far_side_wrap_left_clearances(graph: MetroGraph) -> dict[str, float]:
         offset_step = graph_offset_step(graph)
         clearance = (
             (n - 1) * offset_step
-            + CURVE_RADIUS
+            + active_curve_radius()
             + offset_step
             + EDGE_TO_BUNDLE_CLEARANCE
         )
@@ -1469,7 +1466,7 @@ def _layout_once(
                 topology,
                 x_spacing=x_spacing,
                 y_spacing=y_spacing,
-                minimum_runway=INTER_ROW_EDGE_CLEARANCE,
+                minimum_runway=inter_row_edge_clearance(),
             ),
         )
     else:

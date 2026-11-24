@@ -16,7 +16,6 @@ from typing import Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
     graph_offset_step,
@@ -30,8 +29,13 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     station_lane_coord,
 )
-from nf_metro.layout.pass_metrics import active_metrics
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    active_metrics,
+    graph_radius_context,
+)
 from nf_metro.layout.phases._common import (
+    _station_bundle_offset_span,
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
     line_forks_within_section,
@@ -4042,7 +4046,7 @@ def _same_row_bypass_approaches(
     ctx = _build_routing_context(
         graph,
         active_metrics().diagonal_run,
-        CURVE_RADIUS,
+        active_curve_radius(),
         None if station_offsets is None else dict(station_offsets),
     )
     return [_APPROACH_BY_ARRIVAL[arrival_approach(edge, ctx)] for edge in edges]
@@ -5522,6 +5526,64 @@ def validate_linear_entry_frame_ownership(
             )
 
 
+def _station_lane_frame(
+    graph: MetroGraph, station: Station, positive_fan: set[str] | None
+) -> AxisFrame | None:
+    section = graph.sections.get(station.section_id) if station.section_id else None
+    return (
+        None if section is None else _section_lane_frame(graph, section, positive_fan)
+    )
+
+
+def drawn_bundle_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
+) -> tuple[float, float]:
+    """Min/max of a station's per-line offsets *as drawn*.
+
+    The stored offsets are positive; the section's lane sign
+    (:func:`_section_lane_frame`) turns them into the side its lines are drawn
+    on, so a vertical-flow section plots as the rotation of a horizontal one
+    (matching :func:`_tb_x_offset`).  Spanning the marker over the drawn offsets
+    keeps it centred on the lines that actually pass through the station, so a
+    one-line or off-trunk-subset station does not leave its glyph beside its own
+    track.
+    """
+    if not graph.station_lines(station.id):
+        return 0.0, 0.0
+    raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
+    frame = _station_lane_frame(graph, station, positive_fan)
+    sign = 1.0 if frame is None else frame.secondary_sign
+    return min(sign * raw_min, sign * raw_max), max(sign * raw_min, sign * raw_max)
+
+
+def drawn_lane_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """The segment across its flow that a station's lanes are drawn along.
+
+    Its ends are the outermost lanes through the station as the renderer draws
+    them, the spine of the marker it centres on them, so a route ending on any
+    of the station's lanes ends on this segment.  A rail station spans the
+    rails it uses; a lane-less station is its own point.
+    """
+    if station.rail_top_y is not None and station.rail_bottom_y is not None:
+        used = station.rail_used_ys or [station.y]
+        return (station.x, min(used)), (station.x, max(used))
+    if graph.station_is_rail(station.id):
+        return (station.x, station.y), (station.x, station.y)
+    lo, hi = drawn_bundle_span(graph, station, station_offsets, positive_fan)
+    frame = _station_lane_frame(graph, station, positive_fan)
+    if frame is not None and frame.secondary.name == "x":
+        return (station.x + lo, station.y), (station.x + hi, station.y)
+    return (station.x, station.y + lo), (station.x, station.y + hi)
+
+
 def conflicting_linear_entry_frame_assignments(
     proposed_offsets: Mapping[tuple[str, str], float],
     ownership: LinearEntryFrameOwnership,
@@ -5540,6 +5602,16 @@ def conflicting_linear_entry_frame_assignments(
 
 
 def compute_station_offsets(
+    graph: MetroGraph,
+    offset_step: float | None = None,
+) -> dict[tuple[str, str], float]:
+    """Per-station offsets of each line, at the radius *graph* was laid out
+    with (:func:`_compute_station_offsets`)."""
+    with graph_radius_context(graph):
+        return _compute_station_offsets(graph, offset_step)
+
+
+def _compute_station_offsets(
     graph: MetroGraph,
     offset_step: float | None = None,
 ) -> dict[tuple[str, str], float]:

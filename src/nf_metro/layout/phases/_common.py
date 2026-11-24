@@ -26,7 +26,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     quantize_coord,
 )
-from nf_metro.layout.pass_metrics import active_metrics
+from nf_metro.layout.pass_metrics import active_metrics, perp_port_edge_clearance
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.parser.model import (
@@ -1876,9 +1876,10 @@ def port_edge_inset(
 
     On Y it is only a vertical flow's LEFT/RIGHT port.  A horizontal flow's
     LEFT/RIGHT port is its trunk arriving or leaving, not a run crossing the box,
-    so a single line through it owes the top and bottom edges nothing here: where
-    it sits is the content padding's business, and reserving against it instead
-    grows a box into its neighbours.
+    so a single line through it owes the top and bottom edges no more than the
+    ``perp_port_edge_clearance()`` floor every port keeps along its free axis:
+    where it sits is otherwise the content padding's business, and reserving the
+    wider inset instead grows a box into its neighbours.
 
     ``lane_reach`` is how far the port's drawn bundle extends past the port
     station toward that edge (:func:`port_bundle_edge_reach`).  Both insets are
@@ -1889,10 +1890,11 @@ def port_edge_inset(
     A port the wider inset does not cover owes ``MIN_BUNDLE_EDGE_CLEARANCE`` past
     its outermost lane whenever it carries a bundle at all: a multi-line trunk
     crossing the box is drawn ink needing label room off the border, exactly as
-    an interior station's pill is (:func:`...bbox._bundle_edge_padding`).  That
-    is stricter than the ``PERP_PORT_EDGE_CLEARANCE`` floor
-    :func:`...guards._guard_ports_clear_unanchored_box_edges` enforces, the hard
-    runtime minimum for a lane of any kind.
+    an interior station's pill is (:func:`...bbox._bundle_edge_padding`).  Along
+    its free axis it never owes less than the ``perp_port_edge_clearance()``
+    floor :func:`...guards._guard_ports_clear_unanchored_box_edges` enforces, the
+    hard runtime minimum for a lane of any kind: the content padding usually
+    covers that floor, but nothing ties the two, so the reservation states it.
     """
     if port is None:
         return 0.0
@@ -1902,9 +1904,13 @@ def port_edge_inset(
             return reach + PERP_PORT_EDGE_INSET
     elif axis == "x" and port.side in (PortSide.TOP, PortSide.BOTTOM):
         return reach + PERP_PORT_EDGE_INSET
-    if reach:
-        return reach + MIN_BUNDLE_EDGE_CLEARANCE
-    return 0.0
+    free_axis = (axis == "y") == (port.side in (PortSide.LEFT, PortSide.RIGHT))
+    if not free_axis:
+        return 0.0
+    return max(
+        perp_port_edge_clearance(),
+        reach + MIN_BUNDLE_EDGE_CLEARANCE if reach else 0.0,
+    )
 
 
 def _expand_bbox_for_y(section: Section, y: float) -> None:

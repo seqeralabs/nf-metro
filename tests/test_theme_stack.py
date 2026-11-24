@@ -52,9 +52,10 @@ def test_modes_are_not_theme_names(name):
         check_stack(name)
 
 
-def test_default_themes_set_no_layout_options():
-    for name in STYLE_NAMES:
+def test_only_london_tube_sets_layout_options():
+    for name in STYLE_NAMES - {"london-tube"}:
         assert resolve_stack(name).layout == {}
+    assert resolve_stack("london-tube").layout == {"curve_radius_ratio": 3.0}
 
 
 def test_london_tube_sets_its_look_and_inherits_the_rest_from_default():

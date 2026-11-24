@@ -592,7 +592,7 @@ in pipeline order.
 - **Postcondition**: No LR/RL TOP/BOTTOM port's outermost drawn lane sits
   within `PERP_PORT_EDGE_INSET` of its section's left or right edge
   (`port_bundle_edge_reach`, as on the Y axis); adjacent columns still keep
-  `MIN_INTER_SECTION_GAP`.
+  `min_inter_section_gap()`.
 - **Invariants preserved**: Station coords; every port's own edge
   anchoring (LEFT/RIGHT ports move with the edge they are pinned to).
 - **Validate guard after**: `_guard_ports_on_boundaries`.
@@ -625,7 +625,7 @@ in pipeline order.
   grid rows in one column whose sections' content stations nearest that
   side share an X, every section shares the run's outermost edge on that
   side, except one held short by a neighbour overlapping its own row band
-  (which keeps `MIN_INTER_SECTION_GAP` of inter-column corridor). Members
+  (which keeps `min_inter_section_gap()` of inter-column corridor). Members
   of a packed cell are out of scope: they sit side-by-side along X inside
   one cell, so no common vertical edge exists. Two kinds of section break a
   run: a rail-flagged one, because `_retrofit_section_rails_phase`
@@ -1868,10 +1868,13 @@ They are design evidence, not part of this specification.
   before its own earlier translations would be stale.
   `measure_row_gap_clearance` (`layout/phases/bbox.py`) states the row-axis
   box-clearance demands. Convergence planning can publish a column-axis
-  `BoundaryClearanceRequirement` when a landing pair lacks runway, and
-  `measure_boundary_clearance_requirements` re-measures it against live box
-  edges. `measure_drawn_corridor_clearance` states any positive-side
-  containment owed by the strict post-grant ledger. The demand vocabulary is
+  `BoundaryClearanceRequirement` when a landing pair lacks runway, a merge
+  feeder's L-shaped landing publishes a row-axis one, anchored on its entry
+  port, for each earlier-row box it passes beneath short of
+  `inter_row_edge_clearance`, and `measure_boundary_clearance_requirements`
+  re-measures each against live box edges (or the anchor station).
+  `measure_drawn_corridor_clearance` states any positive-side containment owed
+  by the strict post-grant ledger. The demand vocabulary is
   `layout/settlement_demand.py`, held apart from settlement so a layout phase
   can state a demand without importing the routing stack the ledger is built on.
   Rail layouts raise no clearance demand: their row pitch comes from the
@@ -1909,7 +1912,7 @@ They are design evidence, not part of this specification.
   last leg stops at a station of some box has entered that box just as surely, so
   `RouteReservation.landing_section_ids` names it and
   `_row_region_measurement` / `_column_region_measurement` drop it from both
-  sides. Without that, an entry lead-in is charged `INTER_ROW_HEADER_CLEARANCE`
+  sides. Without that, an entry lead-in is charged `inter_row_header_clearance()`
   off the header of the very box it is arriving at, which nothing can satisfy:
   the leg's own endpoint is inside the box, so no widening of the boundary brings
   it into band, and settlement spends real height chasing a demand that cannot
@@ -1994,7 +1997,7 @@ They are design evidence, not part of this specification.
   filed lanes states a boundary wide enough for one stroke where two are drawn,
   and the second is left wherever the narrow gap forced it -- in
   `examples/topologies/merge_around_below_leftmost.mmd`, a merge trunk's return
-  leg 14px below a box edge that asks `INTER_ROW_EDGE_CLEARANCE` of it, ungated
+  leg 14px below a box edge that asks `inter_row_edge_clearance()` of it, ungated
   because it carries no claim.
 - **Postcondition**: No boundary still owes what it was measured for. For a
   clearance demand that is one count, re-measured on the settled geometry by
@@ -2133,7 +2136,7 @@ They are design evidence, not part of this specification.
   polylines. A section box contributes its edge only over the corridor's declared
   longitudinal interval. A header contributes its drawn keepout only where that
   keepout overlaps the same interval and protrudes toward the corridor. The
-  effective clearance is `INTER_ROW_EDGE_CLEARANCE` for horizontal box edges,
+  effective clearance is `inter_row_edge_clearance()` for horizontal box edges,
   `EDGE_TO_BUNDLE_CLEARANCE` for vertical box edges, and
   `SECTION_HEADER_ROUTE_CLEARANCE` for header ink. The corridor-normalisation
   pass seats movable canvas runs inside the corresponding box-edge band. Planned
@@ -2417,7 +2420,7 @@ from consuming reserved corridor clearance.
 
 `SECTION_HEADER_PROTRUSION` above a box top is the prospective band the layout
 reserves for that box's caption, and `section_header_top` states it. Gap routing
-is charged against it (`section_header_safe_cap`, `INTER_ROW_HEADER_CLEARANCE`)
+is charged against it (`section_header_safe_cap`, `inter_row_header_clearance()`)
 before any caption has a position: the caption is picked from the routed
 polylines it has to avoid, so routing against the final caption would require a
 route-place-route fixpoint. What that prospective reservation buys is that the

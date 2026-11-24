@@ -16,12 +16,9 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
     CROSS_ROW_THRESHOLD,
-    CURVE_RADIUS,
     FOLD_MARGIN,
     ICON_TERMINUS_FORK_LEAD,
     LABEL_BBOX_MARGIN,
-    MIN_STATION_FLAT_LENGTH,
-    MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     OFF_TRACK_OUTPUT_TAIL,
 )
@@ -35,7 +32,12 @@ from nf_metro.layout.geometry import (
 from nf_metro.layout.labels import (
     label_text_width,
 )
-from nf_metro.layout.pass_metrics import station_radius_approx
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    min_station_flat_length,
+    min_straight_edge,
+    station_radius_approx,
+)
 from nf_metro.layout.routing.bundle import (
     build_tapered_bundle,
 )
@@ -174,10 +176,10 @@ def _route_entry_bow(
     if not blockers:
         return None
 
-    clearance = station_radius_approx() + CURVE_RADIUS
+    clearance = station_radius_approx() + active_curve_radius()
     over_start = min(st.x for st in blockers) - clearance
     over_end = max(st.x for st in blockers) + clearance
-    height = station_radius_approx() + CURVE_RADIUS
+    height = station_radius_approx() + active_curve_radius()
     min_straight = ctx.curve_radius + MIN_STRAIGHT_PORT
 
     lead_end = over_start - height
@@ -622,7 +624,7 @@ def _route_diagonal(
     if src.is_port or tgt.is_port:
         min_straight = ctx.curve_radius + MIN_STRAIGHT_PORT
     else:
-        min_straight = MIN_STRAIGHT_EDGE
+        min_straight = min_straight_edge()
 
     # Extend straight run past labels at fork/join stations, but only
     # when there is enough horizontal room.  If label clearance would
@@ -683,7 +685,7 @@ def _route_diagonal(
     # Bypass-V edges: bias the diagonal toward V on both halves with
     # equal V-side flat reservations so V sits at the centre of the
     # straight segment of the bypass loop.
-    v_flat_half = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    v_flat_half = active_curve_radius() + min_station_flat_length() / 2
     diagonal_run = ctx.diagonal_run
     tgt_is_bypass_v = tgt.is_hidden and is_bypass_v(edge.target)
     src_is_bypass_v = src.is_hidden and is_bypass_v(edge.source)
@@ -693,13 +695,13 @@ def _route_diagonal(
         is_join_flag = True
         tgt_min = v_flat_half
         if src_min + tgt_min + diagonal_run > abs(dx):
-            tgt_min = MIN_STRAIGHT_EDGE
+            tgt_min = min_straight_edge()
     elif src_is_bypass_v:
         is_fork_flag = True
         is_join_flag = False
         src_min = v_flat_half
         if src_min + tgt_min + diagonal_run > abs(dx):
-            src_min = MIN_STRAIGHT_EDGE
+            src_min = min_straight_edge()
 
     # A steep multi-line bypass bundle descending past an in-line terminal is
     # squeezed through the narrow channel between that terminal's name label and

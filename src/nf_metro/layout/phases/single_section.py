@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 
 from nf_metro.layout.constants import (
-    CURVE_RADIUS,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
     EXIT_GAP_MULTIPLIER,
@@ -17,7 +16,6 @@ from nf_metro.layout.constants import (
     LABEL_MARGIN,
     LABEL_PAD,
     LINE_GAP,
-    MIN_STATION_FLAT_LENGTH,
     SAME_COORD_TOLERANCE,
     TB_LINE_Y_OFFSET,
     TERMINUS_ICON_GAP,
@@ -45,6 +43,7 @@ from nf_metro.layout.ordering import (
     seated_contender_helpers,
 )
 from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
     active_font_scale,
     active_metrics,
     diagonal_label_offset,
@@ -52,6 +51,7 @@ from nf_metro.layout.pass_metrics import (
     icon_width_approx,
     label_height_approx,
     metrics_context,
+    min_station_flat_length,
     station_radius_approx,
 )
 from nf_metro.layout.phases._common import (
@@ -443,7 +443,7 @@ def _layout_single_section(
     # Bypass V helpers (``__bypass_``) have no rendered marker.  Use
     # them to extend the bbox only when V sits beyond the real-station
     # extent, and only by enough for the diversion curve to clear the
-    # section edge (~CURVE_RADIUS + half a station flat) - much less
+    # section edge (~the corner radius + half a station flat) - much less
     # than the full station_y_padding (which is reserved for label
     # clearance around real stations).
     real_for_bbox = [s for s in sub.stations.values() if not is_bypass_v(s.id)]
@@ -455,7 +455,7 @@ def _layout_single_section(
     ys = [s.y for s in real_for_bbox]
     extra_label_h = _multiline_label_padding(sub)
     y_pad = section_y_padding + extra_label_h
-    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    v_curve_clearance = active_curve_radius() + min_station_flat_length() / 2
     y_min = min(ys)
     y_max = max(ys)
     section.bbox_x = min(xs) - section_x_padding

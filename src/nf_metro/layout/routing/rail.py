@@ -19,14 +19,16 @@ __all__ = ["route_rail_edges"]
 from collections import defaultdict
 
 from nf_metro.layout.constants import (
-    CURVE_RADIUS,
-    MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
     RAIL_TERMINUS_FAN_LEAD,
     X_SPACING,
     graph_offset_step,
 )
-from nf_metro.layout.pass_metrics import active_metrics
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    active_metrics,
+    min_straight_edge,
+)
 from nf_metro.layout.routing.bundle import build_offset_bundle, build_tapered_bundle
 from nf_metro.layout.routing.common import (
     OffsetRegime,
@@ -192,7 +194,7 @@ def _route_off_track_elbow(
         [member],
         centerline,
         transition_leg=1,
-        base_radius=CURVE_RADIUS,
+        base_radius=active_curve_radius(),
         bundle_offsets=bundle,
         is_inter_section=False,
         normalize_exempt=False,
@@ -227,8 +229,8 @@ def _diagonal_placement(
         sx,
         tx,
         diagonal_run=diag,
-        src_min_straight=MIN_STRAIGHT_EDGE,
-        tgt_min_straight=MIN_STRAIGHT_EDGE,
+        src_min_straight=min_straight_edge(),
+        tgt_min_straight=min_straight_edge(),
         is_fork=is_fork and not is_join,
         is_join=is_join and not is_fork,
     )
@@ -314,7 +316,7 @@ def _route_inter_section_connector(
     return build_offset_bundle(
         members,
         centerline,
-        base_radius=CURVE_RADIUS,
+        base_radius=active_curve_radius(),
         is_inter_section=False,
     )
 

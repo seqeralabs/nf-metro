@@ -14,11 +14,7 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_HEADER_PROTRUSION,
     graph_offset_step,
@@ -27,6 +23,12 @@ from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     cotravelling_lanes_fuse,
     spans_share_corridor,
+)
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    inter_row_edge_clearance,
+    inter_row_header_clearance,
+    min_corridor_y_overlap,
 )
 from nf_metro.layout.route_plan import ExitTurnPlanId
 from nf_metro.layout.routing.centrelines import (
@@ -88,7 +90,6 @@ from nf_metro.layout.routing.common import (
     x_follows_trunk_direction,
 )
 from nf_metro.layout.routing.context import (
-    _MergeRouting,
     _resolve_section_col,
     _RoutingCtx,
 )
@@ -177,7 +178,7 @@ def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
     """Split a bucket into corridors of substantially y-overlapping channels.
 
     Only channels whose y-spans overlap by more than
-    :data:`MIN_CORRIDOR_Y_OVERLAP` share a true corridor; independent
+    ``min_corridor_y_overlap()`` share a true corridor; independent
     vertical runs at different heights - including two stacked descents that
     merely touch at a shared elbow band - must NOT be merged, so the gap
     layout can distribute them across the gap width instead of packing their
@@ -372,7 +373,7 @@ def _required_channel_clearance(
     if a.down is b.down:
         return 0.0
     overlap = min(a.y_hi, b.y_hi) - max(a.y_lo, b.y_lo)
-    if overlap <= MIN_CORRIDOR_Y_OVERLAP:
+    if overlap <= min_corridor_y_overlap():
         return 0.0
     return cotravelling_lane_clearance(
         same_line=a.route.line_id == b.route.line_id,
@@ -1469,23 +1470,6 @@ def _snap_group(group: _Coincidence, ctx: _RoutingCtx) -> None:
             _set_vchannel_x(ch, ref_x)
 
 
-def _snap_merge_feeder_group(group: _Coincidence, graph: MetroGraph) -> None:
-    """Snap merge-feeder branches onto the trunk descent, carrying each tail.
-
-    A feeder routed as a merge branch (:func:`_route_merge_branch`) opens with a
-    descent and turns onto a short tail that overlaps the trunk's converging run
-    toward the entry port.  Snapping the descent onto the trunk's shared column
-    moves the descent leg but leaves the tail's far end at its routing-time X, so
-    a descent that travels far to reach the trunk drags the tail's terminus past
-    the trunk's own turn as a dead stub.  Translate the tail by the same shift
-    the descent took, preserving its intended short overlap so it terminates on
-    the trunk rather than overshooting it.
-    """
-    ref_x = group.ref_x
-    for ch in group.channels:
-        _seat_merge_feeder_opening(ch.route, ref_x, graph)
-
-
 def _seat_merge_feeder_opening(
     route: RoutedPath,
     coordinate: float,
@@ -1628,36 +1612,21 @@ def _coincide_same_line_tracks(routes: list[RoutedPath], ctx: _RoutingCtx) -> No
     duplicate strokes of one line.  Each such group should read as ONE track
     that splits only where the routes genuinely diverge.
 
-    Four kinds of same-line track contribute. Three fuse near-parallel
-    VERTICAL legs onto a shared reference X:
+    Final descents into one entry port fuse onto a shared reference X, each
+    member resetting its flanking corners since a single track has no
+    concentric nesting.  Opening descents leaving one source are settled by
+    :func:`_coincide_fanout_opening_descents`, and a merge's same-column
+    feeders are routed down the trunk's own descent by their handler
+    (``_merge_branch_lead_x``), so neither needs fusing here.
 
-    * convergent -- final descents into one entry port;
-    * divergent -- opening descents leaving one source;
-    * merge feeders -- a merge's same-column feeders, onto the trunk's descent.
-
-    They are fused in that order so a route touched by more than one kind (a
-    short merge feeder whose opening descent is also its final approach) settles
-    on the last group's reference X; each member snaps onto its group's X,
-    resetting its flanking corners since a single track has no concentric
-    nesting.
-
-    The fourth, :func:`_join_fanout_upstream_tails`, closes the HORIZONTAL
-    handoff seam at a fan-out junction: it extends the upstream tail so it
-    meets the paired downstream route's start. It runs last because the
-    downstream start X it reads is the materialised value the earlier passes
-    (and the vertical fusions above) leave behind, not a routing-time value
-    the handler could have anticipated.
+    :func:`_join_fanout_upstream_tails` then closes the HORIZONTAL handoff seam
+    at a fan-out junction: it extends the upstream tail so it meets the paired
+    downstream route's start.  It runs last because the downstream start X it
+    reads is the materialised value the fusion above leaves behind, not a
+    routing-time value the handler could have anticipated.
     """
     for group in _convergent_port_groups(routes, ctx):
         _snap_group(group, ctx)
-    for group in _merge_feeder_groups(routes, ctx):
-        movable_channels = [
-            channel for channel in group.channels if not _planner_owns_channel(channel)
-        ]
-        if movable_channels:
-            _snap_merge_feeder_group(
-                _Coincidence(movable_channels, group.ref_x), ctx.graph
-            )
     _join_fanout_upstream_tails(routes, ctx)
 
 
@@ -2739,7 +2708,7 @@ def _nest_bypass_above_over_top_wrap(
         # row, the deepest lane clear of that row.  Placement reserves a gap
         # wide enough (see ``_inter_row_routing_minimums``) that this lane sits
         # above the wrap's peak, so the local wrap nests beneath the bundle.
-        target = gap_top + INTER_ROW_EDGE_CLEARANCE
+        target = gap_top + inter_row_edge_clearance()
         max_leg_y = max(y for _r, _k, y in crossing)
         delta = min(target - max_leg_y, 0.0)
         if abs(delta) <= COORD_TOLERANCE:
@@ -2849,7 +2818,7 @@ def _reseat_concentric_flanking(
     axis: int,
     offset_in: float = 0.0,
     offset_out: float = 0.0,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float | None = None,
     base_radius_out: float | None = None,
 ) -> None:
     """Move the ``points[k] -> points[k+1]`` segment onto *new_coord* and re-derive
@@ -2865,6 +2834,8 @@ def _reseat_concentric_flanking(
     two corners may pass different reference radii when they belong to separate
     concentric families; otherwise both use ``base_radius``.
     """
+    if base_radius is None:
+        base_radius = active_curve_radius()
     pts = rp.points
     for j in (k, k + 1):
         px, py = pts[j]
@@ -2895,7 +2866,7 @@ def _set_vchannel_x(
     offset: float = 0.0,
     *,
     offset_out: float | None = None,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float | None = None,
     base_radius_out: float | None = None,
 ) -> None:
     """Move a vertical channel to *new_x*, re-deriving its flanking corners.
@@ -2913,6 +2884,8 @@ def _set_vchannel_x(
     ``base_radius_out`` gives the outgoing corner family its own reference.
     When omitted, both corners use ``base_radius``.
     """
+    if base_radius is None:
+        base_radius = active_curve_radius()
     _reseat_concentric_flanking(
         ch.route,
         ch.idx,
@@ -2931,7 +2904,7 @@ def _set_htrunk_y(
     new_y: float,
     offset_in: float = 0.0,
     offset_out: float = 0.0,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float | None = None,
     base_radius_out: float | None = None,
 ) -> None:
     """Move an interior horizontal trunk (``points[k]->[k+1]``) to *new_y*.
@@ -2949,6 +2922,8 @@ def _set_htrunk_y(
     the line's rank displacement, but the outgoing corner -- where it peels off
     to its own port, alone -- keeps the base radius (zero).
     """
+    if base_radius is None:
+        base_radius = active_curve_radius()
     _reseat_concentric_flanking(
         rp,
         k,
@@ -3358,75 +3333,6 @@ def _descent_crosses_section(graph: MetroGraph, ch: _VChannel, x: float) -> bool
         for ep in (ch.route.edge.source, ch.route.edge.target)
     )
     return _section_intrudes(graph, x, ch.y_lo, ch.y_hi, exclude=own)
-
-
-def _merge_trunks_and_feeders(
-    routes: list[RoutedPath], merge: _MergeRouting
-) -> Iterator[tuple[str, RoutedPath, list[RoutedPath]]]:
-    """Yield ``(merge_id, trunk_route, other_feeder_routes)`` per trunked merge.
-
-    Grouping the routes by target rather than looking each merge edge up by key
-    drops the feeders that were never routed as paths of their own: a port
-    predecessor is redirected into the merge instead (see
-    ``_classify_merge_edges``), so its edge has no route to find.  A merge whose
-    trunk carrier itself did not route is skipped: it has no channel for the
-    others to converge onto.  An empty feeder list yields normally, leaving
-    callers to iterate nothing rather than guard a case.
-    """
-    if not merge.trunk_source:
-        return
-    by_target: dict[str, list[RoutedPath]] = defaultdict(list)
-    for rp in routes:
-        if rp.is_inter_section and rp.edge.target in merge.trunk_source:
-            by_target[rp.edge.target].append(rp)
-    for mjid, trunk_src in merge.trunk_source.items():
-        trunk_rp: RoutedPath | None = None
-        others: list[RoutedPath] = []
-        for rp in by_target[mjid]:
-            if rp.edge.source == trunk_src:
-                trunk_rp = rp
-            else:
-                others.append(rp)
-        if trunk_rp is not None:
-            yield mjid, trunk_rp, others
-
-
-def _merge_feeder_groups(
-    routes: list[RoutedPath], ctx: _RoutingCtx
-) -> list[_Coincidence]:
-    """Same-column merge feeders, grouped to fuse onto the trunk's descent.
-
-    A merge with a trunk routes every other feeder as a branch dropping onto
-    the trunk's bypass channel.  Feeders sharing the trunk's source column
-    descend through the same inter-column gap; left on their own per-route X
-    they read as parallel same-colour tracks (and, since both segments
-    terminate at the merge, trip the same-line parallel-descent guard).  Each
-    same-column feeder's opening descent fuses onto the trunk's so the
-    converging line drops as one track, splitting only where each feeder's
-    horizontal lead peels off at its own Y.  Feeders in other columns descend
-    in their own gap and converge along the shared horizontal channel, so they
-    are left alone.
-    """
-    graph = ctx.graph
-    groups: list[_Coincidence] = []
-    for mjid, trunk_rp, branch_rps in _merge_trunks_and_feeders(routes, ctx.merge):
-        trunk_src_st = graph.stations[ctx.merge.trunk_source[mjid]]
-        trunk_ch = _initial_fanout_descent(trunk_rp)
-        if trunk_ch is None:
-            continue
-        trunk_col = _resolve_section_col(graph, trunk_src_st)
-        members: list[_VChannel] = []
-        for rp in branch_rps:
-            src_st = graph.stations.get(rp.edge.source)
-            if src_st is None or _resolve_section_col(graph, src_st) != trunk_col:
-                continue
-            ch = _initial_fanout_descent(rp)
-            if ch is None:
-                continue
-            members.append(ch)
-        if members:
-            groups.append(_Coincidence(members, trunk_ch.x))
-    return groups
 
 
 def _land_feeder_on_run(rp: RoutedPath, run: HTrunkSeg, ctx: _RoutingCtx) -> None:
@@ -4060,7 +3966,7 @@ def _clamp_inter_row_band_top(ctx: _RoutingCtx, top: float, total: float) -> flo
 
     Without a reservation the stack starts at the cluster *top* and slides
     upward if its bottom would breach the next row's header clearance
-    (``INTER_ROW_HEADER_CLEARANCE`` below the inter-row gap's lower edge),
+    (``inter_row_header_clearance()`` below the inter-row gap's lower edge),
     keeping the inter-band gap intact rather than crowding the lower band into
     the header.
     """
@@ -4071,7 +3977,7 @@ def _clamp_inter_row_band_top(ctx: _RoutingCtx, top: float, total: float) -> flo
     if band is None:
         return top
     _gap_top, gap_bottom = band
-    limit = gap_bottom - INTER_ROW_HEADER_CLEARANCE
+    limit = gap_bottom - inter_row_header_clearance()
     if top + total > limit:
         return limit - total
     return top
