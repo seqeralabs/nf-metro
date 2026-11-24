@@ -243,6 +243,14 @@
   "note": "Resolved metro graphs are acyclic, so feeder tracing reaches a port or a rejection return before revisiting a connector. Loop exhaustion is the defensive cycle stop.",
   "status": "defensive"
  },
+ "common.py::if diag_end < diag_start:::#1": {
+  "note": "Degenerate-collapse clamp for an ascending diagonal: fires only when the run is shorter than 2*MIN_STRAIGHT_EDGE (20px). Every caller feeds grid-placed station coordinates whose run-axis separation is at least one grid pitch (Y_SPACING=40 / X_SPACING=60); _route_entry_runway additionally pre-guards with `room < src_min + diagonal_run`. The 20px collapse threshold is never reached.",
+  "status": "defensive"
+ },
+ "common.py::if diag_end > diag_start:::#1": {
+  "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
+  "status": "defensive"
+ },
  "context.py::if _is_row_level_bottom_row_climb(::#1": {
   "note": "_fan_bypass_band skips a fan's bypass branch that is a bottommost-row climb to a higher-row entry port over a clear row-level corridor: emission keeps that branch at the source's own Y, so pulling the shared bypass band down for it would desync the derived exit-turn plan. tests/fixtures/topologies/twoline_fanout_up.mmd reaches the skip arm, but the sweep's corpus roots do not include tests/fixtures/topologies, so no swept fixture evaluates it.",
   "status": "needs-review"
@@ -1453,14 +1461,6 @@
  },
  "tb_handlers.py::if crossing_x is not None:::#1": {
   "note": "Pair of context.py::if not indices: - the helper returns None only when no bundled feeder reaches the port, but a horizontal-flow section taking a perpendicular entry is always fed by a bundled inter-section edge, so crossing_x resolves.  The crossing_x-is-None fall-through is a defensive guard, never taken across the corpus.",
-  "status": "defensive"
- },
- "tb_handlers.py::if diag_end < diag_start:::#1": {
-  "note": "Degenerate-collapse clamp for an ascending diagonal: fires only when the run is shorter than 2*MIN_STRAIGHT_EDGE (20px). Every caller feeds grid-placed station coordinates whose run-axis separation is at least one grid pitch (Y_SPACING=40 / X_SPACING=60); _route_entry_runway additionally pre-guards with `room < src_min + diagonal_run`. The 20px collapse threshold is never reached.",
-  "status": "defensive"
- },
- "tb_handlers.py::if diag_end > diag_start:::#1": {
-  "note": "Descending-run mirror of the ascending collapse clamp (#1 of `if diag_end < diag_start:`): fires only when |run| < 2*MIN_STRAIGHT_EDGE (20px), but connected diagonal endpoints are always >= one grid pitch (40/60px) apart on the run axis. Unreachable degenerate-geometry guard.",
   "status": "defensive"
  },
  "tb_handlers.py::if tgt_sec is not None and tgt_sec.direction not in (\"TB\", \"BT\"):::#1": {

@@ -44,6 +44,7 @@ from nf_metro.layout.routing.centrelines import (
 )
 from nf_metro.layout.routing.common import (
     RoutedPath,
+    _compute_diagonal_placement,
 )
 from nf_metro.layout.routing.context import (
     _get_offset,
@@ -53,10 +54,7 @@ from nf_metro.layout.routing.context import (
 from nf_metro.layout.routing.perp import (
     _perp_riser_lateral,
 )
-from nf_metro.layout.routing.tb_handlers import (
-    _compute_diagonal_placement,
-    entry_runway_placement,
-)
+from nf_metro.layout.routing.tb_handlers import entry_runway_placement
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,

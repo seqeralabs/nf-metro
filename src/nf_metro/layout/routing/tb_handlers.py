@@ -37,6 +37,7 @@ from nf_metro.layout.routing.centrelines import (
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
+    _compute_diagonal_placement,
     trailing_perp_side,
 )
 from nf_metro.layout.routing.context import (
@@ -135,55 +136,6 @@ def _section_link_route(
         points=[(sx, sy), (tx, ty)],
         offset_regime=OffsetRegime.BAKED,
     )
-
-
-def _compute_diagonal_placement(
-    run_src: float,
-    run_tgt: float,
-    diagonal_run: float,
-    src_min_straight: float,
-    tgt_min_straight: float,
-    is_fork: bool,
-    is_join: bool,
-) -> tuple[float, float]:
-    """Compute diagonal start/end on the run axis.
-
-    Shared by ``_route_diagonal`` (horizontal run axis) and
-    ``_route_tb_diagonal`` (vertical run axis).  The caller maps the
-    result back to (x, y) coordinates.
-
-    Returns (diag_start, diag_end) in run-axis coordinates.
-    """
-    delta = run_tgt - run_src
-    sign = 1.0 if delta > 0 else -1.0
-    half_diag = diagonal_run / 2
-
-    # Bias diagonal toward fork/join stations
-    if is_fork:
-        mid = run_src + sign * (src_min_straight + half_diag)
-    elif is_join:
-        mid = run_tgt - sign * (tgt_min_straight + half_diag)
-    else:
-        mid = (run_src + run_tgt) / 2
-
-    diag_start = mid - sign * half_diag
-    diag_end = mid + sign * half_diag
-
-    # Clamp to ensure minimum straight runs at endpoints
-    if sign > 0:
-        diag_start = max(diag_start, run_src + src_min_straight)
-        diag_end = min(diag_end, run_tgt - tgt_min_straight)
-        if diag_end < diag_start:
-            midpoint = (diag_start + diag_end) / 2
-            diag_start = diag_end = midpoint
-    else:
-        diag_start = min(diag_start, run_src - src_min_straight)
-        diag_end = max(diag_end, run_tgt + tgt_min_straight)
-        if diag_end > diag_start:
-            midpoint = (diag_start + diag_end) / 2
-            diag_start = diag_end = midpoint
-
-    return diag_start, diag_end
 
 
 def _route_tb_diagonal(
