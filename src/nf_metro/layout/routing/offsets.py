@@ -17,7 +17,6 @@ from typing import Literal, NamedTuple
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     CURVE_RADIUS,
-    DIAGONAL_RUN,
     OFFSET_STEP,
     SAME_Y_TOLERANCE,
     graph_offset_step,
@@ -31,6 +30,7 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     station_lane_coord,
 )
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
@@ -3900,7 +3900,7 @@ def _same_row_bypass_approaches(
 
     ctx = _build_routing_context(
         graph,
-        DIAGONAL_RUN,
+        active_metrics().diagonal_run,
         CURVE_RADIUS,
         None if station_offsets is None else dict(station_offsets),
     )

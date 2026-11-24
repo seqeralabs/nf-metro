@@ -19,9 +19,9 @@ from nf_metro.layout.constants import (
     MIN_STATION_FLAT_LENGTH,
     SAME_COORD_TOLERANCE,
     TB_LINE_Y_OFFSET,
-    TERMINUS_ICON_CLEARANCE,
-    TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_ICON_GAP,
+    TERMINUS_ICON_ROOM,
+    TERMINUS_ICON_ROOM_V,
 )
 from nf_metro.layout.geometry import (
     Axis,
@@ -43,6 +43,7 @@ from nf_metro.layout.pass_metrics import (
     diagonal_label_offset,
     icon_half_height_approx,
     icon_width_approx,
+    label_height_approx,
     station_radius_approx,
 )
 from nf_metro.layout.phases._common import (
@@ -760,7 +761,7 @@ def _multiline_track_spacing(sub: MetroGraph, y_spacing: float) -> float:
     for both labels plus clearance.  Returns *y_spacing* unchanged when
     no multi-line labels are present.
     """
-    font_height = FONT_HEIGHT * active_font_scale()
+    font_height = label_height_approx()
     max_text_h = font_height
     for s in sub.stations.values():
         if "\n" in s.label:
@@ -778,7 +779,7 @@ def _multiline_track_spacing(sub: MetroGraph, y_spacing: float) -> float:
 
 def _multiline_label_padding(sub: MetroGraph) -> float:
     """Return extra bbox Y padding for the tallest multi-line label."""
-    font_height = FONT_HEIGHT * active_font_scale()
+    font_height = label_height_approx()
     max_extra = 0.0
     for s in sub.stations.values():
         if "\n" in s.label:
@@ -1163,27 +1164,15 @@ def _terminus_icon_clearance(
 ) -> float:
     """Compute clearance needed for *n_icons* file icons side-by-side.
 
-    The base ``TERMINUS_ICON_CLEARANCE`` covers one icon (station_radius +
-    gap + icon_width + margin).  Each additional icon adds the per-icon
-    centre-to-centre step computed by the renderer's
-    ``caption_aware_icon_step`` -- widened when adjacent captions would
-    overrun the default ``ICON_INTER_GAP`` step.
-
-    Layout doesn't know the theme, so caption widths are estimated
-    using the default label size (14px, matches built-in themes).
-    Slight over-budget is harmless: bbox just gets a few extra px of
-    right padding.
-
-    ``TERMINUS_ICON_CLEARANCE`` bakes in the default (unscaled) icon width;
-    under an active ``font_scale`` the icon itself grows to keep its label
-    from being shrink-to-fit clamped, so the excess over that default width
-    is added back in to keep the reservation matching the drawn icon.
+    ``TERMINUS_ICON_ROOM`` plus the theme's icon width covers one icon. Each
+    additional icon adds the per-icon centre-to-centre step computed by the
+    renderer's ``caption_aware_icon_step`` -- widened when adjacent captions
+    would overrun the default ``ICON_INTER_GAP`` step.
     """
-    icon_width_growth = icon_width_approx() - active_metrics().icon_width
+    clearance = TERMINUS_ICON_ROOM + icon_width_approx()
     if n_icons <= 1:
-        return TERMINUS_ICON_CLEARANCE + icon_width_growth
-    extra = (n_icons - 1) * _terminus_icon_step(n_icons, names)
-    return TERMINUS_ICON_CLEARANCE + icon_width_growth + extra
+        return clearance
+    return clearance + (n_icons - 1) * _terminus_icon_step(n_icons, names)
 
 
 def _terminus_icon_step(n_icons: int, names: list[str] | None) -> float:
@@ -1191,9 +1180,9 @@ def _terminus_icon_step(n_icons: int, names: list[str] | None) -> float:
 
     Mirrors the renderer's ``caption_aware_icon_step``, which widens the
     default ``ICON_INTER_GAP`` step when adjacent captions would overrun it.
-    Layout doesn't know the theme, so caption widths are estimated using the
-    default label size (14px, matches built-in themes); slight over-budget is
-    harmless, costing only a few px of section padding.
+    Caption widths are estimated at a 14px label size, no narrower than any
+    built-in theme draws them; slight over-budget costs only a few px of
+    section padding.
     """
     from nf_metro.render.constants import ICON_NAME_FONT_SCALE
     from nf_metro.render.svg import caption_aware_icon_step
@@ -1259,20 +1248,14 @@ def _terminus_icon_clearance_vertical(
     so each additional icon adds the icon height plus (when captions are
     present) a caption row, matching the renderer's TB step.
 
-    ``TERMINUS_ICON_CLEARANCE_V`` bakes in the default (unscaled) icon
-    height; under an active ``font_scale`` the icon itself grows, so the
-    excess over that default height is added back in (see
-    ``_terminus_icon_clearance``'s matching horizontal-axis note).
+    ``TERMINUS_ICON_ROOM_V`` plus the theme's icon height covers one icon.
     """
     extra_caption_height = (
         _icon_caption_height(caption_line_count) - _icon_caption_height()
         if caption_line_count > 1
         else 0.0
     )
-    icon_height_growth = 2 * (
-        icon_half_height_approx() - active_metrics().icon_half_height
-    )
-    base = TERMINUS_ICON_CLEARANCE_V + extra_caption_height + icon_height_growth
+    base = TERMINUS_ICON_ROOM_V + 2 * icon_half_height_approx() + extra_caption_height
     if n_icons <= 1:
         return base
     caption_room = (

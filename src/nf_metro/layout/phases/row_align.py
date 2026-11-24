@@ -8,7 +8,6 @@ from collections.abc import Iterator
 from typing import NamedTuple
 
 from nf_metro.layout.constants import (
-    FONT_HEIGHT,
     MIN_PORT_STATION_GAP,
     PERP_PORT_EDGE_INSET,
     SAME_COORD_TOLERANCE,
@@ -22,8 +21,8 @@ from nf_metro.layout.geometry import (
     shift_section,
 )
 from nf_metro.layout.pass_metrics import (
-    active_font_scale,
     active_metrics,
+    label_height_approx,
     station_radius_approx,
 )
 from nf_metro.layout.phases._common import (
@@ -124,7 +123,7 @@ def _row_group_grid_spacing(
         (max_lines - 1) * offset_step
         + 2 * station_radius_approx()
         + active_metrics().label_offset
-        + FONT_HEIGHT * active_font_scale()
+        + label_height_approx()
     )
     effective_y_spacing = max(y_spacing, min_track_gap)
     return grid_slots, max_y_pad, effective_y_spacing, section_class

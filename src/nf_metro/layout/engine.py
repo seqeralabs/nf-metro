@@ -25,7 +25,6 @@ from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
-    FONT_HEIGHT,
     ICON_STACK_LABEL_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
     LABEL_OVERLAP_TOL,
@@ -40,7 +39,11 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
-from nf_metro.layout.pass_metrics import LayoutMetrics, active_metrics
+from nf_metro.layout.pass_metrics import (
+    LayoutMetrics,
+    active_metrics,
+    label_height_approx,
+)
 
 if TYPE_CHECKING:
     from nf_metro.render.style import Theme
@@ -387,8 +390,8 @@ def compute_min_y_spacing(
     ICON_STACK_LABEL_CLEARANCE``.  A terminus icon's two extents come from
     :func:`~nf_metro.layout.phases.single_section.terminus_cross_extents`
     (icon body, plus a stacked back page above and a caption below); a
-    labelled station's is ``LABEL_OFFSET + FONT_HEIGHT +
-    DESCENDER_CLEARANCE``.  We take the worst case across all candidate
+    labelled station's is the label offset, the label's line height and
+    ``DESCENDER_CLEARANCE``.  We take the worst case across all candidate
     pairs in every LR/RL section, then clamp to ``floor`` so a label-light
     graph stays at the default pitch.
 
@@ -402,12 +405,10 @@ def compute_min_y_spacing(
     The result is applied uniformly to the whole render -- the grid
     stays global, no per-section overrides.
     """
-    from nf_metro.layout.pass_metrics import active_font_scale
     from nf_metro.layout.phases.single_section import terminus_cross_extents
 
-    scale = active_font_scale()
     label_extent = (
-        active_metrics().label_offset + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
+        active_metrics().label_offset + label_height_approx() + DESCENDER_CLEARANCE
     )
     clearance = ICON_STACK_LABEL_CLEARANCE
 

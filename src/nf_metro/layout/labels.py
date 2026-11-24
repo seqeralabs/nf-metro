@@ -27,7 +27,6 @@ from nf_metro.layout.constants import (
     COLLISION_MULTIPLIER,
     DESCENDER_CLEARANCE,
     DIAGONAL_SLOPE_RATIO,
-    FONT_HEIGHT,
     LABEL_BBOX_MARGIN,
     LABEL_MARGIN,
     LABEL_NUDGE_MAX,
@@ -52,6 +51,7 @@ from nf_metro.layout.pass_metrics import (
     active_metrics,
     diagonal_label_offset,
     label_font_size_approx,
+    label_height_approx,
     station_radius_approx,
     station_stroke_approx,
 )
@@ -109,7 +109,7 @@ def label_glyph_advance_width(
 ) -> float:
     """Rendered pixel width of the widest line in a (possibly multi-line) label.
 
-    Uses the active deterministic metrics face at :data:`LABEL_FONT_SIZE`,
+    Uses the active deterministic metrics face at the theme's label size,
     scaled by the graph's font scale.
     """
     style = text_style(label_font_size_approx(), "bold")
@@ -118,7 +118,7 @@ def label_glyph_advance_width(
 
 def _label_text_height(label: str) -> float:
     """Pixel height of a (possibly multi-line) label."""
-    font_height = FONT_HEIGHT * active_font_scale()
+    font_height = label_height_approx()
     n = label.count("\n") + 1
     style = text_style(font_height, "bold")
     return DEFAULT_TEXT_METRICS.line_block_height(
@@ -410,7 +410,7 @@ def _label_ink_y_band(placement: LabelPlacement) -> tuple[float, float]:
     above block as ``[y - text_h, y]`` (the full height above the anchor) and
     so reads ~one line-height too high for a wrapped label.
     """
-    font_height = FONT_HEIGHT * active_font_scale()
+    font_height = label_height_approx()
     n = placement.text.count("\n") + 1
     line_spacing = DEFAULT_TEXT_METRICS.line_height(
         text_style(font_height, "bold"), TextRole.STATION_LABEL

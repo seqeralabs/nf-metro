@@ -30,6 +30,7 @@ __all__ = [
     "icon_half_height_approx",
     "icon_width_approx",
     "label_font_size_approx",
+    "label_height_approx",
     "metrics_context",
     "station_radius_approx",
     "station_stroke_approx",
@@ -44,6 +45,7 @@ from nf_metro.layout.constants import (
     DIAGONAL_LABEL_OFFSET,
     DIAGONAL_RUN,
     DIRECTIONAL_MARKER_HALF_EXTENT,
+    FONT_HEIGHT,
     ICON_HALF_HEIGHT,
     LABEL_FONT_SIZE,
     LABEL_OFFSET,
@@ -193,6 +195,17 @@ def label_font_size_approx() -> float:
     """Station label size to measure against, under the active font scale."""
     metrics = active_metrics()
     return metrics.label_font_size * metrics.font_scale
+
+
+def label_height_approx() -> float:
+    """Station label line height to reserve against, under the active font scale.
+
+    Layout measures a line at :data:`~nf_metro.layout.constants.FONT_HEIGHT`
+    for a :data:`~nf_metro.layout.constants.LABEL_FONT_SIZE` label, and in the
+    same proportion for any other label size.
+    """
+    metrics = active_metrics()
+    return metrics.label_font_size * FONT_HEIGHT / LABEL_FONT_SIZE * metrics.font_scale
 
 
 def canvas_edge_clearance() -> float:

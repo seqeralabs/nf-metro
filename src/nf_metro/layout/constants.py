@@ -725,27 +725,25 @@ TERMINUS_ICON_GAP: float = 6.0
 Layout-side mirror of the renderer's ``ICON_STATION_GAP`` so the two
 agree on where the icon stack starts without layout depending on render."""
 
-TERMINUS_ICON_CLEARANCE: float = 58.0
-"""Minimum clearance from terminus station center to section bbox edge.
+TERMINUS_ICON_ROOM: float = 30.0
+"""Clearance from a terminus station centre to the section bbox edge, besides
+the file icon's own width: station radius (~5px) + icon gap (6px) + ~19px
+visual margin so icons don't crowd the section border."""
 
-Accounts for station_radius (~5px) + icon gap (6px) + icon width (28px) = 39px
-extent, plus ~19px visual margin so icons don't crowd the section border.
-"""
-
-TERMINUS_ICON_CLEARANCE_V: float = (
+TERMINUS_ICON_ROOM_V: float = (
     STATION_RADIUS_APPROX
     + TERMINUS_ICON_GAP
-    + 2 * ICON_HALF_HEIGHT
     + ICON_CAPTION_GAP
     + ICON_CAPTION_FONT_HEIGHT
     + 14.0  # visual margin so captions don't crowd the section border
 )
-"""Minimum clearance from a terminus station center to the section bbox
-edge along the *vertical* (flow) axis, used by TB/BT sections.
+"""Clearance from a terminus station centre to the section bbox edge along
+the *vertical* (flow) axis of a TB/BT section, besides the file icon's own
+height.
 
 TB/BT termini stack their file icon (and under-icon caption) below or
-above the station instead of beside it, so the reservation uses icon
-height + caption height rather than icon width.
+above the station instead of beside it, so the reservation covers the
+caption rather than icon width.
 """
 
 EXIT_CORRIDOR_ICON_CLEARANCE: float = CURVE_RADIUS

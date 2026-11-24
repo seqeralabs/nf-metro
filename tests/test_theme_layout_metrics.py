@@ -140,3 +140,29 @@ def test_neighbouring_london_tube_titles_do_not_overlap():
     for a, b in zip(keepouts, keepouts[1:]):
         if abs(a[1] - b[1]) < 1.0:
             assert a[2] <= b[0] + 1e-6
+
+
+def test_file_icons_of_the_theme_size_stay_inside_their_sections(tmp_path):
+    from nf_metro.layout.routing import compute_station_offsets
+    from nf_metro.render.svg import _terminus_icon_centers_for
+
+    big = write(tmp_path, "big.yaml", "name: big\nicon_width: 80\nicon_height: 100\n")
+    path = EXAMPLES / "file_icons.mmd"
+    graph = prepare_graph(path.read_text(), theme=str(big), source_dir=str(EXAMPLES))
+    theme = resolve_theme(graph)
+    offsets = compute_station_offsets(graph)
+    termini = [s for s in graph.stations.values() if s.terminus_labels]
+    assert termini
+    for station in termini:
+        section = graph.sections[station.section_id]
+        offs = [
+            offsets.get((station.id, lid), 0.0)
+            for lid in graph.station_lines(station.id)
+        ]
+        for cx, cy in _terminus_icon_centers_for(
+            station, graph, theme, min(offs), max(offs)
+        ):
+            assert section.bbox_x <= cx - theme.icon_width / 2
+            assert cx + theme.icon_width / 2 <= section.bbox_x + section.bbox_w
+            assert section.bbox_y <= cy - theme.icon_height / 2
+            assert cy + theme.icon_height / 2 <= section.bbox_y + section.bbox_h
