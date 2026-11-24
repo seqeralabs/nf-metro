@@ -13,7 +13,10 @@ source's line is declared before or after the peeled line, nor on orientation.
 
 from __future__ import annotations
 
+import signal
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cache
 from itertools import combinations
 from pathlib import Path
@@ -26,6 +29,7 @@ from orientation_transform import Orientation, all_orientations, transform_sourc
 from nf_metro.api import RenderConfig, prepare_graph, render_graph
 from nf_metro.layout.engine import _station_marker_bbox
 from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
+from nf_metro.layout.ordering import _seat_contender
 from nf_metro.layout.phases.guards import PermissiveGuardWarning
 from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.parser.model import MetroGraph
@@ -342,3 +346,127 @@ def test_contender_shapes_stay_clear(shape: str, orientation: Orientation) -> No
     assert not hits, f"lines cross markers they skip: {hits}"
     crossings = _ink_crossings(svg)
     assert not crossings, f"lines cross: {crossings}"
+
+
+@contextmanager
+def _deadline(seconds: int) -> Iterator[None]:
+    """Fail the enclosing block if it runs longer than *seconds*."""
+
+    def _expire(*_: object) -> None:
+        raise TimeoutError(f"exceeded {seconds}s")
+
+    previous = signal.signal(signal.SIGALRM, _expire)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def test_seat_without_a_row_between_the_forks_falls_back_to_clearances() -> None:
+    """Forks barring both sides with no row between them leave the seat free.
+
+    The contender then takes the nearest row its stations allow, as if no fork
+    barred either side.
+    """
+    with _deadline(5):
+        seat = _seat_contender(0.0, [], [], [(0.0, 1.0), (1.0, -1.0)], 1.0)
+    assert seat == 0.0
+
+
+_LINES_L = "".join(
+    f"%%metro line: l{i} | l{i} | {colour}\n"
+    for i, colour in enumerate(
+        ("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628")
+    )
+)
+_LINE_W = "%%metro line: w | W | #984ea3\n"
+_LINE_Y = "%%metro line: y | Y | #0570b0\n"
+
+
+class EdgeShape(NamedTuple):
+    source: str
+    no_crossings: bool
+
+
+EDGE_SHAPES = {
+    "forks_bar_both_sides_without_a_row_between": EdgeShape(
+        _one_section(
+            _LINES_L,
+            "".join(
+                f"        {a} -->|{lid}| {b}\n"
+                for a, lid, b in (
+                    ("n1", "l0,l5", "n2"),
+                    ("n2", "l0", "n3"),
+                    ("n3", "l0", "n4"),
+                    ("n1", "l1", "n3"),
+                    ("n3", "l1", "n5"),
+                    ("n8", "l2", "n3"),
+                    ("n3", "l2", "n9"),
+                    ("n9", "l2", "n6"),
+                    ("n2", "l3", "n10"),
+                    ("n11", "l4", "n6"),
+                )
+            ),
+            "%%metro line_spread: centered\n",
+        ),
+        no_crossings=False,
+    ),
+    "peel_past_the_first_join": EdgeShape(
+        _one_section(
+            _LINES_BC + _LINE_E,
+            _P3_BODY.replace("        f -->|c| m\n", "")
+            + "        z0 -->|e| z1\n"
+            + "        z1 -->|e| x\n"
+            + "        f -->|c| x\n"
+            + "        f -->|c| m\n",
+        ),
+        no_crossings=False,
+    ),
+    "two_trunks_peeling_apart": EdgeShape(
+        _one_section(
+            "%%metro line: u | U | #e41a1c\n"
+            "%%metro line: x | X | #2db572\n"
+            + _LINE_Y
+            + _LINE_W
+            + "%%metro line: c | C | #f5c542\n",
+            "".join(
+                f"        {a} -->|{lid}| {b}\n"
+                for a, lid, b in (
+                    ("a", "x,u", "s"),
+                    ("s", "x", "s2"),
+                    ("s2", "x", "s3"),
+                    ("s3", "x", "m"),
+                    ("s", "u", "pu"),
+                    ("pu", "u", "s3"),
+                    ("b", "y,w", "r"),
+                    ("r", "y", "r2"),
+                    ("r2", "y", "r3"),
+                    ("r3", "y", "m"),
+                    ("r", "w", "pw"),
+                    ("pw", "w", "r3"),
+                    ("f", "c", "m"),
+                )
+            ),
+        ),
+        no_crossings=True,
+    ),
+}
+
+
+@pytest.mark.parametrize("orientation", list(all_orientations()), ids=lambda o: o.name)
+@pytest.mark.parametrize("shape", sorted(EDGE_SHAPES))
+def test_contender_edge_shapes_render(shape: str, orientation: Orientation) -> None:
+    """Shapes at the edge of the contender rule render promptly and unbroken.
+
+    Where no line crosses another with the source seated by the ordinary rule,
+    none crosses with it seated as a contender either.
+    """
+    spec = EDGE_SHAPES[shape]
+    with _deadline(60):
+        _, svg, downgrades = _render_source(transform_source(spec.source, orientation))
+    assert not downgrades, downgrades
+    if spec.no_crossings:
+        crossings = _ink_crossings(svg)
+        assert not crossings, f"lines cross: {crossings}"

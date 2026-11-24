@@ -12,6 +12,7 @@ __all__ = ["assign_tracks"]
 
 from collections import defaultdict
 from collections.abc import Iterable
+from math import ceil
 from statistics import median_low
 
 import networkx as nx
@@ -644,8 +645,9 @@ def _peel_contenders(
     A source contends for a peel when one of its runs strictly spans the peel's
     layer, it feeds none of the fork's successors (so it is not part of the
     fork's fan), and it is seated on its own rather than as a member of a fan.
-    Its seat waits until the layer before its first join, which must lie past
-    every fork it passes.  Returns source -> ``(fork, peel)`` pairs.
+    Its seat waits until the layer before its first join, by which every fork
+    it passes and each fork's peel must be placed.  Returns source ->
+    ``(fork, peel)`` pairs.
     """
     peels = [
         (fork, peel)
@@ -670,7 +672,9 @@ def _peel_contenders(
             and any(layer(node, 0) < layer(peel, 0) < layer(c, 0) for c in succs)
         ]
         seat_layer = _contender_seat_layer(node, G, layers)
-        if passed and all(layer(fork, 0) <= seat_layer for fork, _ in passed):
+        if passed and all(
+            max(layer(fork, 0), layer(peel, 0)) <= seat_layer for fork, peel in passed
+        ):
             contenders[node] = passed
     return contenders
 
@@ -697,17 +701,13 @@ def _far_sides(
     """``(fork track, sign)`` half-lines a contender must seat strictly inside.
 
     Each passed fork bars the side its peel branch opens to, so the contender's
-    run stays off the branch and its diagonals.  Forks that bar both sides
-    between them leave the seat to the station clearances alone.
+    run stays off the branch and its diagonals.
     """
-    sides = [
+    return [
         (tracks[fork], -1.0 if tracks[peel] > tracks[fork] else 1.0)
         for fork, peel in passed
         if abs(tracks[peel] - tracks[fork]) > COORD_TOLERANCE_FINE
     ]
-    floor = max((t for t, sign in sides if sign > 0), default=float("-inf"))
-    ceiling = min((t for t, sign in sides if sign < 0), default=float("inf"))
-    return sides if floor < ceiling else []
 
 
 def _seat_contender(
@@ -722,30 +722,40 @@ def _seat_contender(
     The row must clear every station in its *column* and along its run (*span*)
     and lie strictly on the far side of each passed fork (*far_sides*).  A row
     one pitch from a column station leaves no empty row in the column, so those
-    rows win over any further out.
-    """
+    rows win over any further out, which step out from the column a pitch at a
+    time.  When no row lies on the far side of every passed fork (forks barring
+    both sides, or a window between them too narrow for a row), the forks bar
+    nothing and the station clearances alone pick the seat.
 
-    def free(track: float) -> bool:
-        return (
-            _clear_of(track, column, SAME_COORD_TOLERANCE)
-            and _clear_of(track, span, line_gap / 2)
-            and all((track - t) * sign > COORD_TOLERANCE_FINE for t, sign in far_sides)
+    Past the hull of every coordinate involved a row clears all stations and
+    sits on the far side of every fork barring that direction, so the rows
+    within two pitches beyond it hold the answer.
+    """
+    lo, hi = (min(column), max(column)) if column else (base, base)
+    rows = [(0, t) for c in column for t in (c - line_gap, c + line_gap)]
+    if lo - line_gap <= base <= hi + line_gap:
+        rows.append((0, base))
+    marks = [base, *column, *span, *(t for t, _ in far_sides)]
+    reach = ceil((max(marks) - min(marks)) / line_gap) + 2
+    rows += [
+        (step, t)
+        for step in range(1, reach + 1)
+        for t in (lo - step * line_gap, hi + step * line_gap)
+    ]
+
+    def barred(track: float) -> bool:
+        return not all(
+            (track - t) * sign > COORD_TOLERANCE_FINE for t, sign in far_sides
         )
 
-    def nearest(rows: list[float]) -> float | None:
-        clear = [t for t in rows if free(t)]
-        return min(clear, key=lambda t: (abs(t - base), t)) if clear else None
-
-    lo, hi = (min(column), max(column)) if column else (base, base)
-    adjacent = [t for c in column for t in (c - line_gap, c + line_gap)]
-    if lo - line_gap <= base <= hi + line_gap:
-        adjacent.append(base)
-    seat = nearest(adjacent)
-    step = 1
-    while seat is None:
-        seat = nearest([lo - step * line_gap, hi + step * line_gap])
-        step += 1
-    return seat
+    return min(
+        (
+            (barred(t), step, abs(t - base), t)
+            for step, t in rows
+            if _clear_of(t, column, SAME_COORD_TOLERANCE)
+            and _clear_of(t, span, line_gap / 2)
+        )
+    )[3]
 
 
 def _carrier_exit_stays_on_row(

@@ -1287,21 +1287,16 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
 def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
     """Move each line a section pins (``Section.lane_ends``) to that lane end.
 
-    A pin holds in every flat-frame member carrying the line, so the line keeps
-    its side of the bundle across the frame's boundaries; a line pinned toward
-    opposite ends stays on its priority lane.  Compact sections allot lanes per
-    station, so each station's pinned lines step past its other lines instead.
+    At every station a pinned line stops at it steps just past the station's
+    other lanes on its end (:func:`_stepped_pinned_lanes`), the furthest-out
+    pin landing outermost.  A non-compact section, whose lines each hold one
+    lane order, first moves its pinned lines to that end of the order, the
+    other lines keeping theirs, so a station without a pinned line holds its
+    lanes unbroken.  A pin holds in every flat-frame member carrying the line,
+    so the line keeps its side of the bundle across the frame's boundaries; a
+    line pinned toward opposite ends stays where it is.
     """
     graph = ctx.graph
-    if ctx.compact:
-        for sec_id, section in graph.sections.items():
-            if not section.lane_ends:
-                continue
-            for sid in section.station_ids:
-                ctx.offsets.update(
-                    _stepped_pinned_lanes(ctx, sec_id, sid, section.lane_ends)
-                )
-        return
     frames: dict[str, list[str]] = defaultdict(list)
     for sec_id in graph.sections:
         frames[ctx.frame_roots.get(sec_id, sec_id)].append(sec_id)
@@ -1316,20 +1311,37 @@ def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
             continue
         present = {sid: _section_present_line_set(ctx, sid) for sid in members}
         for sec_id in (m for m in members if present[m] & ends.keys()):
-            mates = set().union(*(present[m] for m in members if m != sec_id))
-            target = _section_order_offsets(
-                ctx,
-                sec_id,
-                sorted(
-                    present[sec_id],
-                    key=lambda lid: (
-                        ends.get(lid, 0.0),
-                        ctx.line_priority.get(lid, 0),
+            if not ctx.compact:
+                mates = set().union(*(present[m] for m in members if m != sec_id))
+                target = _section_order_offsets(
+                    ctx,
+                    sec_id,
+                    sorted(
+                        _section_lane_order(ctx, sec_id),
+                        key=lambda lid: ends.get(lid, 0.0),
                     ),
-                ),
-            )
-            shift = _frame_shift(ctx, target, mates & (present[sec_id] - set(ends)))
-            ctx.offsets.update({key: off + shift for key, off in target.items()})
+                )
+                shift = _frame_shift(ctx, target, mates & (present[sec_id] - set(ends)))
+                ctx.offsets.update({key: off + shift for key, off in target.items()})
+            for sid in graph.sections[sec_id].station_ids:
+                ctx.offsets.update(_stepped_pinned_lanes(ctx, sec_id, sid, ends))
+
+
+def _section_lane_order(ctx: _OffsetCtx, sec_id: str) -> list[str]:
+    """Lines present on *sec_id*, first lane first, in their stored order.
+
+    Lines no station of the section stores an offset for follow, by priority.
+    """
+    held = _section_line_offsets(ctx, sec_id)
+    sign = -1.0 if _stores_reflected(ctx, sec_id) else 1.0
+    return sorted(
+        _section_present_line_set(ctx, sec_id),
+        key=lambda lid: (
+            lid not in held,
+            sign * held.get(lid, 0.0),
+            ctx.line_priority.get(lid, 0),
+        ),
+    )
 
 
 def _frame_shift(
@@ -5511,9 +5523,10 @@ def compute_station_offsets(
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
        sections and applies reconvergence ordering (non-compact only).
-    2a. **Lane ends** - steps each line track assignment pinned to an end of
-       its section's lane order (``Section.lane_ends``) past the section's
-       other lanes on that end.
+    2a. **Lane ends** - moves each line track assignment pinned to an end of
+       its section's lane order (``Section.lane_ends``) to that end of the
+       order, the section's other lines keeping theirs (non-compact only),
+       then steps it just past the other lanes of each station it stops at.
     2b. **Exit-only line reordering** - a line that originates at a
        multi-line station and exits to a port above takes the top slot,
        so it crosses nothing on the way out (non-compact LR/RL).
