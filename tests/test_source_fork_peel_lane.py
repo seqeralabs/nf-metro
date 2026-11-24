@@ -91,12 +91,8 @@ class Rendered(NamedTuple):
     downgrades: list[str]
 
 
-@cache
-def _render(fixture: str, order: str, orientation: Orientation) -> Rendered:
-    spec = FIXTURES[fixture]
-    source = transform_source(
-        DECLARATION_ORDERS[order](spec.path.read_text()), orientation
-    )
+def _render_source(source: str) -> tuple[MetroGraph, str, list[str]]:
+    """Graph, SVG and permissive-guard downgrades of rendering *source*."""
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         graph = prepare_graph(source)
@@ -104,17 +100,69 @@ def _render(fixture: str, order: str, orientation: Orientation) -> Rendered:
     downgrades = [
         str(w.message) for w in caught if issubclass(w.category, PermissiveGuardWarning)
     ]
-    return Rendered(spec, graph, svg, downgrades)
+    return graph, svg, downgrades
+
+
+@cache
+def _render(fixture: str, order: str, orientation: Orientation) -> Rendered:
+    spec = FIXTURES[fixture]
+    source = transform_source(
+        DECLARATION_ORDERS[order](spec.path.read_text()), orientation
+    )
+    return Rendered(spec, *_render_source(source))
+
+
+def _side(graph: MetroGraph, fork: str, ahead: str, sid: str) -> float:
+    """Signed side of *sid* relative to the trunk run from *fork* to *ahead*."""
+    f, a, station = (graph.stations[n] for n in (fork, ahead, sid))
+    flow = (a.x - f.x, a.y - f.y)
+    rel = (station.x - f.x, station.y - f.y)
+    return flow[0] * rel[1] - flow[1] * rel[0]
 
 
 def _side_of_trunk(r: Rendered, sid: str) -> float:
     """Signed side of *sid* relative to the trunk run leaving the fork."""
-    fork, ahead, station = (
-        r.graph.stations[n] for n in (r.fixture.fork, r.fixture.trunk_next, sid)
-    )
-    flow = (ahead.x - fork.x, ahead.y - fork.y)
-    rel = (station.x - fork.x, station.y - fork.y)
-    return flow[0] * rel[1] - flow[1] * rel[0]
+    return _side(r.graph, r.fixture.fork, r.fixture.trunk_next, sid)
+
+
+def _marker_hits(
+    graph: MetroGraph, svg: str, only_line: str | None = None
+) -> list[tuple[str, str]]:
+    """``(line, station)`` pairs where drawn ink crosses a station it skips.
+
+    With *only_line*, just that line's ink is checked.
+    """
+    offsets = compute_station_offsets(graph)
+    segments = [
+        seg
+        for seg in drawn_segments(parse_route_polylines(svg))
+        if only_line is None or seg[0] == only_line
+    ]
+    hits = []
+    for sid, station in graph.stations.items():
+        if station.is_port:
+            continue
+        bbox = _station_marker_bbox(graph, sid, offsets=offsets)
+        if bbox is None:
+            continue
+        lines = set(graph.station_lines(sid))
+        hits += [
+            (line_id, sid)
+            for line_id, p, q in segments
+            if line_id not in lines
+            and segment_intersects_bbox(p[0], p[1], q[0], q[1], bbox)
+        ]
+    return sorted(set(hits))
+
+
+def _ink_crossings(svg: str) -> list[tuple[str, str, object]]:
+    """Pairs of distinct lines whose drawn ink crosses, with the crossing point."""
+    segments = drawn_segments(parse_route_polylines(svg))
+    return [
+        (a[0], b[0], point)
+        for a, b in combinations(segments, 2)
+        if a[0] != b[0] and (point := _segments_cross(a[1], a[2], b[1], b[2]))
+    ]
 
 
 def _column_gaps(r: Rendered) -> list[tuple[str, str, float]]:
@@ -177,25 +225,8 @@ def test_sibling_line_clears_non_consumer_markers(
     fixture: str, order: str, orientation: Orientation
 ) -> None:
     r = _render(fixture, order, orientation)
-    graph, line = r.graph, r.fixture.sibling_line
-    offsets = compute_station_offsets(graph)
-    segments = [
-        (p, q)
-        for line_id, p, q in drawn_segments(parse_route_polylines(r.svg))
-        if line_id == line
-    ]
-    for sid, station in graph.stations.items():
-        if station.is_port or line in graph.station_lines(sid):
-            continue
-        bbox = _station_marker_bbox(graph, sid, offsets=offsets)
-        if bbox is None:
-            continue
-        hits = [
-            (p, q)
-            for p, q in segments
-            if segment_intersects_bbox(p[0], p[1], q[0], q[1], bbox)
-        ]
-        assert not hits, f"line {line!r} crosses {sid!r} marker {bbox}: {hits}"
+    hits = _marker_hits(r.graph, r.svg, only_line=r.fixture.sibling_line)
+    assert not hits, f"lines cross markers they skip: {hits}"
 
 
 @CASES
@@ -209,12 +240,7 @@ def test_no_line_crosses_another(
     checked pairwise as well.
     """
     r = _render(fixture, order, orientation)
-    segments = drawn_segments(parse_route_polylines(r.svg))
-    crossings = [
-        (a[0], b[0], point)
-        for a, b in combinations(segments, 2)
-        if a[0] != b[0] and (point := _segments_cross(a[1], a[2], b[1], b[2]))
-    ]
+    crossings = _ink_crossings(r.svg)
     assert not crossings, f"lines cross: {crossings}"
     flagged = [
         v.message
@@ -305,40 +331,14 @@ def test_contender_shapes_stay_clear(shape: str, orientation: Orientation) -> No
     The contender ``f`` seats on the far side of the trunk from the peel ``g``,
     its line runs through no station it does not serve, and no two lines cross.
     """
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        graph = prepare_graph(transform_source(SHAPES[shape], orientation))
-        svg = render_graph(graph, THEMES["nfcore"], RenderConfig())
-    downgrades = [
-        str(w.message) for w in caught if issubclass(w.category, PermissiveGuardWarning)
-    ]
+    graph, svg, downgrades = _render_source(
+        transform_source(SHAPES[shape], orientation)
+    )
     assert not downgrades, downgrades
-
-    def side(sid: str) -> float:
-        fork, ahead, station = (graph.stations[n] for n in ("s", "d", sid))
-        flow = (ahead.x - fork.x, ahead.y - fork.y)
-        return flow[0] * (station.y - fork.y) - flow[1] * (station.x - fork.x)
-
-    assert side("f") * side("g") < 0, "'f' sits on the peel's side of the trunk"
-
-    offsets = compute_station_offsets(graph)
-    segments = drawn_segments(parse_route_polylines(svg))
-    for sid, station in graph.stations.items():
-        if station.is_port:
-            continue
-        bbox = _station_marker_bbox(graph, sid, offsets=offsets)
-        lines = set(graph.station_lines(sid))
-        hits = [
-            line_id
-            for line_id, p, q in segments
-            if bbox is not None
-            and line_id not in lines
-            and segment_intersects_bbox(p[0], p[1], q[0], q[1], bbox)
-        ]
-        assert not hits, f"lines {sorted(set(hits))} cross {sid!r}'s marker"
-    crossings = [
-        (a[0], b[0], point)
-        for a, b in combinations(segments, 2)
-        if a[0] != b[0] and (point := _segments_cross(a[1], a[2], b[1], b[2]))
-    ]
+    assert _side(graph, "s", "d", "f") * _side(graph, "s", "d", "g") < 0, (
+        "'f' sits on the peel's side of the trunk"
+    )
+    hits = _marker_hits(graph, svg)
+    assert not hits, f"lines cross markers they skip: {hits}"
+    crossings = _ink_crossings(svg)
     assert not crossings, f"lines cross: {crossings}"

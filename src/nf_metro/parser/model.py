@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple, TypedDict
@@ -461,6 +462,17 @@ class Section:
     # negative pins toward the first lane, positive toward the last, and a
     # larger magnitude pins further out.
     lane_ends: dict[str, float] = field(default_factory=dict)
+
+
+def agreed_lane_end(pins: Iterable[float]) -> float | None:
+    """The lane-end pin several *pins* of one line agree on, else ``None``.
+
+    Pins agree when they all point toward the same end; the outermost wins.
+    """
+    values = list(pins)
+    if values and (all(v > 0 for v in values) or all(v < 0 for v in values)):
+        return max(values, key=abs)
+    return None
 
 
 class UnresolvedEndpointError(NfMetroError, ValueError):

@@ -11,6 +11,7 @@ from __future__ import annotations
 __all__ = ["assign_tracks"]
 
 from collections import defaultdict
+from collections.abc import Iterable
 from statistics import median_low
 
 import networkx as nx
@@ -24,7 +25,12 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     SIDE_BRANCH_NUDGE,
 )
-from nf_metro.parser.model import LineSpread, MetroGraph, is_bypass_v
+from nf_metro.parser.model import (
+    LineSpread,
+    MetroGraph,
+    agreed_lane_end,
+    is_bypass_v,
+)
 
 
 def assign_tracks(
@@ -222,7 +228,7 @@ def assign_tracks(
             tracks[node] = _seat_contender(
                 station_base[node],
                 [tracks[sid] for sid in column],
-                _span_tracks(node, G, graph, layers, tracks),
+                _span_tracks(node, layer_idx + 1, graph, layers, tracks),
                 _far_sides(contenders[node], tracks),
                 line_gap,
             )
@@ -263,11 +269,8 @@ def peel_lane_ends(
             pin = min(offsets, key=abs) * lane_sign
             for lid in graph.station_lines(node):
                 pins[lid].append(pin)
-    return {
-        lid: max(values, key=abs)
-        for lid, values in pins.items()
-        if all(v > 0 for v in values) or all(v < 0 for v in values)
-    }
+    agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
+    return {lid: pin for lid, pin in agreed.items() if pin is not None}
 
 
 def _station_digraph(graph: MetroGraph) -> nx.DiGraph[str]:
@@ -409,10 +412,14 @@ def _is_track_occupied_at_layer(
 ) -> bool:
     """Check if any already-placed station at this layer occupies the given track."""
     placed = layer_occupancy.get(layer, {})
-    for sid, sid_track in placed.items():
-        if sid != exclude_node and abs(sid_track - track) < tolerance:
-            return True
-    return False
+    return not _clear_of(
+        track, [t for sid, t in placed.items() if sid != exclude_node], tolerance
+    )
+
+
+def _clear_of(track: float, others: Iterable[float], tolerance: float) -> bool:
+    """Whether *track* lies at least *tolerance* from every one of *others*."""
+    return all(abs(track - t) >= tolerance for t in others)
 
 
 def _find_free_nearby_track(
@@ -546,8 +553,9 @@ def _foreign_claim_side(
     Returns the side the claimed lane lies on relative to its fork, or ``None``
     when *track* is free of foreign claims.
     """
+    succs = set(G.successors(node))
     for fork, fork_track in neighbours.items():
-        if fork == node or not set(G.successors(node)).isdisjoint(G.successors(fork)):
+        if fork == node or not succs.isdisjoint(G.successors(fork)):
             continue
         for lane in _source_peel_lanes(
             fork, fork_track, G, graph, line_base, line_gap
@@ -564,17 +572,15 @@ def _seat_source(
     line_gap: float,
     G: nx.DiGraph[str],
     tracks: dict[str, float],
-    graph: MetroGraph | None,
-    layer_occupancy: dict[int, dict[str, float]] | None,
-    line_base: dict[str, float] | None,
+    graph: MetroGraph,
+    layer_occupancy: dict[int, dict[str, float]],
+    line_base: dict[str, float],
 ) -> float:
     """Track for predecessor-less *node*: its *base*, off any foreign peel lane.
 
     The seat steps away from the claiming fork and holds that direction, so
     opposing claims cannot bounce it back.
     """
-    if graph is None or line_base is None or layer_occupancy is None:
-        return base
     column = {
         sid: tracks[sid] for sid in layer_occupancy.get(layer, {}) if sid in tracks
     }
@@ -592,12 +598,10 @@ def _claimed_peel_lane(
     line_gap: float,
     G: nx.DiGraph[str],
     tracks: dict[str, float],
-    graph: MetroGraph | None,
-    line_base: dict[str, float] | None,
+    graph: MetroGraph,
+    line_base: dict[str, float],
 ) -> float | None:
     """Lane a placed source-fork predecessor claimed for peel branch *node*."""
-    if graph is None or line_base is None:
-        return None
     for pred in G.predecessors(node):
         if pred in tracks:
             lane = _source_peel_lanes(
@@ -673,14 +677,13 @@ def _peel_contenders(
 
 def _span_tracks(
     node: str,
-    G: nx.DiGraph[str],
+    join: int,
     graph: MetroGraph,
     layers: dict[str, int],
     tracks: dict[str, float],
 ) -> list[float]:
-    """Tracks of the on-track stations in layers strictly inside *node*'s run."""
+    """Tracks of on-track stations in layers strictly between *node* and *join*."""
     start = layers.get(node, 0)
-    join = _contender_seat_layer(node, G, layers) + 1
     return [
         track
         for sid, track in tracks.items()
@@ -724,8 +727,8 @@ def _seat_contender(
 
     def free(track: float) -> bool:
         return (
-            all(abs(track - t) >= SAME_COORD_TOLERANCE for t in column)
-            and all(abs(track - t) >= line_gap / 2 for t in span)
+            _clear_of(track, column, SAME_COORD_TOLERANCE)
+            and _clear_of(track, span, line_gap / 2)
             and all((track - t) * sign > COORD_TOLERANCE_FINE for t, sign in far_sides)
         )
 
@@ -836,6 +839,8 @@ def _place_single_node(
     node_layer = layers.get(node, 0) if layers else 0
     pred_avg = _predecessor_avg(node, G, tracks)
     if pred_avg is None:
+        if graph is None or line_base is None or layer_occupancy is None:
+            return base
         return _seat_source(
             node,
             base,
@@ -853,9 +858,10 @@ def _place_single_node(
             track, node_layer, layer_occupancy, node
         )
 
-    peel_lane = _claimed_peel_lane(node, line_gap, G, tracks, graph, line_base)
-    if peel_lane is not None and _track_is_inheritable(peel_lane):
-        return peel_lane
+    if graph is not None and line_base is not None:
+        peel_lane = _claimed_peel_lane(node, line_gap, G, tracks, graph, line_base)
+        if peel_lane is not None and _track_is_inheritable(peel_lane):
+            return peel_lane
 
     inherited_predecessor = (continuation_predecessors or {}).get(node)
     if inherited_predecessor in tracks and _track_is_inheritable(
