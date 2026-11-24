@@ -303,6 +303,26 @@
         "mmd": "%%metro title: Source Sibling vs Fork Peel Lane\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\n%%metro line: ref | Reference | #f5c542\ngraph LR\n    subgraph analysis [Analysis]\n        %%metro direction: LR\n        reads[Reads]\n        trim[Trim]\n        qc[QC]\n        align[Align]\n        quant[Quantify]\n        genome[Genome]\n        reads -->|main| trim\n        trim -->|main| align\n        align -->|main| quant\n        reads -->|qc| qc\n        qc -->|qc| align\n        genome -->|ref| quant\n    end\n"
       },
       {
+        "name": "source_vs_fed_fork_peel_lane",
+        "mmd": "%%metro title: Source vs Fed Fork Peel Lane\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\n%%metro line: ref | Reference | #f5c542\ngraph LR\n    subgraph analysis [Analysis]\n        %%metro direction: LR\n        samples[Samples]\n        reads[Reads]\n        trim[Trim]\n        qc[QC]\n        align[Align]\n        quant[Quantify]\n        genome[Genome]\n        samples -->|main| reads\n        reads -->|main| trim\n        trim -->|main| align\n        align -->|main| quant\n        reads -->|qc| qc\n        qc -->|qc| align\n        genome -->|ref| quant\n    end\n"
+      },
+      {
+        "name": "source_vs_chain_fed_fork_peel_lane",
+        "mmd": "%%metro title: Source vs Chain-Fed Fork Peel Lane\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\n%%metro line: ref | Reference | #f5c542\ngraph LR\n    subgraph analysis [Analysis]\n        %%metro direction: LR\n        fetch[Fetch]\n        samples[Samples]\n        reads[Reads]\n        trim[Trim]\n        qc[QC]\n        align[Align]\n        quant[Quantify]\n        genome[Genome]\n        fetch -->|main| samples\n        samples -->|main| reads\n        reads -->|main| trim\n        trim -->|main| align\n        align -->|main| quant\n        reads -->|qc| qc\n        qc -->|qc| align\n        genome -->|ref| quant\n    end\n"
+      },
+      {
+        "name": "source_vs_fed_fork_peel_lane_compact",
+        "mmd": "%%metro title: Source vs Fed Fork Peel Lane (Compact)\n%%metro compact_offsets: true\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\n%%metro line: ref | Reference | #f5c542\ngraph LR\n    subgraph analysis [Analysis]\n        %%metro direction: LR\n        samples[Samples]\n        reads[Reads]\n        trim[Trim]\n        qc[QC]\n        align[Align]\n        quant[Quantify]\n        genome[Genome]\n        samples -->|main| reads\n        reads -->|main| trim\n        trim -->|main| align\n        align -->|main| quant\n        reads -->|qc| qc\n        qc -->|qc| align\n        genome -->|ref| quant\n    end\n"
+      },
+      {
+        "name": "source_vs_fork_peel_lane_across_sections",
+        "mmd": "%%metro title: Source vs Fork Peel Lane Across Sections\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\n%%metro line: ref | Reference | #f5c542\n%%metro grid: analysis | 0,0\n%%metro grid: report | 1,0\ngraph LR\n    subgraph analysis [Analysis]\n        %%metro direction: LR\n        samples[Samples]\n        reads[Reads]\n        trim[Trim]\n        qc[QC]\n        align[Align]\n        quant[Quantify]\n        genome[Genome]\n        samples -->|main| reads\n        reads -->|main| trim\n        trim -->|main| align\n        align -->|main| quant\n        reads -->|qc| qc\n        qc -->|qc| align\n        genome -->|ref| quant\n    end\n    subgraph report [Report]\n        %%metro direction: LR\n        summary[Summary]\n        archive[Archive]\n        summary -->|main,ref| archive\n    end\n    quant -->|main,ref| summary\n"
+      },
+      {
+        "name": "source_vs_terminal_peel_lane",
+        "mmd": "%%metro title: Source vs Terminal Peel Lane\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\n%%metro line: ref | Reference | #f5c542\ngraph LR\n    subgraph analysis [Analysis]\n        %%metro direction: LR\n        samples[Samples]\n        reads[Reads]\n        trim[Trim]\n        qc[QC]\n        genome[Genome]\n        samples -->|main| reads\n        reads -->|main| trim\n        reads -->|qc| qc\n        genome -->|ref| trim\n    end\n"
+      },
+      {
         "name": "root_fan_trunk_feeder_row",
         "mmd": "%%metro title: Root Fan Trunk Feeder Row\n%%metro line: main | Main | #2db572\n%%metro line: qc | QC | #0570b0\ngraph LR\n    subgraph analysis [Analysis]\n        %%metro direction: LR\n        genome[Genome]\n        reads[Reads]\n        trim[Trim]\n        align[Align]\n        fastqc[FastQC]\n        report[Report]\n        genome -->|main| report\n        reads -->|main| trim\n        trim -->|main| align\n        align -->|main| report\n        trim -->|qc| fastqc\n        fastqc -->|qc| report\n    end\n"
       },
