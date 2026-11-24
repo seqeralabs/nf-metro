@@ -1,0 +1,14 @@
+%%metro title: Contender starting the peeled line
+%%metro line: main | Main | #2db572
+%%metro line: b | B | #0570b0
+graph LR
+    subgraph p [P]
+        a -->|main| s
+        s -->|main| d
+        d -->|main| j
+        j -->|main| m
+        m -->|main,b| n
+        s -->|b| g
+        g -->|b| j
+        f -->|b| m
+    end

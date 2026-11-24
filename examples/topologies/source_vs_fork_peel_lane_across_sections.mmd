@@ -1,0 +1,31 @@
+%%metro title: Source vs Fork Peel Lane Across Sections
+%%metro line: main | Main | #2db572
+%%metro line: qc | QC | #0570b0
+%%metro line: ref | Reference | #f5c542
+%%metro grid: analysis | 0,0
+%%metro grid: report | 1,0
+graph LR
+    subgraph analysis [Analysis]
+        %%metro direction: LR
+        samples[Samples]
+        reads[Reads]
+        trim[Trim]
+        qc[QC]
+        align[Align]
+        quant[Quantify]
+        genome[Genome]
+        samples -->|main| reads
+        reads -->|main| trim
+        trim -->|main| align
+        align -->|main| quant
+        reads -->|qc| qc
+        qc -->|qc| align
+        genome -->|ref| quant
+    end
+    subgraph report [Report]
+        %%metro direction: LR
+        summary[Summary]
+        archive[Archive]
+        summary -->|main,ref| archive
+    end
+    quant -->|main,ref| summary
