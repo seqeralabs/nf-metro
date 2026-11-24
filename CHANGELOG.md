@@ -139,7 +139,8 @@ light.png | dark.png`) in a PNG.
 - Layout measures file icons and their captions with the theme the map
   renders with, including `--theme` and a per-output `theme=`, rather than
   the map's own style or `nfcore`. A map rendered with a theme whose icons or
-  captions are larger gets room for them.
+  captions are larger gets room for them on every side of their section,
+  including a stacked `files:` icon's back page and the caption under it.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,
   embed dialog) and the copyable inline-HTML snippet now follow the map's mode
   instead of always being dark. `--mode` or `%%metro mode:` fixes both light

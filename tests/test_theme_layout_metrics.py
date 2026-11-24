@@ -142,27 +142,97 @@ def test_neighbouring_london_tube_titles_do_not_overlap():
             assert a[2] <= b[0] + 1e-6
 
 
-def test_file_icons_of_the_theme_size_stay_inside_their_sections(tmp_path):
-    from nf_metro.layout.routing import compute_station_offsets
-    from nf_metro.render.svg import _terminus_icon_centers_for
+_TB_ICONS_MMD = """\
+%%metro line: main | Main | #4CAF50
+%%metro files: reads_in | FASTQ | Reads
+%%metro files: bam_out | BAM | Alignments
+graph LR
+    subgraph proc [Process]
+        %%metro direction: TB
+        reads_in[ ]
+        a[A]
+        b[B]
+        bam_out[ ]
+        reads_in -->|main| a
+        a -->|main| b
+        b -->|main| bam_out
+    end
+"""
 
-    big = write(tmp_path, "big.yaml", "name: big\nicon_width: 80\nicon_height: 100\n")
-    path = EXAMPLES / "file_icons.mmd"
-    graph = prepare_graph(path.read_text(), theme=str(big), source_dir=str(EXAMPLES))
-    theme = resolve_theme(graph)
+
+def _drawn_terminus_ink(graph, theme, monkeypatch):
+    """Every terminus's drawn icon pages and captions as (sid, kind, box) rects."""
+    import drawsvg as draw
+
+    from nf_metro.layout.routing import compute_station_offsets
+    from nf_metro.render import icons, svg
+
+    pages: list[tuple[float, float, float, float]] = []
+
+    def record(d, *, cx, cy, width, height, **_):
+        pages.append((cx - width / 2, cy - height / 2, cx + width / 2, cy + height / 2))
+
+    for module in (icons, svg):
+        monkeypatch.setattr(module, "render_file_icon", record)
+    monkeypatch.setattr(svg, "render_folder_icon", record)
     offsets = compute_station_offsets(graph)
-    termini = [s for s in graph.stations.values() if s.terminus_labels]
-    assert termini
-    for station in termini:
-        section = graph.sections[station.section_id]
+    ink = []
+    for station in graph.stations.values():
+        if not station.terminus_labels:
+            continue
         offs = [
             offsets.get((station.id, lid), 0.0)
             for lid in graph.station_lines(station.id)
         ]
-        for cx, cy in _terminus_icon_centers_for(
-            station, graph, theme, min(offs), max(offs)
+        pages.clear()
+        d = draw.Drawing(1, 1)
+        svg._render_terminus_icons(
+            d, station, graph, theme, theme.station_radius, min(offs), max(offs), False
+        )
+        ink += [(station.id, "page", box) for box in pages]
+        for el in d.elements:
+            if isinstance(el, draw.Text):
+                x, y = float(el.args["x"]), float(el.args["y"])
+                height = max(1, len(el.children)) * float(el.args["font-size"])
+                ink.append((station.id, "caption", (x, y, x, y + height)))
+    return ink
+
+
+def _ink_margins(text: str, theme: str | None, monkeypatch) -> dict:
+    """Least room between terminus ink and each edge of its section's box."""
+    graph = prepare_graph(text, theme=theme, source_dir=str(EXAMPLES))
+    margins: dict[tuple[str, str], float] = {}
+    for sid, _, (x0, y0, x1, y1) in _drawn_terminus_ink(
+        graph, resolve_theme(graph), monkeypatch
+    ):
+        section = graph.sections[graph.stations[sid].section_id]
+        for side, room in (
+            ("left", x0 - section.bbox_x),
+            ("right", section.bbox_x + section.bbox_w - x1),
+            ("top", y0 - section.bbox_y),
+            ("bottom", section.bbox_y + section.bbox_h - y1),
         ):
-            assert section.bbox_x <= cx - theme.icon_width / 2
-            assert cx + theme.icon_width / 2 <= section.bbox_x + section.bbox_w
-            assert section.bbox_y <= cy - theme.icon_height / 2
-            assert cy + theme.icon_height / 2 <= section.bbox_y + section.bbox_h
+            key = (section.id, side)
+            margins[key] = min(margins.get(key, room), room)
+    return margins
+
+
+@pytest.mark.parametrize("source", ["file_icons", "tb"], ids=["lr", "tb"])
+def test_file_icons_of_the_theme_size_keep_the_default_room(
+    tmp_path, monkeypatch, source: str
+):
+    big = write(tmp_path, "big.yaml", "name: big\nicon_width: 80\nicon_height: 100\n")
+    text = (
+        (EXAMPLES / "file_icons.mmd").read_text()
+        if source == "file_icons"
+        else _TB_ICONS_MMD
+    )
+    default = _ink_margins(text, None, monkeypatch)
+    enlarged = _ink_margins(text, str(big), monkeypatch)
+    assert default.keys() == enlarged.keys()
+    short = {
+        key: (round(enlarged[key], 1), round(room, 1))
+        for key, room in default.items()
+        if enlarged[key] < room - 1e-6
+    }
+    assert not short, f"(section, side): (enlarged room, default room) {short}"

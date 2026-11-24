@@ -379,6 +379,7 @@ def _layout_section_rails(
     # clearance beyond the standard padding (right side only, without shifting
     # the terminus itself).
     from nf_metro.layout.phases.single_section import (
+        _stacked_page_excess,
         _terminus_icon_clearance,
         terminus_icon_flow_reach,
     )
@@ -398,7 +399,7 @@ def _layout_section_rails(
             continue
         need = _terminus_icon_clearance(
             len(st.terminus_labels), st.terminus_names or None
-        )
+        ) + _stacked_page_excess(st)
         tail_icon_extra = max(tail_icon_extra, need - section_x_padding)
     tail_icon_extra = max(0.0, tail_icon_extra)
 

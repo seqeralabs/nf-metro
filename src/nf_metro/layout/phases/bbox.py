@@ -598,7 +598,8 @@ def _predict_section_content_bottom(
                     ),
                     sid in fan_ids,
                 ),
-                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
+                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1]
+                + (section_y_padding if is_horizontal else 0.0),
                 angled_label_reach(
                     graph.stations[sid],
                     0.0 if sid in rail_above_ids else label_angle,
@@ -835,8 +836,10 @@ def _section_content_hug_top(
             ),
             # A vertical-flow terminus's file icon reaches above its marker
             # (a top-entering source), so the box must clear the icon, not
-            # just a padding band above the marker.
-            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[0],
+            # just a padding band above the marker.  A horizontal-flow
+            # terminus owes the padding plus any larger-than-default icon.
+            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[0]
+            + (section_y_padding if is_horizontal else 0.0),
         )
 
     content_min_ys = [_content_min_y(sid) for sid in content_ids]

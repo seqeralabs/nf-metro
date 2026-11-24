@@ -11,6 +11,7 @@ from nf_metro.layout.constants import (
     EXIT_GAP_MULTIPLIER,
     FONT_HEIGHT,
     ICON_CAPTION_GAP,
+    ICON_HALF_HEIGHT,
     ICON_INTER_GAP,
     LABEL_BBOX_MARGIN,
     LABEL_MARGIN,
@@ -22,6 +23,7 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_GAP,
     TERMINUS_ICON_ROOM,
     TERMINUS_ICON_ROOM_V,
+    TERMINUS_WIDTH,
 )
 from nf_metro.layout.geometry import (
     Axis,
@@ -49,6 +51,7 @@ from nf_metro.layout.pass_metrics import (
     icon_half_height_approx,
     icon_width_approx,
     label_height_approx,
+    metrics_context,
     station_radius_approx,
 )
 from nf_metro.layout.phases._common import (
@@ -1328,6 +1331,56 @@ def terminus_cross_extents(station: Station) -> tuple[float, float]:
     return above, below
 
 
+def _terminus_cross_reach(station: Station, section_dir: str) -> tuple[float, float]:
+    """(low, high) px a terminus's icon reaches past its marker across the flow.
+
+    ``low`` is toward the smaller coordinate: above an LR/RL marker, left of a
+    TB/BT one.  A vertical-flow icon is centred on its marker across the flow,
+    with a stacked ``files:`` back page peeking right; its caption is centred
+    under it and does not grow with the icon.
+    """
+    if lanes_run_along_y(section_dir):
+        return terminus_cross_extents(station)
+    from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO
+
+    half = icon_width_approx() / 2
+    stacked = (
+        icon_width_approx() * FILES_ICON_OFFSET_RATIO
+        if ICON_TYPE_FILES in (station.terminus_icon_types or [])
+        else 0.0
+    )
+    return half, half + stacked
+
+
+def terminus_cross_excess(station: Station, section_dir: str) -> tuple[float, float]:
+    """(low, high) px a terminus's icon reaches past the default icon across the flow.
+
+    Section padding across the flow is sized for the default icon, so a theme
+    with larger icons owes the box this much more on each side.  Zero for a
+    non-terminus and for icons no larger than the default.
+    """
+    if not station.is_terminus:
+        return 0.0, 0.0
+    low, high = _terminus_cross_reach(station, section_dir)
+    with metrics_context(icon_width=TERMINUS_WIDTH, icon_half_height=ICON_HALF_HEIGHT):
+        default_low, default_high = _terminus_cross_reach(station, section_dir)
+    return max(0.0, low - default_low), max(0.0, high - default_high)
+
+
+def _stacked_page_excess(station: Station) -> float:
+    """Px a stacked ``files:`` back page peeks past the default icon's, along the flow.
+
+    Flow-axis icon room is sized from the theme's icon width and height, but
+    the back page's peek, a fraction of the width, comes on top of that.
+    """
+    if ICON_TYPE_FILES not in (station.terminus_icon_types or []):
+        return 0.0
+    from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO
+
+    default_width = TERMINUS_WIDTH * active_font_scale()
+    return max(0.0, icon_width_approx() - default_width) * FILES_ICON_OFFSET_RATIO
+
+
 def _terminus_icons_extend_forward(is_source: bool, section_dir: str) -> bool:
     """Whether a terminus's icons extend in the section's forward flow.
 
@@ -1341,21 +1394,49 @@ def _terminus_icons_extend_forward(is_source: bool, section_dir: str) -> bool:
 def _terminus_y_overhang(
     station: Station, section_dir: str, graph: MetroGraph
 ) -> tuple[float, float]:
-    """(above, below) px a TB/BT terminus's icons extend past its marker.
+    """(above, below) px a terminus's icons extend past its marker.
 
-    Returns ``(0.0, 0.0)`` for non-terminus stations and for LR/RL
-    sections (whose icons extend horizontally), so content-extent callers
-    stay byte-identical there.
+    A TB/BT terminus's icons march along Y, so this is their whole reach,
+    room included.  An LR/RL terminus's icons march along X and the section
+    padding already covers a default icon's height, so this is only the
+    :func:`terminus_cross_excess` a larger theme icon reaches beyond it.
+    Zero for non-terminus stations.
     """
-    if not station.is_terminus or lanes_run_along_y(section_dir):
+    if not station.is_terminus:
         return 0.0, 0.0
+    if lanes_run_along_y(section_dir):
+        return terminus_cross_excess(station, section_dir)
     is_source = not graph.edges_to(station.id)
     extent = _terminus_icon_clearance_vertical(
         len(station.terminus_labels), station.terminus_caption_line_count
-    )
+    ) + _stacked_page_excess(station)
     if _terminus_icons_extend_forward(is_source, section_dir):  # below
         return 0.0, extent
     return extent, 0.0
+
+
+def _grow_cross_padding_for_icon(
+    section: Section, station: Station, section_dir: str
+) -> None:
+    """Grow *section* across its flow so *station*'s icon keeps the padding."""
+    low, high = terminus_cross_excess(station, section_dir)
+    if not (low or high):
+        return
+    metrics = active_metrics()
+    if lanes_run_along_y(section_dir):
+        top = min(section.bbox_y, station.y - metrics.section_y_padding - low)
+        bottom = max(
+            section.bbox_y + section.bbox_h,
+            station.y + metrics.section_y_padding + high,
+        )
+        section.bbox_y, section.bbox_h = top, bottom - top
+    else:
+        left = min(section.bbox_x, station.x - metrics.section_x_padding - low)
+        right = max(
+            section.bbox_x + section.bbox_w,
+            station.x + metrics.section_x_padding + high,
+        )
+        section.bbox_x, section.bbox_w = left, right - left
 
 
 def _adjust_terminus_icon_clearance(
@@ -1369,6 +1450,8 @@ def _adjust_terminus_icon_clearance(
     LR/RL, vertically for TB/BT), on the station's "outside": forwards for
     sinks, backwards for sources, with RL/BT mirrored.  When the section
     padding doesn't leave enough room, grow the bbox on the affected side.
+    Across the flow, an icon larger than the default grows the box by its
+    :func:`terminus_cross_excess` beyond the section padding.
     """
     section_dir = section.direction or "LR"
     icons_march_on_y = lanes_run_along_x(section_dir)
@@ -1377,6 +1460,8 @@ def _adjust_terminus_icon_clearance(
         if not station.is_terminus:
             continue
 
+        _grow_cross_padding_for_icon(section, station, section_dir)
+
         n_icons = len(station.terminus_labels)
         is_source = not graph.edges_to(station.id)
         extends_forward = _terminus_icons_extend_forward(is_source, section_dir)
@@ -1384,7 +1469,7 @@ def _adjust_terminus_icon_clearance(
         if icons_march_on_y:
             needed = _terminus_icon_clearance_vertical(
                 n_icons, station.terminus_caption_line_count
-            )
+            ) + _stacked_page_excess(station)
             if extends_forward:  # icons below the station
                 clearance = section.bbox_y + section.bbox_h - station.y
                 if clearance < needed:
@@ -1396,7 +1481,9 @@ def _adjust_terminus_icon_clearance(
                     section.bbox_y -= expand
                     section.bbox_h += expand
         else:
-            needed = _terminus_icon_clearance(n_icons, station.terminus_names)
+            needed = _terminus_icon_clearance(
+                n_icons, station.terminus_names
+            ) + _stacked_page_excess(station)
             if not extends_forward:  # icons left of the station
                 clearance = station.x - section.bbox_x
                 if clearance < needed:
