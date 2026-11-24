@@ -44,6 +44,9 @@ history.
   apart through the whole turn at every angle, closing the thin seam that a
   right-angle bundle turn showed between touching lines. Every rounded corner
   on every map redraws very slightly fuller.
+- Animated dots ride the drawn strokes: each dot turns about a corner with its
+  lane's own radius, so dots keep to their lines through concentric turns and
+  source turnouts. Animation timing is measured on the unrounded geometry.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,
   embed dialog) and the copyable inline-HTML snippet now follow the map's mode
   instead of always being dark. `--mode` or `%%metro mode:` fixes both light
