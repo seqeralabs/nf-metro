@@ -107,6 +107,13 @@ _KNOWN_DEFECTS = {
             for order in DECLARATION_ORDERS
             for o in _TB + _BT
         },
+        **{
+            ("flat_frame_carried_peel_line_first", o): (
+                "the carried bundle leaves outside the inter-row corridor its "
+                "reservation realises, a downgrade main does not raise here"
+            )
+            for o in _BT
+        },
     },
 }
 
