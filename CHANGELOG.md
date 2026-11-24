@@ -72,16 +72,18 @@ history.
   of the trunk from the branch, in the nearest row clear of the stations in
   its column and along its run, and its line joins the bundle on the outer
   lane of that side instead of crossing the trunk to reach it, keeping that
-  side when it carries on into a section beside it. The line takes that lane
-  only along the source's own run, so another run of the same line keeps its
-  place. A source with runs to several stations of the trunk keeps the run
-  that joins first on its own row and lays each later one a clear row further
-  out, so its runs neither cross the trunk nor each other, while its lines
-  bound for the same station stay together in one bundle. A helper bowing the
-  line around a station it skips leaves the source where it was, and on a
-  top-to-bottom or bottom-to-top section stays on the source's side of the
-  station it skips. Where no row lies beyond every branch it passes, the
-  source sits where any other source would
+  side when it carries on into a section beside it. This holds in a section
+  that several lines enter too, whose entering lines keep their order. The
+  line takes that lane only along the source's own run, so another run of the
+  same line, including one entering the section, keeps its place. A source with
+  runs to several stations of the trunk keeps the run that joins first on its
+  own row and lays each later one a clear row further out, so its runs neither
+  cross the trunk nor each other, while its lines bound for the same station
+  stay together in one bundle. A helper bowing the line around a
+  station it skips leaves the source where it was, and on a top-to-bottom or
+  bottom-to-top section stays on the source's side of the station it skips.
+  Where no row lies beyond every branch it passes, the source sits where any
+  other source would
   ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
 - An off-track input steps further out until it clears an on-track station in
   its own column, as it does for stations downstream of it
