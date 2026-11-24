@@ -15,6 +15,23 @@ history.
 
 ## [Unreleased]
 
+### Breaking changes
+
+- `jsonschema` is a core dependency, and the `validate` extra is gone:
+  `pip install nf-metro` brings everything `nf-metro validate-svg` and theme
+  files need, and `pip install "nf-metro[validate]"` no longer names an extra.
+- Theme file errors take the form `theme file <path>: <JSON path>: <message>`
+  (for example `$.light.label_color: '#12345' is not a colour`), as reported by
+  the theme JSON Schema.
+- The Python API raises `ThemeError` (an `NfMetroError` and `ValueError`) for
+  an unknown theme name instead of falling back to `nfcore`.
+- `nf-metro info` reports `style: transparent` for a map written with
+  `style: light`; `light` stays accepted as an alias.
+- Python API: `route_edges`, `route_edges_centred`, `observe_route_edges` and
+  `observe_route_edges_centred` take no `diagonal_run` argument; set the
+  `diagonal_run` option instead. `render.constants.line_style_kwargs` takes the
+  theme its dash patterns come from.
+
 ### Added
 
 - Theme stacks and theme files (#2195): `%%metro style:`, `--theme` and a
@@ -33,6 +50,19 @@ history.
 - `glyph_stroke` and `capsule_fill` theme settings give interchange rings,
   bar line ends, station capsules and interchanges colours that follow the
   viewer's light or dark mode, muted lines included.
+- Theme files are validated against a JSON Schema generated from the theme
+  definition and shipped as `nf_metro/themes/theme.schema.json`. Editors using
+  the YAML language server complete and check theme files once pointed at it;
+  the built-in themes do.
+- Theme fields for values that were fixed: section badge fill, digit colour
+  and size; dashed and dotted dash patterns; `line_cap`; `bridge_gap`; caption
+  colour (light/dark aware) and size; watermark colour; file-icon banner fill
+  and text colour; legend padding, row height and swatch width; group caption
+  rule width and opacity; `canvas_padding`; `title_font_weight`;
+  `animation_ball_opacity`. Each defaults to the value it replaces.
+- `section_x_padding`, `section_y_padding`, `label_offset` and `diagonal_run`
+  options, each a `%%metro` directive, a CLI flag and a theme `layout:` option;
+  `directional` can be set by a theme too.
 - `london-tube` built-in theme: a schematic transit look after the geometry of
   TfL's Line Diagram Standard, with track-weight station tabs, terminus bars,
   bold capsules at interchanges, bundled lines edge to edge and a 30% grey for
@@ -69,10 +99,12 @@ history.
   lane's own radius, so dots keep to their lines through concentric turns and
   source turnouts. Animation timing is measured on the unrounded geometry.
 - The transparent embed theme is named `transparent`; `light` is an accepted
-  alias. `nf-metro info` reports `style: transparent` for a map written with
-  `style: light`.
-- The Python API raises `ThemeError` (an `NfMetroError` and `ValueError`) for
-  an unknown theme name instead of falling back to `nfcore`.
+  alias.
+- Layout reserves room for a theme's own file-icon size, line width and
+  chevron size, and the canvas margin grows for a theme drawing wider lines or
+  larger chevrons than any built-in.
+- The title lines up with a thick section outline's outer edge;
+  `london-tube`'s 1.5px outline moves its title 0.25px left.
 - Layout measures file icons and their captions with the theme the map
   renders with, including `--theme` and a per-output `theme=`, rather than
   the map's own style or `nfcore`. A map rendered with a theme whose icons or
