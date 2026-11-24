@@ -302,10 +302,9 @@ def corner_arc_controls(
     ``phi`` drawn as one cubic puts each control point ``4/3 * tan(phi / 4)``
     radii along its tangent, which is ``k = 4/3 * tan(phi / 4) / tan(phi / 2)``
     of the tangent arm; the radial error is under 0.03% of the radius up to a
-    right angle. Concentric lanes drawn this way stay parallel through the
-    turn, which a quadratic through *corner* does not. With ``t = tan(phi / 4)``
-    the ratio is ``2/3 * (1 - t**2)``, so a straight-through corner gets 2/3,
-    the cubic form of that quadratic. A corner with a zero arm is a straight
+    right angle, so concentric lanes drawn this way stay parallel through the
+    turn. With ``t = tan(phi / 4)`` the ratio is ``2/3 * (1 - t**2)``, so a
+    straight-through corner gets 2/3. A corner with a zero arm is a straight
     run between its tangent points.
     """
     d_in = (corner[0] - before[0], corner[1] - before[1])

@@ -20,10 +20,7 @@ from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath
-from nf_metro.layout.routing.corners import (
-    curve_tangents,
-    resolve_curve_radii,
-)
+from nf_metro.layout.routing.corners import curve_tangents, resolve_curve_radii
 from nf_metro.layout.routing.invariants import (
     _ORTHOGONAL_TURN_FLOOR,
     _ORTHOGONAL_TURN_TOL,
@@ -237,7 +234,6 @@ class TestSvgPathStructure:
             non_z = [c for c in cmds if c[0] != "Z"]
             if len(non_z) > 1:
                 assert non_z[-1][0] == "L", f"Path doesn't end with L: {d[:80]}"
-            # Every C must be preceded by L (approach segment)
             for i, (cmd, _) in enumerate(cmds):
                 if cmd == "C" and i > 0:
                     assert cmds[i - 1][0] in ("L", "M"), (
@@ -291,7 +287,6 @@ class TestCurveContinuity:
                     assert not (v != v), f"NaN in path: {d[:80]}"  # NaN != NaN
                     assert abs(v) < 1e6, f"Extreme coordinate in path: {d[:80]}"
 
-            # Verify C commands have exactly 6 args (c1, c2, end)
             for cmd, args in cmds:
                 if cmd == "C":
                     assert len(args) == 6, (
@@ -469,7 +464,6 @@ class TestCornerCountMatchesCorners:
             f"({routed_corners}) plus one per turnout ({turnouts})"
         )
 
-        # Count actual C commands in SVG paths
         actual_c = 0
         for d in _parse_svg_edge_paths(emit_render_plan(plan)):
             cmds = _parse_path_commands(d)
