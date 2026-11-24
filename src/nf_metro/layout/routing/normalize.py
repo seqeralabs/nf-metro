@@ -100,6 +100,7 @@ from nf_metro.layout.routing.corners import (
     concentric_reference_radius_at,
     corner_radius,
     corner_radius_budget,
+    reference_anchored_radius,
     resolve_curve_radii,
     turn_shift,
     wholesale_corner_translation,
@@ -2153,7 +2154,9 @@ def _unify_coincident_corner_radii(
                 or current_offset != 0.0
                 or current_base != reference
             ):
-                route.curve_radii[radius_index] = reference
+                route.curve_radii[radius_index] = reference_anchored_radius(
+                    0.0, reference
+                )
                 route.record_concentric_corner(radius_index, 0.0, reference)
 
 
