@@ -26,6 +26,7 @@ from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
     SIDE_BRANCH_NUDGE,
 )
+from nf_metro.layout.layers import build_station_digraph
 from nf_metro.parser.model import (
     LineSpread,
     MetroGraph,
@@ -79,7 +80,7 @@ def assign_tracks(
     if not graph.lines:
         return {sid: float(i) for i, sid in enumerate(graph.stations)}
 
-    G = _station_digraph(graph)
+    G = build_station_digraph(graph)
 
     continuation_predecessors = continuation_predecessors or {}
 
@@ -258,7 +259,7 @@ def peel_lane_ends(
     """
     if priority_lane_sign is None:
         return {}
-    G = _station_digraph(graph)
+    G = build_station_digraph(graph)
     lane_sign = 1.0 if priority_lane_sign > 0 else -1.0
     pins: dict[str, list[float]] = defaultdict(list)
     for node in _peel_contenders(G, graph, layers):
@@ -272,17 +273,6 @@ def peel_lane_ends(
                 pins[lid].append(pin)
     agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
     return {lid: pin for lid, pin in agreed.items() if pin is not None}
-
-
-def _station_digraph(graph: MetroGraph) -> nx.DiGraph[str]:
-    """Every station of *graph* as a node, every edge as a directed arc."""
-    G: nx.DiGraph[str] = nx.DiGraph()
-    for edge in graph.edges:
-        G.add_edge(edge.source, edge.target)
-    for sid in graph.stations:
-        if sid not in G:
-            G.add_node(sid)
-    return G
 
 
 def _step_off_exit_rows(
