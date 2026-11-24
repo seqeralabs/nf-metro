@@ -5354,8 +5354,9 @@ def check_no_hanging_routes(
     property every family-specific endpoint guard encodes locally -- that a
     routed segment terminates at a real anchor -- once, over every route.  An
     endpoint is anchored when it lies within :func:`_hanging_route_tol` of a
-    station/port/junction marker (all live in ``graph.stations``, including
-    terminus/file-icon hosts) or of any *other* route's rendered path (the
+    station/port/junction's lanes as drawn (:func:`drawn_lane_span`; all live in
+    ``graph.stations``, including terminus/file-icon hosts) or of any *other*
+    route's rendered path (the
     join point of a bundle mate, a branch onto its trunk, or a peel-off).
 
     Rail-mode endpoints are skipped: a rail stub terminates on its rail rather
@@ -5369,7 +5370,14 @@ def check_no_hanging_routes(
         if routes_to_check is not None
         else None
     )
-    anchor_xy = [(st.x, st.y) for st in graph.stations.values()]
+    from nf_metro.layout.routing.offsets import drawn_lane_span
+    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
+
+    positive_fan = tb_positive_fan_sections(graph)
+    anchors = [
+        drawn_lane_span(graph, st, offsets, positive_fan)
+        for st in graph.stations.values()
+    ]
     rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
     polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
 
@@ -5382,7 +5390,7 @@ def check_no_hanging_routes(
             if graph.station_is_rail(node):
                 continue
             d_marker = min(
-                (((end[0] - x) ** 2 + (end[1] - y) ** 2) ** 0.5 for x, y in anchor_xy),
+                (point_to_polyline_distance(end, anchor) for anchor in anchors),
                 default=float("inf"),
             )
             if d_marker <= _hanging_route_tol():

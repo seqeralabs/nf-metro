@@ -4363,12 +4363,54 @@ def _l_shape_fan_source_turn(
     lead_length = ctx.curve_radius + 2 * half_width
     launch_x = axis_x - run_direction.sign * lead_length
     launch_x = min(launch_x, sx) if run_direction is Direction.R else max(launch_x, sx)
+    # The lead-in overlaps the same lines' upstream tail, but never past the
+    # exit port onto the section the fan leaves: a fan wider than its
+    # junction's margin from the wall would otherwise launch inside the box.
+    exit_port = _source_exit_port(ctx.graph, src)
+    if exit_port is not None and _port_run_direction(exit_port) is run_direction:
+        launch_x = (
+            max(launch_x, exit_port.x)
+            if run_direction is Direction.R
+            else min(launch_x, exit_port.x)
+        )
     return _LShapeFanSourceTurn(
         launch_x,
         axis_x,
         run_direction,
         turn_direction,
     )
+
+
+def _source_exit_port(graph: MetroGraph, src: Station) -> Port | None:
+    """The exit port a route leaves its source section through, if any.
+
+    *src* itself when it is an exit port, else the one feeding the junction
+    *src* (directly or through a chain of junctions); ``None`` otherwise.
+    """
+    seen: set[str] = set()
+    cur: str | None = src.id
+    while cur is not None and cur not in seen:
+        seen.add(cur)
+        port = graph.ports.get(cur)
+        if port is not None and not port.is_entry:
+            return port
+        if cur in graph.junctions:
+            cur = next(
+                (e.source for e in graph.edges if e.target == cur),
+                None,
+            )
+            continue
+        return None
+    return None
+
+
+def _port_run_direction(port: Port) -> Direction | None:
+    """Horizontal direction a LEFT/RIGHT port faces; ``None`` for TOP/BOTTOM."""
+    if port.side == PortSide.RIGHT:
+        return Direction.R
+    if port.side == PortSide.LEFT:
+        return Direction.L
+    return None
 
 
 def _source_exit_side(graph: MetroGraph, src: Station) -> Direction | None:
@@ -4378,25 +4420,8 @@ def _source_exit_side(graph: MetroGraph, src: Station) -> Direction | None:
     exit port, or a junction fed (directly or transitively) by one; ``None``
     when the source has no horizontal exit side (e.g. a TOP/BOTTOM port).
     """
-    seen: set[str] = set()
-    cur: str | None = src.id
-    while cur is not None and cur not in seen:
-        seen.add(cur)
-        port = graph.ports.get(cur)
-        if port is not None and not port.is_entry:
-            if port.side == PortSide.RIGHT:
-                return Direction.R
-            if port.side == PortSide.LEFT:
-                return Direction.L
-            return None
-        if cur in graph.junctions:
-            cur = next(
-                (e.source for e in graph.edges if e.target == cur),
-                None,
-            )
-            continue
-        return None
-    return None
+    port = _source_exit_port(graph, src)
+    return None if port is None else _port_run_direction(port)
 
 
 @dataclass(frozen=True, slots=True)

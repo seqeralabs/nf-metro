@@ -12,7 +12,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
-from typing import Literal, NamedTuple
+from typing import AbstractSet, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
@@ -35,6 +35,7 @@ from nf_metro.layout.pass_metrics import (
     graph_radius_context,
 )
 from nf_metro.layout.phases._common import (
+    _station_bundle_offset_span,
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
     line_forks_within_section,
@@ -5523,6 +5524,57 @@ def validate_linear_entry_frame_ownership(
                 f"{assignment.station_id!r} moves frame-owned line "
                 f"{assignment.line_id!r} from {assignment.offset} to {actual}"
             )
+
+
+def drawn_bundle_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float],
+    positive_fan: AbstractSet[str],
+) -> tuple[float, float]:
+    """Min/max of a station's per-line offsets *as drawn*.
+
+    A vertical-flow (TB) section is the 90-degree rotation of a horizontal one:
+    a line rides ``x - offset`` where an LR line rides ``y + offset`` (matching
+    :func:`_tb_x_offset`).  Spanning the marker over the drawn offsets keeps it
+    centred on the lines that actually pass through the station, so a one-line or
+    off-trunk-subset station does not leave its glyph beside its own track.
+    """
+    raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
+    if not graph.station_lines(station.id):
+        return 0.0, 0.0
+    sec = graph.sections.get(station.section_id) if station.section_id else None
+    if sec is not None and sec.direction == "TB":
+        sign = 1.0 if station.section_id in positive_fan else -1.0
+        drawn = [sign * raw_min, sign * raw_max]
+    else:
+        drawn = [raw_min, raw_max]
+    return min(drawn), max(drawn)
+
+
+def drawn_lane_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: dict[tuple[str, str], float],
+    positive_fan: AbstractSet[str],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """The segment across its flow that a station's lanes are drawn along.
+
+    Its ends are the outermost lanes through the station as the renderer draws
+    them, the spine of the marker it centres on them, so a route ending on any
+    of the station's lanes ends on this segment.  A rail station spans the
+    rails it uses; a lane-less station is its own point.
+    """
+    if station.rail_top_y is not None and station.rail_bottom_y is not None:
+        used = station.rail_used_ys or [station.y]
+        return (station.x, min(used)), (station.x, max(used))
+    if graph.station_is_rail(station.id):
+        return (station.x, station.y), (station.x, station.y)
+    lo, hi = drawn_bundle_span(graph, station, station_offsets, positive_fan)
+    sec = graph.sections.get(station.section_id) if station.section_id else None
+    if sec is not None and lanes_run_along_x(sec.direction):
+        return (station.x + lo, station.y), (station.x + hi, station.y)
+    return (station.x, station.y + lo), (station.x, station.y + hi)
 
 
 def conflicting_linear_entry_frame_assignments(
