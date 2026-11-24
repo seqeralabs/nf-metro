@@ -494,11 +494,13 @@ def test_tab_in_a_vertical_section_faces_its_label_sideways():
 
 @pytest.mark.parametrize("vertical", [False, True])
 def test_terminus_bar_crosses_the_line_end_and_overhangs_both_sides(vertical):
-    from nf_metro.render.svg import _Bundle, terminus_bar_box
+    from nf_metro.render.svg import _Bundle, bundle_end_bar_box
 
     theme = replace(_GEOM, station_tick_width=1.0, station_tick_length=1.5)
     axis = 100.0 if vertical else 50.0
-    x, y, w, h = terminus_bar_box(_Bundle(_At(100.0, 50.0), 0.0, 0.0, vertical), theme)
+    x, y, w, h = bundle_end_bar_box(
+        _Bundle(_At(100.0, 50.0), 0.0, 0.0, vertical), theme
+    )
     thick, across = 1.0 * _LW, _LW + 2 * 1.5 * _LW
     if vertical:
         assert (w, h) == pytest.approx((across, thick))

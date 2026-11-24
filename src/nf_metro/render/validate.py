@@ -24,8 +24,9 @@ from nf_metro.layout.labels import (
     segment_strikes_label,
 )
 from nf_metro.layout.pass_metrics import font_scale_context
-from nf_metro.layout.routing.corners import corner_from_arc
+from nf_metro.layout.routing.corners import corner_from_arc, cubic_point
 from nf_metro.manifest import read_manifest
+from nf_metro.render.path_geometry import iter_path_commands
 
 if TYPE_CHECKING:
     from nf_metro.render.plan import RenderPlan
@@ -84,23 +85,15 @@ class _Label(NamedTuple):
 # chevrons (the optional directional markers) also carry ``data-line-id`` but
 # are not the route, so the route class substring gates them out.
 _ROUTE_CLASS = "metro-line-"
-_NUM = re.compile(r"-?\d+(?:\.\d+)?")
 _ELEMENT = re.compile(r"<(path|line)\b([^>]*?)/?>", re.DOTALL)
 _TEXT = re.compile(r"<text\b([^>]*?)>(.*?)</text>", re.DOTALL)
 _TSPAN = re.compile(r"<tspan\b[^>]*>(.*?)</tspan>", re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
-_PATH_CMD = re.compile(r"([MLC])([^MLC]*)")
 
 
 def _attr(attrs: str, name: str, default: str | None = None) -> str | None:
     match = re.search(rf'\b{name}="([^"]*)"', attrs)
     return match.group(1) if match else default
-
-
-def _iter_path_cmds(d: str) -> Iterator[tuple[str, list[float]]]:
-    """``(command, numbers)`` for each ``M``/``L``/``C`` in a path's ``d``."""
-    for cmd, body in _PATH_CMD.findall(d):
-        yield cmd, [float(n) for n in _NUM.findall(body)]
 
 
 def _route_elements(svg: str) -> Iterator[tuple[str, list[tuple[str, list[float]]]]]:
@@ -119,7 +112,7 @@ def _route_elements(svg: str) -> Iterator[tuple[str, list[tuple[str, list[float]
             )
             yield line_id, [("M", [x1, y1]), ("L", [x2, y2])]
         else:
-            yield line_id, list(_iter_path_cmds(_attr(attrs, "d") or ""))
+            yield line_id, list(iter_path_commands(_attr(attrs, "d") or ""))
 
 
 def parse_route_polylines(
@@ -528,14 +521,6 @@ class DrawnChevron(NamedTuple):
     reach: float
 
 
-def _cubic_point(a: _Point, c1: _Point, c2: _Point, b: _Point, t: float) -> _Point:
-    s = 1.0 - t
-    return (
-        s**3 * a[0] + 3 * s * s * t * c1[0] + 3 * s * t * t * c2[0] + t**3 * b[0],
-        s**3 * a[1] + 3 * s * s * t * c1[1] + 3 * s * t * t * c2[1] + t**3 * b[1],
-    )
-
-
 def parse_route_strokes(svg: str) -> list[StrokeTrace]:
     """Each drawn route's painted centreline, rounded corners included.
 
@@ -565,7 +550,7 @@ def parse_route_strokes(svg: str) -> list[StrokeTrace]:
                 end = (nums[4], nums[5])
                 prev = pen
                 for k in range(1, _CORNER_CHORDS + 1):
-                    point = _cubic_point(pen, c1, c2, end, k / _CORNER_CHORDS)
+                    point = cubic_point(pen, c1, c2, end, k / _CORNER_CHORDS)
                     chords.append((prev, point))
                     prev = point
                 pen = end
@@ -580,7 +565,7 @@ def parse_chevrons(svg: str) -> list[DrawnChevron]:
         cls = _attr(attrs, "class") or ""
         if tag != "path" or _DIRECTION_CLASS not in cls:
             continue
-        nums = [n for _, ns in _iter_path_cmds(_attr(attrs, "d") or "") for n in ns]
+        nums = [n for _, ns in iter_path_commands(_attr(attrs, "d") or "") for n in ns]
         if len(nums) != 6:
             continue
         w1x, w1y, ax, ay, w2x, w2y = nums
