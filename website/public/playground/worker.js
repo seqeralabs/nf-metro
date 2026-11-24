@@ -27,12 +27,14 @@ def nfm_render(mmd, opts_json):
     layout_geom = {k: v for k, v in all_layout.items() if k not in _RENDER_ONLY}
     render_only = {k: v for k, v in all_layout.items() if k in _RENDER_ONLY}
 
-    # A theme can set layout options, so the layout is keyed on the picked
-    # theme's options, or on the map's own style line when none is picked.
+    # Layout measures with the picked theme, so the layout is keyed on its name
+    # and options, or on the map's own style line when none is picked.
     theme_sel = opts.get("theme") or None
     if theme_sel:
         mmd_norm = _STYLE_RE.sub("", mmd).strip()
-        theme_key = json.dumps(dict(resolve_stack(theme_sel).layout), sort_keys=True)
+        theme_key = theme_sel + "\\x00" + json.dumps(
+            dict(resolve_stack(theme_sel).layout), sort_keys=True
+        )
     else:
         mmd_norm = _MODE_RE.sub("", mmd).strip()
         theme_key = ""

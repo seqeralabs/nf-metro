@@ -510,6 +510,7 @@ def _evaluate_attempt(
                 source_dir=production.source_dir,
                 bare=production.render.bare,
                 output_format="svg",
+                theme=production.theme,
                 layout_commitments=LayoutCommitmentOverlay(
                     production.caller_pins, attempt.commitments
                 ),

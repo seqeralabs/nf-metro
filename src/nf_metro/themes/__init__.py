@@ -208,25 +208,26 @@ def resolve_graph_stack(theme: str | None, graph: MetroGraph) -> ResolvedTheme:
     """
     if theme is not None:
         return resolve_stack(theme)
-    if graph.theme_stack:
-        return resolve_stack(graph.theme_stack, graph.theme_dir)
+    if graph.resolved_theme is not None:
+        return graph.resolved_theme
     return resolve_stack(graph.style, graph.source_dir)
 
 
 def bind_graph_stack(
     graph: MetroGraph, theme: str | None, source_dir: str
 ) -> ResolvedTheme:
-    """Record on *graph* the stack its layout and render use, and resolve it.
+    """Resolve the stack *graph*'s layout and render use and cache it there.
 
     Layout passes that borrow render geometry read it back through
     :func:`layout_theme`, and the render through :func:`resolve_theme` with no
     explicit theme, so both measure with the same theme.
     """
-    if theme is not None:
-        graph.theme_stack, graph.theme_dir = theme, ""
-    else:
-        graph.theme_stack, graph.theme_dir = graph.style, source_dir
-    return resolve_stack(graph.theme_stack, graph.theme_dir)
+    graph.resolved_theme = (
+        resolve_stack(theme)
+        if theme is not None
+        else resolve_stack(graph.style, source_dir)
+    )
+    return graph.resolved_theme
 
 
 def layout_theme(graph: MetroGraph) -> Theme:

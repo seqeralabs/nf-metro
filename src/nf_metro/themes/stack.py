@@ -150,6 +150,24 @@ class ResolvedTheme:
         effective = self.fixed_mode or self.pinned_mode or mode
         return self.light if effective == LIGHT else self.dark
 
+    def __deepcopy__(self, memo: dict[int, object]) -> ResolvedTheme:
+        # Immutable and shared by every resolution of its stack, so a copied
+        # graph keeps the same object.
+        return self
+
+    def __reduce__(self) -> tuple[object, ...]:
+        return (
+            ResolvedTheme,
+            (
+                self.name,
+                self.light,
+                self.dark,
+                dict(self.layout),
+                self.fixed_mode,
+                self.pinned_mode,
+            ),
+        )
+
 
 def split_stack(value: str) -> list[str]:
     """Split a ``style``/``--theme`` value into its non-empty entries."""
