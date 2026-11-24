@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import itertools
-import math
 from collections import defaultdict, deque
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -95,11 +94,12 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
-    concentric_corner_radius,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
     corner_radius,
     corner_radius_budget,
+    largest_concentric_reference,
+    padded_curve_radii,
     reference_anchored_radius,
     resolve_curve_radii,
     turn_shift,
@@ -1227,14 +1227,12 @@ def _rederive_semantic_end_corners(
         inner_vertex = inner.points[inner.rank]
         prepared: list[tuple[_ConcentricCorner, int, float, list[float]]] = []
         ceiling = curve_radius
-        cap = math.inf
-        floor = -math.inf
         for member in members:
             vertex = member.points[member.rank]
             radius_index = member.rank - 1
-            corners = len(member.points) - 2
-            radii = list(member.route.curve_radii or [])
-            radii += [curve_radius] * (corners - len(radii))
+            radii = padded_curve_radii(
+                member.points, member.route.curve_radii, curve_radius
+            )
             shift = turn_shift(
                 member.points[member.rank - 1],
                 vertex,
@@ -1242,16 +1240,18 @@ def _rederive_semantic_end_corners(
                 (vertex[0] - inner_vertex[0], vertex[1] - inner_vertex[1]),
             )
             ceiling = max(ceiling, radii[radius_index] - shift)
-            cap = min(
-                cap, corner_radius_budget(member.points, radii, radius_index) - shift
-            )
-            floor = max(floor, COORD_TOLERANCE_FINE - shift)
             prepared.append((member, radius_index, shift, radii))
-        reference = min(ceiling, cap)
-        if reference < floor:
+        reference = largest_concentric_reference(
+            ceiling,
+            (
+                (corner_radius_budget(member.points, radii, radius_index), shift)
+                for member, radius_index, shift, radii in prepared
+            ),
+        )
+        if reference is None:
             continue
         for member, radius_index, shift, radii in prepared:
-            radii[radius_index] = reference + shift
+            radii[radius_index] = reference_anchored_radius(shift, reference)
             member.route.curve_radii = radii
             if member.orthogonal:
                 member.route.record_concentric_corner(
@@ -2137,17 +2137,21 @@ def _unify_coincident_corner_radii(
             corner_is_owned(route, radius_index) for route, radius_index in members
         ):
             continue
-        reference = widest_coincident_radius(
-            _padded_radii(route)[radius_index] for route, radius_index in members
-        )
-        reference = min(
-            reference,
-            *(
-                corner_radius_budget(route.points, _padded_radii(route), radius_index)
-                for route, radius_index in members
+        padded = [
+            padded_curve_radii(route.points, route.curve_radii)
+            for route, _radius_index in members
+        ]
+        reference = largest_concentric_reference(
+            widest_coincident_radius(
+                radii[radius_index]
+                for radii, (_route, radius_index) in zip(padded, members)
+            ),
+            (
+                (corner_radius_budget(route.points, radii, radius_index), 0.0)
+                for radii, (route, radius_index) in zip(padded, members)
             ),
         )
-        if reference < COORD_TOLERANCE_FINE:
+        if reference is None:
             continue
         for route, radius_index in members:
             assert route.curve_radii is not None
@@ -2162,16 +2166,8 @@ def _unify_coincident_corner_radii(
                 or current_offset != 0.0
                 or current_base != reference
             ):
-                route.curve_radii[radius_index] = reference_anchored_radius(
-                    0.0, reference
-                )
+                route.curve_radii[radius_index] = reference
                 route.record_concentric_corner(radius_index, 0.0, reference)
-
-
-def _padded_radii(route: RoutedPath) -> list[float]:
-    """*route*'s corner radii, the base radius standing in for any it lacks."""
-    radii = list(route.curve_radii or [])
-    return radii + [CURVE_RADIUS] * (len(route.points) - 2 - len(radii))
 
 
 def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
@@ -5744,16 +5740,7 @@ def _reanchor_concentric_corner_fans(
     from nf_metro.layout.routing.invariants import concentric_corner_fans
 
     for fan in concentric_corner_fans(population, offsets):
-        members: list[
-            tuple[
-                _CornerObservation,
-                int,
-                float,
-                float,
-                tuple[float, float],
-                tuple[float, float],
-            ]
-        ] = []
+        members: list[tuple[_CornerObservation, int, float, float]] = []
         for observation in fan:
             route = observation.route
             if route.curve_radii is None:
@@ -5767,45 +5754,40 @@ def _reanchor_concentric_corner_fans(
                 observation.points[observation.rank + 1],
             )
             term = observation.points[observation.rank][0] * (turn_out[0] - turn_in[0])
-            members.append(
-                (observation, index, resolved[index], term, turn_in, turn_out)
-            )
+            members.append((observation, index, resolved[index], term))
         if not members:
             continue
-        floor_radius = min(radius for _o, _i, radius, _t, _ti, _to in members)
+        floor_radius = min(radius for _o, _i, radius, _t in members)
         if abs(floor_radius - curve_radius) <= COORD_TOLERANCE:
             continue
         innermost = max(members, key=lambda member: member[3])[0]
-        innermost_x = innermost.points[innermost.rank][0]
+        innermost_vertex = innermost.points[innermost.rank]
+        innermost_x = innermost_vertex[0]
 
-        prepared: list[
-            tuple[
-                _CornerObservation, int, float, tuple[float, float], tuple[float, float]
-            ]
-        ] = []
-        cap = math.inf
-        floor = -math.inf
-        for observation, index, _resolved, _term, turn_in, turn_out in members:
+        prepared: list[tuple[_CornerObservation, int, float, float]] = []
+        lanes: list[tuple[float, float]] = []
+        for observation, index, _resolved, _term in members:
             displacement = observation.points[observation.rank][0] - innermost_x
-            shift = -displacement * (turn_out[0] - turn_in[0])
             budget = corner_radius_budget(
-                observation.points, _padded_radii(observation.route), index
+                observation.points,
+                padded_curve_radii(observation.points, observation.route.curve_radii),
+                index,
             )
-            cap = min(cap, budget - shift)
-            floor = max(floor, COORD_TOLERANCE_FINE - shift)
-            prepared.append((observation, index, displacement, turn_in, turn_out))
-        reference = min(curve_radius, cap)
-        if reference < floor or (reference < curve_radius and reference < floor_radius):
+            vertex = observation.points[observation.rank]
+            shift = turn_shift(
+                observation.points[observation.rank - 1],
+                vertex,
+                observation.points[observation.rank + 1],
+                (vertex[0] - innermost_vertex[0], vertex[1] - innermost_vertex[1]),
+            )
+            lanes.append((budget, shift))
+            prepared.append((observation, index, displacement, shift))
+        reference = largest_concentric_reference(curve_radius, lanes)
+        if reference is None or (reference < curve_radius and reference < floor_radius):
             continue
 
-        for observation, index, displacement, turn_in, turn_out in prepared:
-            radius = concentric_corner_radius(
-                turn_in,
-                turn_out,
-                displacement,
-                reference,
-            )
+        for observation, index, displacement, shift in prepared:
             radii = list(observation.route.curve_radii or ())
-            radii[index] = radius
+            radii[index] = reference_anchored_radius(shift, reference)
             observation.route.curve_radii = radii
             observation.route.record_concentric_corner(index, displacement, reference)

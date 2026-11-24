@@ -128,6 +128,36 @@ def corner_radius_budget(
     return min(len_in - prev_r, len_out - next_r)
 
 
+def padded_curve_radii(
+    points: list[tuple[float, float]],
+    curve_radii: Iterable[float] | None,
+    base_radius: float = CURVE_RADIUS,
+) -> list[float]:
+    """*curve_radii* for every corner of *points*, *base_radius* standing in
+    for any it lacks."""
+    radii = list(curve_radii or [])
+    return radii + [base_radius] * (len(points) - 2 - len(radii))
+
+
+def largest_concentric_reference(
+    ceiling: float, lanes: Iterable[tuple[float, float]]
+) -> float | None:
+    """The largest reference radius, up to *ceiling*, that every lane fits.
+
+    Each lane is ``(budget, shift)``: it draws at the reference plus *shift*,
+    which must stay within its :func:`corner_radius_budget`. ``None`` when the
+    largest such reference would leave some lane's radius under
+    :data:`COORD_TOLERANCE_FINE`.
+    """
+    cap = math.inf
+    floor = -math.inf
+    for budget, shift in lanes:
+        cap = min(cap, budget - shift)
+        floor = max(floor, COORD_TOLERANCE_FINE - shift)
+    reference = min(ceiling, cap)
+    return None if reference < floor else reference
+
+
 def resolve_curve_radii(
     points: list[tuple[float, float]],
     desired_radii: list[float] | None,
