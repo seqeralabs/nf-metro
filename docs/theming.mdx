@@ -42,12 +42,12 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 
 `--theme` replaces the map's `%%metro style:` entirely.
 
-| Theme         | Look                                                                                                                                      |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.                                      |
-| `seqera`      | Seqera brand colors and Inter type.                                                                                                       |
-| `london-tube` | A schematic transit look: square tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, unboxed sections. |
-| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                                                     |
+| Theme         | Look                                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.                                            |
+| `seqera`      | Seqera brand colors and Inter type.                                                                                                             |
+| `london-tube` | A schematic transit look: track-weight tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, unboxed sections. |
+| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                                                           |
 
 Add `-light` or `-dark` to `nfcore`, `seqera` or `london-tube` to pin the baked palette, for example `nfcore-light`.
 `dark` is also accepted for `nfcore`, and `light` for `transparent`.
@@ -102,7 +102,7 @@ layout:
 A theme with one palette sets `fixed_mode: light` or `fixed_mode: dark`.
 It then renders that palette whatever mode is asked for, and its SVG does not adapt to the viewer.
 In a stack, `fixed_mode` behaves like any field: a later theme that sets it, to a mode or to `none`, replaces an earlier one.
-The built-in `nfcore`, `seqera` and `london-tube` set `fixed_mode: none`, so `transparent, seqera` adapts to the viewer again.
+The built-in `nfcore`, `seqera` and `london-tube` set `fixed_mode: none`, so `transparent, seqera` adapts to the viewer's mode.
 
 nf-metro checks the whole file before it renders anything.
 An unknown field, a value of the wrong type, a color it cannot read, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the problem.
@@ -121,7 +121,7 @@ A station on several lines is an interchange.
 `interchange_glyph` picks how it is drawn:
 
 - `pill` (the default) draws one capsule across all its lines.
-  `capsule_stroke` and `capsule_fill` give the capsule colours that follow the viewer's light or dark mode; left empty, it takes `station_stroke` and `station_fill` in both modes.
+  `glyph_stroke` and `capsule_fill` give the capsule colours that follow the viewer's light or dark mode; left empty, it takes `station_stroke` and `station_fill` in both modes.
 - `ring` draws a ring centred on the lines, with the centre left in the background color.
 
 With `ring`, `ring_max_lines` is the most lines on one track that a single ring covers, and `ring_overflow` decides what a wider bundle gets:
@@ -138,7 +138,7 @@ The Line Diagram Standard's own idiom is rings, which a theme extending `london-
 A line end shared by several lines follows `terminus_glyph` instead:
 
 - `nub` (the default) draws a square-cornered box across the lines in the station colours.
-- `bar` draws a buffer-stop bar across the whole bundle, as thick as a station tab and overhanging the outermost lines by a tab's length, in `terminus_bar_color` (which follows the viewer's light or dark mode).
+- `bar` draws a buffer-stop bar across the whole bundle, as thick as a station tab and overhanging the outermost lines by a tab's length, in `glyph_stroke` (which follows the viewer's light or dark mode).
 - `ring` draws the interchange glyph above.
 
 A line end with one line follows `station_glyph`, and its file icon always sits beyond the glyph.
@@ -186,7 +186,7 @@ legend_stroke_width: 1.5
 light:
   background_color: "#ffffff"
   label_color: "#1c3f94"
-  capsule_stroke: "#000000"
+  glyph_stroke: "#000000"
   capsule_fill: "#ffffff"
   muted_line_color: "#b3b3b3"
   section_fill: transparent
@@ -194,7 +194,7 @@ light:
 dark:
   background_color: "#10141c"
   label_color: "#dfe6ff"
-  capsule_stroke: "#ffffff"
+  glyph_stroke: "#ffffff"
   capsule_fill: "#10141c"
   muted_line_color: "#585a60"
   section_fill: transparent
@@ -256,16 +256,14 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | ---------------------- | ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `marker_stroke`        | colour                   | empty         | Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.                                                                                                                                                                                                                                                |
 | `marker_open_fill`     | colour                   | empty         | Inside of `open` markers. Empty takes the background, or white on a transparent canvas.                                                                                                                                                                                                                                                     |
-| `ring_color`           | colour                   | empty         | Interchange ring outline when `interchange_glyph` is `ring`. Empty takes `station_stroke`.                                                                                                                                                                                                                                                  |
+| `glyph_stroke`         | colour                   | empty         | Outline of interchange rings and their links, the `bar` terminus, and station capsules, in colours that follow the viewer's light or dark mode. Empty takes `station_stroke`, and capsules keep it in both modes.                                                                                                                           |
 | `ring_fill`            | colour                   | empty         | Inside of interchange rings and the strip bridging a chain of them. Empty takes the background, or white on a transparent canvas.                                                                                                                                                                                                           |
-| `terminus_bar_color`   | colour                   | empty         | A `bar` terminus across several lines. Empty takes `station_stroke`.                                                                                                                                                                                                                                                                        |
-| `station_glyph`        | `pill` \| `tick`         | `pill`        | How a station on one line is drawn. `pill` draws a capsule. `tick` draws a square tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.                                                                                                                                              |
+| `station_glyph`        | `pill` \| `tick`         | `pill`        | How a station on one line is drawn. `pill` draws a capsule. `tick` draws a tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.                                                                                                                                                     |
 | `interchange_glyph`    | `pill` \| `ring`         | `pill`        | How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one.                                                                                                                               |
 | `station_fill`         | colour                   | from `nfcore` | Station capsule fill.                                                                                                                                                                                                                                                                                                                       |
 | `station_stroke`       | colour                   | from `nfcore` | Station capsule outline; also the default marker and file-icon outline.                                                                                                                                                                                                                                                                     |
 | `station_stroke_width` | number                   | from `nfcore` | Station capsule outline width, px.                                                                                                                                                                                                                                                                                                          |
-| `capsule_stroke`       | colour                   | empty         | Station capsule and interchange outline that follows the viewer's light or dark mode. Empty paints `station_stroke` in both modes.                                                                                                                                                                                                          |
-| `capsule_fill`         | colour                   | empty         | Station capsule and interchange inside that follows the viewer's light or dark mode. Empty paints `station_fill` in both modes.                                                                                                                                                                                                             |
+| `capsule_fill`         | colour                   | empty         | Inside of station capsules and interchanges, in colours that follow the viewer's light or dark mode. Empty takes `station_fill` in both modes.                                                                                                                                                                                              |
 | `station_radius`       | number                   | `5`           | Station capsule end radius, px.                                                                                                                                                                                                                                                                                                             |
 | `terminus_glyph`       | `nub` \| `bar` \| `ring` | `nub`         | How a line end shared by several lines is drawn. `nub` is a square-cornered box across the lines in the station colours; `bar` is a buffer-stop bar across the whole bundle, as thick as a tab and overhanging the outermost lines by a tab's length; `ring` draws the interchange glyph. A line end with one line follows `station_glyph`. |
 | `station_tick_width`   | number                   | `0.66`        | Thickness of a `tick` tab along its line, and of a terminus bar, in multiples of `line_width`.                                                                                                                                                                                                                                              |
@@ -329,10 +327,8 @@ These colors also emit a CSS custom property, so a page that inlines the SVG can
 | `legend_stroke`       | `--nfm-map-legend-stroke`       |
 | `legend_text_color`   | `--nfm-map-legend-text-color`   |
 | `marker_stroke`       | `--nfm-map-marker-stroke`       |
-| `ring_color`          | `--nfm-map-ring-color`          |
+| `glyph_stroke`        | `--nfm-map-glyph-stroke`        |
 | `ring_fill`           | `--nfm-map-ring-fill`           |
-| `terminus_bar_color`  | `--nfm-map-terminus-bar-color`  |
-| `capsule_stroke`      | `--nfm-map-capsule-stroke`      |
 | `capsule_fill`        | `--nfm-map-capsule-fill`        |
 
 ### Layout options

@@ -269,7 +269,8 @@ from nf_metro.render.style import (
     is_adaptive,
     muted_adapts,
     muted_paint_class,
-    opaque_or_white,
+    target_applies,
+    theme_color,
 )
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
@@ -3317,7 +3318,7 @@ def _maybe_muted_class(name: str, muted: bool) -> str:
 
 def _capsule_adapts(theme: Theme) -> bool:
     """Whether *theme* gives station capsules colours that follow the mode."""
-    return bool(theme.capsule_stroke or theme.capsule_fill)
+    return bool(theme.glyph_stroke or theme.capsule_fill)
 
 
 def _capsule_attrs(
@@ -3325,8 +3326,8 @@ def _capsule_attrs(
 ) -> dict[str, Any]:
     """Paint and data attributes of a station capsule or blank-terminus nub."""
     attrs: dict[str, Any] = {
-        "fill": theme.capsule_fill or theme.station_fill,
-        "stroke": theme.capsule_stroke or theme.station_stroke,
+        "fill": theme_color(theme, "capsule_fill"),
+        "stroke": theme_color(theme, "glyph_stroke"),
         "stroke_width": theme.station_stroke_width,
         **station_data,
     }
@@ -3359,16 +3360,15 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
 
     rules: dict[str, list[str]] = {}
     for binding in chrome_bindings():
-        if binding.emit_if and getattr(theme, binding.emit_if[0]) != binding.emit_if[1]:
-            continue
         baked = baked_binding(theme, binding)
         if not baked or baked == "none":
             continue
         value = (
             f"var({binding.css_var}, {adaptive_value(*binding_pair(theme, binding))})"
         )
-        for cls, prop in binding.targets:
-            rules.setdefault(cls, []).append(f"{prop}: {value}")
+        for target in binding.targets:
+            if target_applies(theme, binding, target):
+                rules.setdefault(target.cls, []).append(f"{target.prop}: {value}")
     lines = [_rule(cls, "; ".join(props)) for cls, props in rules.items()]
     # The label halo is a knockout of the background, so it tracks --nfm-map-bg
     # and must flip with the mode too; otherwise a dark-baked halo blots out
@@ -3391,28 +3391,17 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
             "var(--nfm-map-muted-color, "
             f"{adaptive_value(*color_pair(theme, 'muted_line_color'))})"
         )
+        muted_rules: dict[str, list[str]] = {}
+        for binding in chrome_bindings():
+            for target in binding.targets:
+                if target.muted and target_applies(theme, binding, target):
+                    muted_rules.setdefault(target.cls, []).append(
+                        f"{target.prop}: {muted_val}"
+                    )
         lines += [
-            _rule("nf-metro-station-label", f"fill: {muted_val}", _MUTED_CLASS),
-            _rule("nf-metro-marker-stroke", f"stroke: {muted_val}", _MUTED_CLASS),
+            _rule(cls, "; ".join(props), _MUTED_CLASS)
+            for cls, props in muted_rules.items()
         ]
-        if theme.terminus_glyph == TERMINUS_BAR:
-            lines.append(
-                _rule("nf-metro-terminus-bar", f"fill: {muted_val}", _MUTED_CLASS)
-            )
-        if _capsule_adapts(theme):
-            lines += [
-                _rule("nf-metro-capsule", f"stroke: {muted_val}", _MUTED_CLASS),
-                _rule(
-                    "nf-metro-capsule-outline",
-                    f"stroke: {muted_val}; fill: {muted_val}",
-                    _MUTED_CLASS,
-                ),
-            ]
-        if theme.interchange_glyph == GLYPH_RING:
-            lines += [
-                _rule("nf-metro-ring", f"stroke: {muted_val}", _MUTED_CLASS),
-                _rule("nf-metro-ring-link", f"fill: {muted_val}", _MUTED_CLASS),
-            ]
         if muted_adapts(theme):
             lines += [
                 _rule(MUTED_STROKE_CLASS, f"stroke: {muted_val}"),
@@ -4707,8 +4696,8 @@ def _interchange_paint(
     """
     if fill_override is None:
         return _InterchangePaint(
-            theme.capsule_fill or theme.station_fill,
-            theme.capsule_stroke or theme.station_stroke,
+            theme_color(theme, "capsule_fill"),
+            theme_color(theme, "glyph_stroke"),
             _capsule_adapts(theme),
         )
     return _InterchangePaint(
@@ -4998,9 +4987,8 @@ def _muted_line_theme(theme: FrozenRecord) -> FrozenRecord:
     muted = theme.muted_line_color
     overrides: dict[str, Any] = {
         "station_stroke": muted,
-        "capsule_stroke": muted if theme.capsule_stroke else "",
+        "glyph_stroke": muted if theme.glyph_stroke else "",
         "marker_stroke": muted,
-        "ring_color": muted,
         "terminus_stroke": muted,
         "terminus_font_color": muted,
         "label_color": muted,
@@ -5358,8 +5346,8 @@ def _draw_ring_chain(
     lw = theme.line_width
     stroke = theme.ring_stroke_width * lw
     half_bridge = theme.ring_bridge_width * lw / 2
-    fill = theme.ring_fill or opaque_or_white(theme.background_color)
-    color = theme.ring_color or theme.station_stroke
+    fill = theme_color(theme, "ring_fill")
+    color = theme_color(theme, "glyph_stroke")
 
     group_el = draw.Group(**station_data)
     for prev, nxt in zip(groups, groups[1:]):
@@ -5434,7 +5422,7 @@ def _draw_line_station_glyph(
             d.append(
                 draw.Rectangle(
                     *bundle_end_bar_box(bundle, theme),
-                    fill=theme.terminus_bar_color or theme.station_stroke,
+                    fill=theme_color(theme, "glyph_stroke"),
                     **{
                         **station_data,
                         "class_": station_data["class_"]
@@ -5708,8 +5696,8 @@ def _render_terminus_icons(
             cy=icon_cy,
             width=theme.terminus_width,
             height=theme.terminus_height,
-            fill=theme.terminus_fill or theme.station_fill,
-            stroke=theme.terminus_stroke or theme.station_stroke,
+            fill=theme_color(theme, "terminus_fill"),
+            stroke=theme_color(theme, "terminus_stroke"),
             stroke_width=theme.terminus_stroke_width,
             corner_radius=theme.terminus_corner_radius,
             label=label,

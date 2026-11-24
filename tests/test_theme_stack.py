@@ -338,13 +338,13 @@ def test_interchanges_are_bold_capsules(tube_svg):
     assert "nf-metro-capsule" in star.get("class").split()
     assert float(star.get("rx")) == pytest.approx(float(star.get("width")) / 2)
     assert float(star.get("stroke-width")) == pytest.approx(2.5)
-    assert star.get("stroke") == THEMES["london-tube-dark"].capsule_stroke
+    assert star.get("stroke") == THEMES["london-tube-dark"].glyph_stroke
     assert star.get("fill") == THEMES["london-tube-dark"].capsule_fill
 
 
 def test_capsules_switch_colour_with_the_mode(tube_svg):
     svg = ET.tostring(tube_svg, encoding="unicode")
-    assert "stroke: var(--nfm-map-capsule-stroke, light-dark(#000000, #ffffff))" in svg
+    assert "stroke: var(--nfm-map-glyph-stroke, light-dark(#000000, #ffffff))" in svg
     assert "fill: var(--nfm-map-capsule-fill, light-dark(#ffffff, #10141c))" in svg
 
 
@@ -372,7 +372,7 @@ def test_ring_interchanges_are_one_ring_over_two_lines(tube_ring_svg):
     assert len(rings) == 1
     assert float(rings[0].get("r")) == pytest.approx(4.0 + 1.0)
     assert float(rings[0].get("stroke-width")) == pytest.approx(2.0)
-    assert rings[0].get("stroke") == THEMES["london-tube-dark"].ring_color
+    assert rings[0].get("stroke") == THEMES["london-tube-dark"].glyph_stroke
 
 
 def test_ring_interchanges_chain_over_three_lines(tube_ring_svg):
@@ -390,7 +390,7 @@ def test_a_line_end_is_a_nub_by_default(tmp_path):
     fastq = _station_glyphs(root)["fastq_in"]
     assert fastq.get("rx") is None
     assert fastq.get("fill") == THEMES["london-tube-dark"].capsule_fill
-    assert fastq.get("stroke") == THEMES["london-tube-dark"].capsule_stroke
+    assert fastq.get("stroke") == THEMES["london-tube-dark"].glyph_stroke
     assert "nf-metro-capsule" in fastq.get("class").split()
 
 
@@ -418,12 +418,12 @@ def test_a_bar_line_end_spans_the_bundle_at_track_weight(tmp_path):
     assert float(bar.get("width")) == pytest.approx(1.0 * lw)
     span = 5 * lw
     assert float(bar.get("height")) == pytest.approx(span + lw + 2 * 1.5 * lw)
-    assert bar.get("fill") == THEMES["london-tube-dark"].terminus_bar_color
+    assert bar.get("fill") == THEMES["london-tube-dark"].glyph_stroke
 
 
 def test_a_bar_line_end_switches_colour_with_the_mode(tmp_path):
     svg = ET.tostring(_terminus_svg(tmp_path, "bar"), encoding="unicode")
-    rule = "fill: var(--nfm-map-terminus-bar-color, light-dark(#000000, #ffffff))"
+    rule = "fill: var(--nfm-map-glyph-stroke, light-dark(#000000, #ffffff))"
     assert rule in svg
 
 
@@ -680,15 +680,13 @@ def test_new_chrome_colours_follow_the_viewer():
 
 
 def test_every_chrome_binding_reaches_the_stylesheet():
-    from nf_metro.render.style import chrome_bindings
+    from nf_metro.render.style import chrome_bindings, target_applies
 
     svg = render_string(_MMD, theme="london-tube")
     theme = THEMES["london-tube"]
     for binding in chrome_bindings():
-        if binding.emit_if and getattr(theme, binding.emit_if[0]) != binding.emit_if[1]:
-            assert binding.css_var not in svg, binding.css_var
-        else:
-            assert binding.css_var in svg, binding.css_var
+        drawn = any(target_applies(theme, binding, t) for t in binding.targets)
+        assert (binding.css_var in svg) == drawn, binding.css_var
 
 
 def test_inactive_lines_take_the_theme_muted_grey():
@@ -714,7 +712,7 @@ def test_unset_ring_colours_fall_back_and_still_follow_the_mode(tmp_path):
         THEMES["seqera-light"].station_stroke,
         THEMES["seqera-dark"].station_stroke,
     )
-    assert "--nfm-map-ring-color" in svg
+    assert "--nfm-map-glyph-stroke" in svg
     fill = "var(--nfm-map-ring-fill, light-dark(#f8f9fa, #1a1625))"
     assert fill in svg
     if stroke_light != stroke_dark:
@@ -881,3 +879,48 @@ def test_layout_measures_file_icons_with_the_render_theme(tmp_path):
 
     assert qc_width(None) == pytest.approx(qc_width("nfcore"))
     assert qc_width(str(roomy)) > qc_width("nfcore") + 10
+
+
+def _all_inactive(text: str) -> frozenset[str]:
+    return frozenset(re.findall(r"%%metro line: (\w+)", text))
+
+
+def test_a_muted_bar_terminus_greys_in_a_baked_render():
+    text = _RNASEQ.read_text()
+    svg = render_string(
+        text,
+        theme="london-tube",
+        mode="dark",
+        chrome_css=False,
+        source_dir=str(_RNASEQ.parent),
+        inactive_line_ids=_all_inactive(text),
+    )
+    bar = _station_glyphs(ET.fromstring(svg))["fastq_in"]
+    assert "nf-metro-terminus-bar" in bar.get("class")
+    assert bar.get("fill") == THEMES["london-tube-dark"].muted_line_color
+
+
+def test_ring_line_ends_follow_the_mode_under_pill_interchanges(tmp_path):
+    theme = _write(
+        tmp_path,
+        "t.yaml",
+        "name: t\nextends: london-tube\ninterchange_glyph: pill\n"
+        "terminus_glyph: ring\n",
+    )
+    text = _RNASEQ.read_text().replace("%%metro style: nfcore", "")
+    for mode in ("light", "dark"):
+        svg = render_string(
+            text,
+            theme=str(theme),
+            mode=mode,
+            source_dir=str(_RNASEQ.parent),
+            inactive_line_ids=_all_inactive(text),
+        )
+        css = re.search(r"<style>(.*?)</style>", svg, re.S).group(1)
+        assert (
+            ".nf-metro-ring { stroke: var(--nfm-map-glyph-stroke, "
+            "light-dark(#000000, #ffffff))"
+        ) in css
+        assert ".nf-metro-ring-hole { fill: var(--nfm-map-ring-fill," in css
+        assert ".nf-metro-ring.nf-metro-muted { stroke:" in css
+        assert ".nf-metro-ring-link.nf-metro-muted { fill:" in css

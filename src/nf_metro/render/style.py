@@ -21,6 +21,8 @@ __all__ = [
     "TERMINUS_BAR",
     "TERMINUS_NUB",
     "ChromeBinding",
+    "ChromeTarget",
+    "EMIT_CONDITIONS",
     "Theme",
     "adaptive_value",
     "authored_fields",
@@ -33,10 +35,14 @@ __all__ = [
     "is_adaptive",
     "muted_adapts",
     "muted_paint_class",
+    "draws_rings",
     "opaque_or_white",
+    "target_applies",
+    "theme_color",
 ]
 
 import dataclasses
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
@@ -66,6 +72,20 @@ TERMINUS_NUB = "nub"
 TERMINUS_BAR = "bar"
 
 
+class ChromeTarget(NamedTuple):
+    """One CSS property a chrome colour paints on one element class.
+
+    ``when`` names the condition in :data:`EMIT_CONDITIONS` under which the
+    element is drawn at all (empty: always); ``muted`` gives the class a rule
+    that greys it when every line touching it is inactive.
+    """
+
+    cls: str
+    prop: str
+    when: str = ""
+    muted: bool = False
+
+
 def _field(
     default: Any = _MISSING,  # noqa: ANN401
     *,
@@ -73,11 +93,10 @@ def _field(
     group: str,
     color: bool = False,
     choices: tuple[str, ...] = (),
-    chrome: tuple[tuple[str, str], ...] = (),
+    chrome: tuple[ChromeTarget | tuple[str, str], ...] = (),
     css_var: str = "",
     fallback: str = "",
     opaque: bool = False,
-    emit_if: tuple[str, str] | None = None,
 ) -> Any:  # noqa: ANN401
     return dataclasses.field(
         default=default,
@@ -86,11 +105,10 @@ def _field(
             "group": group,
             "color": color,
             "choices": choices,
-            "chrome": chrome,
+            "chrome": tuple(ChromeTarget(*target) for target in chrome),
             "css_var": css_var,
             "fallback": fallback,
             "opaque": opaque,
-            "emit_if": emit_if,
         },
     )
 
@@ -133,7 +151,7 @@ class Theme:
         doc="Station label text.",
         group="Canvas and text",
         color=True,
-        chrome=(("nf-metro-station-label", "fill"),),
+        chrome=(ChromeTarget("nf-metro-station-label", "fill", muted=True),),
         css_var="--nfm-map-label-color",
     )
     label_font_family: str = _field(
@@ -254,7 +272,7 @@ class Theme:
         "Empty takes `station_stroke`.",
         group="Stations",
         color=True,
-        chrome=(("nf-metro-marker-stroke", "stroke"),),
+        chrome=(ChromeTarget("nf-metro-marker-stroke", "stroke", muted=True),),
         css_var="--nfm-map-marker-stroke",
         fallback="station_stroke",
     )
@@ -265,16 +283,23 @@ class Theme:
         group="Stations",
         color=True,
     )
-    ring_color: str = _field(
+    glyph_stroke: str = _field(
         "",
-        doc="Interchange ring outline when `interchange_glyph` is `ring`. Empty "
-        "takes `station_stroke`.",
+        doc="Outline of interchange rings and their links, the `bar` terminus, "
+        "and station capsules, in colours that follow the viewer's light or dark "
+        "mode. Empty takes `station_stroke`, and capsules keep it in both modes.",
         group="Stations",
         color=True,
-        chrome=(("nf-metro-ring", "stroke"), ("nf-metro-ring-link", "fill")),
-        css_var="--nfm-map-ring-color",
+        chrome=(
+            ChromeTarget("nf-metro-ring", "stroke", "rings", muted=True),
+            ChromeTarget("nf-metro-ring-link", "fill", "rings", muted=True),
+            ChromeTarget("nf-metro-terminus-bar", "fill", "bar", muted=True),
+            ChromeTarget("nf-metro-capsule", "stroke", "set", muted=True),
+            ChromeTarget("nf-metro-capsule-outline", "stroke", "set", muted=True),
+            ChromeTarget("nf-metro-capsule-outline", "fill", "set", muted=True),
+        ),
+        css_var="--nfm-map-glyph-stroke",
         fallback="station_stroke",
-        emit_if=("interchange_glyph", GLYPH_RING),
     )
     ring_fill: str = _field(
         "",
@@ -282,26 +307,18 @@ class Theme:
         "them. Empty takes the background, or white on a transparent canvas.",
         group="Stations",
         color=True,
-        chrome=(("nf-metro-ring-hole", "fill"), ("nf-metro-ring-bridge", "fill")),
+        chrome=(
+            ChromeTarget("nf-metro-ring-hole", "fill", "rings"),
+            ChromeTarget("nf-metro-ring-bridge", "fill", "rings"),
+        ),
         css_var="--nfm-map-ring-fill",
         fallback="background_color",
         opaque=True,
-        emit_if=("interchange_glyph", GLYPH_RING),
-    )
-    terminus_bar_color: str = _field(
-        "",
-        doc="A `bar` terminus across several lines. Empty takes `station_stroke`.",
-        group="Stations",
-        color=True,
-        chrome=(("nf-metro-terminus-bar", "fill"),),
-        css_var="--nfm-map-terminus-bar-color",
-        fallback="station_stroke",
-        emit_if=("terminus_glyph", TERMINUS_BAR),
     )
     station_glyph: str = _field(
         "pill",
         doc="How a station on one line is drawn. `pill` draws a capsule. "
-        "`tick` draws a square tab in the line's colour on the label's side, "
+        "`tick` draws a tab in the line's colour on the label's side, "
         "and a bar across the line's end (a buffer stop) at a terminus.",
         group="Stations",
         choices=(GLYPH_PILL, GLYPH_TICK),
@@ -326,31 +343,20 @@ class Theme:
     station_stroke_width: float = _field(
         doc="Station capsule outline width, px.", group="Stations"
     )
-    capsule_stroke: str = _field(
-        "",
-        doc="Station capsule and interchange outline that follows the viewer's "
-        "light or dark mode. Empty paints `station_stroke` in both modes.",
-        group="Stations",
-        color=True,
-        chrome=(
-            ("nf-metro-capsule", "stroke"),
-            ("nf-metro-capsule-outline", "stroke"),
-            ("nf-metro-capsule-outline", "fill"),
-        ),
-        css_var="--nfm-map-capsule-stroke",
-    )
     capsule_fill: str = _field(
         "",
-        doc="Station capsule and interchange inside that follows the viewer's "
-        "light or dark mode. Empty paints `station_fill` in both modes.",
+        doc="Inside of station capsules and interchanges, in colours that follow "
+        "the viewer's light or dark mode. Empty takes `station_fill` in both "
+        "modes.",
         group="Stations",
         color=True,
         chrome=(
-            ("nf-metro-capsule", "fill"),
-            ("nf-metro-capsule-core", "stroke"),
-            ("nf-metro-capsule-core", "fill"),
+            ChromeTarget("nf-metro-capsule", "fill", "set"),
+            ChromeTarget("nf-metro-capsule-core", "stroke", "set"),
+            ChromeTarget("nf-metro-capsule-core", "fill", "set"),
         ),
         css_var="--nfm-map-capsule-fill",
+        fallback="station_fill",
     )
     station_radius: float = _field(
         STATION_RADIUS_APPROX, doc="Station capsule end radius, px.", group="Stations"
@@ -446,13 +452,18 @@ class Theme:
         8.0, doc="Size of the folded corner, px.", group="File icons"
     )
     terminus_fill: str = _field(
-        "", doc="Icon fill. Empty takes `station_fill`.", group="File icons", color=True
+        "",
+        doc="Icon fill. Empty takes `station_fill`.",
+        group="File icons",
+        color=True,
+        fallback="station_fill",
     )
     terminus_stroke: str = _field(
         "",
         doc="Icon outline. Empty takes `station_stroke`.",
         group="File icons",
         color=True,
+        fallback="station_stroke",
     )
     terminus_stroke_width: float = _field(
         1.5, doc="Icon outline width, px.", group="File icons"
@@ -490,20 +501,52 @@ class Theme:
     )
 
 
+_THEME_FIELDS: MappingProxyType[str, dataclasses.Field[Any]] = MappingProxyType(
+    {f.name: f for f in dataclasses.fields(Theme)}
+)
+
+
 class ChromeBinding(NamedTuple):
     """One chrome colour: the field, its custom property, and what it paints.
 
     ``fallback`` names the field an empty value takes; ``opaque`` turns a
-    transparent value into white; ``emit_if`` is the ``(field, value)`` a
-    theme must have for the colour to be drawn at all.
+    transparent value into white.
     """
 
     field: str
     css_var: str
-    targets: tuple[tuple[str, str], ...]
+    targets: tuple[ChromeTarget, ...]
     fallback: str
     opaque: bool
-    emit_if: tuple[str, str] | None
+
+
+def draws_rings(theme: object) -> bool:
+    """Whether *theme* draws interchange rings, at interchanges or line ends."""
+    return GLYPH_RING in (
+        getattr(theme, "interchange_glyph"),
+        getattr(theme, "terminus_glyph"),
+    )
+
+
+EMIT_CONDITIONS: MappingProxyType[str, Callable[[object], bool]] = MappingProxyType(
+    {
+        "rings": draws_rings,
+        "bar": lambda theme: getattr(theme, "terminus_glyph") == TERMINUS_BAR,
+    }
+)
+
+
+def target_applies(theme: object, binding: ChromeBinding, target: ChromeTarget) -> bool:
+    """Whether *theme* draws the elements *target* paints.
+
+    ``set`` targets apply only when the theme sets the colour itself, so a
+    theme that leaves it empty keeps fixed colours there.
+    """
+    if not target.when:
+        return True
+    if target.when == "set":
+        return bool(getattr(theme, binding.field))
+    return EMIT_CONDITIONS[target.when](theme)
 
 
 @lru_cache(maxsize=1)
@@ -528,7 +571,6 @@ def chrome_bindings() -> tuple[ChromeBinding, ...]:
             f.metadata["chrome"],
             f.metadata["fallback"],
             f.metadata["opaque"],
-            f.metadata["emit_if"],
         )
         for f in dataclasses.fields(Theme)
         if f.metadata.get("chrome")
@@ -575,10 +617,17 @@ def binding_pair(theme: object, binding: ChromeBinding) -> tuple[str, str]:
 
 def baked_binding(theme: object, binding: ChromeBinding) -> str:
     """A chrome colour's value for *theme*'s own mode after its fallback rules."""
-    value: str = getattr(theme, binding.field)
-    if not value and binding.fallback:
-        value = getattr(theme, binding.fallback)
-    return opaque_or_white(value) if binding.opaque else value
+    return theme_color(theme, binding.field)
+
+
+def theme_color(theme: object, name: str) -> str:
+    """Colour field *name* of *theme* after the fallback and opacity rules its
+    schema metadata declares."""
+    meta = _THEME_FIELDS[name].metadata
+    value: str = getattr(theme, name)
+    if not value and meta["fallback"]:
+        value = getattr(theme, meta["fallback"])
+    return opaque_or_white(value) if meta["opaque"] else value
 
 
 MUTED_STROKE_CLASS = "nf-metro-muted-stroke"

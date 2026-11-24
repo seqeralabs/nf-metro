@@ -106,7 +106,7 @@ output is the same diagram:
 | `raster_width` | `--raster-width` | `raster_width=800`         |
 
 An unknown key, or a value the matching flag would reject, is warned about and
-ignored; the output itself still renders under the run's global options.
+ignored; the output renders under the run's global options.
 
 `mode` is baked when the SVG is serialized rather than when the map is laid
 out, so the static SVG and both PNGs above share a single layout run — only the

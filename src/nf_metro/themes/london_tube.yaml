@@ -1,22 +1,21 @@
 # A schematic-transit look after the geometry of TfL's Line Diagram Standard:
 # tabs for stations on one line, a bar across a line's end, bold capsules at
 # interchanges, bundled lines edge to edge, unboxed sections and a humanist
-# sans in navy. Glyph sizes are multiples of
-# line_width. Also the worked example of the theme file format.
+# sans in navy. Glyph sizes are multiples of line_width. Also the worked
+# example of the theme file format.
 name: london-tube
 fixed_mode: none # both palettes, even over a single-palette theme
 
 station_glyph: tick
-# Track-weight tabs, heavier than the Line Diagram Standard's 0.66 square, so
-# a tab reads as a continuation of its line.
+# Tabs as thick as the line, reaching 1.5 line widths past it.
 station_tick_width: 1
 station_tick_length: 1.5
-# A white capsule with a heavy outline spans every line at an interchange.
-# The standard's own idiom is `interchange_glyph: ring`: a ring over two lines,
-# and a bridged chain of rings over three or more (ring_max_lines below).
+# Interchanges are capsules spanning their lines. `interchange_glyph: ring`
+# draws the Line Diagram Standard's rings instead: one ring over two lines, a
+# bridged chain of rings over three or more.
 interchange_glyph: pill
 ring_max_lines: 2
-# A line end shared by several lines gets one buffer-stop bar across them.
+# One buffer-stop bar across every line ending at a shared line end.
 terminus_glyph: bar
 station_fill: "#ffffff"
 station_stroke: "#000000"
@@ -39,10 +38,8 @@ light:
   label_color: "#1c3f94"
   title_color: "#000000"
   marker_stroke: "#000000"
-  capsule_stroke: "#000000"
+  glyph_stroke: "#000000"
   capsule_fill: "#ffffff"
-  ring_color: "#000000"
-  terminus_bar_color: "#000000"
   ring_fill: "#ffffff"
   muted_line_color: "#b3b3b3"
   section_fill: transparent
@@ -57,10 +54,8 @@ dark:
   label_color: "#dfe6ff"
   title_color: "#ffffff"
   marker_stroke: "#f0f0f0"
-  capsule_stroke: "#ffffff"
+  glyph_stroke: "#ffffff"
   capsule_fill: "#10141c"
-  ring_color: "#ffffff"
-  terminus_bar_color: "#ffffff"
   ring_fill: "#10141c"
   muted_line_color: "#585a60"
   section_fill: transparent

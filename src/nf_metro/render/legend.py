@@ -52,7 +52,7 @@ from nf_metro.render.constants import (
 )
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import ns as _ns
-from nf_metro.render.style import Theme, muted_paint_class
+from nf_metro.render.style import Theme, muted_paint_class, theme_color
 from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
 
 
@@ -161,7 +161,7 @@ def marker_stroke_color(theme: Theme) -> str:
     A dedicated light outline keeps dark-filled markers visible against a
     dark background; an empty ``marker_stroke`` inherits ``station_stroke``.
     """
-    return theme.marker_stroke or theme.station_stroke
+    return theme_color(theme, "marker_stroke")
 
 
 @dataclass
