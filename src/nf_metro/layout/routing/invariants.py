@@ -1841,20 +1841,11 @@ def _lines_reaching_exit(
     separate run leaving it shares the name only: no stroke spans the section
     for the exit slot to keep, so the two ends are free to differ.
     """
-    reaching: set[str] = set()
-    for line_id in lines:
-        seen = {reference_id}
-        queue = [reference_id]
-        while queue:
-            current_id = queue.pop()
-            if current_id == exit_port_id:
-                reaching.add(line_id)
-                break
-            for edge in graph.edges_from(current_id):
-                if edge.line_id == line_id and edge.target not in seen:
-                    seen.add(edge.target)
-                    queue.append(edge.target)
-    return reaching
+    return {
+        line_id
+        for line_id in lines
+        if exit_port_id in graph.line_reach(line_id, (reference_id,))
+    }
 
 
 def _entry_order_reference(

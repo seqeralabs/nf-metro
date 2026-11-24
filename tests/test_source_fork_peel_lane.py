@@ -80,28 +80,25 @@ _CORRIDOR = (
     "with its neighbour stacked along the flow, the bundle carried across "
     "leaves outside the inter-row corridor its reservation realises"
 )
-_CORRIDOR_NOT_ON_MAIN = f"{_CORRIDOR}, a downgrade main does not raise here"
-_CORRIDOR_SEATED_ON_MAIN = (
-    f"{_CORRIDOR_NOT_ON_MAIN}, though it does once the contender's line is "
-    "declared first and seats the contender on this side too"
-)
-_STACKED_FEED = "lines fed from the stacked frame cross the trunk, on main too"
+_STACKED_FEED = "lines fed from the stacked frame cross the trunk"
+_CENTRED_TB_ABORT = "the centred fork's fan plan aborts in a top-to-bottom section"
 _FED_SHAPES = [
     "fed_bundle_with_the_peel_line",
     "fed_bundle_with_the_peel_line_sibling_line_first",
     "fed_bundle_without_the_peel_line",
+    "fed_bundle_with_the_contender_line",
 ]
+_AUTO_GRID = "fed_bundle_with_the_peel_line_auto_grid"
 _KNOWN_DEFECTS = {
     "test_no_guard_downgrade": {
-        **{("fed_fork_across_sections", o): f"{_CORRIDOR}, on main too" for o in _TB},
-        **{("fed_fork_across_sections", o): f"{_CORRIDOR}; main aborts" for o in _BT},
+        ("fed_fork_across_sections", o): _CORRIDOR for o in _TB + _BT
     },
     "test_no_line_crosses_another": {
-        ("fed_fork_across_sections", o): f"{_CORRIDOR}, on main too" for o in _TB
+        ("fed_fork_across_sections", o): _CORRIDOR for o in _TB
     },
     "test_contender_shapes_stay_clear": {
         **{
-            (f"centered_{order}", o): "aborts on main too"
+            (f"centered_{order}", o): _CENTRED_TB_ABORT
             for order in DECLARATION_ORDERS
             for o in _TB
         },
@@ -110,44 +107,25 @@ _KNOWN_DEFECTS = {
             for shape in [
                 *(f"flat_frame_{order}" for order in DECLARATION_ORDERS),
                 *_FED_SHAPES,
-                "fed_bundle_with_the_peel_line_auto_grid",
-                "fed_bundle_with_the_contender_line",
+                _AUTO_GRID,
             ]
             for o in _TB
         },
         **{
-            (f"flat_frame_carried_{order}", o): f"{_CORRIDOR}, on main too"
+            (f"flat_frame_carried_{order}", o): _CORRIDOR
             for order in DECLARATION_ORDERS
-            for o in _TB
+            for o in _TB + _BT
         },
+        **{(shape, o): _CORRIDOR for shape in _FED_SHAPES for o in _BT},
         **{
-            ("flat_frame_carried_sibling_line_first", o): (
-                f"{_CORRIDOR}; main instead runs the contender's line through "
-                "the peel's marker, a downgrade of its own"
-            )
-            for o in _BT
-        },
-        **{
-            ("flat_frame_carried_peel_line_first", o): _CORRIDOR_NOT_ON_MAIN
-            for o in _BT
-        },
-        **{(shape, o): _CORRIDOR_SEATED_ON_MAIN for shape in _FED_SHAPES for o in _BT},
-        **{
-            ("fed_bundle_with_the_contender_line", o): (
-                f"{_CORRIDOR_NOT_ON_MAIN}; main aborts once the contender's line "
-                "is declared first and seats the contender on this side too"
-            )
-            for o in _BT
-        },
-        **{
-            ("fed_bundle_with_the_peel_line_auto_grid", o): (
+            (_AUTO_GRID, o): (
                 "the bundle carried over the top keeps less canvas margin than "
-                "it reserved, on main too"
+                "it reserved"
             )
             for o in _BT
         },
         **{
-            ("fed_bundle_with_the_peel_line_auto_grid", o): "aborts on main too"
+            (_AUTO_GRID, o): "the inferred grid reverses the flow and aborts"
             for o in ("m0", "r180")
         },
     },

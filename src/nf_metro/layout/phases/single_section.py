@@ -42,6 +42,7 @@ from nf_metro.layout.labels import (
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import (
     assign_tracks,
+    peel_contenders,
     peel_lane_ends,
     seated_contender_helpers,
 )
@@ -292,6 +293,7 @@ def _layout_single_section(
     # from the exit ports through in-section feeders).
     exit_reaching = _exit_reaching_nodes(graph, section)
     priority_lane_sign = _priority_lane_sign(section, graph)
+    G, contenders = peel_contenders(sub, layers)
     tracks = assign_tracks(
         sub,
         layers,
@@ -301,14 +303,15 @@ def _layout_single_section(
         exit_reaching=exit_reaching,
         flow_horizontal=lanes_run_along_y(section.direction),
         priority_lane_sign=priority_lane_sign,
+        contenders=(G, contenders),
     )
-    section.lane_ends, section.lane_end_exempt = peel_lane_ends(
-        sub, layers, tracks, _lane_sign(section, graph)
+    section.lane_ends, section.lane_end_seeds = peel_lane_ends(
+        sub, G, contenders, tracks, _lane_sign(section, graph)
     )
-    seated_helpers = seated_contender_helpers(sub, layers, tracks)
 
     if not layers:
         return None
+    seated_helpers = seated_contender_helpers(G, contenders, tracks)
 
     lead_extra = {
         pid: cols * x_spacing for pid, cols in section.off_track_lead_extra.items()
@@ -649,7 +652,7 @@ def _align_bypass_v_to_lane_side(
     sub: MetroGraph,
     section: Section,
     graph: MetroGraph,
-    seated: frozenset[str] = frozenset(),
+    seated: frozenset[str],
 ) -> None:
     """Seat a bypass V on its section's lane side of the trunk.
 
@@ -668,11 +671,7 @@ def _align_bypass_v_to_lane_side(
     no lane-side station to share, reflect the V across the bypassed station so
     it at least leaves on the side its line is drawn.  Horizontal (LR/RL)
     sections stack lanes on Y in the same order :func:`assign_tracks` uses, so
-    they never transpose.
-
-    A V in *seated* carries a peel contender's run, which
-    :func:`assign_tracks` laid on the contender's own side of the trunk, so it
-    stays, as it would on a horizontal section.
+    they never transpose.  A V in *seated* is left where it is.
     """
     if not lanes_run_along_x(section.direction):
         return

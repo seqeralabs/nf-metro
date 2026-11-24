@@ -462,9 +462,9 @@ class Section:
     # negative pins toward the first lane, positive toward the last, and a
     # larger magnitude pins further out.
     lane_ends: dict[str, float] = field(default_factory=dict)
-    # Stations a pinned line reaches by a run other than the one that set its
-    # pin, so the pin does not hold there.
-    lane_end_exempt: dict[str, frozenset[str]] = field(default_factory=dict)
+    # The stations whose runs set each pinned line's pin; the pin holds only
+    # where the line reaches from them.
+    lane_end_seeds: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 def agreed_lane_end(pins: Iterable[float]) -> float | None:
@@ -921,6 +921,17 @@ class MetroGraph:
         """
         lines = set(self.station_lines(station_id))
         return [lid for lid in self.lines if lid in lines]
+
+    def line_reach(self, line_id: str, starts: Iterable[str]) -> set[str]:
+        """Stations *line_id* reaches from *starts* along its edges, *starts* too."""
+        reach = set(starts)
+        stack = list(reach)
+        while stack:
+            for edge in self.edges_from(stack.pop()):
+                if edge.line_id == line_id and edge.target not in reach:
+                    reach.add(edge.target)
+                    stack.append(edge.target)
+        return reach
 
     def edges_from(self, station_id: str) -> list[Edge]:
         """Return edges whose ``source`` is *station_id* (lazy adjacency cache)."""

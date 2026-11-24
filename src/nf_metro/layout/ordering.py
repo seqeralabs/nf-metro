@@ -14,6 +14,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from math import ceil
 from statistics import median_low
+from typing import NamedTuple
 
 import networkx as nx
 
@@ -46,6 +47,7 @@ def assign_tracks(
     exit_reaching: frozenset[str] = frozenset(),
     flow_horizontal: bool = True,
     priority_lane_sign: float | None = None,
+    contenders: tuple[nx.DiGraph[str], dict[str, list[tuple[str, str]]]] | None = None,
 ) -> dict[str, float]:
     """Assign each station a track using the track-per-line strategy.
 
@@ -74,13 +76,16 @@ def assign_tracks(
             stacks its lanes in line-priority order, or ``None`` when a seam may
             impose another order.  Lets a bypass branch open toward its own
             lines' lanes (see :func:`_bypass_lane_side`).
+        contenders: *graph*'s station digraph and peel contenders, as
+            :func:`peel_contenders` returns them, when the caller already has
+            them.
 
     Returns a dict mapping station_id -> track (float).
     """
     if not graph.lines:
         return {sid: float(i) for i, sid in enumerate(graph.stations)}
 
-    G = build_station_digraph(graph)
+    G, seat_contenders = contenders or peel_contenders(graph, layers)
 
     continuation_predecessors = continuation_predecessors or {}
 
@@ -146,15 +151,12 @@ def assign_tracks(
     diamond_members = _build_diamond_index(G, layers, graph)
     layer_occupancy: dict[int, dict[str, float]] = defaultdict(dict)
 
-    contenders = _peel_contenders(G, graph, layers)
     seats_after: dict[int, list[str]] = defaultdict(list)
     run_helpers: dict[str, list[str]] = {}
-    for node in contenders:
-        seats_after[_contender_seat_layer(node, contenders[node], G, layers)].append(
-            node
-        )
+    for node, passed in seat_contenders.items():
+        seats_after[_contender_seat_layer(node, passed, G, layers)].append(node)
         run_helpers[node] = sorted(
-            _run_joins(node, G)[1], key=lambda sid: layers.get(sid, 0)
+            _run_joins(node, G).helpers, key=lambda sid: layers.get(sid, 0)
         )
     deferred = set().union(*run_helpers.values())
 
@@ -236,7 +238,7 @@ def assign_tracks(
         for node in sorted(
             seats_after.get(layer_idx, []), key=lambda n: station_base[n]
         ):
-            far_sides = _far_sides(contenders[node], tracks)
+            far_sides = _far_sides(seat_contenders[node], tracks)
             node_layer = layers.get(node, 0)
             column = [
                 t
@@ -275,54 +277,66 @@ def assign_tracks(
 
 
 def seated_contender_helpers(
-    graph: MetroGraph, layers: dict[str, int], tracks: dict[str, float]
+    G: nx.DiGraph[str],
+    contenders: dict[str, list[tuple[str, str]]],
+    tracks: dict[str, float],
 ) -> frozenset[str]:
     """Bypass helpers :func:`assign_tracks` stacked on a seated contender's side.
 
     They hold the contender's side of the trunk by construction, not a
     line-priority slot.
     """
-    G = build_station_digraph(graph)
     helpers: set[str] = set()
-    for node, passed in _peel_contenders(G, graph, layers).items():
-        far_sides = _far_sides(passed, tracks)
-        if len({sign for _, sign in far_sides}) == 1 and _on_far_sides(
-            tracks[node], far_sides
-        ):
-            helpers.update(_run_joins(node, G)[1])
+    for node, passed in contenders.items():
+        signs = {sign for _, sign in _far_sides(passed, tracks)}
+        if len(signs) == 1 and _seated(node, passed, tracks):
+            helpers.update(_run_joins(node, G).helpers)
     return frozenset(helpers)
+
+
+def peel_contenders(
+    graph: MetroGraph, layers: dict[str, int]
+) -> tuple[nx.DiGraph[str], dict[str, list[tuple[str, str]]]]:
+    """*graph*'s station digraph and its peel contenders (:func:`_peel_contenders`)."""
+    G = build_station_digraph(graph)
+    return G, _peel_contenders(G, graph, layers)
+
+
+def _seated(node: str, passed: list[tuple[str, str]], tracks: dict[str, float]) -> bool:
+    """Whether contender *node* sits on the far side of every peel it passes."""
+    far_sides = _far_sides(passed, tracks)
+    return bool(far_sides) and _on_far_sides(tracks[node], far_sides)
 
 
 def peel_lane_ends(
     graph: MetroGraph,
-    layers: dict[str, int],
+    G: nx.DiGraph[str],
+    contenders: dict[str, list[tuple[str, str]]],
     tracks: dict[str, float],
     lane_sign: float,
 ) -> tuple[dict[str, float], dict[str, frozenset[str]]]:
-    """Lines a section pins to an end of its lane order, and where they are exempt.
+    """Lines a section pins to an end of its lane order, and the runs that pin them.
 
     A peel contender's lines join the bundle from the side of the trunk it was
     seated on, so they take the lane-order end facing that side, the contender
     seated furthest out taking the outermost lane.  Each pinned line maps to its
     contender's seat distance from the join, signed toward the first lane
     (negative) or the last (positive) (``Section.lane_ends``).  The pin holds
-    only along the contender's own run of the line; stations the line reaches
-    by its other runs are exempt (``Section.lane_end_exempt``).
+    only along the contender's own run of the line, so each pinned line also
+    maps to the contenders that set it (``Section.lane_end_seeds``).
     *lane_sign* is the track direction the section's lane order runs in, first
     lane to last, whether line priority or an entering seam set that order.  A
     contender not seated on the far side of the peels it passes, or whose joins
     do not all lie on one side of it, pins nothing, and a line two contenders
     would pin to opposite ends keeps its place in the lane order.
     """
-    G = build_station_digraph(graph)
     pins: dict[str, list[float]] = defaultdict(list)
-    runs: dict[str, set[str]] = defaultdict(set)
-    for node, passed in _peel_contenders(G, graph, layers).items():
-        far_sides = _far_sides(passed, tracks)
-        if not far_sides or not _on_far_sides(tracks[node], far_sides):
+    seeds: dict[str, set[str]] = defaultdict(set)
+    for node, passed in contenders.items():
+        if not _seated(node, passed, tracks):
             continue
         offsets = [
-            tracks[node] - tracks[c] for c in _run_joins(node, G)[0] if c in tracks
+            tracks[node] - tracks[c] for c in _run_joins(node, G).joins if c in tracks
         ]
         if offsets and (
             all(o > COORD_TOLERANCE_FINE for o in offsets)
@@ -331,33 +345,10 @@ def peel_lane_ends(
             pin = min(offsets, key=abs) * lane_sign
             for lid in graph.station_lines(node):
                 pins[lid].append(pin)
-                runs[lid] |= line_reach(graph, lid, (node,))
+                seeds[lid].add(node)
     agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
     ends = {lid: pin for lid, pin in agreed.items() if pin is not None}
-    exempt = {
-        lid: off_run
-        for lid in ends
-        if (
-            off_run := frozenset(
-                sid
-                for sid in graph.stations
-                if lid in graph.station_lines(sid) and sid not in runs[lid]
-            )
-        )
-    }
-    return ends, exempt
-
-
-def line_reach(graph: MetroGraph, lid: str, starts: Iterable[str]) -> set[str]:
-    """Stations line *lid* reaches from *starts* along its edges, *starts* included."""
-    reach = set(starts)
-    stack = list(reach)
-    while stack:
-        for edge in graph.edges_from(stack.pop()):
-            if edge.line_id == lid and edge.target not in reach:
-                reach.add(edge.target)
-                stack.append(edge.target)
-    return reach
+    return ends, {lid: frozenset(seeds[lid]) for lid in ends}
 
 
 def _step_off_exit_rows(
@@ -701,12 +692,17 @@ def _lone_line_stations(graph: MetroGraph, layers: dict[str, int]) -> list[str]:
     return [nodes[0] for nodes in groups.values() if len(nodes) == 1]
 
 
-def _run_joins(node: str, G: nx.DiGraph[str]) -> tuple[set[str], list[str]]:
+class RunJoins(NamedTuple):
+    joins: set[str]
+    helpers: list[str]
+
+
+def _run_joins(node: str, G: nx.DiGraph[str]) -> RunJoins:
     """Stations *node*'s runs reach, looking through bypass helpers on the way.
 
     A bypass helper only bows a run around a station it skips, so the run's
     join is the first real station past it.  Returns the joins and the helpers
-    passed, in run order.
+    passed.
     """
     joins: set[str] = set()
     helpers: list[str] = []
@@ -718,12 +714,17 @@ def _run_joins(node: str, G: nx.DiGraph[str]) -> tuple[set[str], list[str]]:
         elif sid not in helpers:
             helpers.append(sid)
             stack.extend(G.successors(sid))
-    return joins, helpers
+    return RunJoins(joins, helpers)
+
+
+def _join_layer(joins: Iterable[str], layers: dict[str, int]) -> int:
+    """Layer of the first of *joins*."""
+    return min(layers.get(c, 0) for c in joins)
 
 
 def _first_join_layer(node: str, G: nx.DiGraph[str], layers: dict[str, int]) -> int:
     """Layer of the first station *node*'s runs join."""
-    return min(layers.get(c, 0) for c in _run_joins(node, G)[0])
+    return _join_layer(_run_joins(node, G).joins, layers)
 
 
 def _contender_seat_layer(
@@ -760,11 +761,10 @@ def _peel_contenders(
     spans the peel's layer while it feeds none of the fork's successors (so it
     is not part of the fork's fan), or the peel ends in its first join's layer
     and it joins none of the fork's peels.  Joins, successors and peels are
-    found through bypass helpers (:func:`_run_joins`), so inserting one leaves
-    the contender as it was.  It is placed like any other source and moves to
-    its contender seat once :func:`_contender_seat_layer` is placed, so no
-    passed peel may lie past its first join.  Returns source -> ``(fork,
-    peel)`` pairs.
+    found through bypass helpers (:func:`_run_joins`).  It is placed like any
+    other source and moves to its contender seat once
+    :func:`_contender_seat_layer` is placed, so no passed peel may lie past its
+    first join.  Returns source -> ``(fork, peel)`` pairs.
     """
     peels = [
         (fork, peel, primary)
@@ -772,7 +772,7 @@ def _peel_contenders(
         if not graph.stations[fork].is_port
         and (primary := _primary_line(graph, fork)) is not None
         for lead in _peel_leads(fork, G, graph)
-        for peel in (_run_joins(lead, G)[0] if is_bypass_v(lead) else (lead,))
+        for peel in (_run_joins(lead, G).joins if is_bypass_v(lead) else (lead,))
     ]
     if not peels:
         return {}
@@ -783,28 +783,22 @@ def _peel_contenders(
     contenders: dict[str, list[tuple[str, str]]] = {}
     for node in _lone_line_stations(graph, layers):
         station = graph.stations[node]
-        joins = _run_joins(node, G)[0]
+        joins = _run_joins(node, G).joins
         if G.in_degree(node) or station.is_port or station.is_hidden or not joins:
             continue
-        first = min(layer(c, 0) for c in joins)
-        passed = [
-            (fork, peel)
-            for fork, peel, primary in peels
-            if fork != node
-            and all(_primary_line(graph, c) == primary for c in joins)
-            and (
-                (
-                    joins.isdisjoint(_run_joins(fork, G)[0])
-                    and any(
-                        layer(node, 0) < layer(peel, 0) < layer(c, 0) for c in joins
-                    )
-                )
-                or (
-                    layer(node, 0) < layer(peel, 0) == first
-                    and joins.isdisjoint(peels_of[fork])
-                )
+        first = _join_layer(joins, layers)
+        passed: list[tuple[str, str]] = []
+        for fork, peel, primary in peels:
+            if fork == node or any(_primary_line(graph, c) != primary for c in joins):
+                continue
+            spans_peel = joins.isdisjoint(_run_joins(fork, G).joins) and any(
+                layer(node, 0) < layer(peel, 0) < layer(c, 0) for c in joins
             )
-        ]
+            peel_ends_at_first_join = layer(node, 0) < layer(
+                peel, 0
+            ) == first and joins.isdisjoint(peels_of[fork])
+            if spans_peel or peel_ends_at_first_join:
+                passed.append((fork, peel))
         if passed and all(layer(peel, 0) <= first for _, peel in passed):
             contenders[node] = passed
     return contenders
@@ -907,17 +901,15 @@ def _stack_contender_runs(
             joins, rest = _run_joins(lead, G)
             bundles[frozenset(joins)] += [lead, *rest]
     row = tracks[node]
-    by_join = sorted(bundles.items(), key=lambda b: min(layers.get(c, 0) for c in b[0]))
+    by_join = sorted(bundles.items(), key=lambda b: _join_layer(b[0], layers))
     for i, (ends, helpers) in enumerate(by_join):
         if i:
-            span = _span_tracks(
-                node, min(layers.get(c, 0) for c in ends), graph, layers, tracks
-            )
-            row = next(
-                t
-                for k in range(1, len(span) + 2)
-                if _clear_of(t := row + k * outward * line_gap, span, line_gap / 2)
-            )
+            span = _span_tracks(node, _join_layer(ends, layers), graph, layers, tracks)
+            for k in range(1, len(span) + 2):
+                candidate = row + k * outward * line_gap
+                if _clear_of(candidate, span, line_gap / 2):
+                    row = candidate
+                    break
         for helper in helpers:
             tracks[helper] = row
 
