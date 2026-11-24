@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from nf_metro.api import _resolve_input_format, render_string
+from nf_metro.api import render_string
 from nf_metro.cli import SNAKEMAKE_QUIPS, cli
 from nf_metro.convert import (
     LINE_COLORS,
@@ -310,7 +310,7 @@ def test_a_rule_level_loop_is_reported_as_feedback():
 @pytest.mark.parametrize("export", ["rulegraph.dot", "rulegraph.mermaid"])
 def test_rendering_an_unconverted_export_points_at_the_snakemake_flag(export):
     text = (FIXTURES / f"flat_pipeline.{export}").read_text()
-    with pytest.raises(ValueError, match="--from-snakemake"):
+    with pytest.raises(ValueError, match="--from snakemake"):
         parse_metro_mermaid(text)
 
 
@@ -327,11 +327,6 @@ def test_conversion_warns_that_it_is_experimental():
 def test_unknown_input_format_is_rejected():
     with pytest.raises(ValueError, match="unknown input format 'cwl'"):
         convert_dag("", "cwl")
-
-
-def test_from_nextflow_contradicting_input_format_is_rejected():
-    with pytest.raises(ValueError, match="contradicts"):
-        _resolve_input_format("snakemake", True)
 
 
 @pytest.mark.parametrize("workflow", WORKFLOWS)
@@ -434,7 +429,7 @@ class TestCli:
     def test_snakemake_runs_print_one_quip(self, command, tmp_path):
         args = [command, str(FIXTURES / "flat_pipeline.rulegraph.dot")]
         if command == "render":
-            args.append("--from-snakemake")
+            args += ["--from", "snakemake"]
         args += [
             "-o",
             str(tmp_path / ("out.mmd" if command == "convert" else "out.svg")),
@@ -493,7 +488,8 @@ class TestCli:
             [
                 "render",
                 str(FIXTURES / "variant_calling.rulegraph.dot"),
-                "--from-snakemake",
+                "--from",
+                "snakemake",
                 "-o",
                 str(out),
             ],
@@ -501,17 +497,55 @@ class TestCli:
         assert result.exit_code == 0, result.output
         assert "Gatk Haplotypecaller" in out.read_text()
 
-    def test_render_rejects_both_from_flags(self, tmp_path):
+    def test_render_many_converts_with_from(self, tmp_path):
+        import json
+
+        out = tmp_path / "out.svg"
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                [
+                    {
+                        "input": str(FIXTURES / "variant_calling.rulegraph.dot"),
+                        "output": str(out),
+                        "from": "snakemake",
+                    }
+                ]
+            )
+        )
+        result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+        assert result.exit_code == 0, result.output
+        assert "Gatk Haplotypecaller" in out.read_text()
+
+    def test_render_many_rejects_an_unknown_from(self, tmp_path):
+        import json
+
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                [
+                    {
+                        "input": str(FIXTURES / "variant_calling.rulegraph.dot"),
+                        "output": str(tmp_path / "out.svg"),
+                        "from": "cwl",
+                    }
+                ]
+            )
+        )
+        result = CliRunner().invoke(cli, ["render-many", str(manifest)])
+        assert result.exit_code != 0
+        assert "'from' must be one of" in result.output
+
+    @pytest.mark.parametrize("flag", ["--from-nextflow", "--from-snakemake"])
+    def test_render_rejects_the_per_format_flags(self, flag, tmp_path):
         result = CliRunner().invoke(
             cli,
             [
                 "render",
                 str(FIXTURES / "variant_calling.rulegraph.dot"),
-                "--from-snakemake",
-                "--from-nextflow",
+                flag,
                 "-o",
                 str(tmp_path / "out.svg"),
             ],
         )
-        assert result.exit_code != 0
-        assert "cannot be combined" in result.output
+        assert result.exit_code == 2

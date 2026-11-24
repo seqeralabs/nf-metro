@@ -48,10 +48,10 @@ interface Props {
   render?: SectionState;
   // Render with the --debug layout overlay.
   debug?: boolean;
-  // Treat the source as a Nextflow DAG and convert it (--from-nextflow).
+  // Treat the source as a Nextflow DAG and convert it (--from nextflow).
   fromNextflow?: boolean;
   // Treat the source as Snakemake --rulegraph DOT and convert it
-  // (--from-snakemake, experimental).
+  // (--from snakemake, experimental).
   fromSnakemake?: boolean;
   // With fromNextflow or fromSnakemake: convert with `nf-metro convert --lines`
   // to show the other line mode from the format's default. SVG only.
@@ -271,7 +271,7 @@ let cliCommand = linesMode
     `nf-metro render ${stem}.mmd -o ${stem}.${format}`
   : `nf-metro render ${src} -o ${stem}.${format}`;
 if (debug) cliCommand += " --debug";
-if (inputFormat && !linesMode) cliCommand += ` ${INPUT_FORMATS[inputFormat].flag}`;
+if (inputFormat && !linesMode) cliCommand += ` --from ${inputFormat}`;
 if (animate && !isBinary) cliCommand += " --animate";
 if (duration != null) cliCommand += ` --duration ${duration}`;
 if (fps != null) cliCommand += ` --fps ${fps}`;

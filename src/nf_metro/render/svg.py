@@ -28,10 +28,13 @@ from typing import Any, Literal, NamedTuple, cast
 import drawsvg as draw
 
 from nf_metro.layout.constants import (
+    CANVAS_ORIGIN_MARGIN,
     COORD_TOLERANCE_FINE,
+    ICON_INTER_GAP,
     LOGO_HEIGHT,
     LOGO_Y_STANDALONE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
+    RAIL_KNOB_RADIUS_RATIO,
     SAME_COORD_TOLERANCE,
     SECTION_Y_GAP,
     graph_offset_step,
@@ -131,7 +134,7 @@ from nf_metro.layout.routing.system_emission import (
     validate_published_route_attribution,
 )
 from nf_metro.layout.settlement_demand import BoundaryClearanceDemand
-from nf_metro.manifest import node_data_attrs
+from nf_metro.manifest import manifest_metadata_svg, node_data_attrs
 from nf_metro.parser.model import (
     ICON_TYPE_DIR,
     ICON_TYPE_FILE,
@@ -149,7 +152,6 @@ from nf_metro.parser.model import (
 )
 from nf_metro.render.bridges import BridgeBreak, compute_bridges
 from nf_metro.render.constants import (
-    CANVAS_ORIGIN_MARGIN,
     DEBUG_DIAMOND_RADIUS,
     DEBUG_ENTRY_PORT_COLOR,
     DEBUG_EXIT_PORT_COLOR,
@@ -176,7 +178,6 @@ from nf_metro.render.constants import (
     ICON_BANNER_TEXT_COLOR_MUTED,
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
-    ICON_INTER_GAP,
     ICON_NAME_FONT_SCALE,
     ICON_NAME_GAP,
     ICON_STATION_GAP,
@@ -184,7 +185,6 @@ from nf_metro.render.constants import (
     LEGEND_INSET,
     LEGEND_ROUTE_CLEARANCE,
     MARKER_PILL_LENGTH_RATIO,
-    RAIL_KNOB_RADIUS_RATIO,
     RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
@@ -227,7 +227,7 @@ from nf_metro.render.legend import (
     render_legend,
     resolve_logo_file,
 )
-from nf_metro.render.manifest import build_manifest, manifest_metadata_svg
+from nf_metro.render.manifest import build_manifest
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import class_prefix_context
 from nf_metro.render.ns import ns as _ns

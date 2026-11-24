@@ -60,7 +60,6 @@ from nf_metro.layout.engine import (
     PhaseInvariantError,
     compute_layout,
     compute_min_y_spacing,
-    is_loop_side_branch_station,
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
@@ -91,6 +90,7 @@ from nf_metro.layout.phases._common import (
     continuation_track_predecessors,
     flow_axis_exit_ports,
     flow_exit_carrier_anchor,
+    is_loop_side_branch_station,
     iter_corridor_fed_solo_entries,
     iter_fold_lr_exit_straight_runs,
     iter_fold_lr_exits_short_of_target,
@@ -2939,7 +2939,7 @@ def test_distinct_trunk_not_hidden_behind_exempt(fixture):
     the BAM line).  ``_dogleg_off_exempt_trunks`` nudges it to a full gap.
     """
     from nf_metro.layout.constants import OFFSET_STEP
-    from nf_metro.layout.routing.core import _collect_htrunks
+    from nf_metro.layout.routing.normalize import _collect_htrunks
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -3044,11 +3044,8 @@ def test_inter_row_trunks_bundle_tightly(fixture):
     another).  Opposite directions are NOT counted as bundle-mates.
     """
     from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN, OFFSET_STEP
-    from nf_metro.layout.routing.core import (
-        _build_routing_context,
-        _collect_htrunks,
-        _inter_row_gap_band,
-    )
+    from nf_metro.layout.routing.core import _build_routing_context
+    from nf_metro.layout.routing.normalize import _collect_htrunks, _inter_row_gap_band
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -3108,11 +3105,8 @@ def test_opposite_direction_trunks_on_separate_bands(fixture):
         CURVE_RADIUS,
         DIAGONAL_RUN,
     )
-    from nf_metro.layout.routing.core import (
-        _build_routing_context,
-        _collect_htrunks,
-        _inter_row_gap_band,
-    )
+    from nf_metro.layout.routing.core import _build_routing_context
+    from nf_metro.layout.routing.normalize import _collect_htrunks, _inter_row_gap_band
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -3156,10 +3150,8 @@ def test_inter_row_trunk_bands_crossing_optimal(fixture):
     such avoidable swap remains in the routed output.
     """
     from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN
-    from nf_metro.layout.routing.core import (
-        _build_routing_context,
-        _suboptimal_trunk_bands,
-    )
+    from nf_metro.layout.routing.core import _build_routing_context
+    from nf_metro.layout.routing.normalize import _suboptimal_trunk_bands
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -6487,8 +6479,10 @@ def test_junction_same_line_fans_coincide_or_separate(fixture):
     columns are a separate concern.
     """
     from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN, OFFSET_STEP
-    from nf_metro.layout.engine import first_vertical_leg_x
-    from nf_metro.layout.phases._common import first_vertical_leg_sign
+    from nf_metro.layout.phases._common import (
+        first_vertical_leg_sign,
+        first_vertical_leg_x,
+    )
     from nf_metro.layout.routing.core import _build_routing_context
 
     graph = _layout(fixture)
@@ -6531,10 +6525,8 @@ def test_junction_same_line_fans_coincide_or_separate(fixture):
 def _assert_no_backtrack_leg_over_40pc_of_canvas(fixture: str) -> None:
     """Assert no inter-section route reverses in X for more than 40% of the
     canvas width in a single leg."""
-    from nf_metro.layout.engine import (
-        _canvas_width,
-        inter_section_route_backtrack_legs,
-    )
+    from nf_metro.layout.phases._common import _canvas_width
+    from nf_metro.layout.phases.guards import inter_section_route_backtrack_legs
 
     graph = _layout(fixture)
     routes = route_edges(graph)
@@ -6592,7 +6584,7 @@ def test_routes_enter_sections_only_at_ports(fixture):
     port inferred on the wrong side (so the connector cuts the box) or a
     fan-in bundle ploughing into a section through an undeclared edge.
     """
-    from nf_metro.layout.engine import _route_crosses_section_boundary
+    from nf_metro.layout.phases._common import _route_crosses_section_boundary
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -7466,7 +7458,7 @@ def test_no_station_or_icon_overlap(fixture):
     """No two station marker bboxes (including off-track file icons)
     may overlap; otherwise one station hides another in the rendered
     SVG."""
-    from nf_metro.layout.engine import _station_marker_bbox
+    from nf_metro.layout.phases._common import _station_marker_bbox
 
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
@@ -8008,7 +8000,7 @@ def test_lines_dont_cross_non_consumer_markers(fixture):
     bbox when the line is not part of the station's consumed or
     produced set.
     """
-    from nf_metro.layout.engine import _station_marker_bbox
+    from nf_metro.layout.phases._common import _station_marker_bbox
     from nf_metro.render.svg import apply_route_offsets
 
     graph = _layout(fixture)
@@ -8083,13 +8075,11 @@ def _snap_to_grid_offenders(
     while its reconvergence fan rides ``spine_y + k * pitch``.  A station off
     both, without a recognised half-grid exception, is reported.
     """
-    from nf_metro.layout.engine import (
-        _iter_symmetric_diamonds,
-        _section_symfan_uses_half_grid,
-    )
     from nf_metro.layout.phases.fan_bundles import (
+        _iter_symmetric_diamonds,
         _section_has_symmetric_entry_fork,
         _section_row_pitch,
+        _section_symfan_uses_half_grid,
     )
 
     half_grid_ids = (
@@ -8307,7 +8297,7 @@ def test_symmetric_diamond_compacts_to_half_pitch(fixture):
     diamond at full pitch (``trunk_y +/- 1`` slot) reads as tall as a
     3-way fan with an empty trunk row between its two branches.
     """
-    from nf_metro.layout.engine import _iter_symmetric_diamonds
+    from nf_metro.layout.phases.fan_bundles import _iter_symmetric_diamonds
 
     y_spacing = 55.0
     graph = _layout(fixture, y_spacing=y_spacing)

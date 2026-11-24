@@ -179,9 +179,7 @@ def build_info(
     :func:`rendered_section_numbers` for a graph that has not been laid out).
     A section that draws no badge reports ``None``.
 
-    ``style`` reports the theme name the map resolves to, which is the name
-    ``--theme`` accepts: an alias or an unrecognised value is reported as the
-    brand the render will actually use, not as authored.
+    ``style`` reports the map's ``%%metro style:`` as written.
     """
     real_sections = graph.real_sections
     topology_query = build_route_topology_query(graph)

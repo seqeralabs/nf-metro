@@ -34,7 +34,8 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.engine import _station_marker_bbox, compute_layout
+from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.phases._common import _station_marker_bbox
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import is_bypass_v

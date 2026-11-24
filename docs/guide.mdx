@@ -628,7 +628,7 @@ An unknown or wrong-case value exits with an error, where the directive warns an
 
 Three groups fall outside that pairing:
 
-- `--output`, `--format`, `--from-nextflow`, `--debug`, `--validate`, and the embedding flags (`--responsive`, `--embed-font`, `--text-to-paths`, `--svg-class-prefix`, `--bare`, `--no-self-color-scheme`, `--no-dark-mode-css`, `--no-chrome-css`) have no directive.
+- `--output`, `--format`, `--from`, `--debug`, `--validate`, and the embedding flags (`--responsive`, `--embed-font`, `--text-to-paths`, `--svg-class-prefix`, `--bare`, `--no-self-color-scheme`, `--no-dark-mode-css`, `--no-chrome-css`) have no directive.
   They select the output target, a diagnostic overlay, or how the SVG is packaged for a host, rather than describing the diagram.
 - `--inactive-lines` is the per-render counterpart to the `inactive` field on `%%metro line:`, and replaces that set outright.
 - The remaining directives have no CLI flag, because they describe the diagram's content rather than a render setting: `line:`, `grid:`, `off_track:`, `process:`, `interchange:`, `legend_combo:`, `group:`, `marker:`, `marker_legend:`, the `file:`/`files:`/`dir:` icons, and the section-scoped `entry:`/`exit:`/`direction:`/`number:`.

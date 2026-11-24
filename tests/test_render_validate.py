@@ -21,10 +21,10 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.manifest import read_manifest
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render import build_render_plan, emit_render_plan, validate_render
-from nf_metro.render.manifest import read_manifest
 from nf_metro.render.validate import (
     CHEVRON_OFF_STROKE,
     LABEL_STRIKE,

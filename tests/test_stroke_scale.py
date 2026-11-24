@@ -14,6 +14,7 @@ from nf_metro.layout.constants import (
     DIRECTIONAL_MARKER_HALF_EXTENT,
     EDGE_TO_BUNDLE_CLEARANCE,
     OFFSET_STEP,
+    RAIL_KNOB_RADIUS_RATIO,
     STATION_RADIUS_APPROX,
     WIDEST_THEME_LINE_WIDTH,
     graph_offset_step,
@@ -28,7 +29,6 @@ from nf_metro.layout.route_reservations import (
     canvas_edge_slack,
 )
 from nf_metro.parser import parse_metro_mermaid
-from nf_metro.render.constants import RAIL_KNOB_RADIUS_RATIO
 from nf_metro.render.svg import (
     _scale_theme_fonts,
     _scale_theme_strokes,

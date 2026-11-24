@@ -3426,7 +3426,7 @@ def _guard_fan_bundles_coincide_or_separate(
         offsets = routing.compute_station_offsets(graph)
     if routes is None:
         routes = routing.route_edges(graph, station_offsets=offsets)
-    fan_sources = {key[0] for key in routing_core.compute_junction_fan_info(graph)}
+    fan_sources = {key[0] for key in routing_context.compute_junction_fan_info(graph)}
     if not fan_sources:
         return
 
@@ -4028,7 +4028,7 @@ def _guard_no_artefactual_counter_flow(
             if not counter:
                 continue
             # (b) the with-flow gap above the target was clear for this X-span.
-            if routing_core._h_segment_crosses_other_section(
+            if routing_normalize._h_segment_crosses_other_section(
                 graph, x1, x2, gy, exclude
             ):
                 continue  # gap blocked -> dive was topologically necessary

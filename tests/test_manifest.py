@@ -20,7 +20,7 @@ from conftest import compute_corpus_layout, content_corpus, parse_and_layout
 
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.live.mapping import stations_for_process
-from nf_metro.render.manifest import (
+from nf_metro.manifest import (
     MANIFEST_SCHEMA_VERSION,
     manifest_schema,
     match_node_ids,

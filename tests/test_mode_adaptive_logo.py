@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image as PILImage
 
-from nf_metro.api import render_string
+from nf_metro.api import RenderConfig, render_string
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.legend import (
     logo_image_kwargs,
@@ -380,8 +380,8 @@ def test_baked_mode_embeds_matching_logo_variant(tmp_path):
         "    a[A] -->|main| b[B]\n"
     )
 
-    light_svg = render_string(text, mode="light", chrome_css=False)
-    dark_svg = render_string(text, mode="dark", chrome_css=False)
+    light_svg = render_string(text, mode="light", config=RenderConfig(chrome_css=False))
+    dark_svg = render_string(text, mode="dark", config=RenderConfig(chrome_css=False))
 
     assert _embedded_image_bytes(light_svg) == light_file.read_bytes()
     assert _embedded_image_bytes(dark_svg) == dark_file.read_bytes()
@@ -413,4 +413,4 @@ def test_data_uri_logo_with_quote_is_rejected_before_rendering():
     )
 
     with pytest.raises(ValueError, match="base64"):
-        render_string(text, chrome_css=False)
+        render_string(text, config=RenderConfig(chrome_css=False))

@@ -725,11 +725,8 @@ def test_multiline_icon_caption_fits_render_obstacle(direction):
 
 @pytest.mark.parametrize("direction", ["TB", "BT"])
 def test_vertical_icon_stack_reserves_multiline_caption(direction):
-    from nf_metro.render.constants import (
-        ICON_INTER_GAP,
-        ICON_NAME_FONT_SCALE,
-        ICON_NAME_GAP,
-    )
+    from nf_metro.layout.constants import ICON_INTER_GAP
+    from nf_metro.render.constants import ICON_NAME_FONT_SCALE, ICON_NAME_GAP
     from nf_metro.render.svg import _terminus_icon_centers_for
 
     graph = parse_metro_mermaid(

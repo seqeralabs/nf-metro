@@ -1767,7 +1767,7 @@ def test_manifest_flag_overrides_a_map_that_opted_out(tmp_path):
 
 
 def test_theme_option_accepts_every_style_directive_value(tmp_path):
-    """`--theme` takes the values `%%metro style:` takes, alias included."""
+    """`--theme` takes the values `%%metro style:` takes."""
     from nf_metro.themes import STYLE_NAMES
 
     src = _simple_map(tmp_path)

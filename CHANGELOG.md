@@ -65,6 +65,28 @@ history.
 - `serve-multi` lays out and renders every posted map with its `--theme`
   stack, layout options included; a posted map's `%%metro style:` is ignored.
   `live.server.serve_multi` and `RunRegistry` take a `ResolvedTheme`.
+- `nf-metro render` takes `--from nextflow|snakemake`, the spelling `convert`
+  already uses. `--from-nextflow` and `--from-snakemake` are gone, as are the
+  `from_nextflow` argument of `prepare_graph` and `render_string` (pass
+  `input_format="nextflow"`) and the `from_nextflow` and `from_snakemake` keys
+  of a `render-many` job (use `"from": "nextflow"`).
+- `render_string` takes its render options only through `config=RenderConfig(...)`.
+  The flat `output_format`, `debug`, `responsive`, `embed_font`,
+  `text_to_paths`, `svg_class_prefix`, `inject_dark_mode_css`, `chrome_css`,
+  `self_color_scheme`, `bare`, `embed_basename` and `inactive_line_ids`
+  keyword arguments are gone.
+- The GitHub Action's `theme` input and the pre-commit hook no longer pass
+  `--theme default`. A map's own `%%metro style:` now applies in CI and in the
+  hook; set the `theme` input or hook `args` to replace it for every run.
+- `nf_metro.render` no longer re-exports the manifest API, and
+  `nf_metro.render.manifest` holds only `build_manifest`. Import `read_manifest`,
+  `match_node_ids`, `manifest_schema` and the rest from `nf_metro.manifest`.
+  `nf_metro.render.constants` no longer re-exports `CANVAS_ORIGIN_MARGIN`,
+  `ICON_INTER_GAP`, `RAIL_KNOB_RADIUS_RATIO` or `TERMINUS_WIDTH`; they live in
+  `nf_metro.layout.constants`.
+- `nf_metro.layout.engine` and `nf_metro.layout.routing.core` export only what
+  they define. Private helpers they used to re-export are imported from the
+  `layout.phases` and `layout.routing` modules that define them.
 
 ### Added
 

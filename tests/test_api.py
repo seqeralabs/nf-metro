@@ -8,7 +8,6 @@ a map looks different in the editor than on the command line.
 from __future__ import annotations
 
 import base64
-import warnings
 from pathlib import Path
 
 import pytest
@@ -60,8 +59,7 @@ def test_render_string_matches_cli_html(name: str, tmp_path: Path) -> None:
     api_out = render_string(
         src.read_text(),
         source_dir=str(src.parent),
-        output_format="html",
-        embed_basename=out.name,
+        config=RenderConfig(output_format="html", embed_basename=out.name),
     )
     assert cli_out == _as_written(api_out)
 
@@ -82,8 +80,7 @@ def test_render_string_matches_cli_with_explicit_options(tmp_path: Path) -> None
     api_out = render_string(
         src.read_text(),
         source_dir=str(src.parent),
-        responsive=True,
-        embed_font=True,
+        config=RenderConfig(responsive=True, embed_font=True),
         layout_options={"animate": True, "center_ports": True, "x_spacing": 80.0},
     )
     assert cli_out == _as_written(api_out)
@@ -242,36 +239,25 @@ def test_render_string_self_color_scheme_parity() -> None:
     src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
     where = str(EXAMPLES)
     with_cs = render_string(src, source_dir=where)
-    without_cs = render_string(src, source_dir=where, self_color_scheme=False)
+    without_cs = render_string(
+        src, source_dir=where, config=RenderConfig(self_color_scheme=False)
+    )
     assert "color-scheme" in with_cs
     assert "color-scheme" not in without_cs
 
 
-def test_render_string_accepts_render_config() -> None:
+def test_render_string_applies_render_config() -> None:
     src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
     where = str(EXAMPLES)
-    via_config = render_string(
+    responsive = render_string(
         src, source_dir=where, config=RenderConfig(responsive=True)
     )
-    via_kwargs = render_string(src, source_dir=where, responsive=True)
-    assert via_config == via_kwargs
+    assert responsive != render_string(src, source_dir=where)
 
 
-def test_render_string_warns_when_config_shadows_flat_kwargs() -> None:
-    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
-    where = str(EXAMPLES)
-    with pytest.warns(UserWarning, match=r"ignoring \[.*'responsive'"):
-        out = render_string(
-            src, source_dir=where, config=RenderConfig(), responsive=True
-        )
-    # config wins: the flat responsive=True is ignored.
-    assert out == render_string(src, source_dir=where)
-
-
-def test_render_string_no_shadow_warning_when_only_config() -> None:
-    src = (EXAMPLES / "rnaseq_auto.mmd").read_text()
-    where = str(EXAMPLES)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        render_string(src, source_dir=where, config=RenderConfig(responsive=True))
-    assert not [w for w in caught if "supersedes" in str(w.message)]
+@pytest.mark.parametrize(
+    "kwarg", ["responsive", "embed_font", "self_color_scheme", "output_format"]
+)
+def test_render_string_takes_render_options_only_through_config(kwarg: str) -> None:
+    with pytest.raises(TypeError, match=kwarg):
+        render_string("graph LR\n    a --> b\n", **{kwarg: True})

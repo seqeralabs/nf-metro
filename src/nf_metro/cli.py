@@ -682,8 +682,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     options=[
         "--output",
         "--format",
-        "--from-nextflow",
-        "--from-snakemake",
+        "--from",
         "--debug",
         "--reject-output-outside-source",
     ],
@@ -850,19 +849,15 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     help="Position of the legend+logo block.",
 )
 @click.option(
-    "--from-nextflow",
-    is_flag=True,
-    default=False,
-    help="Convert Nextflow -with-dag mermaid input before rendering.",
-)
-@click.option(
-    "--from-snakemake",
-    is_flag=True,
-    default=False,
-    help=(
-        "[bold]Experimental.[/] Convert Snakemake [code]--rulegraph[/] or "
-        "[code]--dag[/] output (DOT or mermaid-js) before rendering."
-    ),
+    "--from",
+    "input_format",
+    type=click.Choice(INPUT_FORMATS),
+    default=None,
+    cls=_DescribedDefault,
+    default_text="an nf-metro map",
+    help="Convert a workflow manager's DAG before rendering: Nextflow "
+    "[code]-with-dag[/] mermaid, or (experimental) Snakemake [code]--rulegraph[/] "
+    "or [code]--dag[/] output (DOT or mermaid-js).",
 )
 @click.option(
     "--title",
@@ -950,8 +945,7 @@ def render(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    from_nextflow: bool,
-    from_snakemake: bool,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -983,9 +977,6 @@ def render(
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
-    input_format = _input_format_from_flags(
-        from_nextflow=from_nextflow, from_snakemake=from_snakemake
-    )
     if input_format == "snakemake":
         _echo_snakemake_quip()
 
@@ -1249,19 +1240,16 @@ def _echo_snakemake_quip() -> None:
     console.print(f"[dim italic]{random.choice(SNAKEMAKE_QUIPS)}[/]")
 
 
-def _input_format_from_flags(
-    *, from_nextflow: bool, from_snakemake: bool
-) -> InputFormat | None:
-    """Map the mutually exclusive ``--from-*`` flags to an ``input_format``."""
-    if from_nextflow and from_snakemake:
-        raise click.UsageError(
-            "--from-nextflow and --from-snakemake cannot be combined."
+def _input_format_from_job(job: Mapping[str, object]) -> InputFormat | None:
+    """The render-many job's ``from`` value, which must name an input format."""
+    value = job.get("from")
+    if value is None:
+        return None
+    if value not in INPUT_FORMATS:
+        raise ValueError(
+            f"'from' must be one of {', '.join(INPUT_FORMATS)}, not {value!r}"
         )
-    if from_nextflow:
-        return "nextflow"
-    if from_snakemake:
-        return "snakemake"
-    return None
+    return cast(InputFormat, value)
 
 
 def _render_one(
@@ -1683,10 +1671,7 @@ def render_many(manifest_file: Path) -> None:
                 logo=Path(str(logo_raw)) if logo_raw else None,
                 line_spread=_str_or_none("line_spread"),
                 legend=_str_or_none("legend"),
-                input_format=_input_format_from_flags(
-                    from_nextflow=bool(job.get("from_nextflow", False)),
-                    from_snakemake=bool(job.get("from_snakemake", False)),
-                ),
+                input_format=_input_format_from_job(job),
                 title=_str_or_none("title"),
                 responsive=bool(job.get("responsive", False)),
                 embed_font=bool(job.get("embed_font", False)),
@@ -2278,7 +2263,7 @@ def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
     """
     import jsonschema
 
-    from nf_metro.render import manifest_schema, read_manifest
+    from nf_metro.manifest import manifest_schema, read_manifest
 
     svg = svg_file.read_text()
     manifest = read_manifest(svg)

@@ -2,8 +2,7 @@
 
 Routes edges as horizontal segments with 45-degree diagonal transitions.
 The per-handler families and post-routing passes live in sibling modules
-(context, *_handlers, normalize, postprocess) and are re-exported here as the
-module's public routing surface.
+(context, *_handlers, normalize, postprocess).
 """
 
 from __future__ import annotations
@@ -19,125 +18,48 @@ from nf_metro.layout.route_reservations import reservation_ids_by_claimant_membe
 from nf_metro.layout.routing.common import (
     RoutedPath,
 )
-from nf_metro.layout.routing.context import (  # noqa: F401
+from nf_metro.layout.routing.context import (
     _build_routing_context,
-    _classify_merge_edges,
-    _compute_bypass_gap_indices,
-    _compute_junction_fan_info,
-    _compute_section_trunk_ys,
-    _EdgeKey,
-    _get_offset,
-    _has_intervening_sections,
-    _max_offset_at,
-    _MergeRouting,
-    _resolve_section_col,
-    _resolve_section_colrow,
-    _resolve_section_row,
     _RoutingCtx,
-    _tb_x_offset,
-    compute_junction_fan_info,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
-from nf_metro.layout.routing.inter_section_handlers import (  # noqa: F401
-    _build_right_entry_wrap_route,
-    _corridor_descent_x,
-    _corridor_is_viable,
-    _fan_has_corridor_sibling,
-    _fan_left_entry_descent_x,
-    _gap_above_target_y,
-    _has_around_section_sibling,
-    _has_bypass_sibling_to_same_entry,
-    _left_entry_descent_x,
-    _right_entry_gap_above_is_clear,
-    _route_around_section_below,
-    _route_bottom_exit_junction,
-    _route_bypass,
-    _route_inter_row_gap_corridor,
+from nf_metro.layout.routing.inter_section_handlers import (
     _route_inter_section,
-    _route_l_shape,
-    _route_left_entry_wrap,
-    _route_left_exit_left_entry_drop,
-    _route_merge_branch,
-    _route_merge_trunk,
-    _route_right_entry_around_below,
-    _route_right_entry_via_gap_above,
-    _route_right_entry_wrap,
-    _route_tb_bottom_exit,
-    _route_top_entry_l_shape,
-    _v1_corner_x,
     classify_inter_section_family,
 )
-from nf_metro.layout.routing.intra_handlers import (  # noqa: F401
-    _is_side_branch_ascent,
-    _route_diagonal,
+from nf_metro.layout.routing.intra_handlers import (
     _route_entry_runway,
     _route_intra_section,
 )
-from nf_metro.layout.routing.normalize import (  # noqa: F401
+from nf_metro.layout.routing.normalize import (
     _align_merge_fed_confluence_to_band,
-    _band_order_crossings,
-    _bundle_divergent_distinct_descents,
     _bundle_divergent_distinct_traverses,
-    _clamp_inter_row_band_top,
-    _clear_channel_x_in_band,
     _clear_merge_trunk_opposite_arm,
     _coincide_fanout_opening_descents,
     _coincide_merge_fanout_pivots,
     _coincide_same_line_fanout_traverses,
     _coincide_same_line_tracks,
-    _coincident_trunk_slots,
-    _collect_htrunks,
-    _distinct_line_order,
-    _dogleg_off_exempt_trunks,
-    _final_port_approach,
-    _gap_channel_base,
-    _group_channel_trunks,
-    _h_segment_crosses_other_section,
     _hold_runs_in_corridor_clearance,
-    _HTrunk,
-    _inter_row_gap_band,
     _materialize_gap_slots,
     _materialize_trunk_slots,
     _nest_bypass_above_over_top_wrap,
-    _plan_trunk_band,
     _reconcile_port_peeloff_risers,
-    _restack_channel,
-    _restack_htrunk,
-    _restack_trunk_band,
     _separate_declared_opposing_gap_bundles,
     _separate_fused_cotravelling_runs,
     _separate_opposing_inter_row_trunks,
-    _set_vchannel_x,
     _settle_same_destination_approach_bundles,
     _size_concentric_cohorts,
     _stagger_convergent_distinct_lines,
-    _suboptimal_trunk_bands,
     _unify_coincident_corner_radii,
-    _VChannel,
 )
 from nf_metro.layout.routing.planning import prepare_route_system_planning
-from nf_metro.layout.routing.postprocess import (  # noqa: F401
-    _align_uncentered_siblings,
-    _apply_diagonal_spread,
-    _apply_station_moves,
-    _BubbleCtx,
-    _build_bubble_ctx,
+from nf_metro.layout.routing.postprocess import (
     _center_bubble_stations,
     _clear_bypass_v_label_strikes,
-    _collect_centering_candidates,
-    _is_diagonal_route,
     _spread_diagonal_bundles,
-    _StationMoveCandidate,
 )
 from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
-from nf_metro.layout.routing.tb_handlers import (  # noqa: F401
-    _compute_diagonal_placement,
-    _perp_entry_drop_delta,
-    _route_perp_entry,
-    _route_tb_diagonal,
-    _route_tb_internal,
-    _route_tb_lr_entry,
-    _route_tb_lr_exit,
+from nf_metro.layout.routing.tb_handlers import (
     _route_tb_section,
 )
 from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
