@@ -108,3 +108,37 @@ def test_london_tube_fan_corners_leave_no_seam():
                     worst, min(math.dist(q, s) for s in other) - theme.line_width
                 )
     assert worst <= 0.1
+
+
+# One cubic per corner holds a circle to 1e-3 of its radius up to a right
+# angle, the largest turn routing draws; past it the single cubic's own
+# approximation error grows, to about 3.1e-3 at 135 degrees.
+@pytest.mark.parametrize(
+    ("turn_degrees", "bound"),
+    [
+        (30.0, 1e-3),
+        (45.0, 1e-3),
+        (61.0, 1e-3),
+        (90.0, 1e-3),
+        (120.0, 2e-3),
+        (135.0, 3.5e-3),
+    ],
+)
+def test_a_drawn_corner_is_a_circular_arc(turn_degrees, bound):
+    """Every point of a drawn corner sits on the circle tangent to both legs."""
+    from nf_metro.layout.routing.corners import corner_arc_at
+
+    phi = math.radians(turn_degrees)
+    arm = 10.0
+    corner = (100.0, 100.0)
+    before = (corner[0] - arm, corner[1])
+    after = (corner[0] + arm * math.cos(phi), corner[1] - arm * math.sin(phi))
+    radius = arm / math.tan(phi / 2)
+    centre = (before[0], before[1] - radius)
+    worst = max(
+        abs(
+            math.dist(corner_arc_at(before, corner, after, k / 200)[0], centre) - radius
+        )
+        for k in range(201)
+    )
+    assert worst <= bound * radius
