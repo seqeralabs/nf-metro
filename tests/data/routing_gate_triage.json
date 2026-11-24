@@ -1739,15 +1739,15 @@
   "note": "Bundle bound in _split_at_bundle_gaps: two bundles turning the same angle whose corners happen to lie on one bisector are kept as separate cohorts. Every corpus diagonal cohort is one bundle, so the split arm has no fixture; tests/test_concentric_bundle_corners.py::test_separate_bundles_on_one_bisector_turn_apart builds the shape.",
   "status": "defensive"
  },
- "normalize.py::if reference < floor:::#1": {
+ "normalize.py::if reference is None:::#1": {
   "note": "A cohort whose leg budgets would take some lane's radius to zero keeps its radii. Every corpus cohort's budget leaves each lane a positive radius, so the keep arm has no fixture; it guards cohorts squeezed onto legs shorter than their lane offsets.",
   "status": "defensive"
  },
- "normalize.py::if reference < floor or (reference < curve_radius and reference < floor_radius):::#1": {
+ "normalize.py::if reference is None or (reference < curve_radius and reference < floor_radius):::#1": {
   "note": "_reanchor_concentric_corner_fans leaves a fan unraised when its leg budgets cannot seat the innermost lane at the curve radius or at its own current floor. Every corpus fan the pass reaches fits the curve radius, so the keep arm has no fixture; it guards fans on legs too short for their lane offsets.",
   "status": "defensive"
  },
- "normalize.py::if reference < COORD_TOLERANCE_FINE:::#1": {
+ "normalize.py::if reference is None:::#2": {
   "note": "A coincident-turn bucket whose leg budgets leave no positive common radius keeps its radii. Every corpus bucket's budget leaves a positive radius, so the keep arm has no fixture; it guards same-line turns squeezed onto legs shorter than a neighbouring corner's radius.",
   "status": "defensive"
  },
