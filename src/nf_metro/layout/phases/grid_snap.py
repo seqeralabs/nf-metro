@@ -714,13 +714,15 @@ def _restore_divergence_midpoints(
         st = graph.stations.get(hub_id)
         if st is None or st.off_track:
             continue
-        new_tgt_ys = _evenly_spaced_ys(
-            [graph.stations[sid].y for sid in tgt_ids if sid in graph.stations]
-        )
+        tgt_ys = [graph.stations[sid].y for sid in tgt_ids if sid in graph.stations]
+        new_tgt_ys = _evenly_spaced_ys(tgt_ys)
         if new_tgt_ys is None:
             continue
         local_pitch = new_tgt_ys[1] - new_tgt_ys[0]
-        midpoint = (new_tgt_ys[0] + new_tgt_ys[-1]) / 2.0
+        # The rounded Ys only classify the spread; the hub centres on the
+        # stations' own Ys, as a fan-in target does, so a pitch off the
+        # 0.001 px lattice leaves the two on one centreline.
+        midpoint = (min(tgt_ys) + max(tgt_ys)) / 2.0
         residue = (midpoint - new_tgt_ys[0]) % local_pitch
         half_pitch = min(residue, local_pitch - residue) > 1.0
         for sid in (hub_id, *trunk_followers.get(hub_id, ())):
