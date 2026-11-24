@@ -4084,7 +4084,7 @@ def _guard_inter_row_run_clearance(
     routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: a horizontal leg of an inter-*row* route must keep
-    ``INTER_ROW_EDGE_CLEARANCE`` from its source section's near bbox edge.
+    ``inter_row_edge_clearance()`` from its source section's near bbox edge.
 
     An inter-section bundle that crosses grid rows (e.g. a right-exit
     wrapping down to a left-entry below) lands its horizontal run in the
@@ -4153,8 +4153,6 @@ def _guard_trunk_bands_crossing_optimal(
     strictly reduce crossings.  This guard fails loudly if a future change ever
     leaves a band in such an avoidable-crossing order.
     """
-    pass
-
     routes = _ensure_routes(graph, routes)
     ctx = routing_context._build_routing_context(
         graph, active_metrics().diagonal_run, active_curve_radius(), offsets

@@ -3131,7 +3131,7 @@ def resolve_section_colrow(
 def inter_row_wrap_band(n_lines: int, offset_step: float = OFFSET_STEP) -> float:
     """Bbox-to-bbox row gap a wrap bundle of *n_lines* needs.
 
-    A horizontal inter-row run keeps :data:`INTER_ROW_EDGE_CLEARANCE` below
+    A horizontal inter-row run keeps ``inter_row_edge_clearance()`` below
     the upper box edge and ``inter_row_header_clearance()`` above the next
     row's header badge, with the bundle's ``(n_lines - 1) * offset_step``
     stagger between.  Section placement reserves this band
@@ -3226,7 +3226,7 @@ def inter_row_channel_y(
 def _inter_row_band_fits(upper_bottom: float, lower_top: float) -> bool:
     """Whether a horizontal run fits between two stacked rows with clearance.
 
-    True when the band keeps :data:`INTER_ROW_EDGE_CLEARANCE` below the upper
+    True when the band keeps ``inter_row_edge_clearance()`` below the upper
     row's bottom edge and ``inter_row_header_clearance()`` above the lower
     row's header badge.  When it does not, a centred run grazes one edge, so a
     route prefers a different channel (the around-below loop / canvas-bottom
@@ -3243,7 +3243,7 @@ def fan_corridor_band(
 ) -> float | None:
     """Centre Y of the routing band between two stacked rows, or ``None``.
 
-    The band keeps :data:`INTER_ROW_EDGE_CLEARANCE` below the upper row's bottom
+    The band keeps ``inter_row_edge_clearance()`` below the upper row's bottom
     and ``inter_row_header_clearance()`` above the lower row's header badge.  A
     :class:`FanCorridor` shares one inter-row traverse band across a junction
     fan's branches, so the band must hold the whole nested bundle: returns the centre
@@ -3311,7 +3311,7 @@ def _center_inter_row_channel(
     which the closing guard reports.
 
     Without a reservation the channel is centred in the band that keeps
-    :data:`INTER_ROW_EDGE_CLEARANCE` above the bbox bottom of the row
+    ``inter_row_edge_clearance()`` above the bbox bottom of the row
     above and ``inter_row_header_clearance()`` above the row below --
     the latter clears the *header badge* (numbered circle + label) rather
     than just the bbox edge, so the run doesn't graze the next-row label.

@@ -168,11 +168,6 @@ history.
   takes only the other theme's colors and glyphs.
 - `transparent` bakes the requested mode's logo variant (`%%metro logo:
 light.png | dark.png`) in a PNG.
-- A junction fan wider than its junction's margin from the wall no longer
-  launches its lead-in inside the section it leaves (`london-tube` aborted on
-  a five-line fan out of one exit), and a route starting on a one-line
-  station's drawn lane is no longer reported as hanging in open space when the
-  lane sits more than two corner radii off the station's centre.
 - The title lines up with a thick section outline's outer edge;
   `london-tube`'s 1.5px outline moves its title 0.25px left.
 - Layout measures file icons and their captions with the theme the map
@@ -314,6 +309,11 @@ light.png | dark.png`) in a PNG.
   That feeder's exit run was drawn straight through the branch's marker
   (and any file icon after it); the branch now peels below the exit rows
   (#2175).
+- A junction fan wider than its junction's margin from the wall no longer
+  launches its lead-in inside the section it leaves (`london-tube` aborted on
+  a five-line fan out of one exit), and a route starting on a one-line
+  station's drawn lane is no longer reported as hanging in open space when the
+  lane sits more than two corner radii off the station's centre.
 
 ## [2.1.0] — 2026-09-15
 

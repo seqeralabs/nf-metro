@@ -8,11 +8,13 @@ module's public routing surface.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.pass_metrics import (
     active_curve_radius,
     active_metrics,
+    curve_radius_context,
     graph_radius_context,
 )
 from nf_metro.layout.route_plan import RouteSystemId
@@ -218,12 +220,14 @@ def _route_edges(
     x}`` requests; the route points are adjusted in place either way.
 
     Routes at the radius *graph* was laid out with unless *curve_radius* says
-    otherwise.
+    otherwise; either way the radius is the one every clearance helper reads.
     """
-    with graph_radius_context(graph):
-        return _route_edges_at_radius(
+    with (
+        graph_radius_context(graph),
+        nullcontext() if curve_radius is None else curve_radius_context(curve_radius),
+    ):
+        return _route_edges_in_context(
             graph,
-            active_curve_radius() if curve_radius is None else curve_radius,
             station_offsets,
             observe_plan=observe_plan,
             offset_step=offset_step,
@@ -236,9 +240,8 @@ def _route_edges(
         )
 
 
-def _route_edges_at_radius(  # noqa: C901
+def _route_edges_in_context(  # noqa: C901
     graph: MetroGraph,
-    curve_radius: float,
     station_offsets: dict[tuple[str, str], float] | None,
     *,
     observe_plan: bool,
@@ -340,7 +343,7 @@ def _route_edges_at_radius(  # noqa: C901
     ctx = _build_routing_context(
         graph,
         active_metrics().diagonal_run,
-        curve_radius,
+        active_curve_radius(),
         station_offsets,
         offset_step=offset_step,
         validate_final_route_frames=validate_final_route_frames,

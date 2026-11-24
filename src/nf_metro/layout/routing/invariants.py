@@ -4407,7 +4407,7 @@ def concentric_corner_fans(
     edges reads as one fan at every corner it turns together, not just its first
     and last.  Each route's own exit-turn corner is excluded (anchored
     separately).  Only fans spanning two or more distinct lines -- the ones whose
-    innermost lane the the corner radius floor governs -- are returned.
+    innermost lane the corner radius floor governs -- are returned.
 
     This is the single definition of "one concentric fan" shared by the
     re-anchoring pass that seats each innermost lane at the floor and the oracle
@@ -5384,8 +5384,13 @@ def check_no_hanging_routes(
         else None
     )
     from nf_metro.layout.routing.offsets import drawn_lane_span
+    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 
-    anchors = [drawn_lane_span(graph, st, offsets) for st in graph.stations.values()]
+    positive_fan = tb_positive_fan_sections(graph)
+    anchors = [
+        drawn_lane_span(graph, st, offsets, positive_fan)
+        for st in graph.stations.values()
+    ]
     rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
     polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
 

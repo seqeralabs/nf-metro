@@ -162,6 +162,47 @@ def test_a_laid_out_graph_routes_at_its_own_radius() -> None:
     assert radii and min(radii) == pytest.approx(12.0)
 
 
+def test_an_explicit_radius_is_the_radius_every_accessor_reads() -> None:
+    from nf_metro.layout.pass_metrics import (
+        active_curve_radius,
+        curve_radius_context,
+        inter_row_edge_clearance,
+        metrics_context,
+    )
+
+    with metrics_context(curve_radius_ratio=3.0, line_width=4.0, stroke_scale=1.5):
+        with curve_radius_context(30.0):
+            assert active_curve_radius() == pytest.approx(30.0)
+            assert inter_row_edge_clearance() == pytest.approx(60.0)
+        assert active_curve_radius() == pytest.approx(18.0)
+
+
+def test_an_explicit_routing_radius_binds_the_clearance_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``route_edges(curve_radius=...)`` builds its context at the radius the
+    clearance helpers read during the call."""
+    from nf_metro.layout.pass_metrics import active_curve_radius
+    from nf_metro.layout.routing import core, route_edges
+
+    graph = prepare_graph(
+        (EXAMPLES / "rnaseq_london_tube.mmd").read_text(),
+        source_dir=str(EXAMPLES),
+    )
+    seen: list[tuple[float, float]] = []
+    build = core._build_routing_context
+
+    def spy(graph, diagonal_run, curve_radius, *args, **kwargs):
+        seen.append((curve_radius, active_curve_radius()))
+        return build(graph, diagonal_run, curve_radius, *args, **kwargs)
+
+    monkeypatch.setattr(core, "_build_routing_context", spy)
+    route_edges(graph, curve_radius=14.0)
+    assert seen
+    for ctx_radius, helper_radius in seen:
+        assert ctx_radius == helper_radius == pytest.approx(14.0)
+
+
 # Fixtures whose corner clearances at a larger radius rest on reservations
 # that have to grow with it.
 RADIUS_SENSITIVE = [

@@ -742,7 +742,7 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     (LEFT/RIGHT) entry port wraps through the inter-row gap as a
     horizontal run (see ``_route_left_entry_wrap``).  To keep that run
     clear of both bounding obstacles it needs a band of
-    ``INTER_ROW_EDGE_CLEARANCE`` below the upper bbox bottom, the bundle
+    ``inter_row_edge_clearance()`` below the upper bbox bottom, the bundle
     span, and ``inter_row_header_clearance()`` above the lower row (clearing
     its header badge, not just the bbox edge); a narrow gap squeezes the
     bundle flush against a box.  Returns, per adjacent
@@ -875,7 +875,7 @@ def _merge_trunk_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     bypass channel routes in the inter-row gap *above* the bottom row (see
     ``bypass_bottom_y``).  That channel is a horizontal run spanning the
     trunk's columns, so -- like an inter-row wrap bundle -- it needs
-    ``INTER_ROW_EDGE_CLEARANCE`` below the upper row's bbox, the bundle span,
+    ``inter_row_edge_clearance()`` below the upper row's bbox, the bundle span,
     and ``inter_row_header_clearance()`` above the bottom row's header.  Unlike a
     wrap, the bottom-row target need not share a column with the upper-row
     sections the channel crosses, so the column-overlap test that gates header

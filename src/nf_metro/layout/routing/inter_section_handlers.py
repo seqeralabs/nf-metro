@@ -6711,7 +6711,7 @@ def _corridor_is_viable(ctx: _RoutingCtx, src: Station, entry_port: Station) -> 
         return False
     if _corridor_descent_x(ctx, ep_col, ep_row, 0.0) is None:
         return False
-    # The leftward traverse runs in a band INTER_ROW_EDGE_CLEARANCE below the
+    # The leftward traverse runs in a band inter_row_edge_clearance() below the
     # source-row bottom and inter_row_header_clearance() above the lower row's
     # header badge, with the bundle's per-line stagger inside it.  A gap too
     # narrow for that band collapses the stagger onto one Y (a collinear
@@ -6812,7 +6812,7 @@ def _route_inter_row_gap_corridor(
     else:
         gy_base = gap_top + inter_row_edge_clearance()
     # Keep the channel inside the clearance band: at least
-    # INTER_ROW_EDGE_CLEARANCE below the source-row bottom and clear of the
+    # inter_row_edge_clearance() below the source-row bottom and clear of the
     # next row's header badge.  Skipped for fan feeders, which share the wrap
     # sibling's (unclamped) band so the two bundles' H legs coincide.
     if fan is None and gap_bottom > gap_top:

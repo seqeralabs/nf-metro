@@ -32,6 +32,7 @@ __all__ = [
     "active_stroke_scale",
     "bypass_clearance",
     "canvas_edge_clearance",
+    "curve_radius_context",
     "diagonal_label_offset",
     "exit_corridor_icon_clearance",
     "graph_layout_context",
@@ -197,6 +198,19 @@ def graph_radius_context(graph: MetroGraph) -> AbstractContextManager[None]:
             line_width=metrics.line_width,
             stroke_scale=metrics.stroke_scale,
         )
+    )
+
+
+def curve_radius_context(radius: float) -> AbstractContextManager[None]:
+    """Bind *radius* as the corner radius every accessor reads.
+
+    The ratio is solved against the bound line width and stroke scale, so
+    :func:`active_curve_radius` and every clearance derived from it agree with
+    *radius* for the duration of the block.
+    """
+    metrics = active_metrics()
+    return metrics_context(
+        metrics, curve_radius_ratio=radius / (metrics.line_width * metrics.stroke_scale)
     )
 
 
