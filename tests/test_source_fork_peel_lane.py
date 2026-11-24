@@ -81,7 +81,10 @@ _CORRIDOR = (
     "leaves outside the inter-row corridor its reservation realises"
 )
 _STACKED_FEED = "lines fed from the stacked frame cross the trunk"
-_CENTRED_TB_ABORT = "the centred fork's fan plan aborts in a top-to-bottom section"
+_CENTRED_TB_ABORT = (
+    "the lane pin leaves the centred fork's planned fan off its boundary "
+    "frame, and the render aborts in a top-to-bottom section"
+)
 _FED_SHAPES = [
     "fed_bundle_with_the_peel_line",
     "fed_bundle_with_the_peel_line_sibling_line_first",

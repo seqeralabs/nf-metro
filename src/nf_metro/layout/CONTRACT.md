@@ -367,7 +367,8 @@ in pipeline order.
   station assigned a local `(x, y)`, a `layer`, and a `track`. Section
   `bbox_x/y/w/h` reflect the local content extent, and `Section.lane_ends`
   holds the lines pinned to an end of the section's lane order (read by the
-  offsets phase that re-slots them).
+  offsets phase that re-slots them), and `Section.lane_end_seeds` maps each
+  such line to the contenders that set its pin.
 - **Invariants preserved**: Ports (`is_port=True`) are not positioned.
   Inter-section edges in `graph.edges` are untouched. Junctions are not
   positioned.

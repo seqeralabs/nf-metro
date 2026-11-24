@@ -73,7 +73,10 @@ history.
   its column and along its run, and its line joins the bundle on the outer
   lane of that side instead of crossing the trunk to reach it, keeping that
   side when it carries on into a section beside it. This holds in a section
-  that several lines enter too, whose entering lines keep their order. The
+  that several lines enter too, whose entering lines keep their order, unless
+  the pass that re-slots perpendicular lines at a multi-feeder merge port moves
+  a line of the entering bundle outside the pinned line, which the contender
+  then crosses. The
   line takes that lane only along the source's own run, so another run of the
   same line, including one entering the section, keeps its place. A source with
   runs to several stations of the trunk keeps the run that joins first on its
