@@ -1,21 +1,26 @@
 # yaml-language-server: $schema=theme.schema.json
-# A schematic-transit look after the geometry of TfL's Line Diagram Standard:
-# tabs for stations on one line, a bar across a line's end, bold capsules at
-# interchanges, bundled lines edge to edge, unboxed sections and a humanist
-# sans in navy. Glyph sizes are multiples of line_width. Also the worked
-# example of the theme file format.
+# A schematic-transit look after the geometry of TfL's Line Diagram Standard,
+# which measures everything in multiples of the line width: tabs for stations
+# on one line, a bar across a line's end, bold capsules at interchanges,
+# bundled lines edge to edge (so no track_gap), unboxed sections and a
+# humanist sans in navy. Also the worked example of the theme file format.
 name: london-tube
 
+# Track-weight tabs rather than the standard's 0.66 square: 1 line width thick
+# and reaching 1.5 past the line, a tab reads as a continuation of the track.
+# The terminus bar matches it.
 station_glyph: tick
 station_tick_width: 1
 station_tick_length: 1.5
-# `interchange_glyph: ring` draws the Line Diagram Standard's rings: one ring
-# over two lines, a bridged chain of rings over three or more.
+# `interchange_glyph: ring` draws the standard's rings (a 2-wide inside, a
+# 0.5-wide outline, chains bridged by a 0.5-wide strip): one ring over two
+# lines, a bridged chain over three or more.
 interchange_glyph: pill
 ring_max_lines: 2
 terminus_glyph: bar
 icon_fill: "#ffffff"
 icon_stroke: "#000000"
+# Bold capsules: a 2.5px outline on 4px lines.
 station_stroke_width: 2.5
 line_width: 4
 label_font_family: "'Gill Sans', 'Gill Sans MT', 'Hammersmith One', Calibri, 'Trebuchet MS', sans-serif"
@@ -37,7 +42,7 @@ light:
   marker_stroke: "#000000"
   station_fill: "#ffffff"
   station_stroke: "#000000"
-  muted_line_color: "#b3b3b3"
+  muted_line_color: "#b3b3b3" # inactive lines in 30% grey
   section_fill: transparent
   section_stroke: "#8b919c"
   section_label_color: "#7a8291"

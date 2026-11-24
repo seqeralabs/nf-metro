@@ -229,23 +229,27 @@ That tick time base has to be set on the stream's codec context: set on the stre
 ## Theming (`style.py`, `themes/`)
 
 `Theme` in `style.py` is the theme schema: one keyword-only dataclass whose fields are every visual setting a theme can carry.
-Each field's metadata records its description and reference group, whether it is a color, its allowed values, and for chrome colors the SVG class and property it paints and the `--nfm-map-*` custom property that overrides it.
-Three things derive from that metadata rather than from hand-kept lists: theme file validation, the chrome CSS in `_inject_chrome_css`, and the field reference in `docs/theming.mdx` (`themes/reference.py`, checked by `tests/test_theme_reference.py`).
+Each field's metadata records its description and reference group, whether it is a color, and its allowed values.
+`themes/schema.py` generates the JSON Schema theme files are validated against from it, and `scripts/theme_docs.py` writes that schema to `themes/theme.schema.json` and the field reference into `docs/theming.mdx` (both checked by `tests/test_theme_schema.py`).
+`CHROME` beside the dataclass maps each chrome color to its `--nfm-map-*` custom property and the classes and properties it paints, for `_inject_chrome_css`.
 
-Built-in themes are YAML files in `src/nf_metro/themes/` (`nfcore.yaml`, `seqera.yaml`, `london_tube.yaml`, `transparent.yaml`), loaded by the same loader as user theme files (`themes/stack.py`).
+Built-in themes are YAML files in `src/nf_metro/themes/` (`nfcore.yaml`, `seqera.yaml`, `london_tube.yaml`, `transparent.yaml`), loaded by the same loader as user theme files (`themes/stack.py`), without re-validation (the test suite validates them).
 A `style`/`--theme` value is a stack of names and files.
-`resolve_stack` lays the stack over the `nfcore` base and merges each mode separately into an immutable `ResolvedTheme` holding the light theme, the dark theme, the stack's layout options, and any fixed or pinned mode.
-`resolve_theme(theme, graph, mode)` picks one theme from it.
+`resolve_stack` lays the stack over the `nfcore` base and merges each mode separately into an immutable `ResolvedTheme` holding the light theme, the dark theme and the stack's layout options.
+`merge_layers` fills every empty derived color (icon and badge colors from the station colors, `knockout_fill` from the opaque background), so a resolved `Theme`'s fields are all concrete and the renderer reads them directly.
 A stack of built-in names is memoised, so a name always resolves to the same objects.
 
-A resolved theme with both palettes carries `mode_colors`, the light and dark value of every color field, so the renderer emits chrome as CSS `light-dark(<light>, <dark>)` without looking anything up.
-A single-palette theme (`fixed_mode` set, as `transparent` does) carries none and renders one baked palette.
+Every resolved theme carries `mode_colors`, the light and dark value of every color field, so the renderer emits chrome as CSS `light-dark(<light>, <dark>)` without looking anything up, and a pair that matches emits the plain value.
+A station color reaches the stylesheet only when its two values differ; otherwise the baked attribute is right in both modes.
 `--no-chrome-css` bakes one concrete palette for consumers that cannot parse `light-dark()`.
 
-`prepare_graph` resolves the stack once: the caller's `--theme` (or a per-output `theme=`), else the map's `%%metro style:`.
-`bind_graph_stack` resolves that stack once and caches it on the graph (`MetroGraph.resolved_theme`), and `api.apply_theme_layout` writes the stack's `layout:` options the map's directives left unset (`MetroGraph.directive_options`); explicit caller options are applied after it.
-Layout reads no `Theme` field for its own decisions, but four passes borrow render geometry, and they measure with the resolved render theme (`themes.layout_theme`: the bound stack in the map's own mode, its `%%metro mode:` or the default, since one layout serves every mode a render bakes): the terminus-icon obstacles in label spacing (`phases/spacing.py`), the off-track leaf-sink check (`phases/off_track.py`), the icon and label guards (`phases/guards.py`), and the final render-plan check at the end of `compute_layout` (`engine.py`).
-So a map is laid out for the theme it is drawn with, including `--theme` and a per-output `theme=`: a theme with a larger station radius or caption size moves the file icons, and layout makes room for them.
+`themes.bound_stack(graph, theme)` resolves the stack a graph lays out and renders with and binds it on the graph (`MetroGraph.resolved_theme`): the caller's `--theme` (or a per-output `theme=`), else the map's `%%metro style:`.
+`resolve_theme(graph, mode)` bakes it in one mode.
+`api.apply_theme_layout` writes the stack's `layout:` options the map's directives left unset (`MetroGraph.directive_options`); explicit caller options are applied after it.
+
+Layout reserves room for the theme's sizes: `compute_layout` records the station radius and outline, label size, icon size, line width, chevron size, scales and spacing options it laid out with as one `LayoutMetrics` on the graph (`MetroGraph.layout_metrics`), and `layout/pass_metrics.py` serves them to geometry helpers through one context.
+Every later measurement of that geometry (render settlement, guards, validators) binds the graph's recorded metrics through `graph_layout_context`, never the render theme's, so a layout can be drawn in another theme: its colors and glyphs follow the render theme while its geometry keeps its layout's.
+Sizes are the same in both palettes, so one layout serves every mode a render bakes.
 
 To add a built-in theme, add a YAML file, list it in `_BUILTIN_FILES` in `themes/__init__.py`, and add a gallery example.
 

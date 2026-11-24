@@ -14,9 +14,10 @@ It never changes what the map says.
 **Theme.** A named set of [fields](#field-reference), written as a YAML file.
 Every built-in theme is such a file in `src/nf_metro/themes/`, loaded and checked exactly like one you write yourself.
 
-**Mode.** Most themes have a light and a dark palette.
+**Mode.** A theme has a light and a dark palette of colors; sizes and shapes are the same in both.
 An SVG carries both and follows the viewer's `color-scheme` (see [Light and dark in one SVG](#light-and-dark-in-one-svg)).
 `%%metro mode:` or `--mode` picks the palette baked into a PNG or a single-palette export.
+A theme whose colors match in both palettes renders the same in either.
 
 **Stack.** A theme value is a comma-separated list of themes, applied left to right.
 A later theme wins for every field it sets, and the light and dark palettes merge separately.
@@ -47,10 +48,9 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 | `nfcore`      | The default and the base: bold labels, filled section boxes with number badges, white station pills.                                            |
 | `seqera`      | Seqera brand colors and Inter type.                                                                                                             |
 | `london-tube` | A schematic transit look: track-weight tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, unboxed sections. |
-| `transparent` | One palette on a transparent canvas, for embedding. Ignores the mode.                                                                           |
+| `transparent` | One palette on a transparent canvas, for embedding. Looks the same in either mode.                                                              |
 
-Add `-light` or `-dark` to `nfcore`, `seqera` or `london-tube` to pin the baked palette, for example `nfcore-light`.
-`dark` is also accepted for `nfcore`, and `light` for `transparent`.
+`--mode light` or `--mode dark` picks the palette a PNG bakes.
 
 <Metro src="examples/rnaseq_london_tube.mmd" />
 
@@ -70,7 +70,8 @@ A built-in theme sets only the fields its file lists.
 
 1. Create a YAML file whose name ends in `.yaml` or `.yml`.
 2. Give it a `name`, then set the fields you want to change.
-   Top-level fields apply to both palettes, and `light:` and `dark:` blocks override them for one palette.
+   Top-level fields apply to both palettes, and `light:` and `dark:` blocks override colors for one palette.
+   Sizes and shapes are top-level only, because a map is laid out once for both palettes.
 3. Optionally, start from another theme with `extends:`, and set layout options in a `layout:` block.
 4. Add the file to a stack.
    In `%%metro style:` the path is relative to the `.mmd` file; on the command line it is relative to the working directory.
@@ -100,13 +101,11 @@ layout:
 
 `extends:` is shorthand for listing those themes earlier in the stack, so the line above is the same as `%%metro style: london-tube, house_style.yaml`.
 
-A theme with one palette sets `fixed_mode: light` or `fixed_mode: dark`.
-It then renders that palette whatever mode is asked for, and its SVG does not adapt to the viewer.
-In a stack, `fixed_mode` behaves like any field: a later theme that sets it, to a mode or to `none`, replaces an earlier one.
-The built-in `nfcore`, `seqera` and `london-tube` set `fixed_mode: none`, so `transparent, seqera` adapts to the viewer's mode.
+A color left empty takes the field its description names: icon and badge colors take the station colors, the marker outline takes `station_stroke`, and `knockout_fill` (label halos and `open` markers) takes the background, or white on a transparent canvas.
 
 nf-metro checks the whole file against the theme's JSON Schema before it renders anything.
-An unknown field, a value of the wrong type, a color it cannot read, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the file and the path to the bad value, such as `$.light.label_color`.
+An unknown field, a value of the wrong type or out of range (including `.inf` and `.nan`), a color it cannot read, a size inside `light:` or `dark:`, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the file and the path to the bad value, such as `$.light.label_color`.
+Font families, font weights and dash patterns accept only the characters CSS needs for them.
 
 The schema ships with nf-metro as `nf_metro/themes/theme.schema.json` and is generated from the same definitions as the field reference below.
 The first line of the example above points editors that use the YAML language server (VS Code's YAML extension, for one) at it, so they complete field names and flag mistakes as you type.
@@ -117,13 +116,12 @@ Any other JSON Schema tool can validate a theme file against it too.
 A station on several lines is an interchange.
 `interchange_glyph` picks how it is drawn:
 
-- `pill` (the default) draws one capsule across all its lines.
-  `glyph_stroke` and `capsule_fill` give the capsule colours that follow the viewer's light or dark mode; left empty, it takes `station_stroke` and `station_fill` in both modes.
-- `ring` draws a ring centred on the lines, with the centre left in the background color.
+- `pill` (the default) draws one capsule across all its lines, in `station_fill` and `station_stroke`.
+- `ring` draws a ring centred on the lines, outlined in `station_stroke` and filled with `station_fill`.
 
 With `ring`, `ring_max_lines` is the most lines on one track that a single ring covers, and `ring_overflow` decides what a wider bundle gets:
 
-- `chain` draws the fewest rings that cover the bundle, centred on it, each ring's outer edge meeting the next ring's inner edge, with a strip in the ring fill cut through the outlines where they meet so the centres join into one shape.
+- `chain` draws the fewest rings that cover the bundle, centred on it, each ring's outer edge meeting the next ring's inner edge, with a strip in the station fill cut through the outlines where they meet so the centres join into one shape.
   The spacing never changes, so every chain has the same neck, and a chain can reach a little past the outermost lines.
 - `grow` draws one ring whose inside widens to cover the whole bundle.
 
@@ -135,7 +133,7 @@ The Line Diagram Standard's own idiom is rings, which a theme extending `london-
 A line end shared by several lines follows `terminus_glyph` instead:
 
 - `nub` (the default) draws a square-cornered box across the lines in the station colours.
-- `bar` draws a buffer-stop bar across the whole bundle, as thick as a station tab and overhanging the outermost lines by a tab's length, in `glyph_stroke` (which follows the viewer's light or dark mode).
+- `bar` draws a buffer-stop bar across the whole bundle, as thick as a station tab and overhanging the outermost lines by a tab's length, in `station_stroke`.
 - `ring` draws the interchange glyph above.
 
 A line end with one line follows `station_glyph`, and its file icon always sits beyond the glyph.
@@ -155,13 +153,8 @@ Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/n
   It sets every field the schema leaves without a default, so it is the template for a complete theme.
 - `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
 - `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
-  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), which measures everything in multiples of the line width.
-  Interchanges are bold capsules spanning the bundle, outlined at 2.5px on 4px lines.
-  Setting `interchange_glyph: ring` over it switches to the standard's rings: a 2-wide inside and a 0.5-wide outline, chains bridged by a 0.5-wide strip, and lines on separate tracks joined by a dumbbell link.
-  The theme deliberately uses track-weight tabs rather than the standard's 0.66 square: a tab is 1 line width thick and reaches 1.5 past the line, so it reads as a continuation of the track, and the terminus bar matches it.
-  Lines on a shared track are drawn edge to edge, as in the standard, so the theme sets no `track_gap`.
-  Inactive lines are 30% grey.
-- `transparent.yaml` sets `fixed_mode: dark` and `background_fill: none`, for maps embedded on a page that supplies its own background.
+  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), and the file's comments give the reasoning behind each choice.
+- `transparent.yaml` sets every color at the top level, so both palettes match, with `background_fill: none`, for maps embedded on a page that supplies its own background.
 
 ```yaml title="london_tube.yaml (abridged)"
 name: london-tube
@@ -183,16 +176,16 @@ legend_stroke_width: 1.5
 light:
   background_fill: "#ffffff"
   label_color: "#1c3f94"
-  glyph_stroke: "#000000"
-  capsule_fill: "#ffffff"
+  station_fill: "#ffffff"
+  station_stroke: "#000000"
   muted_line_color: "#b3b3b3"
   section_fill: transparent
   legend_stroke: "#000000"
 dark:
   background_fill: "#10141c"
   label_color: "#dfe6ff"
-  glyph_stroke: "#ffffff"
-  capsule_fill: "#10141c"
+  station_fill: "#10141c"
+  station_stroke: "#ffffff"
   muted_line_color: "#585a60"
   section_fill: transparent
   legend_stroke: "#ffffff"
@@ -499,7 +492,7 @@ They then follow the page's mode rather than the OS setting.
 
 <Aside type="note" title="One theme opts out of all of this on purpose">
 
-nf-metro ships one theme with no light/dark pair at all: `transparent` (also accepted as `light`), whose file sets `fixed_mode`.
+nf-metro ships one theme whose palettes match: `transparent`, whose file sets every color at the top level.
 Every `--nfm-*` fallback is a single baked value, no `light-dark()` appears anywhere, and `self_color_scheme` has nothing to do, because no `color-scheme` gets declared either way.
 The media query described earlier is the only adaptation such a theme gets.
 Choose it deliberately rather than by leaving `--theme` or `%%metro style:` unset.

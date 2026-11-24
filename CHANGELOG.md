@@ -20,40 +20,69 @@ history.
 - `jsonschema` is a core dependency, and the `validate` extra is gone:
   `pip install nf-metro` brings everything `nf-metro validate-svg` and theme
   files need, and `pip install "nf-metro[validate]"` no longer names an extra.
-- Theme file errors take the form `theme file <path>: <JSON path>: <message>`
-  (for example `$.light.label_color: '#12345' is not a colour`), as reported by
-  the theme JSON Schema.
-- The Python API raises `ThemeError` (an `NfMetroError` and `ValueError`) for
-  an unknown theme name instead of falling back to `nfcore`.
-- `nf-metro info` reports `style: transparent` for a map written with
-  `style: light`; `light` stays accepted as an alias.
-- Python API: `route_edges`, `route_edges_centred`, `observe_route_edges` and
+- Theme names: the `light` theme is `transparent`; the `dark` and `light`
+  aliases and the mode-suffixed names (`nfcore-light`, `nfcore-dark`,
+  `seqera-light`, `seqera-dark`) are gone, so `%%metro style:`, `--theme`
+  and `theme=` take only `nfcore`, `seqera`, `london-tube`, `transparent` and
+  theme files. Pick the palette with `--mode` or `%%metro mode:`. A map with
+  no style has `MetroGraph.style == "nfcore"`.
+- An unknown theme name raises `ThemeError` (an `NfMetroError` and
+  `ValueError`) instead of falling back to `nfcore`, and `nf-metro info`
+  reports a map's style as written.
+- Theme fields renamed: `background_color` to `background_fill`,
+  `legend_background` to `legend_fill`, `animation_ball_color` to
+  `animation_ball_fill`, `bridge_glyph` to `bridge_lines`, the file-icon
+  fields `terminus_width`, `terminus_height`, `terminus_fold_size`,
+  `terminus_fill`, `terminus_stroke`, `terminus_stroke_width`,
+  `terminus_corner_radius` and `terminus_font_size` to `icon_*`,
+  `terminus_font_color` to `icon_text_color`, and `directional_marker_size`,
+  `directional_marker_spacing`, `directional_marker_opacity` and
+  `directional_marker_color` to `chevron_size`, `chevron_spacing`,
+  `chevron_opacity` and `chevron_color`.
+- `label_halo_color` and `marker_open_fill` merge into `knockout_fill`, which
+  colors label halos and `open` markers. `Theme.name` and `Theme.brand` are
+  gone.
+- `Theme` is a frozen dataclass; derive a variant with `dataclasses.replace`.
+  A resolved theme's empty derived colors are filled in, so
+  `marker_stroke`, `icon_fill`, `icon_stroke`, `section_badge_fill` and
+  `section_badge_text_color` read as the station colors they take, and
+  `knockout_fill` as the background (white on a transparent canvas).
+- Python API: `resolve_theme(graph, mode=None)` replaces
+  `resolve_theme(theme, graph, mode)`; bind a caller's stack first with
+  `themes.bound_stack(graph, theme)`. `THEME_MODES`, `mode_pair`,
+  `resolve_style` and `LIGHT_THEME` are gone (`TRANSPARENT_THEME` replaces the
+  last). `route_edges`, `route_edges_centred`, `observe_route_edges` and
   `observe_route_edges_centred` take no `diagonal_run` argument; set the
   `diagonal_run` option instead. `render.constants.line_style_kwargs` takes the
   theme its dash patterns come from.
+- `serve-multi` lays out and renders every posted map with its `--theme`
+  stack, layout options included; a posted map's `%%metro style:` is ignored.
+  `live.server.serve_multi` and `RunRegistry` take a `ResolvedTheme`.
 
 ### Added
 
 - Theme stacks and theme files (#2195): `%%metro style:`, `--theme` and a
   per-output `theme=` take a comma-separated list of built-in names and YAML
-  theme files, merged left to right over the `nfcore` base. A theme file can
-  set any field of the theme schema per light/dark palette, extend other
-  themes, fix one palette (`fixed_mode`), and set look-related layout options
-  in a `layout:` block, which sits below `%%metro` directives and CLI flags.
-  Every built-in theme is itself such a file. See the Theming page.
+  theme files, merged left to right over the `nfcore` base. A theme file sets
+  any field of the theme schema for both palettes and colors per light/dark
+  palette, extends other themes, and sets look-related layout options in a
+  `layout:` block, which sits below `%%metro` directives and CLI flags. Every
+  built-in theme is itself such a file. See the Theming page.
 - Themes can set station and section shapes: tab-and-ring station glyphs in
   multiples of the line width, section outline width, dash and corners,
   number badges, title case and tracking, and a legend frame.
 - `terminus_glyph` theme setting for a line end shared by several lines:
   `nub` (the default square box), `bar` (a track-weight buffer-stop bar
   across the bundle) or `ring`.
-- `glyph_stroke` and `capsule_fill` theme settings give interchange rings,
-  bar line ends, station capsules and interchanges colours that follow the
-  viewer's light or dark mode, muted lines included.
+- Station colors that differ between a theme's palettes follow the viewer's
+  light or dark mode on capsules, interchange rings and bar line ends, muted
+  lines included.
 - Theme files are validated against a JSON Schema generated from the theme
   definition and shipped as `nf_metro/themes/theme.schema.json`. Editors using
   the YAML language server complete and check theme files once pointed at it;
-  the built-in themes do.
+  the built-in themes do. Sizes may not differ between palettes, non-finite
+  numbers are refused, and font families, weights and dash patterns are held
+  to what CSS needs.
 - Theme fields for values that were fixed: section badge fill, digit colour
   and size; dashed and dotted dash patterns; `line_cap`; `bridge_gap`; caption
   colour (light/dark aware) and size; watermark colour; file-icon banner fill
@@ -94,13 +123,17 @@ history.
 - Animated dots ride the drawn strokes: each dot turns about a corner with its
   lane's own radius, so dots keep to their lines through concentric turns and
   source turnouts. Animation timing is measured on the unrounded geometry.
-- The transparent embed theme is named `transparent`; `light` is an accepted
-  alias.
-- Layout reserves room for a theme's own station radius, label size,
-  file-icon size, line width and chevron size, and the canvas margin grows for
-  a theme drawing wider lines or larger chevrons than any built-in. `seqera`
-  (14px labels) and `transparent` (6px stations, 14px labels) lay out with
-  the room their own sizes need.
+- Layout reserves room for a theme's own station radius and outline, label
+  size and line height, file-icon size, line width and chevron size, and the
+  canvas margin grows for a theme drawing wider lines or larger chevrons than
+  any built-in. `seqera` (14px labels, 2px outlines) and `transparent` (6px
+  stations, 14px labels, 2px outlines) lay out with the room their own sizes
+  need.
+- A graph keeps the metrics it was laid out with: drawing a layout in another
+  theme (`render_svg(prepare_graph(text), theme)`) keeps its geometry and
+  takes only the other theme's colors and glyphs.
+- `transparent` bakes the requested mode's logo variant (`%%metro logo:
+light.png | dark.png`) in a PNG.
 - The title lines up with a thick section outline's outer edge;
   `london-tube`'s 1.5px outline moves its title 0.25px left.
 - Layout measures file icons and their captions with the theme the map

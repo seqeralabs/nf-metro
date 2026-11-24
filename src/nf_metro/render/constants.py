@@ -478,11 +478,12 @@ STROKE_DASHARRAY: dict[str, str] = {
 """SVG stroke-dasharray values for non-solid line styles."""
 
 
-def line_style_kwargs(style: str, theme: object) -> dict[str, str]:
+def line_style_kwargs(style: str, theme: Theme) -> dict[str, str]:
     """Return extra SVG kwargs for a metro line style (dashed/dotted)."""
-    dasharray = (
-        getattr(theme, f"{style}_dasharray") if style in STROKE_DASHARRAY else ""
-    )
+    dasharray = {
+        "dashed": theme.dashed_dasharray,
+        "dotted": theme.dotted_dasharray,
+    }.get(style, "")
     if dasharray:
         return {"stroke_dasharray": dasharray}
     return {}
