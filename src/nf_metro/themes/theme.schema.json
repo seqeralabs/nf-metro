@@ -993,7 +993,7 @@
         "type": "string"
       },
       "label_font_size": {
-        "description": "Station label size, px. Layout reserves label room from the map's own settings, so keep this near 13 and use the `font_scale` layout option to grow text.",
+        "description": "Station label size, px.",
         "x-group": "Canvas and text",
         "type": "number",
         "minimum": 0

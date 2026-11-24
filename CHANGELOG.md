@@ -100,9 +100,11 @@ history.
   source turnouts. Animation timing is measured on the unrounded geometry.
 - The transparent embed theme is named `transparent`; `light` is an accepted
   alias.
-- Layout reserves room for a theme's own file-icon size, line width and
-  chevron size, and the canvas margin grows for a theme drawing wider lines or
-  larger chevrons than any built-in.
+- Layout reserves room for a theme's own station radius, label size,
+  file-icon size, line width and chevron size, and the canvas margin grows for
+  a theme drawing wider lines or larger chevrons than any built-in. `seqera`
+  (14px labels) and `transparent` (6px stations, 14px labels) lay out with
+  the room their own sizes need.
 - The title lines up with a thick section outline's outer edge;
   `london-tube`'s 1.5px outline moves its title 0.25px left.
 - Layout measures file icons and their captions with the theme the map

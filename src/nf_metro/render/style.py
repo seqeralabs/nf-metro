@@ -177,9 +177,7 @@ class Theme:
         group="Canvas and text",
     )
     label_font_size: float = _field(
-        doc="Station label size, px. Layout reserves label room from the map's "
-        "own settings, so keep this near 13 and use the `font_scale` layout "
-        "option to grow text.",
+        doc="Station label size, px.",
         group="Canvas and text",
     )
     label_font_weight: str = _field(

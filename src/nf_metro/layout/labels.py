@@ -30,7 +30,6 @@ from nf_metro.layout.constants import (
     DIAGONAL_SLOPE_RATIO,
     FONT_HEIGHT,
     LABEL_BBOX_MARGIN,
-    LABEL_FONT_SIZE,
     LABEL_MARGIN,
     LABEL_NUDGE_MAX,
     LABEL_OVERLAP_TOL,
@@ -54,6 +53,7 @@ from nf_metro.layout.pass_metrics import (
     active_layout_metrics,
     diagonal_label_offset,
     font_scale_context,
+    label_font_size_approx,
     station_radius_approx,
     station_stroke_approx,
 )
@@ -72,7 +72,7 @@ def label_text_width(label: str, role: TextRole = TextRole.STATION_LABEL) -> flo
     A generous fixed-per-character budget for collision spacing; for the width
     the text actually draws at, use :func:`label_glyph_advance_width`.
     """
-    style = text_style(LABEL_FONT_SIZE * active_font_scale(), "bold")
+    style = text_style(label_font_size_approx(), "bold")
     return DEFAULT_TEXT_METRICS.reserve_width(label, style, role)
 
 
@@ -114,7 +114,7 @@ def label_glyph_advance_width(
     Uses the active deterministic metrics face at :data:`LABEL_FONT_SIZE`,
     scaled by the graph's font scale.
     """
-    style = text_style(LABEL_FONT_SIZE * active_font_scale(), "bold")
+    style = text_style(label_font_size_approx(), "bold")
     return DEFAULT_TEXT_METRICS.advance(label, style, role)
 
 
@@ -441,7 +441,7 @@ def label_glyph_ink_bbox(
     """
     x0, y0, x1, y1 = _label_bbox(placement)
     if placement.angle or placement.dominant_baseline:
-        style = text_style(LABEL_FONT_SIZE * active_font_scale(), "bold")
+        style = text_style(label_font_size_approx(), "bold")
         ink_half = DEFAULT_TEXT_METRICS.ink_half_width(
             placement.text, style, TextRole.STATION_LABEL
         )

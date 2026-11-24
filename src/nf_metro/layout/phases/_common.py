@@ -18,7 +18,6 @@ from nf_metro.layout.constants import (
     PERP_PORT_EDGE_INSET,
     PORT_BOUNDARY_CROSSING_TOL,
     SAME_COORD_TOLERANCE,
-    STATION_RADIUS_APPROX,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
@@ -27,7 +26,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     quantize_coord,
 )
-from nf_metro.layout.pass_metrics import active_layout_metrics
+from nf_metro.layout.pass_metrics import active_layout_metrics, active_theme_metrics
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.parser.model import (
@@ -928,7 +927,7 @@ def _station_marker_bbox(
     from nf_metro.layout.routing import compute_station_offsets
 
     if radius is None:
-        radius = STATION_RADIUS_APPROX * graph.stroke_scale
+        radius = active_theme_metrics().station_radius * graph.stroke_scale
 
     st = graph.stations.get(sid)
     if st is None or st.is_port or st.is_hidden or sid in graph.junctions:

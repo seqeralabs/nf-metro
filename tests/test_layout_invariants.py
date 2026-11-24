@@ -8076,11 +8076,12 @@ def _snap_to_grid_offenders(
 ) -> list[str]:
     """On-track stations whose Y is off every grid the section legitimately uses.
 
-    The trunk grid is ``trunk_y + k * y_spacing``.  A section fed by a half-grid
-    centred entry fork also carries a spine grid a half slot off the trunk: the
-    fork's branches sit on the trunk grid while its reconvergence fan rides
-    ``spine_y + k * y_spacing``.  A station off both, without a recognised
-    half-grid exception, is reported.
+    The trunk grid is ``trunk_y + k * pitch``, where ``pitch`` is the section's
+    row pitch: ``y_spacing`` unless the row's widest bundle and marker inflated
+    it.  A section fed by a half-grid centred entry fork also carries a spine
+    grid a half slot off the trunk: the fork's branches sit on the trunk grid
+    while its reconvergence fan rides ``spine_y + k * pitch``.  A station off
+    both, without a recognised half-grid exception, is reported.
     """
     from nf_metro.layout.engine import (
         _iter_symmetric_diamonds,
@@ -8088,6 +8089,7 @@ def _snap_to_grid_offenders(
     )
     from nf_metro.layout.phases.fan_bundles import (
         _section_has_symmetric_entry_fork,
+        _section_row_pitch,
     )
 
     half_grid_ids = (
@@ -8114,7 +8116,8 @@ def _snap_to_grid_offenders(
             continue
         anchor_id, anchor_y = anchor
         if anchor_id in half_grid_ids:
-            section_trunk_y[sec.id] = anchor_y + 0.5 * y_spacing
+            pitch = _section_row_pitch(graph, sec.id, y_spacing)
+            section_trunk_y[sec.id] = anchor_y + 0.5 * pitch
             section_spine_y[sec.id] = anchor_y
         else:
             section_trunk_y[sec.id] = anchor_y
@@ -8171,9 +8174,10 @@ def _snap_to_grid_offenders(
         trunk_y = section_trunk_y.get(st.section_id)
         if trunk_y is None:
             continue
-        offset = (st.y - trunk_y) / y_spacing
+        pitch = _section_row_pitch(graph, st.section_id, y_spacing)
+        offset = (st.y - trunk_y) / pitch
         nearest_int = round(offset)
-        on_grid = abs(offset - nearest_int) * y_spacing <= tol
+        on_grid = abs(offset - nearest_int) * pitch <= tol
         if on_grid:
             continue
         spine_y = section_spine_y.get(st.section_id)
@@ -8183,18 +8187,18 @@ def _snap_to_grid_offenders(
             # there, half a slot off the branch grid.
             continue
         # The centred entry fork's reconvergence fan re-fans on the spine grid
-        # (spine_y + k * y_spacing), a half slot off the trunk grid its sibling
+        # (spine_y + k * pitch), a half slot off the trunk grid its sibling
         # entry-fork branches use; those stations are registered half-grid and
         # land exactly on that spine grid.
         on_spine_grid = False
         if spine_y is not None:
-            spine_offset = (st.y - spine_y) / y_spacing
-            on_spine_grid = abs(spine_offset - round(spine_offset)) * y_spacing <= tol
+            spine_offset = (st.y - spine_y) / pitch
+            on_spine_grid = abs(spine_offset - round(spine_offset)) * pitch <= tol
         # Half-grid exception is allowed only for 2-branch fan members
         # whose section legitimately uses the half-grid layout.
         is_half = (
-            abs(offset - (nearest_int - 0.5)) * y_spacing <= tol
-            or abs(offset - (nearest_int + 0.5)) * y_spacing <= tol
+            abs(offset - (nearest_int - 0.5)) * pitch <= tol
+            or abs(offset - (nearest_int + 0.5)) * pitch <= tol
         )
         if (
             is_half
@@ -8209,7 +8213,7 @@ def _snap_to_grid_offenders(
             continue
         offenders.append(
             f"{sid!r} cy={st.y:.2f} trunk_y={trunk_y:.2f} "
-            f"offset/y_spacing={offset:.3f} "
+            f"offset/pitch={offset:.3f} "
             f"section={st.section_id!r} "
             f"in_half_grid_ids={sid in half_grid_ids} "
             f"section_uses_half_grid="

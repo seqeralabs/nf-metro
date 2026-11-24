@@ -1,12 +1,11 @@
-"""Pass-scoped scaling of the render metrics layout reserves against.
+"""Pass-scoped metrics the layout reserves against.
 
-The layout engine reserves room using theme-agnostic proxies -- ``CHAR_WIDTH``
-and ``FONT_HEIGHT`` for text, :data:`~nf_metro.layout.constants.
-STATION_RADIUS_APPROX` and :data:`~nf_metro.layout.constants.
-STATION_STROKE_APPROX` for station markers.  The ``font_scale`` and
-``stroke_scale`` directives multiply what the renderer actually draws, so those
-proxies have to be read through the same multiplier or a scaled render collides
-with reservations made for unscaled ink.
+The layout engine reserves room for the theme it lays out for: its station
+radius, label size, file-icon size, line width and chevron size
+(:class:`ThemeMetrics`), and the map's spacing options (:class:`LayoutMetrics`).
+The ``font_scale`` and ``stroke_scale`` directives multiply what the renderer
+actually draws, so those sizes are read through the same multiplier or a scaled
+render collides with reservations made for unscaled ink.
 
 The scale is ambient for the duration of a layout or render pass rather than a
 parameter because the readers are geometry helpers taking a ``Station`` or a
@@ -29,6 +28,7 @@ __all__ = [
     "canvas_edge_clearance",
     "font_scale_context",
     "icon_half_height_approx",
+    "label_font_size_approx",
     "station_radius_approx",
     "station_stroke_approx",
     "stroke_scale_context",
@@ -46,6 +46,7 @@ from nf_metro.layout.constants import (
     DIAGONAL_RUN,
     DIRECTIONAL_MARKER_HALF_EXTENT,
     ICON_HALF_HEIGHT,
+    LABEL_FONT_SIZE,
     LABEL_OFFSET,
     SECTION_X_PADDING,
     SECTION_Y_PADDING,
@@ -62,18 +63,22 @@ class ThemeMetrics(NamedTuple):
     The defaults are the base theme's, for a pass run with no theme bound.
     """
 
+    station_radius: float = STATION_RADIUS_APPROX
     terminus_width: float = TERMINUS_WIDTH
     icon_half_height: float = ICON_HALF_HEIGHT
     line_width: float = DEFAULT_LINE_WIDTH
+    label_font_size: float = LABEL_FONT_SIZE
     marker_half_extent: float = DIRECTIONAL_MARKER_HALF_EXTENT
 
     @classmethod
     def of(cls, theme: object) -> ThemeMetrics:
         """The metrics of a :class:`~nf_metro.render.style.Theme`."""
         return cls(
+            getattr(theme, "station_radius"),
             getattr(theme, "terminus_width"),
             getattr(theme, "terminus_height") / 2,
             getattr(theme, "line_width"),
+            getattr(theme, "label_font_size"),
             getattr(theme, "directional_marker_size"),
         )
 
@@ -134,7 +139,7 @@ def stroke_scale_context(scale: float) -> Iterator[None]:
 
 def station_radius_approx() -> float:
     """Station pill radius to reserve against, under the active stroke scale."""
-    return STATION_RADIUS_APPROX * active_stroke_scale()
+    return active_theme_metrics().station_radius * active_stroke_scale()
 
 
 def station_stroke_approx() -> float:
@@ -155,6 +160,11 @@ def terminus_width_approx() -> float:
 def icon_half_height_approx() -> float:
     """Terminus icon half-height to reserve against, under the active font scale."""
     return active_theme_metrics().icon_half_height * active_font_scale()
+
+
+def label_font_size_approx() -> float:
+    """Station label size to measure against, under the active font scale."""
+    return active_theme_metrics().label_font_size * active_font_scale()
 
 
 def canvas_edge_clearance() -> float:

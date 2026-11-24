@@ -112,14 +112,6 @@ The schema ships with nf-metro as `nf_metro/themes/theme.schema.json` and is gen
 The first line of the example above points editors that use the YAML language server (VS Code's YAML extension, for one) at it, so they complete field names and flag mistakes as you type.
 Any other JSON Schema tool can validate a theme file against it too.
 
-<Aside type="caution" title="Label size">
-
-Layout reserves room for station labels from the map's own settings, not the theme.
-A theme that sets `label_font_size` much above 13 can make labels collide.
-Use the layout option `font_scale` instead, which layout does account for.
-
-</Aside>
-
 ### Interchange styles
 
 A station on several lines is an interchange.
@@ -216,22 +208,22 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Canvas and text
 
-| Field               | Value        | Default                    | Effect                                                                                                                                                    |
-| ------------------- | ------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `background_color`  | colour       | from `nfcore`              | Canvas fill. `none` leaves the canvas transparent.                                                                                                        |
-| `title_color`       | colour       | from `nfcore`              | Map title text.                                                                                                                                           |
-| `title_font_size`   | number       | from `nfcore`              | Map title size, px.                                                                                                                                       |
-| `title_font_weight` | text         | `bold`                     | Map title weight.                                                                                                                                         |
-| `label_color`       | colour       | from `nfcore`              | Station label text.                                                                                                                                       |
-| `label_font_family` | text         | from `nfcore`              | CSS font stack for station labels, and for every other text element.                                                                                      |
-| `label_font_size`   | number       | from `nfcore`              | Station label size, px. Layout reserves label room from the map's own settings, so keep this near 13 and use the `font_scale` layout option to grow text. |
-| `label_font_weight` | text         | from `nfcore`              | Station label weight (`bold`, `normal`, `600`, ...).                                                                                                      |
-| `label_halo_width`  | number       | `3`                        | Width of the knockout halo behind station labels, px. 0 disables it.                                                                                      |
-| `label_halo_color`  | colour       | empty                      | Halo colour. Empty takes the background, or white on a transparent canvas.                                                                                |
-| `caption_color`     | colour       | empty                      | `%%metro caption:` text, in colours that follow the viewer's light or dark mode. Empty draws a fixed light grey.                                          |
-| `caption_font_size` | whole number | `11`                       | Caption size, px.                                                                                                                                         |
-| `watermark_color`   | colour       | `rgba(150, 150, 150, 0.6)` | The attribution line.                                                                                                                                     |
-| `canvas_padding`    | number       | `60`                       | Margin around the map on every side, px.                                                                                                                  |
+| Field               | Value        | Default                    | Effect                                                                                                           |
+| ------------------- | ------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `background_color`  | colour       | from `nfcore`              | Canvas fill. `none` leaves the canvas transparent.                                                               |
+| `title_color`       | colour       | from `nfcore`              | Map title text.                                                                                                  |
+| `title_font_size`   | number       | from `nfcore`              | Map title size, px.                                                                                              |
+| `title_font_weight` | text         | `bold`                     | Map title weight.                                                                                                |
+| `label_color`       | colour       | from `nfcore`              | Station label text.                                                                                              |
+| `label_font_family` | text         | from `nfcore`              | CSS font stack for station labels, and for every other text element.                                             |
+| `label_font_size`   | number       | from `nfcore`              | Station label size, px.                                                                                          |
+| `label_font_weight` | text         | from `nfcore`              | Station label weight (`bold`, `normal`, `600`, ...).                                                             |
+| `label_halo_width`  | number       | `3`                        | Width of the knockout halo behind station labels, px. 0 disables it.                                             |
+| `label_halo_color`  | colour       | empty                      | Halo colour. Empty takes the background, or white on a transparent canvas.                                       |
+| `caption_color`     | colour       | empty                      | `%%metro caption:` text, in colours that follow the viewer's light or dark mode. Empty draws a fixed light grey. |
+| `caption_font_size` | whole number | `11`                       | Caption size, px.                                                                                                |
+| `watermark_color`   | colour       | `rgba(150, 150, 150, 0.6)` | The attribution line.                                                                                            |
+| `canvas_padding`    | number       | `60`                       | Margin around the map on every side, px.                                                                         |
 
 ### Sections
 

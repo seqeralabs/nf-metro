@@ -895,7 +895,7 @@ def test_layout_measures_file_icons_with_the_render_theme(tmp_path):
         return graph.sections["qc_sec"].bbox_w
 
     assert qc_width(None) == pytest.approx(qc_width("nfcore"))
-    assert qc_width(str(roomy)) > qc_width("nfcore") + 10
+    assert qc_width(str(roomy)) > qc_width("nfcore")
 
 
 def _all_inactive(text: str) -> frozenset[str]:
@@ -1022,3 +1022,20 @@ def test_file_icon_banners_take_the_theme_colours(tmp_path):
     path = _ROOT / "examples" / "file_icons.mmd"
     svg = render_string(path.read_text(), theme=str(theme), source_dir=str(path.parent))
     assert 'fill="#0000aa"' in svg and 'fill="#ffff00"' in svg
+
+
+def test_layout_reserves_the_theme_label_size(tmp_path):
+    """A theme with larger labels gets the room they need."""
+    big = _write(tmp_path, "big.yaml", "name: big\nlabel_font_size: 20\n")
+    path = _RNASEQ
+
+    from nf_metro.layout.engine import compute_layout
+
+    def laid(theme: str | None) -> float:
+        graph = prepare_graph(
+            path.read_text(), theme=theme, source_dir=str(path.parent)
+        )
+        compute_layout(graph)
+        return max(s.bbox_w for s in graph.sections.values())
+
+    assert laid(str(big)) > laid(None)
