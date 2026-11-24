@@ -11,11 +11,13 @@ from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.convert import convert_nextflow_dag
 from nf_metro.parser.model import PermissiveGuardWarning, split_guard_warnings
 from nf_metro.render import render_svg
+from nf_metro.themes import resolve_stack
 
 _cached_graph = None
 _cached_key = None
 _RENDER_ONLY = frozenset({"animate", "directional"})
 _STYLE_RE = _re.compile(r"^\\s*%%metro\\s+(?:style|mode):.*$", _re.MULTILINE)
+_MODE_RE = _re.compile(r"^\\s*%%metro\\s+mode:.*$", _re.MULTILINE)
 
 def nfm_render(mmd, opts_json):
     global _cached_graph, _cached_key
@@ -25,8 +27,18 @@ def nfm_render(mmd, opts_json):
     layout_geom = {k: v for k, v in all_layout.items() if k not in _RENDER_ONLY}
     render_only = {k: v for k, v in all_layout.items() if k in _RENDER_ONLY}
 
-    mmd_norm = _STYLE_RE.sub("", mmd).strip()
-    cache_key = hashlib.md5((mmd_norm + "\\x00" + json.dumps(layout_geom, sort_keys=True)).encode()).hexdigest()
+    # Layout measures with the picked theme, so the layout is keyed on its name
+    # and options, or on the map's own style line when none is picked.
+    theme_sel = opts.get("theme") or None
+    if theme_sel:
+        mmd_norm = _STYLE_RE.sub("", mmd).strip()
+        theme_key = theme_sel + "\\x00" + json.dumps(
+            dict(resolve_stack(theme_sel).layout), sort_keys=True
+        )
+    else:
+        mmd_norm = _MODE_RE.sub("", mmd).strip()
+        theme_key = ""
+    cache_key = hashlib.md5((mmd_norm + "\\x00" + json.dumps(layout_geom, sort_keys=True) + "\\x00" + theme_key).encode()).hexdigest()
 
     svg = None
     error = None
@@ -34,7 +46,7 @@ def nfm_render(mmd, opts_json):
         warnings.filterwarnings("always", category=PermissiveGuardWarning)
         try:
             if cache_key != _cached_key:
-                graph = prepare_graph(mmd, layout_options=layout_geom)
+                graph = prepare_graph(mmd, layout_options=layout_geom, theme=theme_sel)
                 _cached_graph = graph
                 _cached_key = cache_key
             else:
@@ -43,7 +55,7 @@ def nfm_render(mmd, opts_json):
             for k, v in render_only.items():
                 setattr(graph, k, bool(v))
 
-            theme_obj = resolve_theme(opts.get("theme") or None, graph, mode=opts.get("mode") or None)
+            theme_obj = resolve_theme(graph, opts.get("mode") or None)
             svg = render_svg(
                 graph,
                 theme_obj,
