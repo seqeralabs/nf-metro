@@ -1358,10 +1358,13 @@ def iter_same_destination_approach_bundles(
     graph: MetroGraph,
     step: float,
     *,
-    min_common_run: float = 2 * active_curve_radius(),
+    min_common_run: float | None = None,
     max_separation: float = EDGE_TO_BUNDLE_CLEARANCE,
 ) -> Iterator[SameDestinationVerticalBundle]:
     """Yield complete same-direction H-V-H groups eligible for tight bundling."""
+    min_common_run = (
+        2 * active_curve_radius() if min_common_run is None else min_common_run
+    )
 
     def admit(route: RoutedPath, tail: PeeloffTail, port: Port) -> bool:
         return (
@@ -1862,7 +1865,7 @@ def iter_opposing_entry_confluences(
     graph: MetroGraph,
     step: float,
     *,
-    min_common_approach: float = 2 * active_curve_radius(),
+    min_common_approach: float | None = None,
 ) -> Iterator[OpposingEntryConfluence]:
     """Yield complete entry groups that bundle after approaching from both sides.
 
@@ -1870,6 +1873,11 @@ def iter_opposing_entry_confluences(
     occupy one contiguous channel band, and share a substantial vertical run.
     Requiring the complete port line set keeps route-system ownership atomic.
     """
+    min_common_approach = (
+        2 * active_curve_radius()
+        if min_common_approach is None
+        else min_common_approach
+    )
     by_shape: dict[
         tuple[str, int, int],
         list[tuple[RoutedPath, PeeloffTail]],
@@ -1995,7 +2003,7 @@ def iter_port_peeloff_bundles(
     step: float,
     *,
     require_contiguous: bool = True,
-    min_common_suffix: float = 2 * active_curve_radius(),
+    min_common_suffix: float | None = None,
 ) -> Iterator[PortPeeloffBundle]:
     """Yield each destination-facing peel-off bundle into a side entry port.
 
@@ -2005,6 +2013,9 @@ def iter_port_peeloff_bundles(
     track-step band; the runtime guard disables that filter so a missing eager
     bundling pass cannot make the check vacuous.
     """
+    min_common_suffix = (
+        2 * active_curve_radius() if min_common_suffix is None else min_common_suffix
+    )
     by_shape: dict[
         tuple[str, int, int, int],
         list[tuple[RoutedPath, PeeloffTail]],
