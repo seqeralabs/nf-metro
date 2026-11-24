@@ -675,6 +675,7 @@ def test_reportho_owned_lead_is_frozen_at_its_concentric_radius() -> None:
         observation.routes,
         CURVE_RADIUS,
         compute_station_offsets(graph),
+        OFFSET_STEP,
     )
     assert (
         tuple(route.curve_radii),
