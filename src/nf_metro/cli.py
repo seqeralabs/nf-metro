@@ -33,7 +33,7 @@ from nf_metro.console import (
     print_banner,
     progress_bar,
 )
-from nf_metro.convert import INPUT_FORMATS, InputFormat
+from nf_metro.convert import INPUT_FORMATS, LINE_MODES, InputFormat, LineMode
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import (
     build_info,
@@ -1683,11 +1683,23 @@ def render_many(manifest_file: Path) -> None:
     default_text="detected from the input",
     help="Workflow manager that wrote INPUT_FILE. Snakemake is experimental.",
 )
+@click.option(
+    "--lines",
+    type=click.Choice(LINE_MODES),
+    default=None,
+    cls=_DescribedDefault,
+    default_text="sections for Nextflow, graph for Snakemake",
+    help="How to draw metro lines: [code]graph[/] runs [code]main[/] along the "
+    "longest chain into the final step and gives each other chain its own "
+    "line (one-section maps only); [code]sections[/] builds lines from the "
+    "pipeline's sections.",
+)
 def convert(
     input_file: Path,
     output: Path | None,
     title: str | None,
     input_format: InputFormat | None,
+    lines: LineMode | None,
 ) -> None:
     """Convert a workflow manager's DAG export to nf-metro format.
 
@@ -1717,7 +1729,7 @@ def convert(
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         try:
-            result = convert_dag(text, input_format, title=title or "")
+            result = convert_dag(text, input_format, title=title or "", lines=lines)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 

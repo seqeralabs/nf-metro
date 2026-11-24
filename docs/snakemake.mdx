@@ -78,6 +78,25 @@ rule bcftools_stats:       # both VCFs -> stats/{sample}.txt
   mmd={false}
 />
 
+The `main` line runs from BWA through DeepVariant to MultiQC, the final rule with the most rules upstream.
+The GATK branch and the FastQC route each get their own line, so the legend tells the three routes apart.
+
+### One line for everything
+
+To put every rule on a single `main` line instead, convert with `--lines sections`:
+
+```bash
+nf-metro convert rules.dot -o workflow.mmd --lines sections
+nf-metro render workflow.mmd -o workflow.svg
+```
+
+<Metro
+  src="tests/fixtures/snakemake/variant_calling.rulegraph.dot"
+  fromSnakemake
+  lines="sections"
+  mmd={false}
+/>
+
 ## Limits
 
 Snakemake's graph output contains rules and dependencies only:

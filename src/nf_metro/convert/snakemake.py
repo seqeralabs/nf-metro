@@ -23,11 +23,12 @@ import networkx as nx
 from nf_metro.convert._core import (
     DagNode,
     ExperimentalInputWarning,
+    LineMode,
     ParsedDag,
     _break_cycles,
     _humanize_label,
-    branch_line_planner,
     dag_to_mmd,
+    line_planner,
 )
 from nf_metro.graph_views import directed_graph
 
@@ -114,10 +115,11 @@ def is_snakemake_dag(text: str) -> bool:
     return _dialect(text) is not None
 
 
-def convert_snakemake_dag(text: str, title: str = "") -> str:
+def convert_snakemake_dag(text: str, title: str = "", lines: LineMode = "graph") -> str:
     """Convert Snakemake ``--rulegraph`` or ``--dag`` output to nf-metro ``.mmd``.
 
-    Accepts the DOT and ``mermaid-js`` forms of either export.
+    Accepts the DOT and ``mermaid-js`` forms of either export. *lines* chooses
+    how lines are drawn (see :data:`LineMode`).
 
     Warns
     -----
@@ -152,4 +154,4 @@ def convert_snakemake_dag(text: str, title: str = "") -> str:
         for nid, node in dag.nodes.items()
         if not (node.label == _TARGET_RULE and nid not in has_outgoing)
     }
-    return dag_to_mmd(dag, kept_ids, title, branch_line_planner)
+    return dag_to_mmd(dag, kept_ids, title, line_planner(lines))

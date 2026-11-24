@@ -15,8 +15,10 @@ from typing import Literal, get_args
 
 from nf_metro.convert._core import (
     LINE_COLORS,
+    LINE_MODES,
     ExperimentalInputWarning,
     FeedbackEdgesDroppedWarning,
+    LineMode,
 )
 from nf_metro.convert.nextflow import (
     convert_nextflow_dag,
@@ -30,7 +32,7 @@ InputFormat = Literal["nextflow", "snakemake"]
 
 INPUT_FORMATS: tuple[InputFormat, ...] = get_args(InputFormat)
 
-_CONVERTERS: dict[InputFormat, Callable[[str, str], str]] = {
+_CONVERTERS: dict[InputFormat, Callable[..., str]] = {
     "nextflow": convert_nextflow_dag,
     "snakemake": convert_snakemake_dag,
 }
@@ -50,20 +52,31 @@ def detect_input_format(text: str) -> InputFormat | None:
     return None
 
 
-def convert_dag(text: str, input_format: InputFormat, title: str = "") -> str:
-    """Convert a DAG export in *input_format* to nf-metro ``.mmd`` text."""
+def convert_dag(
+    text: str,
+    input_format: InputFormat,
+    title: str = "",
+    lines: LineMode | None = None,
+) -> str:
+    """Convert a DAG export in *input_format* to nf-metro ``.mmd`` text.
+
+    *lines* chooses how lines are drawn (see :data:`LineMode`); ``None`` keeps
+    the format's own default.
+    """
     converter = _CONVERTERS.get(input_format)
     if converter is None:
         raise ValueError(
             f"unknown input format {input_format!r}; "
             f"expected one of {', '.join(INPUT_FORMATS)}"
         )
-    return converter(text, title)
+    return converter(text, title) if lines is None else converter(text, title, lines)
 
 
 __all__ = [
     "INPUT_FORMATS",
+    "LINE_MODES",
     "InputFormat",
+    "LineMode",
     "LINE_COLORS",
     "ExperimentalInputWarning",
     "FeedbackEdgesDroppedWarning",

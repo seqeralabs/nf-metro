@@ -119,7 +119,8 @@ function findFiles(dir, recursive = true, suffix = ".mmd") {
  * DAG formats `nf-metro render` converts on the way in, keyed by the
  * `inputFormat` the render helpers take. `letter` joins the cache mode
  * string; `ext` is the source extension the Vite plugin loads; `lang` is the
- * source's highlighting language; `fixtures` lists the directory under
+ * source's highlighting language; `lines` is the `nf-metro convert --lines`
+ * mode the format uses by default; `fixtures` lists the directory under
  * tests/fixtures/ and the suffix whose files the build pre-warms.
  */
 export const INPUT_FORMATS = {
@@ -128,6 +129,7 @@ export const INPUT_FORMATS = {
     flag: "--from-nextflow",
     ext: ".mmd",
     lang: "metro",
+    lines: "sections",
     fixtures: { dir: "nextflow", suffix: ".mmd", recursive: true },
   },
   snakemake: {
@@ -135,6 +137,7 @@ export const INPUT_FORMATS = {
     flag: "--from-snakemake",
     ext: ".dot",
     lang: "dot",
+    lines: "graph",
     fixtures: { dir: "snakemake", suffix: ".rulegraph.dot", recursive: false },
   },
 };
@@ -295,21 +298,23 @@ function prewarmMetroCache() {
 /**
  * Render a committed `.mmd` file to inline SVG markup.
  * @param {string} file  Absolute path to the source `.mmd`.
- * @param {{ debug?: boolean, inputFormat?: keyof typeof INPUT_FORMATS | null, chromeCss?: boolean, animate?: boolean }} [opts]
+ * @param {{ debug?: boolean, inputFormat?: keyof typeof INPUT_FORMATS | null, lines?: "graph" | "sections" | null, chromeCss?: boolean, animate?: boolean }} [opts]
  *   `chromeCss: false` bakes concrete colours instead of the `--nfm-*` custom
  *   properties `<Metro>` relies on for live host recoloring - use this for
  *   standalone raster export (e.g. OG images), never for inline embeds.
  *   `animate: true` adds the `--animate` balls (still plain SVG; their motion
  *   is CSS, not baked frames - see `renderMetroBinary` for a looping export).
+ *   `lines` (with `inputFormat`) converts with `nf-metro convert --lines` first,
+ *   then renders the converted map.
  * @returns {string} inline `<svg>` markup
  */
 export function renderMetroFile(
   file,
-  { debug = false, inputFormat = null, chromeCss = true, animate = false } = {},
+  { debug = false, inputFormat = null, lines = null, chromeCss = true, animate = false } = {},
 ) {
   const source = readFileSync(file, "utf-8");
   const converter = inputFormat ? INPUT_FORMATS[inputFormat] : null;
-  const mode = `${debug ? "d" : ""}${converter?.letter ?? ""}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
+  const mode = `${debug ? "d" : ""}${converter?.letter ?? ""}${lines ? `l${lines}` : ""}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
   const hash = cacheHash(source, mode);
   const cacheFile = join(CACHE_DIR, `${hash}.svg`);
 
@@ -320,21 +325,46 @@ export function renderMetroFile(
   }
 
   const tmpOutput = join(tmpdir(), `metro-${hash}.svg`);
+  const converted = lines ? join(tmpdir(), `metro-${hash}.mmd`) : null;
+  if (converted) {
+    runNfMetro(["convert", file, "--from", inputFormat, "--lines", lines, "-o", converted], file);
+  }
   // Render the real file rather than a temp copy: the CLI resolves a map's
-  // asset paths against the directory the file itself sits in.
+  // asset paths against the directory the file itself sits in. A converted
+  // DAG has no assets, so its temp copy is safe to render.
   const args = [
     "render",
-    file,
+    converted ?? file,
     "-o",
     tmpOutput,
     "--no-self-color-scheme",
     "--no-manifest",
   ];
   if (debug) args.push("--debug");
-  if (converter) args.push(converter.flag);
+  if (converter && !converted) args.push(converter.flag);
   if (!chromeCss) args.push("--no-chrome-css");
   if (animate) args.push("--animate");
+  runNfMetro(args, file);
 
+  const svg = readFileSync(tmpOutput, "utf-8").replace(XML_PROLOG_RE, "");
+  for (const tmp of [tmpOutput, converted]) {
+    try {
+      if (tmp) unlinkSync(tmp);
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+  writeFileSync(cacheFile, svg, "utf-8");
+  return svg;
+}
+
+/**
+ * Run the nf-metro CLI from the repo root, turning a failure into an error
+ * that names the source file and quotes nf-metro's stderr.
+ * @param {string[]} args
+ * @param {string} file  The source the run is for.
+ */
+function runNfMetro(args, file) {
   try {
     execFileSync("nf-metro", args, {
       cwd: REPO_ROOT,
@@ -343,19 +373,10 @@ export function renderMetroFile(
   } catch (err) {
     const stderr = err.stderr?.toString().trim() || "";
     throw new Error(
-      `nf-metro render failed for ${file}:\n${stderr}\n\n` +
+      `nf-metro ${args[0]} failed for ${file}:\n${stderr}\n\n` +
         `Make sure 'nf-metro' is on PATH (activate the nf-core micromamba env).`,
     );
   }
-
-  const svg = readFileSync(tmpOutput, "utf-8").replace(XML_PROLOG_RE, "");
-  try {
-    unlinkSync(tmpOutput);
-  } catch {
-    /* best-effort cleanup */
-  }
-  writeFileSync(cacheFile, svg, "utf-8");
-  return svg;
 }
 
 /** Output formats `renderMetroBinary` can produce. */
@@ -466,6 +487,7 @@ export function metroVitePlugin() {
         debug: params.has("debug"),
         animate: params.has("animate"),
         inputFormat,
+        lines: params.get("lines"),
       });
       return { code: `export default ${JSON.stringify(svg)};`, map: null };
     },

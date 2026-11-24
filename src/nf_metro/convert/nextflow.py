@@ -10,7 +10,14 @@ from __future__ import annotations
 
 import re
 
-from nf_metro.convert._core import DagGroup, DagNode, ParsedDag, dag_to_mmd
+from nf_metro.convert._core import (
+    DagGroup,
+    DagNode,
+    LineMode,
+    ParsedDag,
+    dag_to_mmd,
+    line_planner,
+)
 
 # ---------------------------------------------------------------------------
 # Regex patterns for Nextflow mermaid format
@@ -143,7 +150,9 @@ def process_node_labels(text: str) -> list[str]:
     return sorted({n.label for n in dag.nodes.values() if n.shape == "stadium"})
 
 
-def convert_nextflow_dag(text: str, title: str = "") -> str:
+def convert_nextflow_dag(
+    text: str, title: str = "", lines: LineMode = "sections"
+) -> str:
     """Convert a Nextflow ``-with-dag`` mermaid file to nf-metro ``.mmd`` format.
 
     Parameters
@@ -152,6 +161,8 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
         Contents of a ``.mmd`` file produced by ``nextflow -with-dag file.mmd``.
     title:
         Optional pipeline title. If empty, inferred from subgraph names.
+    lines:
+        How to draw lines (see :data:`LineMode`).
 
     Returns
     -------
@@ -165,7 +176,7 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
     """
     dag = _parse_nextflow_mermaid(text)
     kept_ids = {nid for nid, node in dag.nodes.items() if node.shape == "stadium"}
-    return dag_to_mmd(dag, kept_ids, title)
+    return dag_to_mmd(dag, kept_ids, title, line_planner(lines))
 
 
 def is_nextflow_dag(text: str) -> bool:

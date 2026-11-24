@@ -15,6 +15,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import pairwise
+from typing import Literal, get_args
 
 import networkx as nx
 
@@ -570,6 +571,17 @@ class _LineAssignment:
     side: list[tuple[str, str, str]] = field(default_factory=list)
 
 
+LineMode = Literal["graph", "sections"]
+"""How a converter draws lines.
+
+``graph`` plans them from the graph's shape with :func:`branch_line_planner`,
+in a one-section map only; ``sections`` derives ``main``, ``spur`` and
+``bypass`` lines from the sections.
+"""
+
+LINE_MODES: tuple[LineMode, ...] = get_args(LineMode)
+
+
 LinePlan = list[tuple[tuple[str, str, str], list[tuple[str, str]]]]
 """Lines a front end draws itself: each ``(id, name, colour)`` with its edges.
 
@@ -881,6 +893,11 @@ def branch_line_planner(
         on_line.update(path)
 
 
+def line_planner(lines: LineMode) -> Callable[..., LinePlan] | None:
+    """The ``plan_lines`` hook for *lines*, or ``None`` for section lines."""
+    return branch_line_planner if lines == "graph" else None
+
+
 def dag_to_mmd(
     dag: ParsedDag,
     kept_ids: set[str],
@@ -895,9 +912,10 @@ def dag_to_mmd(
     section; the rest share one synthesised section.
 
     *plan_lines*, when given, receives the nodes and the final acyclic edges
-    and returns the map's lines, such as :func:`branch_line_planner`. Without
-    it, or when it plans none, edges go on ``main`` with ``spur`` and
-    ``bypass`` lines derived from the sections.
+    and returns the map's lines, such as :func:`branch_line_planner`. It
+    applies to a one-section map only. Without it, when it plans none, or in a
+    map of several sections, edges go on ``main`` with ``spur`` and ``bypass``
+    lines derived from the sections.
 
     Warns
     -----
@@ -905,6 +923,8 @@ def dag_to_mmd(
         When the kept graph loops. nf-metro's layout engine requires a DAG, so
         a deterministic set of back edges is removed; the warning and a
         trailing ``%%`` comment block in the output both name them.
+    UserWarning
+        When *plan_lines* is given for a map of several sections.
     """
     if not kept_ids:
         return "%%metro title: Empty Pipeline\n\ngraph LR\n"
@@ -922,6 +942,16 @@ def dag_to_mmd(
     )
 
     intra_edges, inter_edges = _classify_edges(edges, sections.node_section)
+    if plan_lines and len(sections.names) > 1:
+        # The layout engine cannot yet place planned lines across sections
+        # without crossings or aborts.
+        warnings.warn(
+            "Lines are planned from the graph's shape only in a one-section "
+            f"map; this map has {len(sections.names)} sections, so its lines "
+            "come from them.",
+            stacklevel=4,
+        )
+        plan_lines = None
     plan = plan_lines(dag.nodes, edges) if plan_lines else []
     planned = [edge for _, line_edges in plan for edge in line_edges]
     if plan and (len(planned) != len(set(planned)) or set(planned) != set(edges)):

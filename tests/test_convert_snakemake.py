@@ -351,7 +351,50 @@ def test_render_string_converts_snakemake_input():
     assert "Bcftools Stats" in svg
 
 
+def test_sections_lines_put_every_rule_on_main():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ExperimentalInputWarning)
+        mmd = convert_snakemake_dag(
+            (FIXTURES / "variant_calling.rulegraph.dot").read_text(), lines="sections"
+        )
+    assert _declared_lines(mmd) == [("main", "Main")]
+    assert set(_edge_lines(mmd).values()) == {"main"}
+
+
+def test_graph_lines_give_a_one_section_nextflow_map_a_line_per_route():
+    text = (NEXTFLOW_FIXTURES / "flat_pipeline.mmd").read_text()
+    default = convert_dag(text, "nextflow")
+    graph = convert_dag(text, "nextflow", lines="graph")
+
+    assert set(_edge_lines(default).values()) == {"main"}
+    assert _declared_lines(graph) == [("main", "Main"), ("fastqc", "Fastqc")]
+    assert _edge_lines(graph)[("fastqc", "multiqc")] == "fastqc"
+
+
+def test_graph_lines_fall_back_to_section_lines_in_a_map_of_several_sections():
+    text = (NEXTFLOW_FIXTURES / "variant_calling.mmd").read_text()
+    with pytest.warns(UserWarning, match="one-section map; this map has 4 sections"):
+        graph = convert_dag(text, "nextflow", lines="graph")
+    assert graph == convert_dag(text, "nextflow")
+
+
 class TestCli:
+    def test_convert_takes_a_line_mode(self, tmp_path):
+        out = tmp_path / "out.mmd"
+        result = CliRunner().invoke(
+            cli,
+            [
+                "convert",
+                str(NEXTFLOW_FIXTURES / "flat_pipeline.mmd"),
+                "--lines",
+                "graph",
+                "-o",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "%%metro line: fastqc | Fastqc" in out.read_text()
+
     def test_convert_detects_snakemake_and_flags_it_experimental(self, tmp_path):
         out = tmp_path / "out.mmd"
         result = CliRunner().invoke(

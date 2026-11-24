@@ -151,6 +151,15 @@ Pick the mix with `purpose`, or override a single section by setting `mmd`, `com
   fromSnakemake
   mmd={false}
 />
+
+{/* the other line mode, via nf-metro convert --lines (SVG only) */}
+
+<Metro
+  src="tests/fixtures/nextflow/flat_pipeline.mmd"
+  fromNextflow
+  lines="graph"
+  mmd={false}
+/>
 ```
 
 The page must be `.mdx`, not `.md`.
