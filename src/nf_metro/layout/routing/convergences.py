@@ -5022,43 +5022,6 @@ def _assert_landing_geometry(
             )
 
 
-def _seat_landing_runway(
-    route: RoutedPath, landing: ConvergenceLanding, graph: MetroGraph
-) -> None:
-    """Seat the run a landing turns off at the far end of its planned runway.
-
-    The runway states where the approach's cross run stands
-    (:func:`_landing_cross_segment`), and the run's corner onto the approach
-    is owned with it, so emission puts that run on the stated coordinate
-    rather than wherever the member's template drew it.
-    """
-    join = landing.join_point
-    for rank, (start, end) in enumerate(zip(route.points, route.points[1:])):
-        runway = abs(start[0] - join[0]) + abs(start[1] - join[1])
-        if (
-            runway > COORD_TOLERANCE
-            and point_to_polyline_distance(join, (start, end)) <= COORD_TOLERANCE
-        ):
-            break
-    else:
-        return
-    if rank == 0 or abs(runway - landing.minimum_runway) <= COORD_TOLERANCE:
-        return
-    along = landing.approach_axis.point_index
-    coordinate = join[along] - landing.approach_direction.sign * landing.minimum_runway
-    cross = [list(point) for point in route.points[rank - 1 : rank + 1]]
-    for point in cross:
-        point[along] = coordinate
-    _seat_planned_run(
-        route,
-        rank - 1,
-        ((cross[0][0], cross[0][1]), (cross[1][0], cross[1][1])),
-        graph,
-        0.0,
-        0.0,
-    )
-
-
 def consume_convergence_route(route: RoutedPath, ctx: _RoutingCtx) -> None:
     query = ctx.convergences
     if query is None:
@@ -5130,7 +5093,6 @@ def consume_convergence_route(route: RoutedPath, ctx: _RoutingCtx) -> None:
         if plan.primary_trunk_reason is ConvergenceTrunkReason.SHARED_TERMINAL_APPROACH:
             _bake_route(route, ctx)
             _connect_route_endpoint(route, landing.join_point)
-            _seat_landing_runway(route, landing, ctx.graph)
         assert plan.trunk_axis is not None
         lane_rank = plan.lane_order.index(route.line_id)
         lane_offset = (len(plan.lane_order) - lane_rank - 1) * ctx.offset_step
@@ -5157,8 +5119,6 @@ def consume_convergence_route(route: RoutedPath, ctx: _RoutingCtx) -> None:
             _land_feeder_on_run(route, run, ctx)
     _bake_route(route, ctx)
     _connect_route_endpoint(route, landing.join_point)
-    if plan.primary_trunk_reason is not ConvergenceTrunkReason.LONGEST_BYPASS:
-        _seat_landing_runway(route, landing, ctx.graph)
     route.convergence_owned_segment_ranks = _ordered_unique(
         (len(route.points) - 2,) + (() if opening_rank is None else (opening_rank,))
     )
