@@ -96,7 +96,7 @@ gh api repos/bioconda/bioconda-recipes/contents/recipes/nf-metro/meta.yaml \
     --jq '.content' | base64 -d
 
 # Read pyproject deps
-grep -A 20 '^dependencies' ~/projects/nf-metro/pyproject.toml
+grep -A 40 '^dependencies' ~/projects/nf-metro/pyproject.toml
 ```
 
 **What to look for:**
@@ -104,12 +104,16 @@ grep -A 20 '^dependencies' ~/projects/nf-metro/pyproject.toml
 - Any package in `pyproject.toml` `dependencies` that is **absent** from
   the recipe `run:` block is a missing dep.
 - Any package in the recipe absent from `pyproject.toml` `dependencies`
-  is an extra — flag it but don't remove it without asking. `fonttools` and
-  `jsonschema` are deliberate extras: the recipe carries them in `run:` even
-  though pyproject only lists them under the `font` and `validate` extras,
-  because conda users get `--font` handling and `nf-metro validate-svg`
-  without a separate install step. Don't flag those two; the "flag but
-  don't remove" rule still applies to any other extra found.
+  is an extra: flag it but don't remove it without asking. `fonttools` is
+  a deliberate extra: the recipe carries it in `run:` even though pyproject
+  only lists it under the `font` extra, because conda users get `--font`
+  handling without a separate install step. Don't flag it; the "flag but
+  don't remove" rule still applies to any other extra found. `jsonschema`
+  is a core dependency (there is no `validate` extra), so it is an ordinary
+  `run:` entry like the rest.
+- Dependencies are added to `pyproject.toml` between releases without anyone
+  touching the recipe (`rich`, `rich-click`, `pyyaml` and `jsonschema` all
+  arrived that way), so expect a real diff and read it entry by entry.
 - Version pins don't need to match exactly, but the recipe should cover
   at least the same lower bound as pyproject.toml.
 
@@ -144,7 +148,7 @@ If the recipe is already in sync, say so and continue.
 
 ## Step 3: Pre-flight checks
 
-Run these three checks and report the results before touching any files.
+Run these checks and report the results before touching any files.
 
 **origin/main CI must be green.** Do not proceed if the HEAD commit's checks
 are red or still in progress:
@@ -168,6 +172,31 @@ merging one of these right after a release means the very next release
 changes default output again, which is worth deciding on purpose rather than
 by accident of merge timing.
 
+**Breaking changes recorded.** `CHANGELOG.md`'s Breaking section is written
+by PR authors and is easy to leave incomplete. Diff the public surface
+against the last tag and check that every removal, rename, default change
+and behaviour change shows up there, and that each statement is true of the
+code:
+
+```bash
+git -C ~/projects/nf-metro diff ${LAST_TAG}..origin/main -- \
+    src/nf_metro/cli.py src/nf_metro/options.py src/nf_metro/parser/directives.py \
+    src/nf_metro/__init__.py src/nf_metro/api.py pyproject.toml action.yml \
+    .pre-commit-hooks.yaml
+```
+
+Cover the CLI flags and what `render` prints on stdout and stderr, the
+`%%metro` directives, the exported Python names and signatures, the SVG
+contract (`data-*` attributes, class names, `--nfm-*` custom properties,
+and the `DRIVER_CONTRACT_VERSION`, `MANIFEST_SCHEMA_VERSION` and
+`STATE_SCHEMA_VERSION` constants), the action's inputs and outputs, the
+hook, and dependencies. Add anything missing before drafting the page.
+
+**Playground.** `website/public/playground/worker.js` installs nf-metro in
+Pyodide. A new core dependency may not resolve there, so confirm the
+`playground-e2e` check on `origin/main` is green rather than assuming the
+generic CI result covers it.
+
 **Live strict xfails.** Collect every strict xfail currently in the suite,
 with its reason and any issue number in that reason:
 
@@ -181,11 +210,12 @@ Keep this list; it feeds the Known issues subsection in Step 6.
 
 ```bash
 git -C ~/projects/nf-metro fetch origin main
-git -C ~/projects/nf-metro worktree add /tmp/nf-metro-release-$NEW_VERSION \
+git -C ~/projects/nf-metro worktree add ~/projects/nf-metro-release-$NEW_VERSION \
     -b release/$NEW_VERSION origin/main
 ```
 
-All subsequent edits happen inside `/tmp/nf-metro-release-$NEW_VERSION`.
+All subsequent edits happen inside `~/projects/nf-metro-release-$NEW_VERSION`
+(beside the main checkout, not in `/tmp`, which a reboot clears).
 
 ## Step 5: Bump the version
 
@@ -196,8 +226,8 @@ All subsequent edits happen inside `/tmp/nf-metro-release-$NEW_VERSION`.
 Verify both:
 
 ```bash
-grep '^version' /tmp/nf-metro-release-$NEW_VERSION/pyproject.toml
-grep '__version__' /tmp/nf-metro-release-$NEW_VERSION/src/nf_metro/__init__.py
+grep '^version' ~/projects/nf-metro-release-$NEW_VERSION/pyproject.toml
+grep '__version__' ~/projects/nf-metro-release-$NEW_VERSION/src/nf_metro/__init__.py
 ```
 
 ### CI-integration version references
@@ -208,11 +238,12 @@ previous version and must be bumped to `$NEW_VERSION` so consumers copy the
 current one:
 
 ```bash
-cd /tmp/nf-metro-release-$NEW_VERSION
+cd ~/projects/nf-metro-release-$NEW_VERSION
 OLD_VERSION=${LAST_TAG}
 grep -rn "${OLD_VERSION}" docs/automation.mdx README.md action.yml
-# Bump the `- uses: seqeralabs/nf-metro@X.Y.Z` ref in docs/automation.mdx and
-# the `(e.g. X.Y.Z)` example in the action's `version` input description.
+# Bump the `- uses: seqeralabs/nf-metro@X.Y.Z` ref and the pre-commit
+# `rev: X.Y.Z` in docs/automation.mdx, and the `(e.g. X.Y.Z)` example in the
+# action's `version` input description.
 ```
 
 The action's `runs:` block needs **no** version edit — with an empty `version`
@@ -224,9 +255,15 @@ stale refs remain:
 grep -rn "${OLD_VERSION}" docs/automation.mdx README.md action.yml || echo "clean"
 ```
 
+Two generated artifacts also embed the version and go stale (cosmetic, not
+blocking): the terminal screenshots under `docs/assets/img/nf-metro-*.svg`,
+which the `rich-codex` workflow regenerates, and
+`examples/rnaseq_hero_animated.svg`, whose watermark reads "created with
+nf-metro vX.Y.Z". Regenerate them or leave them and say so in the PR.
+
 ## Step 6: Draft the release page
 
-Create `/tmp/nf-metro-release-$NEW_VERSION/docs/releases/$NEW_VERSION.md`.
+Create `~/projects/nf-metro-release-$NEW_VERSION/docs/releases/$NEW_VERSION.md`.
 
 The page is a Starlight content file: the title comes from frontmatter, not
 from a heading in the body.
@@ -248,6 +285,13 @@ how to use it>
 
 <Metro src="examples/guide/<relevant_example>.mmd" />
 ```
+
+**Major releases:** lead the page with a `## Breaking changes` section, as
+`docs/releases/2.0.0.md` does, and give a migration table of old to new for
+every renamed theme, theme field, flag, Python name and import path, so a
+2.x user can fix their maps, scripts and CI without reading the PRs. Say what
+changes silently as well as what errors, such as a default that now follows
+the viewer's colour scheme or a rule that now hides an existing section.
 
 **Illustration guidance:**
 
@@ -291,7 +335,7 @@ itself, so the new page appears in the sidebar with no config edit.
 ### releases/index.md
 
 Insert a new row at the **top** of the table (below the header row) in
-`/tmp/nf-metro-release-$NEW_VERSION/docs/releases/index.md`, matching the
+`~/projects/nf-metro-release-$NEW_VERSION/docs/releases/index.md`, matching the
 site-absolute link form the other rows use:
 
 ```markdown
@@ -302,7 +346,7 @@ site-absolute link form the other rows use:
 
 `CHANGELOG.md` carries a condensed Keep-a-Changelog history; the release page is
 the full account. At the top of
-`/tmp/nf-metro-release-$NEW_VERSION/CHANGELOG.md`:
+`~/projects/nf-metro-release-$NEW_VERSION/CHANGELOG.md`:
 
 - Retitle `## [Unreleased]` to `## [$NEW_VERSION] — <YYYY-MM-DD>` if the
   release's entries were accumulated there.
@@ -317,7 +361,7 @@ Headings in this file use an em-dash date separator; match it.
 ## Step 8: Commit and push
 
 ```bash
-cd /tmp/nf-metro-release-$NEW_VERSION
+cd ~/projects/nf-metro-release-$NEW_VERSION
 
 git add pyproject.toml \
         src/nf_metro/__init__.py \
@@ -335,27 +379,32 @@ git push -u origin release/$NEW_VERSION
 
 ## Step 9: Open the PR
 
-```bash
-gh pr create \
-  --repo seqeralabs/nf-metro \
-  --title "chore: release $NEW_VERSION" \
-  --body "$(cat <<'EOF'
+Write the PR body to a scratch file with the Write tool (the body needs the
+real version number, and a quoted heredoc would leave `$NEW_VERSION` as
+literal text), then pass it with `--body-file`:
+
+```markdown
 ## Summary
 
-- Bumps version to $NEW_VERSION in \`pyproject.toml\` and \`__init__.py\`
-- Adds \`docs/releases/$NEW_VERSION.md\` and its \`docs/releases/index.md\` row
-- Adds the condensed \`CHANGELOG.md\` section for $NEW_VERSION
+- Bumps version to X.Y.Z in `pyproject.toml` and `__init__.py`
+- Adds `docs/releases/X.Y.Z.md` and its `docs/releases/index.md` row
+- Adds the condensed `CHANGELOG.md` section for X.Y.Z
 
 <paste the highlights from the release page here>
 
 ## After merge
 
 Create the GitHub Release at https://github.com/seqeralabs/nf-metro/releases/new
-with tag \`$NEW_VERSION\` to trigger the PyPI publish and versioned docs deploy.
+with tag `X.Y.Z` to trigger the PyPI publish and versioned docs deploy.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
-EOF
-)"
+```
+
+```bash
+gh pr create \
+  --repo seqeralabs/nf-metro \
+  --title "chore: release $NEW_VERSION" \
+  --body-file <scratch file>
 ```
 
 ## Step 10: After the PR merges
@@ -385,7 +434,7 @@ Remind the user:
 ## Step 11: Cleanup
 
 ```bash
-git -C ~/projects/nf-metro worktree remove /tmp/nf-metro-release-$NEW_VERSION
+git -C ~/projects/nf-metro worktree remove ~/projects/nf-metro-release-$NEW_VERSION
 git -C ~/projects/nf-metro branch -d release/$NEW_VERSION
 git -C ~/projects/nf-metro worktree prune
 ```
