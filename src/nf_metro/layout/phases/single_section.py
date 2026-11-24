@@ -661,12 +661,34 @@ def _align_bypass_v_to_lane_side(
     it at least leaves on the side its line is drawn.  Horizontal (LR/RL)
     sections stack lanes on Y in the same order :func:`assign_tracks` uses, so
     they never transpose.
+
+    A V on the same side of the bypassed station as the station its run
+    leaves from carries a run already seated off the trunk (as a peel
+    contender's is) rather than a priority slot, so it stays, as it would on a
+    horizontal section.
     """
     if not lanes_run_along_x(section.direction):
         return
     bypass_vs = [v for v in sub.stations.values() if is_bypass_v(v.id)]
     if not bypass_vs:
         return
+
+    feeder: dict[str, str] = {edge.target: edge.source for edge in sub.edges}
+
+    def _run_origin(vid: str) -> Station | None:
+        sid = feeder.get(vid)
+        seen = {vid}
+        while sid is not None and is_bypass_v(sid) and sid not in seen:
+            seen.add(sid)
+            sid = feeder.get(sid)
+        return sub.stations.get(sid) if sid is not None else None
+
+    def _on_seated_run(v: Station, anchor_x: float) -> bool:
+        origin = _run_origin(v.id)
+        if origin is None:
+            return False
+        lead, side = origin.x - anchor_x, v.x - anchor_x
+        return abs(lead) > SAME_COORD_TOLERANCE and lead * side > 0.0
 
     lane_sign = _lane_sign(section, graph)
     real_xs = [
@@ -680,7 +702,7 @@ def _align_bypass_v_to_lane_side(
         full = graph.stations.get(v.id)
         bypassed_id = full.bypasses_station_id if full else None
         anchor = sub.stations.get(bypassed_id) if bypassed_id else None
-        if anchor is None:
+        if anchor is None or _on_seated_run(v, anchor.x):
             continue
         side_cols = [
             x for x in real_xs if (x - anchor.x) * lane_sign > SAME_COORD_TOLERANCE

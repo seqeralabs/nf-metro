@@ -150,7 +150,9 @@ def assign_tracks(
     seats_after: dict[int, list[str]] = defaultdict(list)
     run_helpers: dict[str, list[str]] = {}
     for node in contenders:
-        seats_after[_contender_seat_layer(node, G, layers)].append(node)
+        seats_after[_contender_seat_layer(node, contenders[node], G, layers)].append(
+            node
+        )
         run_helpers[node] = sorted(
             _run_joins(node, G)[1], key=lambda sid: layers.get(sid, 0)
         )
@@ -235,12 +237,21 @@ def assign_tracks(
             seats_after.get(layer_idx, []), key=lambda n: station_base[n]
         ):
             far_sides = _far_sides(contenders[node], tracks)
-            column = layer_occupancy[layers.get(node, 0)]
+            node_layer = layers.get(node, 0)
+            column = [
+                t
+                for sid, t in tracks.items()
+                if sid != node
+                and layers.get(sid, 0) == node_layer
+                and not graph.stations[sid].off_track
+            ]
             seat = (
                 _seat_contender(
                     station_base[node],
-                    [t for sid, t in column.items() if sid != node],
-                    _span_tracks(node, layer_idx + 1, graph, layers, tracks),
+                    column,
+                    _span_tracks(
+                        node, _first_join_layer(node, G, layers), graph, layers, tracks
+                    ),
                     far_sides,
                     line_gap,
                 )
@@ -248,7 +259,7 @@ def assign_tracks(
                 else None
             )
             if seat is not None:
-                tracks[node] = column[node] = seat
+                tracks[node] = layer_occupancy[node_layer][node] = seat
             outward = {sign for _, sign in far_sides}
             if seat is not None and len(outward) == 1:
                 _stack_contender_runs(
@@ -698,13 +709,28 @@ def _run_joins(node: str, G: nx.DiGraph[str]) -> tuple[set[str], list[str]]:
     return joins, helpers
 
 
-def _contender_seat_layer(node: str, G: nx.DiGraph[str], layers: dict[str, int]) -> int:
-    """Layer after which contender *node* is seated: the one before its first join.
+def _first_join_layer(node: str, G: nx.DiGraph[str], layers: dict[str, int]) -> int:
+    """Layer of the first station *node*'s runs join."""
+    return min(layers.get(c, 0) for c in _run_joins(node, G)[0])
 
-    Every station along its run up to the join is then placed, so the seat can
-    see each of them.
+
+def _contender_seat_layer(
+    node: str,
+    passed: list[tuple[str, str]],
+    G: nx.DiGraph[str],
+    layers: dict[str, int],
+) -> int:
+    """Layer after which contender *node* is seated.
+
+    Normally the one before its first join, so every station along its run up
+    to the join is placed and the seat can see each of them.  A peel it passes
+    in the first join's own layer is placed only with that layer, so the seat
+    then waits for it.
     """
-    return min(layers.get(c, 0) for c in _run_joins(node, G)[0]) - 1
+    first = _first_join_layer(node, G, layers)
+    return (
+        first if any(layers.get(peel, 0) == first for _, peel in passed) else first - 1
+    )
 
 
 def _peel_contenders(
@@ -714,15 +740,17 @@ def _peel_contenders(
 ) -> dict[str, list[tuple[str, str]]]:
     """Sources whose line runs past a fork's peel branch, with the peels they pass.
 
-    A source contends for a peel when one of its runs strictly spans the peel's
-    layer on its way to the trunk the peel leaves (the fork's primary line is
-    every join's primary line), it feeds none of the fork's successors (so it is not
-    part of the fork's fan), and it is seated on its own rather than as a
-    member of a fan.  Joins, successors and peels are found through bypass
-    helpers (:func:`_run_joins`), so inserting one leaves the contender as it
-    was.  It is placed like any other source and moves to its contender seat
-    once the layer before its first join is placed, so every passed peel must
-    be placed by then.  Returns source -> ``(fork, peel)`` pairs.
+    A source contends for a peel when it joins the trunk the peel leaves (the
+    fork's primary line is every join's primary line), is seated on its own
+    rather than as a member of a fan, and either one of its runs strictly
+    spans the peel's layer while it feeds none of the fork's successors (so it
+    is not part of the fork's fan), or the peel ends in its first join's layer
+    and it joins none of the fork's peels.  Joins, successors and peels are
+    found through bypass helpers (:func:`_run_joins`), so inserting one leaves
+    the contender as it was.  It is placed like any other source and moves to
+    its contender seat once :func:`_contender_seat_layer` is placed, so no
+    passed peel may lie past its first join.  Returns source -> ``(fork,
+    peel)`` pairs.
     """
     peels = [
         (fork, peel, primary)
@@ -734,6 +762,9 @@ def _peel_contenders(
     ]
     if not peels:
         return {}
+    peels_of: dict[str, set[str]] = defaultdict(set)
+    for fork, peel, _ in peels:
+        peels_of[fork].add(peel)
     layer = layers.get
     contenders: dict[str, list[tuple[str, str]]] = {}
     for node in _lone_line_stations(graph, layers):
@@ -741,16 +772,26 @@ def _peel_contenders(
         joins = _run_joins(node, G)[0]
         if G.in_degree(node) or station.is_port or station.is_hidden or not joins:
             continue
+        first = min(layer(c, 0) for c in joins)
         passed = [
             (fork, peel)
             for fork, peel, primary in peels
             if fork != node
-            and joins.isdisjoint(_run_joins(fork, G)[0])
-            and any(layer(node, 0) < layer(peel, 0) < layer(c, 0) for c in joins)
             and all(_primary_line(graph, c) == primary for c in joins)
+            and (
+                (
+                    joins.isdisjoint(_run_joins(fork, G)[0])
+                    and any(
+                        layer(node, 0) < layer(peel, 0) < layer(c, 0) for c in joins
+                    )
+                )
+                or (
+                    layer(node, 0) < layer(peel, 0) == first
+                    and joins.isdisjoint(peels_of[fork])
+                )
+            )
         ]
-        seat_layer = _contender_seat_layer(node, G, layers)
-        if passed and all(layer(peel, 0) <= seat_layer for _, peel in passed):
+        if passed and all(layer(peel, 0) <= first for _, peel in passed):
             contenders[node] = passed
     return contenders
 

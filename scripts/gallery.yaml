@@ -597,6 +597,14 @@ gallery:
       a Report section on the same row: the line keeps the lane facing Genome's side in
       both sections, so it crosses the trunk neither at Quantify nor at the boundary
       (#2199)."
+  - id: source_vs_terminal_peel_lane
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The fork's QC branch ends beside the station where Genome's Reference line joins
+      the trunk: Genome sits one row on the far side of the trunk from the QC branch and
+      the Reference line joins Trim on the lane facing that side, so no line crosses
+      another (#2199)."
   - id: root_fan_trunk_feeder_row
     source_dir: examples/topologies
     category: Fan-out and Fan-in

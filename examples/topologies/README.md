@@ -2,7 +2,7 @@
 
 Example `.mmd` files demonstrating a range of pipeline topologies and the layout patterns they produce. Each example exercises different aspects of the auto-layout engine.
 
-This directory holds 327 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
+This directory holds 328 fixtures and every one of them is named in this file: the illustrated ones in the walkthrough sections below, the rest in the [Regression Catalogue](#regression-catalogue).
 
 To render one example:
 
@@ -618,6 +618,7 @@ python scripts/list_topology_fixtures.py
 | `source_vs_chain_fed_fork_peel_lane.mmd`       | The same fork two stations down the trunk - the source's seat and lane do not depend on how far down the trunk the fork sits                                                                                                                                                                             |
 | `source_vs_fed_fork_peel_lane_compact.mmd`     | The one-station-down fork with compact offsets - the source's line still steps to the lane facing its side where it joins the trunk                                                                                                                                                                      |
 | `source_vs_fork_peel_lane_across_sections.mmd` | The one-station-down fork with the source's line carried on with the trunk into the next section on the row - the line keeps the lane facing its side in both sections                                                                                                                                   |
+| `source_vs_terminal_peel_lane.mmd`             | The fork's branch ends in the layer where the source's line joins the trunk - the source still sits on the far side of the trunk from the branch and joins on the lane facing that side                                                                                                                  |
 | `root_fan_trunk_feeder_row.mmd`                | Two sources share a column on one line: one feeds a station that adds a second line, the other runs straight to the merge - the feeding source holds its successor's row, the other source sits one row to one side and the added line's branch one row to the other, whichever source is declared first |
 | `internal_source_equal_sibling_2fan.mmd`       | A two-way fan from a blank internal source station with equal-length siblings, which centres on the source                                                                                                                                                                                               |
 | `symmetric_deadend_fanout.mmd`                 | A `diamond_style: symmetric` dead-end fan straddling a fixed entry-port trunk (#1299)                                                                                                                                                                                                                    |

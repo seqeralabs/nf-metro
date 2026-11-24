@@ -1,0 +1,17 @@
+%%metro title: Source vs Terminal Peel Lane
+%%metro line: main | Main | #2db572
+%%metro line: qc | QC | #0570b0
+%%metro line: ref | Reference | #f5c542
+graph LR
+    subgraph analysis [Analysis]
+        %%metro direction: LR
+        samples[Samples]
+        reads[Reads]
+        trim[Trim]
+        qc[QC]
+        genome[Genome]
+        samples -->|main| reads
+        reads -->|main| trim
+        reads -->|qc| qc
+        genome -->|ref| trim
+    end
