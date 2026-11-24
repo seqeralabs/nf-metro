@@ -580,12 +580,12 @@ def test_ring_geometry_scales_with_line_width():
 def test_bridge_strip_cuts_through_where_ring_outlines_meet():
     import drawsvg as draw
 
-    from nf_metro.render.svg import _draw_ring_chain, ring_layout
+    from nf_metro.render.svg import _CrossAxis, _draw_ring_chain, ring_layout
 
     theme = replace(_GEOM, ring_max_lines=2)
     layout = ring_layout(0.0, 2 * _LW, 3, theme)
     canvas = draw.Drawing(100, 100)
-    _draw_ring_chain(canvas, [layout], lambda off: (0.0, off), True, theme, {}, False)
+    _draw_ring_chain(canvas, [layout], _CrossAxis(0.0, 0.0, False), theme, {}, False)
     root = ET.fromstring(canvas.as_svg())
     strip = next(
         el
