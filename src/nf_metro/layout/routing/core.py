@@ -620,7 +620,9 @@ def _route_edges(  # noqa: C901
     )
     _unify_coincident_corner_radii(routes)
     assert_exit_turn_snapshot(routes, planned_segments, "corner-radius unification")
-    _rederive_semantic_end_corners(routes, ctx.curve_radius, ctx.station_offsets or {})
+    _rederive_semantic_end_corners(
+        routes, ctx.curve_radius, ctx.station_offsets or {}, ctx.offset_step
+    )
     assert_exit_turn_snapshot(routes, planned_segments, "semantic corner derivation")
     covered_edges = (
         system_execution.covered_edges()
