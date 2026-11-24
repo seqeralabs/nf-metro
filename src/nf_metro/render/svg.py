@@ -1049,7 +1049,7 @@ _FREE_TEXT_FIELDS = (
 
 def _drawn_theme(theme: Theme, graph: MetroGraph) -> Theme:
     """*theme* as drawn for *graph*: sizes under its scales, free text escaped."""
-    escaped = {
+    escaped: dict[str, Any] = {
         name: html.escape(getattr(theme, name), quote=False).replace('"', "&quot;")
         for name in _FREE_TEXT_FIELDS
     }
