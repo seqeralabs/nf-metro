@@ -298,7 +298,9 @@ def _layout_single_section(
         flow_horizontal=lanes_run_along_y(section.direction),
         priority_lane_sign=priority_lane_sign,
     )
-    section.lane_ends = peel_lane_ends(sub, layers, tracks, priority_lane_sign)
+    section.lane_ends, section.lane_end_exempt = peel_lane_ends(
+        sub, layers, tracks, priority_lane_sign
+    )
 
     if not layers:
         return None

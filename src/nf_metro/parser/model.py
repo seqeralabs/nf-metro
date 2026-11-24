@@ -462,6 +462,9 @@ class Section:
     # negative pins toward the first lane, positive toward the last, and a
     # larger magnitude pins further out.
     lane_ends: dict[str, float] = field(default_factory=dict)
+    # Stations a pinned line reaches by a run other than the one that set its
+    # pin, so the pin does not hold there.
+    lane_end_exempt: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 def agreed_lane_end(pins: Iterable[float]) -> float | None:

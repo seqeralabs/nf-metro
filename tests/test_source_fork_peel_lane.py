@@ -309,6 +309,17 @@ SHAPES = {
             for a, b in (("h", "y"), ("y", "z"), ("z", "w"), ("w", "v"), ("v", "m"))
         ),
     ),
+    "two_joins_with_bypassed_run": _one_section(
+        _LINES_BC, _P3_BODY + "        f -->|c| j\n"
+    ),
+    "contender_starts_the_peel_line": _one_section(
+        _LINES_BC.replace(_LINES_BC.splitlines(True)[2], ""),
+        _P3_BODY.replace("f -->|c| m", "f -->|b| m"),
+    ),
+    "contender_starts_the_peel_line_carried_on": _one_section(
+        _LINES_BC.replace(_LINES_BC.splitlines(True)[2], ""),
+        _P3_BODY.replace("f -->|c| m", "f -->|b| m") + "        m -->|main,b| n\n",
+    ),
 }
 
 
@@ -349,15 +360,14 @@ def _deadline(seconds: int) -> Iterator[None]:
         signal.signal(signal.SIGALRM, previous)
 
 
-def test_seat_without_a_row_between_the_forks_falls_back_to_clearances() -> None:
-    """Forks barring both sides with no row between them leave the seat free.
+def test_seat_without_a_row_between_the_forks_is_left_to_the_ordinary_rule() -> None:
+    """Forks barring both sides with no row between them give no contender seat.
 
-    The contender then takes the nearest row its stations allow, as if no fork
-    barred either side.
+    The source is then seated as any other source would be.
     """
     with _deadline(5):
         seat = _seat_contender(0.0, [], [], [(0.0, 1.0), (1.0, -1.0)], 1.0)
-    assert seat == 0.0
+    assert seat is None
 
 
 _LINES_L = "".join(

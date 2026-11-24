@@ -1294,7 +1294,9 @@ def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
     other lines keeping theirs, so a station without a pinned line holds its
     lanes unbroken.  A pin holds in every flat-frame member carrying the line,
     so the line keeps its side of the bundle across the frame's boundaries; a
-    line pinned toward opposite ends stays where it is.
+    line pinned toward opposite ends stays where it is.  A pin does not hold
+    where the line runs on another of its runs (``Section.lane_end_exempt``),
+    and a line with such a run keeps its place in the lane order.
     """
     graph = ctx.graph
     frames: dict[str, list[str]] = defaultdict(list)
@@ -1302,29 +1304,52 @@ def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
         frames[ctx.frame_roots.get(sec_id, sec_id)].append(sec_id)
     for members in frames.values():
         pins: dict[str, list[float]] = defaultdict(list)
+        exempt: dict[str, set[str]] = defaultdict(set)
         for sec_id in members:
-            for lid, pin in graph.sections[sec_id].lane_ends.items():
+            section = graph.sections[sec_id]
+            for lid, pin in section.lane_ends.items():
                 pins[lid].append(pin)
+            for lid, stations in section.lane_end_exempt.items():
+                exempt[lid] |= stations
         agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
         ends = {lid: pin for lid, pin in agreed.items() if pin is not None}
         if not ends:
             continue
+        ordered = {lid: pin for lid, pin in ends.items() if not exempt[lid]}
         present = {sid: _section_present_line_set(ctx, sid) for sid in members}
         for sec_id in (m for m in members if present[m] & ends.keys()):
-            if not ctx.compact:
+            if not ctx.compact and present[sec_id] & ordered.keys():
                 mates = set().union(*(present[m] for m in members if m != sec_id))
                 target = _section_order_offsets(
                     ctx,
                     sec_id,
                     sorted(
                         _section_lane_order(ctx, sec_id),
-                        key=lambda lid: ends.get(lid, 0.0),
+                        key=lambda lid: ordered.get(lid, 0.0),
                     ),
                 )
-                shift = _frame_shift(ctx, target, mates & (present[sec_id] - set(ends)))
+                shift = _frame_shift(
+                    ctx, target, mates & (present[sec_id] - set(ordered))
+                )
                 ctx.offsets.update({key: off + shift for key, off in target.items()})
             for sid in graph.sections[sec_id].station_ids:
-                ctx.offsets.update(_stepped_pinned_lanes(ctx, sec_id, sid, ends))
+                held = {lid: pin for lid, pin in ends.items() if sid not in exempt[lid]}
+                ctx.offsets.update(_stepped_pinned_lanes(ctx, sec_id, sid, held))
+            if not ctx.compact and len(members) == 1:
+                _rebase_section_offsets(ctx, sec_id)
+
+
+def _rebase_section_offsets(ctx: _OffsetCtx, sec_id: str) -> None:
+    """Shift *sec_id*'s offsets so its first lane lies at zero.
+
+    A pinned line stepped past a station's lanes on a run the section's lane
+    order does not end with lands outside that order.
+    """
+    station_ids = set(ctx.graph.sections[sec_id].station_ids)
+    keys = [key for key in ctx.offsets if key[0] in station_ids]
+    low = min((ctx.offsets[key] for key in keys), default=0.0)
+    if low < -COORD_TOLERANCE_FINE:
+        ctx.offsets.update({key: ctx.offsets[key] - low for key in keys})
 
 
 def _section_lane_order(ctx: _OffsetCtx, sec_id: str) -> list[str]:
