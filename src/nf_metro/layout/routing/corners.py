@@ -392,6 +392,40 @@ def concentric_corner_radius_at(
     )
 
 
+def concentric_turn_radius(
+    prev: tuple[float, float],
+    corner: tuple[float, float],
+    nxt: tuple[float, float],
+    displacement: tuple[float, float],
+    reference_radius: float = CURVE_RADIUS,
+) -> float:
+    """Concentric radius for one bundle line at a turn of any angle.
+
+    The generalisation of :func:`concentric_corner_radius` beyond 90 degrees.
+    A corner's radius here is its tangent arm, the distance from the vertex to
+    where the curve leaves each leg; for a circular turn of deflection
+    ``phi`` that is ``R * tan(phi / 2)``. When a bundle turns wholesale, each
+    line's vertex sits on the turn's bisector, displaced from the reference
+    line's vertex by *displacement*, and the lines share a centre iff::
+
+        arm = reference_arm + displacement . (u_in - u_out) / 2
+
+    where ``u_in`` and ``u_out`` are the unit travel vectors into and out of
+    the corner (read from the line's own *prev* -> *corner* -> *nxt*, which
+    must both have length). The projection is positive for a line on the
+    outside of the turn. At 90 degrees this is the ``-dx * ux`` rule
+    :func:`concentric_corner_radius` applies.
+    """
+    in_len = math.dist(prev, corner)
+    out_len = math.dist(corner, nxt)
+    u_in = ((corner[0] - prev[0]) / in_len, (corner[1] - prev[1]) / in_len)
+    u_out = ((nxt[0] - corner[0]) / out_len, (nxt[1] - corner[1]) / out_len)
+    shift = (
+        displacement[0] * (u_in[0] - u_out[0]) + displacement[1] * (u_in[1] - u_out[1])
+    ) / 2
+    return reference_radius + shift
+
+
 def concentric_reference_radius_at(
     prev: tuple[float, float],
     corner: tuple[float, float],
