@@ -11,11 +11,11 @@ import pytest
 from theme_helpers import MMD, RNASEQ, SVG_NS, classed, station_glyphs, write
 
 from nf_metro.api import render_string
-from nf_metro.render.svg import (
-    _Bundle,
-    _CrossAxis,
-    _draw_ring_chain,
+from nf_metro.render.glyphs import (
+    Bundle,
+    CrossAxis,
     bundle_end_bar_box,
+    draw_ring_chain,
     ring_groups,
     ring_layout,
     station_tab_box,
@@ -159,7 +159,7 @@ _GEOM = replace(NFCORE_LIGHT_THEME, line_width=_LW)
 def test_tab_sits_on_the_label_side_of_the_line(label_below):
     label = (100.0, 60.0 if label_below else 40.0)
     x, y, w, h = station_tab_box(
-        _Bundle(_At(100.0, 50.0), 0.0, 0.0, False), _GEOM, label
+        Bundle(_At(100.0, 50.0), 0.0, 0.0, False, label_point=label), _GEOM
     )
     assert (w, h) == pytest.approx((0.66 * _LW, 0.66 * _LW))
     assert x + w / 2 == pytest.approx(100.0)
@@ -171,15 +171,13 @@ def test_tab_sits_on_the_label_side_of_the_line(label_below):
 
 def test_tab_width_and_length_are_separate_multiples_of_the_line():
     theme = replace(_GEOM, station_tick_width=1.0, station_tick_length=1.5)
-    _, _, w, h = station_tab_box(
-        _Bundle(_At(100.0, 50.0), 0.0, 0.0, False), theme, None
-    )
+    _, _, w, h = station_tab_box(Bundle(_At(100.0, 50.0), 0.0, 0.0, False), theme)
     assert (w, h) == pytest.approx((1.0 * _LW, 1.5 * _LW))
 
 
 def test_tab_in_a_vertical_section_faces_its_label_sideways():
     x, y, w, h = station_tab_box(
-        _Bundle(_At(100.0, 50.0), 0.0, 0.0, True), _GEOM, (80.0, 50.0)
+        Bundle(_At(100.0, 50.0), 0.0, 0.0, True, label_point=(80.0, 50.0)), _GEOM
     )
     assert x + w == pytest.approx(100.0 - _LW / 2)
     assert y + h / 2 == pytest.approx(50.0)
@@ -189,9 +187,7 @@ def test_tab_in_a_vertical_section_faces_its_label_sideways():
 def test_terminus_bar_crosses_the_line_end_and_overhangs_both_sides(vertical):
     theme = replace(_GEOM, station_tick_width=1.0, station_tick_length=1.5)
     axis = 100.0 if vertical else 50.0
-    x, y, w, h = bundle_end_bar_box(
-        _Bundle(_At(100.0, 50.0), 0.0, 0.0, vertical), theme
-    )
+    x, y, w, h = bundle_end_bar_box(Bundle(_At(100.0, 50.0), 0.0, 0.0, vertical), theme)
     thick, across = 1.0 * _LW, _LW + 2 * 1.5 * _LW
     if vertical:
         assert (w, h) == pytest.approx((across, thick))
@@ -276,7 +272,7 @@ def test_bridge_strip_cuts_through_where_ring_outlines_meet():
     theme = replace(_GEOM, ring_max_lines=2)
     layout = ring_layout(0.0, 2 * _LW, 3, theme)
     canvas = draw.Drawing(100, 100)
-    _draw_ring_chain(canvas, [layout], _CrossAxis(0.0, 0.0, False), theme, {}, False)
+    draw_ring_chain(canvas, [layout], CrossAxis(0.0, 0.0, False), theme, {}, False)
     root = ET.fromstring(canvas.as_svg())
     strip = next(
         el

@@ -203,6 +203,16 @@ from nf_metro.render.constants import (
     station_is_muted,
     title_baseline_y,
 )
+from nf_metro.render.glyphs import (
+    MUTED_CLASS,
+    Bundle,
+    CrossAxis,
+    draw_line_station_glyph,
+    draw_ring_chain,
+    maybe_muted_class,
+    ring_groups,
+    station_axis,
+)
 from nf_metro.render.icons import (
     render_file_icon,
     render_files_icon,
@@ -247,11 +257,8 @@ from nf_metro.render.section_header import (
 from nf_metro.render.style import (
     CHROME,
     GLYPH_RING,
-    GLYPH_TICK,
     MUTED_FILL_CLASS,
     MUTED_STROKE_CLASS,
-    RING_GROW,
-    TERMINUS_BAR,
     Theme,
     adaptive_value,
     color_pair,
@@ -3316,16 +3323,6 @@ def _render_adaptive_logo(
         )
 
 
-_MUTED_CLASS = "nf-metro-muted"
-"""Class marking an element greyed because every line touching it is inactive."""
-
-
-def _maybe_muted_class(name: str, muted: bool) -> str:
-    """Return *name*'s class attribute, carrying the muted marker when *muted*."""
-    cls = _ns(name)
-    return f"{cls} {_ns(_MUTED_CLASS)}" if muted else cls
-
-
 def _capsule_adapts(theme: Theme) -> bool:
     """Whether *theme* gives station capsules colours that follow the mode."""
     return colors_adapt(theme, "station_fill", "station_stroke")
@@ -3342,7 +3339,7 @@ def _capsule_attrs(
         **station_data,
     }
     if _capsule_adapts(theme):
-        capsule = _maybe_muted_class("nf-metro-capsule", muted)
+        capsule = maybe_muted_class("nf-metro-capsule", muted)
         attrs["class_"] = f"{station_data['class_']} {capsule}"
     return attrs
 
@@ -3423,7 +3420,7 @@ def _muted_chrome_rules(theme: Theme) -> list[str]:
             if muted:
                 rules.setdefault(cls, []).append(f"{prop}: {muted_val}")
     lines = [
-        _css_rule(cls, "; ".join(props), _MUTED_CLASS) for cls, props in rules.items()
+        _css_rule(cls, "; ".join(props), MUTED_CLASS) for cls, props in rules.items()
     ]
     if colors_adapt(theme, "muted_line_color"):
         lines += [
@@ -4524,56 +4521,13 @@ def _pill_box(
     ``flow_len`` overrides the extent along the flow axis (default ``2 * r``),
     elongating the glyph along the line.
     """
-    axis = _station_axis(station, is_tb_vert)
+    axis = station_axis(station, is_tb_vert)
     across = max_off - min_off + r * 2
     return axis.box(
         r * 2 if flow_len is None else flow_len,
         axis.base + (min_off + max_off) / 2 - across / 2,
         across,
     )
-
-
-class _CrossAxis(NamedTuple):
-    """Positions across a run of lines at one point along the flow.
-
-    ``along`` is the coordinate along the flow, ``base`` the cross coordinate
-    of offset 0, and ``across_x`` says the cross axis runs along x.
-    """
-
-    along: float
-    base: float
-    across_x: bool
-
-    def point(self, offset: float) -> tuple[float, float]:
-        """The position *offset* across the lines from ``base``."""
-        if self.across_x:
-            return self.base + offset, self.along
-        return self.along, self.base + offset
-
-    def box(
-        self, along_len: float, across_lo: float, across_len: float
-    ) -> tuple[float, float, float, float]:
-        """``(x, y, w, h)`` of a box centred on ``along`` along the flow and
-        spanning ``[across_lo, across_lo + across_len]`` across it."""
-        along_lo = self.along - along_len / 2
-        if self.across_x:
-            return across_lo, along_lo, across_len, along_len
-        return along_lo, across_lo, along_len, across_len
-
-    def strip(
-        self, a: float, b: float, half: float
-    ) -> tuple[float, float, float, float]:
-        """``(x, y, w, h)`` of a strip ``2 * half`` thick from offset *a* to *b*."""
-        pa = self.point(a)[0 if self.across_x else 1]
-        pb = self.point(b)[0 if self.across_x else 1]
-        return self.box(2 * half, min(pa, pb), abs(pb - pa))
-
-
-def _station_axis(station: Station, is_tb_vert: bool) -> _CrossAxis:
-    """The cross axis through *station*, offsets measured from its position."""
-    if is_tb_vert:
-        return _CrossAxis(station.y, station.x, True)
-    return _CrossAxis(station.x, station.y, False)
 
 
 def station_marker_box(
@@ -4622,7 +4576,6 @@ def _append_terminus_icons(
     station: Station,
     graph: MetroGraph,
     theme: Theme,
-    r: float,
     min_off: float,
     max_off: float,
     muted: bool,
@@ -4630,7 +4583,7 @@ def _append_terminus_icons(
     """Render a station's terminus icons into their own data-tagged group."""
     icon_group = draw.Group(**{"data-station-id": station.id})
     _render_terminus_icons(
-        icon_group, station, graph, theme, r, min_off, max_off, muted
+        icon_group, station, graph, theme, theme.station_radius, min_off, max_off, muted
     )
     d.append(icon_group)
 
@@ -4640,7 +4593,6 @@ def _render_marker_station(
     marker: MarkerStyle,
     theme: Theme,
     station: Station,
-    r: float,
     min_off: float,
     max_off: float,
     is_tb_vert: bool,
@@ -4654,6 +4606,7 @@ def _render_marker_station(
     in the opposite orientation to the default station pill) while still
     growing across the bundle to cover every track it spans.
     """
+    r = theme.station_radius
     flow_len = (
         r * MARKER_PILL_LENGTH_RATIO if marker.shape == MARKER_SHAPE_PILL else None
     )
@@ -4662,7 +4615,7 @@ def _render_marker_station(
     marker_data = {
         **station_data,
         "class_": f"{station_data['class_']} "
-        f"{_maybe_muted_class('nf-metro-marker-stroke', muted)}",
+        f"{maybe_muted_class('nf-metro-marker-stroke', muted)}",
     }
     d.append(
         draw.Rectangle(
@@ -4725,12 +4678,9 @@ def _interchange_paint(
 ) -> _InterchangePaint:
     """Paint for an interchange glyph's link bar and knobs.
 
-    An untinted interchange keeps the capsule colours (muted or not, fills
-    carry background rather than line identity), and follows the mode when the
-    theme gives capsules mode-adaptive colours. A marker tint is a line
-    identity, so when the station is muted it greys with the rest of the map,
-    overriding the marker-fill exemption; otherwise it keeps the declared tint,
-    with the light marker outline so it reads against a dark background.
+    An untinted interchange takes the station colours, muted or not. A marker
+    tint is a line identity, so a muted station greys it; otherwise it keeps
+    the tint, outlined in the marker stroke.
     """
     if fill_override is None:
         return _InterchangePaint(
@@ -4750,7 +4700,6 @@ def _draw_interchange_glyph(
     x: float,
     knobs: list[tuple[str, float]],
     theme: Theme,
-    r: float,
     *,
     paint: _InterchangePaint,
     station_data: dict[str, str],
@@ -4764,16 +4713,16 @@ def _draw_interchange_glyph(
         return
     if theme.interchange_glyph == GLYPH_RING and len(knobs) > 1:
         ys = [y for _, y in knobs]
-        _draw_ring_chain(
+        draw_ring_chain(
             d,
             ring_groups(ys, theme),
-            _CrossAxis(x, 0.0, False),
+            CrossAxis(x, 0.0, False),
             theme,
             station_data,
             muted,
         )
         return
-    _draw_knob_glyph(d, x, knobs, theme, r, paint, station_data, data_station_id, muted)
+    _draw_knob_glyph(d, x, knobs, theme, paint, station_data, data_station_id, muted)
 
 
 def _draw_knob_glyph(
@@ -4781,7 +4730,6 @@ def _draw_knob_glyph(
     x: float,
     knobs: list[tuple[str, float]],
     theme: Theme,
-    r: float,
     paint: _InterchangePaint,
     station_data: dict[str, str],
     data_station_id: str,
@@ -4796,6 +4744,7 @@ def _draw_knob_glyph(
     radii fills it.  The link is the *fill* colour, not the stroke, so it reads
     as joining the knobs rather than cutting across them.
     """
+    r = theme.station_radius
     ys = [y for _, y in knobs]
     top_y, bot_y = min(ys), max(ys)
     sw = theme.station_stroke_width
@@ -4843,7 +4792,7 @@ def _draw_knob_glyph(
     def _cls(name: str, layer: str, layer_muted: bool = False) -> str:
         if not paint.adaptive:
             return _ns(name)
-        return f"{_ns(name)} {_maybe_muted_class(layer, layer_muted)}"
+        return f"{_ns(name)} {maybe_muted_class(layer, layer_muted)}"
 
     outline, core = "nf-metro-capsule-outline", "nf-metro-capsule-core"
     _link_bar(
@@ -4865,7 +4814,6 @@ def _render_rail_pill(
     graph: MetroGraph,
     station: Station,
     theme: Theme,
-    r: float,
     fill_override: str | None = None,
     muted: bool = False,
 ) -> None:
@@ -4888,7 +4836,6 @@ def _render_rail_pill(
         station.x,
         knobs,
         theme,
-        r,
         paint=_interchange_paint(fill_override, theme, muted),
         station_data=_station_data_attrs(graph, station),
         data_station_id=station.id,
@@ -4902,7 +4849,6 @@ def _render_interchange(
     ic: Interchange,
     theme: Theme,
     station_offsets: dict[tuple[str, str], float] | None,
-    r: float,
     muted: bool = False,
 ) -> None:
     """Draw a cross-track interchange as one glyph across its member stations.
@@ -4930,7 +4876,6 @@ def _render_interchange(
         members[0].x,
         knobs,
         theme,
-        r,
         paint=_interchange_paint(fill_override, theme, muted),
         station_data=_station_data_attrs(graph, members[0]),
         data_station_id=ic.node_id,
@@ -4941,7 +4886,6 @@ def _render_interchange(
 def _draw_station_capsule(
     d: draw.Group | draw.Drawing,
     station: Station,
-    r: float,
     min_off: float,
     max_off: float,
     station_data: dict[str, str],
@@ -4953,6 +4897,7 @@ def _draw_station_capsule(
 ) -> None:
     """Draw the station capsule spanning a bundle, or with *rounded* off a blank
     terminus's sharp-cornered nub."""
+    r = theme.station_radius
     corners: dict[str, float] = {"rx": r, "ry": r} if rounded else {}
     d.append(
         draw.Rectangle(
@@ -5066,34 +5011,25 @@ def _render_stations(
             continue
         muted = station_is_muted(graph, station.id, inactive_line_ids)
         station_theme = muted_theme if muted else theme_view
-        label_point = (label_points or {}).get(station.id)
+        target: draw.Group | draw.Drawing = d
         if graph.embed_manifest:
-            attrs = _station_group_attrs(
-                graph, theme_view, station, station_offsets, positive_fan
+            target = draw.Group(
+                **_station_group_attrs(
+                    graph, theme_view, station, station_offsets, positive_fan
+                )
             )
-            g = draw.Group(**attrs)
-            _render_station_into(
-                g,
-                graph,
-                station_theme,
-                station,
-                station_offsets,
-                positive_fan,
-                muted,
-                label_point,
-            )
-            d.append(g)
-        else:
-            _render_station_into(
-                d,
-                graph,
-                station_theme,
-                station,
-                station_offsets,
-                positive_fan,
-                muted,
-                label_point,
-            )
+        _render_station_into(
+            target,
+            graph,
+            station_theme,
+            station,
+            station_offsets,
+            positive_fan,
+            muted,
+            (label_points or {}).get(station.id),
+        )
+        if target is not d:
+            d.append(target)
 
 
 def _render_station_into(
@@ -5111,8 +5047,6 @@ def _render_station_into(
     The container is the station's wrapping ``<g>`` when the manifest is
     embedded, or the drawing itself under ``--no-manifest``.
     """
-    r = theme.station_radius
-
     # Cross-track interchange: the whole glyph is drawn once, anchored on the
     # node the interchange kept (its id equals interchange_id); the other member
     # sub-stations contribute knobs but draw nothing of their own.  A marker on
@@ -5125,14 +5059,13 @@ def _render_station_into(
                 None,
             )
             if ic is not None and ic.member_ids:
-                _render_interchange(d, graph, ic, theme, station_offsets, r, muted)
+                _render_interchange(d, graph, ic, theme, station_offsets, muted)
         return
 
     # Rail mode: a blank terminus terminates its converged bundle exactly
     # like any other render -- the theme's line-end glyph spanning the bundle,
-    # plus the file icon -- rather than a rail-specific glyph.  The only
-    # difference is the span comes from the rail bundle
-    # (rail mode does not use station_offsets).  An off-track terminus parks
+    # plus the file icon.  The only difference is the span comes from the rail
+    # bundle (rail mode does not use station_offsets).  An off-track terminus parks
     # off the rails and its lines converge onto a single vertical stub, so its
     # nub is the bundle-centred square (zero span) seating the buffer stop
     # where the stub meets the file icon, matching on-rail file termini.
@@ -5147,10 +5080,15 @@ def _render_station_into(
             d,
             graph,
             theme,
-            _Bundle(station, t_min, t_max, station.off_track),
-            _station_data_attrs(graph, station),
-            muted,
-            label_point,
+            Bundle(
+                station,
+                t_min,
+                t_max,
+                station.off_track,
+                _station_data_attrs(graph, station),
+                muted,
+                label_point,
+            ),
         )
         return
 
@@ -5166,17 +5104,11 @@ def _render_station_into(
         and not station.is_terminus
         and not station.off_track
     ):
-        _render_rail_pill(d, graph, station, theme, r)
+        _render_rail_pill(d, graph, station, theme)
         return
     if station.rail_top_y is not None and station.rail_bottom_y is not None:
         _render_rail_pill(
-            d,
-            graph,
-            station,
-            theme,
-            r,
-            _rail_marker_fill(station.marker, theme),
-            muted,
+            d, graph, station, theme, _rail_marker_fill(station.marker, theme), muted
         )
         return
 
@@ -5212,7 +5144,6 @@ def _render_station_into(
             station.marker,
             theme,
             station,
-            r,
             min_off,
             max_off,
             is_tb_vert,
@@ -5220,294 +5151,38 @@ def _render_station_into(
             muted,
         )
         if station.is_terminus:
-            _append_terminus_icons(d, station, graph, theme, r, min_off, max_off, muted)
+            _append_terminus_icons(d, station, graph, theme, min_off, max_off, muted)
         return
 
     _draw_bundle_station(
         d,
         graph,
         theme,
-        _Bundle(station, min_off, max_off, is_tb_vert),
-        station_data,
-        muted,
-        label_point,
+        Bundle(station, min_off, max_off, is_tb_vert, station_data, muted, label_point),
     )
 
 
 def _draw_bundle_station(
-    d: draw.Group | draw.Drawing,
-    graph: MetroGraph,
-    theme: Theme,
-    bundle: _Bundle,
-    station_data: dict[str, str],
-    muted: bool,
-    label_point: tuple[float, float] | None,
+    d: draw.Group | draw.Drawing, graph: MetroGraph, theme: Theme, bundle: Bundle
 ) -> None:
     """Draw a station's glyph across its bundle, then any terminus icons."""
     station = bundle.station
-    r = theme.station_radius
-    if not _draw_line_station_glyph(
-        d, graph, theme, bundle, station_data, muted, label_point
-    ):
+    if not draw_line_station_glyph(d, graph, theme, bundle):
         _draw_station_capsule(
             d,
             station,
-            r,
             bundle.min_off,
             bundle.max_off,
-            station_data,
+            dict(bundle.station_data),
             theme,
             bundle.is_tb_vert,
-            muted,
+            bundle.muted,
             rounded=not station.is_blank_terminus,
         )
     if station.is_terminus:
         _append_terminus_icons(
-            d, station, graph, theme, r, bundle.min_off, bundle.max_off, muted
+            d, station, graph, theme, bundle.min_off, bundle.max_off, bundle.muted
         )
-
-
-class _Bundle(NamedTuple):
-    """A station and the span of its lines across the flow, as drawn.
-
-    Offsets run along y in an LR/RL section and along x in a TB/BT one.
-    """
-
-    station: Station
-    min_off: float
-    max_off: float
-    is_tb_vert: bool
-
-    @property
-    def axis(self) -> _CrossAxis:
-        """The cross axis through the station."""
-        return _station_axis(self.station, self.is_tb_vert)
-
-    def point(self, offset: float) -> tuple[float, float]:
-        """The station's position shifted *offset* across its lines."""
-        return self.axis.point(offset)
-
-
-def station_tab_box(
-    bundle: _Bundle, theme: Theme, label_point: tuple[float, float] | None
-) -> tuple[float, float, float, float]:
-    """``(x, y, w, h)`` of a one-line station's tab.
-
-    The tab is ``station_tick_width`` line widths thick along the line and
-    reaches ``station_tick_length`` line widths past the edge of the line
-    facing the station's label. With no label to face it sits above (LR/RL)
-    or left (TB/BT).
-    """
-    lw = theme.line_width
-    reach = theme.station_tick_length * lw
-    line_x, line_y = bundle.point(bundle.min_off)
-    line_axis = line_x if bundle.is_tb_vert else line_y
-    label_axis = None
-    if label_point is not None:
-        label_axis = label_point[0] if bundle.is_tb_vert else label_point[1]
-    forward = label_axis is not None and label_axis > line_axis
-    lo = line_axis + lw / 2 if forward else line_axis - lw / 2 - reach
-    return bundle.axis.box(theme.station_tick_width * lw, lo, reach)
-
-
-def bundle_end_bar_box(
-    bundle: _Bundle, theme: Theme
-) -> tuple[float, float, float, float]:
-    """``(x, y, w, h)`` of a ``bar`` terminus (a buffer stop) across a bundle.
-
-    As thick as a station tab, spanning every line's stroke and overhanging
-    the outermost lines by a tab's length on each side; a one-line bundle gets
-    the bar across its one line.
-    """
-    lw = theme.line_width
-    lo_x, lo_y = bundle.point(bundle.min_off)
-    hi_x, hi_y = bundle.point(bundle.max_off)
-    lo, hi = (lo_x, hi_x) if bundle.is_tb_vert else (lo_y, hi_y)
-    overhang = lw / 2 + theme.station_tick_length * lw
-    return bundle.axis.box(
-        theme.station_tick_width * lw,
-        min(lo, hi) - overhang,
-        abs(hi - lo) + 2 * overhang,
-    )
-
-
-class RingLayout(NamedTuple):
-    """Ring centres along a bundle's cross axis, and their inside radius."""
-
-    centres: list[float]
-    inner: float
-
-
-def ring_layout(lo: float, hi: float, lines: int, theme: Theme) -> RingLayout:
-    """The rings for *lines* lines on one track, spanning *lo* to *hi*.
-
-    Up to ``ring_max_lines`` lines get one ring of ``ring_inner_diameter``
-    centred on them. A wider bundle gets, under ``ring_overflow: chain``, the
-    fewest rings (at least two) that cover the bundle's outer edges, centred on
-    the bundle and spaced so each ring's outer edge meets the next one's inner
-    edge. That spacing never changes, so every chain has the same neck, and a
-    chain may reach a little past the outermost lines. Under ``grow`` the
-    bundle gets one ring whose inside widens to cover it.
-    """
-    lw = theme.line_width
-    inner = theme.ring_inner_diameter * lw / 2
-    stroke = theme.ring_stroke_width * lw
-    span = hi - lo
-    mid = (lo + hi) / 2
-    if lines <= theme.ring_max_lines or span <= COORD_TOLERANCE_FINE:
-        return RingLayout([mid], inner)
-    if theme.ring_overflow == RING_GROW:
-        return RingLayout([mid], max(inner, (span + lw) / 2))
-    step = 2 * inner + stroke
-    outer = inner + stroke
-    count = max(2, math.ceil((span + lw - 2 * outer) / step - COORD_TOLERANCE_FINE) + 1)
-    return RingLayout([mid + (k - (count - 1) / 2) * step for k in range(count)], inner)
-
-
-def ring_groups(positions: Sequence[float], theme: Theme) -> list[RingLayout]:
-    """Rings for lines at *positions*, one layout per track.
-
-    Lines closer than a ring chain's own spacing share a track; a wider gap
-    starts another track, which the drawing joins with a dumbbell link.
-    """
-    lw = theme.line_width
-    spacing = (theme.ring_inner_diameter + theme.ring_stroke_width) * lw
-    ordered = sorted(positions)
-    groups: list[list[float]] = [[ordered[0]]]
-    for pos in ordered[1:]:
-        if pos - groups[-1][-1] > spacing + COORD_TOLERANCE_FINE:
-            groups.append([pos])
-        else:
-            groups[-1].append(pos)
-    return [ring_layout(g[0], g[-1], len(g), theme) for g in groups]
-
-
-def _draw_ring_chain(
-    d: draw.Group | draw.Drawing,
-    groups: Sequence[RingLayout],
-    axis: _CrossAxis,
-    theme: Theme,
-    station_data: Mapping[str, str],
-    muted: bool,
-) -> None:
-    """Draw interchange rings, one :class:`RingLayout` per track.
-
-    Drawn in layers so a chain reads as one outline around joined centres:
-    dumbbell links between tracks, every ring's outline, every ring's inside
-    (which covers any neighbouring outline crossing it), then a strip in the
-    ring fill from the first centre to the last, through the outlines where
-    rings meet. Ring centres are offsets along *axis*.
-    """
-    lw = theme.line_width
-    stroke = theme.ring_stroke_width * lw
-    half_bridge = theme.ring_bridge_width * lw / 2
-    fill = theme.station_fill
-    color = theme.station_stroke
-
-    group_el = draw.Group(**station_data)
-    for prev, nxt in zip(groups, groups[1:]):
-        group_el.append(
-            draw.Rectangle(
-                *axis.strip(prev.centres[-1], nxt.centres[0], half_bridge + stroke),
-                fill=color,
-                class_=_maybe_muted_class("nf-metro-ring-link", muted),
-            )
-        )
-    rings = [(off, layout.inner) for layout in groups for off in layout.centres]
-    for off, inner in rings:
-        group_el.append(
-            draw.Circle(
-                *axis.point(off),
-                inner + stroke / 2,
-                fill="none",
-                stroke=color,
-                stroke_width=stroke,
-                class_=_maybe_muted_class("nf-metro-ring", muted),
-            )
-        )
-    for off, inner in rings:
-        group_el.append(
-            draw.Circle(
-                *axis.point(off), inner, fill=fill, class_=_ns("nf-metro-ring-hole")
-            )
-        )
-    if len(rings) > 1:
-        group_el.append(
-            draw.Rectangle(
-                *axis.strip(rings[0][0], rings[-1][0], half_bridge),
-                fill=fill,
-                class_=_ns("nf-metro-ring-bridge"),
-            )
-        )
-    d.append(group_el)
-
-
-def _draw_line_station_glyph(
-    d: draw.Group | draw.Drawing,
-    graph: MetroGraph,
-    theme: Theme,
-    bundle: _Bundle,
-    station_data: dict[str, str],
-    muted: bool,
-    label_point: tuple[float, float] | None,
-) -> bool:
-    """Draw a station as a tab, terminus bar or ring when its theme asks for one.
-
-    Returns whether anything was drawn; a ``pill`` theme draws nothing here.
-    """
-    station = bundle.station
-    lines = graph.station_lines(station.id)
-    if theme.station_glyph == GLYPH_TICK and len(lines) == 1:
-        color = effective_line_color(
-            graph.lines.get(lines[0]),
-            theme,
-            frozenset(lines) if muted else frozenset(),
-        )
-        box = (
-            bundle_end_bar_box(bundle, theme)
-            if station.is_terminus
-            else station_tab_box(bundle, theme, label_point)
-        )
-        paint = muted_paint_class(theme, muted, "fill")
-        extra = {"class_": f"{station_data['class_']} {paint}"} if paint else {}
-        d.append(draw.Rectangle(*box, fill=color, **{**station_data, **extra}))
-        return True
-    if station.is_blank_terminus and len(lines) >= 2:
-        if theme.terminus_glyph == TERMINUS_BAR:
-            d.append(
-                draw.Rectangle(
-                    *bundle_end_bar_box(bundle, theme),
-                    fill=theme.station_stroke,
-                    **{
-                        **station_data,
-                        "class_": station_data["class_"]
-                        + " "
-                        + _maybe_muted_class("nf-metro-terminus-bar", muted),
-                    },
-                )
-            )
-            return True
-        if theme.terminus_glyph != GLYPH_RING:
-            return False
-        _draw_bundle_rings(d, bundle, len(lines), theme, station_data, muted)
-        return True
-    if theme.interchange_glyph == GLYPH_RING and len(lines) >= 2:
-        _draw_bundle_rings(d, bundle, len(lines), theme, station_data, muted)
-        return True
-    return False
-
-
-def _draw_bundle_rings(
-    d: draw.Group | draw.Drawing,
-    bundle: _Bundle,
-    line_count: int,
-    theme: Theme,
-    station_data: Mapping[str, str],
-    muted: bool,
-) -> None:
-    """Draw the ring, or chain of rings, across a station's bundle."""
-    layout = ring_layout(bundle.min_off, bundle.max_off, line_count, theme)
-    _draw_ring_chain(d, [layout], bundle.axis, theme, station_data, muted)
 
 
 def caption_aware_icon_step(
@@ -5845,7 +5520,7 @@ def _render_terminus_icons(
                     font_weight=theme.label_font_weight,
                     text_anchor="middle",
                     dominant_baseline="hanging",
-                    class_=_maybe_muted_class("nf-metro-station-label", muted),
+                    class_=maybe_muted_class("nf-metro-station-label", muted),
                 )
             )
 
@@ -5929,7 +5604,7 @@ def _render_labels(
         label_data: dict[str, str] = {}
         if label.station_id and not label.station_id.startswith("__"):
             label_data["data-station-id"] = label.station_id
-            label_data["class_"] = _maybe_muted_class("nf-metro-station-label", muted)
+            label_data["class_"] = maybe_muted_class("nf-metro-station-label", muted)
 
         label_fill = theme.muted_line_color if muted else theme.label_color
 
