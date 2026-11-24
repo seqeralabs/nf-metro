@@ -36,7 +36,12 @@ from nf_metro.layout.labels import (
     label_text_width,
 )
 from nf_metro.layout.layers import assign_layers
-from nf_metro.layout.ordering import assign_tracks
+from nf_metro.layout.ordering import (
+    assign_tracks,
+    peel_contenders,
+    peel_lane_ends,
+    seated_contender_helpers,
+)
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
     active_metrics,
@@ -287,6 +292,7 @@ def _layout_single_section(
     # from the exit ports through in-section feeders).
     exit_reaching = _exit_reaching_nodes(graph, section)
     priority_lane_sign = _priority_lane_sign(section, graph)
+    G, contenders = peel_contenders(sub, layers)
     tracks = assign_tracks(
         sub,
         layers,
@@ -296,10 +302,15 @@ def _layout_single_section(
         exit_reaching=exit_reaching,
         flow_horizontal=lanes_run_along_y(section.direction),
         priority_lane_sign=priority_lane_sign,
+        contenders=(G, contenders),
+    )
+    section.lane_ends, section.lane_end_seeds = peel_lane_ends(
+        sub, G, contenders, tracks, _lane_sign(section, graph)
     )
 
     if not layers:
         return None
+    seated_helpers = seated_contender_helpers(G, contenders, tracks)
 
     lead_extra = {
         pid: cols * x_spacing for pid, cols in section.off_track_lead_extra.items()
@@ -424,7 +435,7 @@ def _layout_single_section(
 
     # Put each bypass V on the side its carried line is drawn, so the fork
     # from the bypassed station's feeder reaches it without crossing the trunk.
-    _align_bypass_v_to_lane_side(sub, section, graph)
+    _align_bypass_v_to_lane_side(sub, section, graph, seated_helpers)
 
     # Bypass V helpers (``__bypass_``) have no rendered marker.  Use
     # them to extend the bbox only when V sits beyond the real-station
@@ -637,7 +648,10 @@ def _seat_fan_in_branches_on_lane_side(
 
 
 def _align_bypass_v_to_lane_side(
-    sub: MetroGraph, section: Section, graph: MetroGraph
+    sub: MetroGraph,
+    section: Section,
+    graph: MetroGraph,
+    seated: frozenset[str],
 ) -> None:
     """Seat a bypass V on its section's lane side of the trunk.
 
@@ -656,7 +670,7 @@ def _align_bypass_v_to_lane_side(
     no lane-side station to share, reflect the V across the bypassed station so
     it at least leaves on the side its line is drawn.  Horizontal (LR/RL)
     sections stack lanes on Y in the same order :func:`assign_tracks` uses, so
-    they never transpose.
+    they never transpose.  A V in *seated* is left where it is.
     """
     if not lanes_run_along_x(section.direction):
         return
@@ -676,7 +690,7 @@ def _align_bypass_v_to_lane_side(
         full = graph.stations.get(v.id)
         bypassed_id = full.bypasses_station_id if full else None
         anchor = sub.stations.get(bypassed_id) if bypassed_id else None
-        if anchor is None:
+        if anchor is None or v.id in seated:
             continue
         side_cols = [
             x for x in real_xs if (x - anchor.x) * lane_sign > SAME_COORD_TOLERANCE
