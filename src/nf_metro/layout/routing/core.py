@@ -697,6 +697,10 @@ def _route_edges_at_radius(  # noqa: C901
         validate_convergence_plans(routes, convergence_execution)
     validate_member_geometry_emission(routes, member_geometry)
 
+    if observer is not None:
+        observer.boundary_clearance_requirements += tuple(
+            ctx.boundary_clearance_requirements
+        )
     plan = observer.finish(routes) if observer is not None else None
     if plan is not None:
         from nf_metro.layout.routing.system_emission import (

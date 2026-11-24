@@ -144,6 +144,9 @@ history.
   10 px).
 - A merge feeder leaving the same column as its merge trunk, on the same line,
   descends in the trunk's own channel rather than a few pixels beside it.
+- A merge feeder's straight landing run that passes beneath a box from an
+  earlier row now runs a full inter-row clearance below it, the rows below
+  moving down to make room, rather than grazing or cutting its bottom edge.
 - Parallel lines turning together through any angle, not only 90 degrees,
   now turn about one shared centre, and rounded corners draw as circular arcs
   (cubic Bézier circle approximations) where they were quadratic curves. A

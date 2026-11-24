@@ -56,6 +56,7 @@ from nf_metro.layout.routing.reversal import (
     detect_reversed_sections,
     tb_positive_fan_sections,
 )
+from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
@@ -267,6 +268,10 @@ class _RoutingCtx:
     route_systems: RouteSystemEmissionExecution | None = None
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
+    boundary_clearance_requirements: list[BoundaryClearanceRequirement] = field(
+        default_factory=list
+    )
+    """Room handlers asked settlement for, published with the route plan."""
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
     perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)

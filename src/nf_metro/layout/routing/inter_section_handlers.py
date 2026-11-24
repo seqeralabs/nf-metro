@@ -38,6 +38,7 @@ from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     lanes_run_along_x,
     lanes_run_along_y,
+    measured_distance,
     section_bbox_span,
 )
 from nf_metro.layout.pass_metrics import (
@@ -47,6 +48,7 @@ from nf_metro.layout.pass_metrics import (
     inter_row_header_clearance,
     merge_route_margin,
 )
+from nf_metro.layout.phases._common import _content_station_ys
 from nf_metro.layout.routing.bundle import build_tapered_bundle
 from nf_metro.layout.routing.centrelines import (
     _Member,
@@ -143,6 +145,10 @@ from nf_metro.layout.routing.reserved_bands import (
     seat_bundle_in_corridor_clearance,
     seat_run_in_corridor_clearance,
 )
+from nf_metro.layout.settlement_demand import (
+    BoundaryClearanceRequirement,
+    SettlementAxis,
+)
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
@@ -199,6 +205,10 @@ class _InterFacts:
     @cached_property
     def merge_entry_route(self) -> _MergeEntryRoute:
         return _merge_entry_route_kind(self)
+
+    @cached_property
+    def merge_landing_room(self) -> tuple[BoundaryClearanceRequirement, ...]:
+        return _merge_landing_room(self)
 
     @cached_property
     def merge_trunk_shape(self) -> _MergeTrunkShape:
@@ -1610,7 +1620,9 @@ def _merge_entry_route_kind(f: _InterFacts) -> _MergeEntryRoute:
 
     A near-collinear feed connects ``STRAIGHT`` to avoid a cramped curve.  A
     LEFT entry whose L-shape horizontal would cross a foreign section descends
-    the clear ``CORRIDOR`` if one exists, else loops ``AROUND_BELOW``.  A
+    the clear ``CORRIDOR`` if one exists, else loops ``AROUND_BELOW``; a box
+    the horizontal passes beneath (:func:`_merge_landing_room`) is not
+    crossed, since the ``L_SHAPE`` asks settlement for room under it.  A
     TOP/BOTTOM entry is approached down its own column, so its feeders take the
     ``PERPENDICULAR_ENTRY`` staircase whose horizontal leg runs in the inter-row
     gap; the ``L_SHAPE`` would instead turn onto the port's own Y, which for a
@@ -1631,12 +1643,70 @@ def _merge_entry_route_kind(f: _InterFacts) -> _MergeEntryRoute:
     ):
         return _MergeEntryRoute.RIGHT_ENTRY_CROSS_ROW_WRAP
     if ep_port and ep_port.side == PortSide.LEFT:
-        exclude = {src.section_id} if src.section_id else set[str]()
+        exclude = {
+            box_id
+            for requirement in f.merge_landing_room
+            for box_id in requirement.negative_section_ids
+        }
+        if src.section_id:
+            exclude.add(src.section_id)
         if f.h_segment_crosses_other_section(f.sx, ep.x, ep.y, exclude):
             if _corridor_is_viable(ctx, src, ep):
                 return _MergeEntryRoute.CORRIDOR
             return _MergeEntryRoute.AROUND_BELOW
     return _MergeEntryRoute.L_SHAPE
+
+
+def _merge_landing_room(f: _InterFacts) -> tuple[BoundaryClearanceRequirement, ...]:
+    """Room a merge feeder's landing run is owed beneath the boxes over it.
+
+    The run lands along a side entry port's Y.  A box from an earlier grid row
+    than the entry's section, over the run's span, with every marker and side
+    port above the run, is one the run passes beneath: widening the boundary
+    the entry's section starts at lowers the run and leaves the box in place,
+    so the run keeps its straight shape and is owed the inter-row edge
+    clearance below the box's bottom edge, padding included.  One requirement
+    per box short of it, measured from the entry port.
+    """
+    graph, ep = f.graph, f.merge_ep
+    assert ep is not None
+    port = graph.ports.get(ep.id)
+    if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
+        return ()
+    target = graph.section_for_port(port)
+    required = inter_row_edge_clearance(f.ctx.curve_radius)
+    lo_x, hi_x = sorted((f.sx, ep.x))
+    room: list[BoundaryClearanceRequirement] = []
+    for box in graph.sections.values():
+        if (
+            box.id in f.endpoint_section_ids
+            or box.grid_row >= target.grid_row
+            or box.bbox_h <= 0
+            or box.bbox_x >= hi_x
+            or box.bbox_x + box.bbox_w <= lo_x
+            or measured_distance(box.bbox_y + box.bbox_h, ep.y)
+            >= required - COORD_TOLERANCE
+        ):
+            continue
+        markers = _content_station_ys(graph, box) + [
+            graph.stations[pid].y
+            for pid in (*box.entry_ports, *box.exit_ports)
+            if graph.ports[pid].side in (PortSide.LEFT, PortSide.RIGHT)
+        ]
+        if markers and max(markers) < ep.y:
+            room.append(
+                BoundaryClearanceRequirement(
+                    SettlementAxis.ROW,
+                    target.grid_row,
+                    ep.id,
+                    required,
+                    (box.id,),
+                    (target.id,),
+                    f"the merge landing run into {ep.id} beneath {box.id}",
+                    positive_anchor_id=ep.id,
+                )
+            )
+    return tuple(room)
 
 
 def _route_perpendicular_entry_stair(
@@ -1697,7 +1767,12 @@ def _route_merge_entry_kind(
         ),
         _MergeEntryRoute.L_SHAPE: lambda: _route_l_shape(edge, src, ep, f.i, f.n, ctx),
     }
-    return builders[kind]()
+    route = builders[kind]()
+    if route is not None and kind is _MergeEntryRoute.L_SHAPE:
+        for requirement in f.merge_landing_room:
+            if requirement not in ctx.boundary_clearance_requirements:
+                ctx.boundary_clearance_requirements.append(requirement)
+    return route
 
 
 def _route_merge_entry_family(f: _InterFacts) -> RoutedPath | None:

@@ -1868,10 +1868,13 @@ They are design evidence, not part of this specification.
   before its own earlier translations would be stale.
   `measure_row_gap_clearance` (`layout/phases/bbox.py`) states the row-axis
   box-clearance demands. Convergence planning can publish a column-axis
-  `BoundaryClearanceRequirement` when a landing pair lacks runway, and
-  `measure_boundary_clearance_requirements` re-measures it against live box
-  edges. `measure_drawn_corridor_clearance` states any positive-side
-  containment owed by the strict post-grant ledger. The demand vocabulary is
+  `BoundaryClearanceRequirement` when a landing pair lacks runway, a merge
+  feeder's L-shaped landing publishes a row-axis one, anchored on its entry
+  port, for each earlier-row box it passes beneath short of
+  `inter_row_edge_clearance`, and `measure_boundary_clearance_requirements`
+  re-measures each against live box edges (or the anchor station).
+  `measure_drawn_corridor_clearance` states any positive-side containment owed
+  by the strict post-grant ledger. The demand vocabulary is
   `layout/settlement_demand.py`, held apart from settlement so a layout phase
   can state a demand without importing the routing stack the ledger is built on.
   Rail layouts raise no clearance demand: their row pitch comes from the
