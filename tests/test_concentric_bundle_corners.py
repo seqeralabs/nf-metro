@@ -14,11 +14,12 @@ The correctness check here is the one the corner-radius *source* ratchet
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import CURVE_RADIUS
+from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import (
     OffsetRegime,
@@ -32,7 +33,7 @@ from nf_metro.layout.routing.invariants import (
     check_fanout_lane_continuity,
     check_standard_source_bundle_corner_inputs,
 )
-from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners
+from nf_metro.layout.routing.normalize import _size_concentric_cohorts
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge
 
@@ -219,7 +220,7 @@ def test_short_planned_source_leads_share_a_clamp_safe_reference_radius() -> Non
     assert check_fanout_lane_continuity(observation.routes, graph)
 
 
-def test_unowned_short_leads_share_a_bisected_clamp_safe_radius() -> None:
+def test_unowned_short_leads_share_a_clamp_safe_radius() -> None:
     routes = [
         _route(
             "main",
@@ -237,11 +238,11 @@ def test_unowned_short_leads_share_a_bisected_clamp_safe_radius() -> None:
         ),
     ]
 
-    _rederive_semantic_end_corners(routes, CURVE_RADIUS, {})
+    _size_concentric_cohorts(routes, CURVE_RADIUS, {}, OFFSET_STEP)
 
     assert [route.curve_radii[0] for route in routes if route.curve_radii] == [
-        pytest.approx(6.01),
-        pytest.approx(10.01),
+        pytest.approx(6.0),
+        pytest.approx(10.0),
     ]
     assert check_concentric_bundle_corners(None, routes, {}) == []
 
@@ -406,3 +407,138 @@ def test_diagonal_leg_is_not_a_corner() -> None:
 def test_single_line_bundle_is_skipped() -> None:
     """One line has no bundle-mate to be concentric with."""
     assert check_concentric_bundle_corners(None, [_CONCENTRIC_A], {}) == []
+
+
+def _diagonal_lane(line_id: str, offset: float) -> RoutedPath:
+    """A lane turning 45 degrees up, shifted *offset* outward of the turn."""
+    corner = (100.0 + math.tan(math.radians(22.5)) * offset, 100.0 + offset)
+    end = (
+        corner[0] + 100 * math.cos(math.radians(45)),
+        corner[1] - 100 * math.sin(math.radians(45)),
+    )
+    return _route(line_id, [(0.0, 100.0 + offset), corner, end], [10.0], source=line_id)
+
+
+def test_separate_bundles_on_one_bisector_turn_apart() -> None:
+    from nf_metro.layout.routing.normalize import _concentric_corner_cohorts
+
+    routes = [
+        _diagonal_lane("a1", 0.0),
+        _diagonal_lane("a2", OFFSET_STEP),
+        _diagonal_lane("b1", 10 * OFFSET_STEP),
+        _diagonal_lane("b2", 11 * OFFSET_STEP),
+    ]
+    cohorts = _concentric_corner_cohorts(routes, {}, True, OFFSET_STEP)
+    assert sorted(sorted(m.route.line_id for m in c.members) for c in cohorts) == [
+        ["a1", "a2"],
+        ["b1", "b2"],
+    ]
+
+
+def test_plan_sizing_leaves_an_unsized_route_unsized() -> None:
+    """Plans record an unsized route's radii as ``None``, which later passes
+    read as not handler-sized; only the final sizing may give it radii."""
+    plan_routes = [_diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)]
+    plan_routes[1].curve_radii = None
+    _size_concentric_cohorts(
+        plan_routes, CURVE_RADIUS, {}, OFFSET_STEP, respect_owned_corners=False
+    )
+    assert plan_routes[1].curve_radii is None
+    assert plan_routes[0].curve_radii == [10.0]
+
+    final_routes = [_diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)]
+    final_routes[1].curve_radii = None
+    _size_concentric_cohorts(final_routes, CURVE_RADIUS, {}, OFFSET_STEP)
+    assert final_routes[1].curve_radii is not None
+    assert final_routes[1].curve_radii[0] > CURVE_RADIUS
+
+
+@pytest.mark.parametrize("radii", [[10.0, 7.0], [10.0, 3.0, 12.0], [0.0, 25.0]])
+def test_corner_budget_is_the_largest_radius_resolve_leaves_unclamped(radii) -> None:
+    from nf_metro.layout.routing.corners import (
+        corner_radius_budget,
+        resolve_curve_radius_at,
+    )
+
+    points = [(0.0, 0.0), (0.0, 40.0), (30.0, 40.0), (30.0, 90.0), (55.0, 90.0)]
+    desired = (radii + [10.0, 10.0, 10.0])[:3]
+    for index in range(3):
+        budget = corner_radius_budget(points, desired, index)
+        at_budget = list(desired)
+        at_budget[index] = budget
+        assert resolve_curve_radius_at(points, at_budget, index) == pytest.approx(
+            budget
+        )
+        past = list(desired)
+        past[index] = budget + 0.5
+        assert resolve_curve_radius_at(points, past, index) < budget + 0.5
+
+
+def test_fan_reanchor_lowers_its_reference_to_the_shortest_leg() -> None:
+    """A fan whose innermost lane cannot reach the curve radius seats it at
+    its leg budget instead, every lane keeping its concentric offset."""
+    from nf_metro.layout.routing.normalize import _reanchor_concentric_corner_fans
+
+    outer = _route("a", [(0.0, 0.0), (0.0, 100.0), (50.0, 100.0)], [10.0])
+    inner = _route("b", [(3.0, 0.0), (3.0, 97.0), (11.0, 97.0)], [7.0])
+    _reanchor_concentric_corner_fans([outer, inner], {}, CURVE_RADIUS)
+    assert inner.curve_radii == [pytest.approx(8.0)]
+    assert outer.curve_radii == [pytest.approx(11.0)]
+
+
+def test_a_route_looping_back_alongside_itself_is_not_a_cohort() -> None:
+    """Two corners of one route that happen to sit like neighbouring lanes
+    are one line passing twice, not a bundle turning together."""
+    from nf_metro.layout.routing.normalize import _concentric_corner_cohorts
+
+    first = (100.0, 0.0)
+    bisector = (math.sin(math.radians(22.5)), math.cos(math.radians(22.5)))
+    second = (first[0] + 5 * bisector[0], first[1] + 5 * bisector[1])
+    diagonal = (50 * math.cos(math.radians(45)), -50 * math.sin(math.radians(45)))
+    loop = _route(
+        "loop",
+        [
+            (0.0, 0.0),
+            first,
+            (first[0] + diagonal[0], first[1] + diagonal[1]),
+            (300.0, first[1] + diagonal[1]),
+            (300.0, 200.0),
+            (-50.0, 200.0),
+            (-50.0, second[1]),
+            second,
+            (second[0] + diagonal[0], second[1] + diagonal[1]),
+        ],
+    )
+    assert _concentric_corner_cohorts([loop], {}, True, OFFSET_STEP) == []
+
+
+def test_cohort_reference_keeps_the_largest_radius_a_lane_asks_for() -> None:
+    """An inner lane already wider than the curve radius keeps its radius and
+    the outer lane nests outside it."""
+    inner, outer = _diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)
+    inner.curve_radii = [20.0]
+    _size_concentric_cohorts([inner, outer], CURVE_RADIUS, {}, OFFSET_STEP)
+    shift = OFFSET_STEP * math.tan(math.radians(22.5))
+    assert inner.curve_radii == [pytest.approx(20.0)]
+    assert outer.curve_radii == [pytest.approx(20.0 + shift)]
+
+
+def test_coincident_corner_budget_counts_an_unsized_neighbour_at_the_base_radius() -> (
+    None
+):
+    """A neighbouring corner a route holds no radius for draws at the base
+    radius, so its share of the shared leg caps the coincident reference."""
+    from nf_metro.layout.routing.normalize import _unify_coincident_corner_radii
+
+    short = _route(
+        "x",
+        [(0.0, 0.0), (0.0, 100.0), (25.0, 100.0), (25.0, 200.0)],
+        [20.0],
+        target="short",
+    )
+    long = _route(
+        "x", [(0.0, -50.0), (0.0, 100.0), (200.0, 100.0)], [20.0], target="long"
+    )
+    _unify_coincident_corner_radii([short, long])
+    assert short.curve_radii == [pytest.approx(25.0 - CURVE_RADIUS)]
+    assert long.curve_radii == [pytest.approx(25.0 - CURVE_RADIUS)]

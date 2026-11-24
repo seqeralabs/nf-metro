@@ -251,12 +251,13 @@ def test_source_turnout_animation_uses_the_same_concentric_radii() -> None:
     paths = {(d.line_id, d.track.d_attr) for d in timeline.dots}
 
     assert any(
-        line_id == "reads" and "L 192.00 124.00 Q 202.00 124.00 202.00 134.00" in path
+        line_id == "reads"
+        and "L 192.00 124.00 C 197.52 124.00 202.00 128.48 202.00 134.00" in path
         for line_id, path in paths
     )
     assert any(
         line_id == "assembly"
-        and "L 192.00 120.00 Q 206.00 120.00 206.00 134.00" in path
+        and "L 192.00 120.00 C 199.73 120.00 206.00 126.27 206.00 134.00" in path
         for line_id, path in paths
     )
 
