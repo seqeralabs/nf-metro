@@ -12,7 +12,6 @@ from nf_metro.layout.constants import (
     EXIT_GAP_MULTIPLIER,
     FONT_HEIGHT,
     ICON_CAPTION_GAP,
-    ICON_HALF_HEIGHT,
     ICON_INTER_GAP,
     LABEL_BBOX_MARGIN,
     LABEL_MARGIN,
@@ -25,7 +24,6 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_CLEARANCE,
     TERMINUS_ICON_CLEARANCE_V,
     TERMINUS_ICON_GAP,
-    TERMINUS_WIDTH,
 )
 from nf_metro.layout.geometry import (
     Axis,
@@ -43,6 +41,7 @@ from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
+    active_theme_metrics,
     icon_half_height_approx,
     station_radius_approx,
     terminus_width_approx,
@@ -1178,7 +1177,7 @@ def _terminus_icon_clearance(
     from being shrink-to-fit clamped, so the excess over that default width
     is added back in to keep the reservation matching the drawn icon.
     """
-    icon_width_growth = terminus_width_approx() - TERMINUS_WIDTH
+    icon_width_growth = terminus_width_approx() - active_theme_metrics().terminus_width
     if n_icons <= 1:
         return TERMINUS_ICON_CLEARANCE + icon_width_growth
     extra = (n_icons - 1) * _terminus_icon_step(n_icons, names)
@@ -1268,7 +1267,9 @@ def _terminus_icon_clearance_vertical(
         if caption_line_count > 1
         else 0.0
     )
-    icon_height_growth = 2 * (icon_half_height_approx() - ICON_HALF_HEIGHT)
+    icon_height_growth = 2 * (
+        icon_half_height_approx() - active_theme_metrics().icon_half_height
+    )
     base = TERMINUS_ICON_CLEARANCE_V + extra_caption_height + icon_height_growth
     if n_icons <= 1:
         return base

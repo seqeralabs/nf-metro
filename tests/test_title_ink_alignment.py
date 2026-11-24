@@ -226,3 +226,20 @@ def test_title_block_starts_at_the_leftmost_ink(name: str, mode: str) -> None:
         assert abs(title_x - ink) <= INK_TOLERANCE, (
             f"{label}: title x={title_x:.1f}, leftmost ink {ink:.1f}"
         )
+
+
+def test_a_thick_section_outline_is_ink_the_title_starts_at(tmp_path: Path) -> None:
+    theme = tmp_path / "thick.yaml"
+    theme.write_text("name: thick\nsection_stroke_width: 12\n")
+    path = ROOT / "examples/rnaseq_sections.mmd"
+    graph = prepare_graph(
+        path.read_text(),
+        title="Map title",
+        theme=str(theme),
+        source_dir=str(path.parent),
+    )
+    result = render_graph_result(graph, resolve_theme(None, graph), RenderConfig())
+    root = ET.fromstring(result.content)
+    ink = leftmost_ink(root, skip_images=False)
+    title_x = float(_title(root).attrib["x"])
+    assert abs(title_x - ink) <= INK_TOLERANCE, (title_x, ink)

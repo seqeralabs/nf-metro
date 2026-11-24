@@ -2299,3 +2299,14 @@ def test_a_rail_layout_keeps_the_row_pitch_its_idiom_set(path: Path) -> None:
     for was, now in changed:
         assert len(was[4]) == 1, "the held run was not a single flat segment"
         assert len(now[4]) == 3, "the run did not become a staircase"
+
+
+def test_a_user_theme_past_every_built_in_widens_the_canvas_clearance() -> None:
+    """A theme drawing wider lines or larger chevrons than any built-in is
+    covered by the clearance it lays out with."""
+    from nf_metro.layout.pass_metrics import ThemeMetrics, theme_metrics_context
+
+    with theme_metrics_context(ThemeMetrics(line_width=6.0, marker_half_extent=8.0)):
+        assert canvas_edge_clearance() == pytest.approx(8.0 + 6.0 / 2)
+        with stroke_scale_context(2.0):
+            assert canvas_edge_clearance() == pytest.approx(8.0 + 6.0)

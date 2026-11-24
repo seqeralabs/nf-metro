@@ -53,7 +53,12 @@ from nf_metro.layout.labels import (
     _label_ink_quad,
     place_labels,
 )
-from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
+from nf_metro.layout.pass_metrics import (
+    ThemeMetrics,
+    font_scale_context,
+    stroke_scale_context,
+    theme_metrics_context,
+)
 from nf_metro.layout.phases._common import _station_bundle_offset_span
 from nf_metro.layout.phases.bbox import measure_row_gap_clearance
 from nf_metro.layout.phases.canvas import translate_graph
@@ -195,7 +200,6 @@ from nf_metro.render.constants import (
     SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
     SECTION_NUM_FONT_SIZE,
-    SECTION_STROKE_WIDTH,
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
@@ -909,6 +913,7 @@ def _build_render_plan_result(
     with (
         font_scale_context(graph.font_scale),
         stroke_scale_context(graph.stroke_scale),
+        theme_metrics_context(ThemeMetrics.of(theme)),
         metrics_face_context(metrics_face),
     ):
         try:
@@ -2297,6 +2302,7 @@ def _settled_render_graph(source_graph: MetroGraph, theme: Theme) -> MetroGraph:
     with (
         font_scale_context(source_graph.font_scale),
         stroke_scale_context(source_graph.stroke_scale),
+        theme_metrics_context(ThemeMetrics.of(theme)),
     ):
         graph, _settled = _settle_clear_of_the_canvas_margins(
             source_graph,
@@ -3122,7 +3128,7 @@ def _leftmost_ink(
     for section in graph.sections.values():
         if not section.is_drawn_box:
             continue
-        reach.append(section.bbox_x - SECTION_STROKE_WIDTH / 2)
+        reach.append(section.bbox_x - theme.section_stroke_width / 2)
         placement = header_placements[section.id]
         if section.has_badge and theme.section_badges:
             reach.append(placement.badge_cx - SECTION_NUM_CIRCLE_R_LARGE)

@@ -18,8 +18,10 @@ accessors here.
 from __future__ import annotations
 
 __all__ = [
+    "ThemeMetrics",
     "active_font_scale",
     "active_stroke_scale",
+    "active_theme_metrics",
     "canvas_edge_clearance",
     "font_scale_context",
     "icon_half_height_approx",
@@ -27,20 +29,65 @@ __all__ = [
     "station_stroke_approx",
     "stroke_scale_context",
     "terminus_width_approx",
+    "theme_metrics_context",
 ]
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 from nf_metro.layout.constants import (
-    CANVAS_EDGE_CLEARANCE,
+    DEFAULT_LINE_WIDTH,
+    DIRECTIONAL_MARKER_HALF_EXTENT,
     ICON_HALF_HEIGHT,
     STATION_RADIUS_APPROX,
     STATION_STROKE_APPROX,
     TERMINUS_WIDTH,
     WIDEST_THEME_LINE_WIDTH,
 )
+
+
+class ThemeMetrics(NamedTuple):
+    """The drawn sizes of the theme a pass lays out for, before any scaling.
+
+    The defaults are the base theme's, for a pass run with no theme bound.
+    """
+
+    terminus_width: float = TERMINUS_WIDTH
+    icon_half_height: float = ICON_HALF_HEIGHT
+    line_width: float = DEFAULT_LINE_WIDTH
+    marker_half_extent: float = DIRECTIONAL_MARKER_HALF_EXTENT
+
+    @classmethod
+    def of(cls, theme: object) -> ThemeMetrics:
+        """The metrics of a :class:`~nf_metro.render.style.Theme`."""
+        return cls(
+            getattr(theme, "terminus_width"),
+            getattr(theme, "terminus_height") / 2,
+            getattr(theme, "line_width"),
+            getattr(theme, "directional_marker_size"),
+        )
+
+
+_ACTIVE_THEME_METRICS: ContextVar[ThemeMetrics] = ContextVar(
+    "active_theme_metrics", default=ThemeMetrics()
+)
+
+
+def active_theme_metrics() -> ThemeMetrics:
+    """The drawn sizes of the theme the current pass lays out for."""
+    return _ACTIVE_THEME_METRICS.get()
+
+
+@contextmanager
+def theme_metrics_context(metrics: ThemeMetrics) -> Iterator[None]:
+    """Reserve against *metrics* for the duration of the block."""
+    token = _ACTIVE_THEME_METRICS.set(metrics)
+    try:
+        yield
+    finally:
+        _ACTIVE_THEME_METRICS.reset(token)
+
 
 _ACTIVE_FONT_SCALE: ContextVar[float] = ContextVar("active_font_scale", default=1.0)
 _ACTIVE_STROKE_SCALE: ContextVar[float] = ContextVar("active_stroke_scale", default=1.0)
@@ -93,12 +140,12 @@ def terminus_width_approx() -> float:
     shrink-to-fit clamped back down, so layout has to reserve the same
     grown footprint.
     """
-    return TERMINUS_WIDTH * active_font_scale()
+    return active_theme_metrics().terminus_width * active_font_scale()
 
 
 def icon_half_height_approx() -> float:
     """Terminus icon half-height to reserve against, under the active font scale."""
-    return ICON_HALF_HEIGHT * active_font_scale()
+    return active_theme_metrics().icon_half_height * active_font_scale()
 
 
 def canvas_edge_clearance() -> float:
@@ -108,7 +155,13 @@ def canvas_edge_clearance() -> float:
     direction chevron's arms, so only the half-stroke term of
     :data:`~nf_metro.layout.constants.CANVAS_EDGE_CLEARANCE` scales.  Reading the
     unscaled constant would leave a coarsened render short of the margin by half
-    the extra stroke weight.
+    the extra stroke weight.  A theme drawing wider lines or larger chevrons than
+    any built-in widens the clearance to match.
     """
-    extra_stroke = WIDEST_THEME_LINE_WIDTH * (active_stroke_scale() - 1.0)
-    return CANVAS_EDGE_CLEARANCE + extra_stroke / 2
+    metrics = active_theme_metrics()
+    line_width = max(WIDEST_THEME_LINE_WIDTH, metrics.line_width)
+    clearance = (
+        max(DIRECTIONAL_MARKER_HALF_EXTENT, metrics.marker_half_extent) + line_width / 2
+    )
+    extra_stroke = line_width * (active_stroke_scale() - 1.0)
+    return clearance + extra_stroke / 2
