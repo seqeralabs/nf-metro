@@ -984,7 +984,7 @@
   "status": "defensive"
  },
  "normalize.py::if abs(delta) <= COORD_TOLERANCE:::#2": {
-  "note": "_snap_merge_feeder_group skips a merge feeder whose opening descent already sits on the trunk's shared column (no shift needed). The corpus's merge feeders all reach the trunk from a distinct column, so the already-coincident skip arm stays un-exercised. Defensive and idempotent across the routing replays a render performs.",
+  "note": "_seat_merge_feeder_opening skips a merge feeder whose opening descent already sits on the trunk's shared column (no shift needed). The corpus's merge feeders all reach the trunk from a distinct column, so the already-coincident skip arm stays un-exercised. Defensive and idempotent across the routing replays a render performs.",
   "status": "defensive"
  },
  "normalize.py::if abs(ly - pts[1][1]) < COORD_TOLERANCE:::#1": {

@@ -956,28 +956,14 @@ def _build_planned_convergence(
         trial_routes[edge_key] = route
 
     if trunk_run is not None:
-        from nf_metro.layout.routing.normalize import (
-            _merge_feeder_groups,
-            _snap_merge_feeder_group,
-        )
-
         exit_turn_geometry = {
             edge_key: _exit_turn_geometry(route)
             for edge_key, route in trial_routes.items()
         }
         trial_route_list = list(trial_routes.values())
-        for feeder_group in _merge_feeder_groups(trial_route_list, ctx):
-            _snap_merge_feeder_group(feeder_group, graph)
         _seat_port_approaches_on_trunk_flank(
             trial_routes[trunk_edge_key], trial_route_list, ctx
         )
-        if any(
-            exit_turn_geometry[edge_key] != _exit_turn_geometry(route)
-            for edge_key, route in trial_routes.items()
-        ):
-            raise ConvergenceOwnershipConflict(
-                "convergence alignment conflicts with an upstream exit turn"
-            )
     else:
         for edge_key in incoming_edges:
             _bake_route(trial_routes[edge_key], ctx)
@@ -988,13 +974,6 @@ def _build_planned_convergence(
         _seat_port_approaches_on_trunk_flank(
             None, [trial_routes[edge_key] for edge_key in incoming_edges], ctx
         )
-        if any(
-            exit_turn_geometry[edge_key] != _exit_turn_geometry(trial_routes[edge_key])
-            for edge_key in incoming_edges
-        ):
-            raise ConvergenceOwnershipConflict(
-                "convergence alignment conflicts with an upstream exit turn"
-            )
         try:
             trunk_axis, carrier_rank = _shared_terminal_axis(
                 tuple(trial_routes[edge_key] for edge_key in incoming_edges),
@@ -1032,6 +1011,13 @@ def _build_planned_convergence(
             trunk_edge_key = incoming_edges[carrier_rank]
             primary_member_id = member_by_edge[trunk_edge_key]
             primary_reason = ConvergenceTrunkReason.SHARED_TERMINAL_APPROACH
+    if any(
+        before != _exit_turn_geometry(trial_routes[edge_key])
+        for edge_key, before in exit_turn_geometry.items()
+    ):
+        raise ConvergenceOwnershipConflict(
+            "convergence alignment conflicts with an upstream exit turn"
+        )
 
     landings: list[ConvergenceLanding] = []
     trunk_points = trial_routes[trunk_edge_key].points

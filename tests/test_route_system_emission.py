@@ -7,7 +7,6 @@ from types import MappingProxyType
 
 import pytest
 
-import nf_metro.layout.routing.normalize as normalize
 import nf_metro.layout.routing.planning as planning
 import nf_metro.layout.routing.system_emission as system_emission
 from nf_metro.api import prepare_graph
@@ -404,30 +403,6 @@ def test_routing_constructs_only_the_final_emission_execution(
     observe_route_edges(graph, station_offsets=compute_station_offsets(graph))
 
     assert calls == 1
-
-
-def test_planned_convergence_channels_are_fixed_merge_snap_anchors(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    original = normalize._snap_merge_feeder_group
-    observed_dispositions: list[tuple[str | None, ...]] = []
-
-    def record_snap(group, graph):
-        dispositions = tuple(
-            channel.route.route_system_disposition for channel in group.channels
-        )
-        observed_dispositions.append(dispositions)
-        assert not any(
-            normalize._planner_owns_channel(channel) for channel in group.channels
-        )
-        original(group, graph)
-
-    monkeypatch.setattr(normalize, "_snap_merge_feeder_group", record_snap)
-
-    _observe(ROOT / "examples" / "topologies" / "merge_feeder_shared_channel_gap.mmd")
-
-    assert observed_dispositions
-    assert any(None in dispositions for dispositions in observed_dispositions)
 
 
 def test_every_reason_a_planner_can_generate_is_registered() -> None:

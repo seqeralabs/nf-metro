@@ -2895,10 +2895,24 @@ def _merge_branch_lead_x(
 
 def _merge_trunk_descent_x(ctx: _RoutingCtx, edge: Edge, src_col: int) -> float | None:
     """The gap channel the merge trunk into *edge*'s target descends in, when
-    the trunk carries *edge*'s line out of the same source column and bypasses
-    its intervening sections rather than wrapping below them."""
+    the trunk leaves the same source column: the channel its bypass drops
+    through, or the descent of the loop it wraps under the target with.
+
+    The trunk is read on *edge*'s own line when it carries it, else on the
+    first line it does carry: every line of the trunk descends in one channel.
+    """
     trunk_source = ctx.merge.trunk_source.get(edge.target)
-    trunk_edge = ctx.edge_by_key.get((trunk_source or "", edge.target, edge.line_id))
+    if trunk_source is None:
+        return None
+    trunk_edge = next(
+        (
+            found
+            for line_id in (edge.line_id, *ctx.graph.lines)
+            if (found := ctx.edge_by_key.get((trunk_source, edge.target, line_id)))
+            is not None
+        ),
+        None,
+    )
     if trunk_edge is None:
         return None
     trunk_src, trunk_tgt = ctx.graph.edge_endpoints(trunk_edge)
@@ -2907,7 +2921,7 @@ def _merge_trunk_descent_x(ctx: _RoutingCtx, edge: Edge, src_col: int) -> float 
         return None
     shape = facts.merge_trunk_shape
     if shape.around_below:
-        return None
+        return _merge_trunk_around_below_geometry(facts, shape).descent_x
     return _bypass_geometry(facts, shape).gap1_x
 
 

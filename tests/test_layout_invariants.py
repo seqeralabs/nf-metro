@@ -2224,10 +2224,10 @@ def test_merge_fanout_pivots_share_first_corner(fixture):
 def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
     """Merge fan-outs share their corner without the divergent-descent passes.
 
-    With ``_divergent_source_groups`` and ``_merge_feeder_groups`` stubbed to
-    no-ops, a merge fan-out's same-direction branches share their first corner
-    purely through ``_coincide_merge_fanout_pivots`` -- which recognises the fan
-    and runs at gap-materialisation time.  This pins the sharing to construction
+    With ``_divergent_source_groups`` stubbed to a no-op, a merge fan-out's
+    same-direction branches share their first corner purely through
+    ``_coincide_merge_fanout_pivots`` -- which recognises the fan and runs at
+    gap-materialisation time.  This pins the sharing to construction
     rather than to the later reconciliation passes.  Removing
     ``_coincide_merge_fanout_pivots`` makes this assertion fail, so it genuinely
     exercises that pass.
@@ -2235,7 +2235,6 @@ def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
     import nf_metro.layout.routing.normalize as normalize_mod
 
     monkeypatch.setattr(normalize_mod, "_divergent_source_groups", lambda routes: [])
-    monkeypatch.setattr(normalize_mod, "_merge_feeder_groups", lambda routes, ctx: [])
     graph = _layout(fixture, _cache=False)
     routes = route_edges(graph)
     offsets = compute_station_offsets(graph)
