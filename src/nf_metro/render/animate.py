@@ -25,7 +25,6 @@ from nf_metro.layout.routing.common import apply_route_offsets, point_on_polylin
 from nf_metro.layout.routing.corners import (
     corner_arc_controls,
     curve_tangents,
-    flatten_cubic,
     resolve_curve_radii,
 )
 from nf_metro.parser.model import Edge, MetroGraph
@@ -38,7 +37,7 @@ from nf_metro.render.constants import (
 )
 from nf_metro.render.ns import ns
 from nf_metro.render.path_geometry import (
-    iter_path_commands,
+    flatten_path,
     materialize_source_turnout_paths,
 )
 from nf_metro.render.style import Theme
@@ -527,23 +526,12 @@ def _flatten_path(
     chord.
     """
     points: list[tuple[float, float]] = []
-
-    def push(point: tuple[float, float]) -> None:
-        # Repeated waypoints are common (a zero-length corner); a duplicate
-        # would add a zero-length segment for point_at to divide by.
-        if not points or points[-1] != point:
-            points.append(point)
-
-    pen = (0.0, 0.0)
-    for command, nums in iter_path_commands(d_attr):
-        if command in ("M", "L"):
-            pen = (nums[0], nums[1])
-            push(pen)
-        else:
-            c1, c2, end = (nums[0], nums[1]), (nums[2], nums[3]), (nums[4], nums[5])
-            for point in flatten_cubic(pen, c1, c2, end, _CURVE_FLATTEN_STEPS):
-                push(point)
-            pen = end
+    for subpath in flatten_path(d_attr, _CURVE_FLATTEN_STEPS):
+        for point in subpath:
+            # Repeated waypoints are common (a zero-length corner); a duplicate
+            # would add a zero-length segment for point_at to divide by.
+            if not points or points[-1] != point:
+                points.append(point)
 
     if not points:
         points.append((0.0, 0.0))

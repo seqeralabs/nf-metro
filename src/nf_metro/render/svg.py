@@ -3583,8 +3583,7 @@ class _DrawnPiece(NamedTuple):
     A straight run has ``control`` None and lies on polyline leg ``leg``; a
     corner is the circular arc from ``start`` to ``end`` tangent to the legs
     meeting at ``control`` (its vertex), has no ``leg``, and carries ``curved`` from
-    :class:`~nf_metro.layout.routing.corners.CornerTangent`. ``handles`` are
-    the cubic control points the corner's arc is drawn with.
+    :class:`~nf_metro.layout.routing.corners.CornerTangent`.
     """
 
     start: tuple[float, float]
@@ -3592,7 +3591,12 @@ class _DrawnPiece(NamedTuple):
     control: tuple[float, float] | None = None
     curved: bool = True
     leg: int | None = None
-    handles: tuple[tuple[float, float], tuple[float, float]] | None = None
+
+    @property
+    def handles(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        """The cubic control points a corner's arc is drawn with."""
+        assert self.control is not None
+        return corner_arc_controls(self.start, self.control, self.end)
 
 
 def _drawn_pieces(
@@ -3618,13 +3622,7 @@ def _drawn_pieces(
     for leg, (start, end) in enumerate(zip(starts, ends[: len(pts) - 1])):
         pieces.append(_DrawnPiece(start, end, leg=leg))
         pieces.extend(
-            _DrawnPiece(
-                tan.before,
-                tan.after,
-                tan.corner,
-                tan.curved,
-                handles=corner_arc_controls(tan.before, tan.corner, tan.after),
-            )
+            _DrawnPiece(tan.before, tan.after, tan.corner, tan.curved)
             for tan in tangents[leg : leg + 1]
         )
     return pieces
@@ -3707,7 +3705,8 @@ def _render_edges(
                 if piece.control is None:
                     path.L(*piece.end)
                 elif piece.curved:
-                    _draw_corner(path, piece)
+                    c1, c2 = piece.handles
+                    path.C(*c1, *c2, *piece.end)
             d.append(path)
 
 
@@ -3775,7 +3774,6 @@ class _RouteTrack:
     starts: list[float]
     gaps: list[tuple[float, float]]
     total: float
-    # Each profile's arc lengths, and each piece's end arc plus _ARC_EPS.
     arcs: list[list[float]] = field(init=False)
     reach: list[float] = field(init=False)
 
@@ -4316,7 +4314,7 @@ def _gap_spans(
 
 def _arc_profile(piece: _DrawnPiece) -> list[tuple[float, float]]:
     """``(arc length, curve parameter)`` stations from a piece's start to end."""
-    if piece.handles is None:
+    if piece.control is None:
         return [(0.0, 0.0), (math.dist(piece.start, piece.end), 1.0)]
     points = flatten_cubic(piece.start, *piece.handles, piece.end, _CORNER_ARC_CHORDS)
     profile = [(0.0, 0.0)]
@@ -4332,18 +4330,13 @@ def _piece_at(
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     """Point and (unnormalised) forward tangent of *piece* at parameter *t*."""
     (ax, ay), (bx, by) = piece.start, piece.end
-    if piece.handles is None:
+    if piece.control is None:
         return (ax + (bx - ax) * t, ay + (by - ay) * t), (bx - ax, by - ay)
+    c1, c2 = piece.handles
     return (
-        cubic_point(piece.start, *piece.handles, piece.end, t),
-        cubic_tangent(piece.start, *piece.handles, piece.end, t),
+        cubic_point(piece.start, c1, c2, piece.end, t),
+        cubic_tangent(piece.start, c1, c2, piece.end, t),
     )
-
-
-def _draw_corner(path: draw.Path, piece: _DrawnPiece) -> None:
-    """Append *piece*'s rounded corner to *path* as the arc it bends around."""
-    assert piece.handles is not None
-    path.C(*piece.handles[0], *piece.handles[1], *piece.end)
 
 
 def _chevron_vertices(
@@ -4418,7 +4411,8 @@ def _render_bridged_edge(
     path.M(*pts[0])
     for piece in _drawn_pieces(pts, curve_radii, curve_radius):
         if piece.control is not None:
-            _draw_corner(path, piece)
+            c1, c2 = piece.handles
+            path.C(*c1, *c2, *piece.end)
             continue
         for bk in _run_breaks(piece, breaks):
             path.L(*bk.cut_a)

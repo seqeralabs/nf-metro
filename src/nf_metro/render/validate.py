@@ -24,9 +24,9 @@ from nf_metro.layout.labels import (
     segment_strikes_label,
 )
 from nf_metro.layout.pass_metrics import font_scale_context
-from nf_metro.layout.routing.corners import corner_from_arc, flatten_cubic
+from nf_metro.layout.routing.corners import corner_from_arc
 from nf_metro.manifest import read_manifest
-from nf_metro.render.path_geometry import iter_path_commands
+from nf_metro.render.path_geometry import flatten_commands, iter_path_commands
 
 if TYPE_CHECKING:
     from nf_metro.render.plan import RenderPlan
@@ -530,27 +530,9 @@ def parse_route_strokes(svg: str) -> list[StrokeTrace]:
     """
     traces: list[StrokeTrace] = []
     for line_id, commands in _route_elements(svg):
-        chords: list[_Segment] = []
-        gaps: list[_Segment] = []
-        pen: _Point | None = None
-        for cmd, nums in commands:
-            if cmd == "M":
-                target = (nums[0], nums[1])
-                if pen is not None:
-                    gaps.append((pen, target))
-                pen = target
-            elif pen is None:
-                continue
-            elif cmd == "L":
-                target = (nums[0], nums[1])
-                chords.append((pen, target))
-                pen = target
-            else:
-                c1, c2 = (nums[0], nums[1]), (nums[2], nums[3])
-                end = (nums[4], nums[5])
-                points = flatten_cubic(pen, c1, c2, end, _CORNER_CHORDS)
-                chords += list(zip([pen, *points], points))
-                pen = end
+        subpaths = flatten_commands(commands, _CORNER_CHORDS)
+        chords = [chord for path in subpaths for chord in zip(path, path[1:])]
+        gaps = [(a[-1], b[0]) for a, b in zip(subpaths, subpaths[1:])]
         traces.append(StrokeTrace(line_id, chords, gaps))
     return traces
 
