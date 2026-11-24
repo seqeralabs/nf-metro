@@ -73,7 +73,8 @@ def field_reference() -> str:
         "### Chrome colors and host overrides\n\n"
         "These colors also emit a CSS custom property, so a page that inlines "
         "the SVG can recolor them (see [`var()` for host overrides]"
-        "(#var-for-host-overrides-optional)). An empty value emits none.\n\n"
+        "(#var-for-host-overrides-optional)). An empty value emits none, and "
+        "a station color emits one only when its light and dark values differ.\n\n"
         "| Field | Custom property |\n| --- | --- |\n" + chrome
     )
     options = ", ".join(f"`{name}`" for name in THEMEABLE_LAYOUT_OPTIONS)
