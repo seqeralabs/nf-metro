@@ -645,9 +645,8 @@ def _peel_contenders(
     A source contends for a peel when one of its runs strictly spans the peel's
     layer, it feeds none of the fork's successors (so it is not part of the
     fork's fan), and it is seated on its own rather than as a member of a fan.
-    Its seat waits until the layer before its first join, by which every fork
-    it passes and each fork's peel must be placed.  Returns source ->
-    ``(fork, peel)`` pairs.
+    Its seat waits until the layer before its first join, and every passed
+    peel must be placed by then.  Returns source -> ``(fork, peel)`` pairs.
     """
     peels = [
         (fork, peel)
@@ -672,9 +671,7 @@ def _peel_contenders(
             and any(layer(node, 0) < layer(peel, 0) < layer(c, 0) for c in succs)
         ]
         seat_layer = _contender_seat_layer(node, G, layers)
-        if passed and all(
-            max(layer(fork, 0), layer(peel, 0)) <= seat_layer for fork, peel in passed
-        ):
+        if passed and all(layer(peel, 0) <= seat_layer for _, peel in passed):
             contenders[node] = passed
     return contenders
 
@@ -727,9 +724,9 @@ def _seat_contender(
     both sides, or a window between them too narrow for a row), the forks bar
     nothing and the station clearances alone pick the seat.
 
-    Past the hull of every coordinate involved a row clears all stations and
-    sits on the far side of every fork barring that direction, so the rows
-    within two pitches beyond it hold the answer.
+    Rows beyond the hull of base, column, span and far_sides clear every
+    station and sit on the far side of every fork barring that direction, so
+    ``reach`` stops two pitches past it.
     """
     lo, hi = (min(column), max(column)) if column else (base, base)
     rows = [(0, t) for c in column for t in (c - line_gap, c + line_gap)]
@@ -748,14 +745,16 @@ def _seat_contender(
             (track - t) * sign > COORD_TOLERANCE_FINE for t, sign in far_sides
         )
 
-    return min(
-        (
-            (barred(t), step, abs(t - base), t)
-            for step, t in rows
-            if _clear_of(t, column, SAME_COORD_TOLERANCE)
-            and _clear_of(t, span, line_gap / 2)
-        )
-    )[3]
+    clear = [
+        (step, t)
+        for step, t in rows
+        if _clear_of(t, column, SAME_COORD_TOLERANCE)
+        and _clear_of(t, span, line_gap / 2)
+    ]
+    _, seat = min(
+        clear, key=lambda row: (barred(row[1]), row[0], abs(row[1] - base), row[1])
+    )
+    return seat
 
 
 def _carrier_exit_stays_on_row(

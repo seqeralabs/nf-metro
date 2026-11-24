@@ -14,7 +14,6 @@ source's line is declared before or after the peeled line, nor on orientation.
 from __future__ import annotations
 
 import signal
-import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import cache
@@ -23,18 +22,16 @@ from pathlib import Path
 from typing import NamedTuple
 
 import pytest
+from conftest import render_with_downgrades
 from layout_validator import _segments_cross, validate_layout
 from orientation_transform import Orientation, all_orientations, transform_source
 
-from nf_metro.api import RenderConfig, prepare_graph, render_graph
 from nf_metro.layout.engine import _station_marker_bbox
 from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.ordering import _seat_contender
-from nf_metro.layout.phases.guards import PermissiveGuardWarning
 from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.validate import drawn_segments, parse_route_polylines
-from nf_metro.themes import THEMES
 
 TOPOLOGIES = Path(__file__).parent.parent / "examples" / "topologies"
 
@@ -95,25 +92,13 @@ class Rendered(NamedTuple):
     downgrades: list[str]
 
 
-def _render_source(source: str) -> tuple[MetroGraph, str, list[str]]:
-    """Graph, SVG and permissive-guard downgrades of rendering *source*."""
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        graph = prepare_graph(source)
-        svg = render_graph(graph, THEMES["nfcore"], RenderConfig())
-    downgrades = [
-        str(w.message) for w in caught if issubclass(w.category, PermissiveGuardWarning)
-    ]
-    return graph, svg, downgrades
-
-
 @cache
 def _render(fixture: str, order: str, orientation: Orientation) -> Rendered:
     spec = FIXTURES[fixture]
     source = transform_source(
         DECLARATION_ORDERS[order](spec.path.read_text()), orientation
     )
-    return Rendered(spec, *_render_source(source))
+    return Rendered(spec, *render_with_downgrades(source))
 
 
 def _side(graph: MetroGraph, fork: str, ahead: str, sid: str) -> float:
@@ -335,7 +320,7 @@ def test_contender_shapes_stay_clear(shape: str, orientation: Orientation) -> No
     The contender ``f`` seats on the far side of the trunk from the peel ``g``,
     its line runs through no station it does not serve, and no two lines cross.
     """
-    graph, svg, downgrades = _render_source(
+    graph, svg, downgrades = render_with_downgrades(
         transform_source(SHAPES[shape], orientation)
     )
     assert not downgrades, downgrades
@@ -465,7 +450,9 @@ def test_contender_edge_shapes_render(shape: str, orientation: Orientation) -> N
     """
     spec = EDGE_SHAPES[shape]
     with _deadline(60):
-        _, svg, downgrades = _render_source(transform_source(spec.source, orientation))
+        _, svg, downgrades = render_with_downgrades(
+            transform_source(spec.source, orientation)
+        )
     assert not downgrades, downgrades
     if spec.no_crossings:
         crossings = _ink_crossings(svg)

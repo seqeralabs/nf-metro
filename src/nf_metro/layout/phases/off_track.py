@@ -1947,9 +1947,8 @@ def _bump_off_track_clear_of_trunks(
     # Find trunk stations -- and, when consider_ports asks for it, the
     # section's own entry/exit ports, whose converging line band can cross
     # the icon just as a station's can -- whose line bundle crosses the
-    # icon's column: downstream of the icon in flow is necessary but not
-    # sufficient, since the run feeding a downstream station may itself start
-    # further downstream than the icon and so never reach the icon's column.
+    # icon's column: those in the column itself, and downstream ones whose
+    # feeding run reaches it.
     port_ids = section.port_ids
     trunk_bands: list[float] = []
     for sid in section.station_ids:
@@ -1963,11 +1962,11 @@ def _bump_off_track_clear_of_trunks(
         if st2.off_track or st2.is_terminus:
             continue
         along = flow_sign * (getattr(st2, flow_axis) - off_flow)
-        if abs(along) > SAME_COORD_TOLERANCE and (
-            along < 0
-            or not _feeding_run_spans_flow_coord(
-                graph, st2, off_flow, flow_axis, in_section
-            )
+        same_column = abs(along) <= SAME_COORD_TOLERANCE
+        if not same_column and along < 0:
+            continue
+        if not same_column and not _feeding_run_spans_flow_coord(
+            graph, st2, off_flow, flow_axis, in_section
         ):
             continue
         # The line-track band spread across the cross axis at this trunk
