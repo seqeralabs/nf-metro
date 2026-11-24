@@ -476,16 +476,16 @@ EXIT_GAP_MULTIPLIER: float = 0.6
 """Exit gap multiplier for flow-side exits."""
 
 JUNCTION_MARGIN: float = 10.0
-"""Baseline margin for positioning junctions in inter-section gaps.
+"""Distance a junction stands from what it is placed against.
 
-Junction placement helpers in ``layout/engine.py`` derive the actual margin
-from this baseline and the junction's fan-out width via
-``_required_junction_margin(n)``: a single-line junction (n=1) uses this
-baseline directly, while wider fans extend the margin to
-``CURVE_RADIUS + (n-1)*OFFSET_STEP + OFFSET_STEP/2`` so the leftmost
-line's curve start lands clear of the source section's bbox.  Keeping
-the baseline small preserves centred channel positions for simple
-fixtures (n=1, 2) while still ensuring clearance for wide fans (n>=3).
+A fan-out junction stands this far past its exit port, or
+``EDGE_TO_BUNDLE_CLEARANCE`` where a branch drops down the junction's own
+column; a merge junction this far past its right-most feeder or short of its
+entry port.  The distance is the same at every fan width and radius.  Routing
+places a fan's first corners a curve radius plus half the fan's width past the
+junction, so their runway grows with the radius and the fan on its own, and
+holds the fan's shared lead-in, which launches half its width behind the
+junction, at the exit port rather than inside the section the fan leaves.
 """
 
 MIN_PORT_STATION_GAP: float = 16.0

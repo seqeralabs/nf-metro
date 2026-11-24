@@ -12,7 +12,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
-from typing import AbstractSet, Literal, NamedTuple
+from typing import Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
@@ -5526,37 +5526,44 @@ def validate_linear_entry_frame_ownership(
             )
 
 
+def _station_lane_frame(
+    graph: MetroGraph, station: Station, positive_fan: set[str] | None
+) -> AxisFrame | None:
+    section = graph.sections.get(station.section_id) if station.section_id else None
+    return (
+        None if section is None else _section_lane_frame(graph, section, positive_fan)
+    )
+
+
 def drawn_bundle_span(
     graph: MetroGraph,
     station: Station,
     station_offsets: dict[tuple[str, str], float],
-    positive_fan: AbstractSet[str],
+    positive_fan: set[str] | None = None,
 ) -> tuple[float, float]:
     """Min/max of a station's per-line offsets *as drawn*.
 
-    A vertical-flow (TB) section is the 90-degree rotation of a horizontal one:
-    a line rides ``x - offset`` where an LR line rides ``y + offset`` (matching
-    :func:`_tb_x_offset`).  Spanning the marker over the drawn offsets keeps it
-    centred on the lines that actually pass through the station, so a one-line or
-    off-trunk-subset station does not leave its glyph beside its own track.
+    The stored offsets are positive; the section's lane sign
+    (:func:`_section_lane_frame`) turns them into the side its lines are drawn
+    on, so a vertical-flow section plots as the rotation of a horizontal one
+    (matching :func:`_tb_x_offset`).  Spanning the marker over the drawn offsets
+    keeps it centred on the lines that actually pass through the station, so a
+    one-line or off-trunk-subset station does not leave its glyph beside its own
+    track.
     """
-    raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
     if not graph.station_lines(station.id):
         return 0.0, 0.0
-    sec = graph.sections.get(station.section_id) if station.section_id else None
-    if sec is not None and sec.direction == "TB":
-        sign = 1.0 if station.section_id in positive_fan else -1.0
-        drawn = [sign * raw_min, sign * raw_max]
-    else:
-        drawn = [raw_min, raw_max]
-    return min(drawn), max(drawn)
+    raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
+    frame = _station_lane_frame(graph, station, positive_fan)
+    sign = 1.0 if frame is None else frame.secondary_sign
+    return min(sign * raw_min, sign * raw_max), max(sign * raw_min, sign * raw_max)
 
 
 def drawn_lane_span(
     graph: MetroGraph,
     station: Station,
     station_offsets: dict[tuple[str, str], float],
-    positive_fan: AbstractSet[str],
+    positive_fan: set[str] | None = None,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     """The segment across its flow that a station's lanes are drawn along.
 
@@ -5571,8 +5578,8 @@ def drawn_lane_span(
     if graph.station_is_rail(station.id):
         return (station.x, station.y), (station.x, station.y)
     lo, hi = drawn_bundle_span(graph, station, station_offsets, positive_fan)
-    sec = graph.sections.get(station.section_id) if station.section_id else None
-    if sec is not None and lanes_run_along_x(sec.direction):
+    frame = _station_lane_frame(graph, station, positive_fan)
+    if frame is not None and frame.secondary.name == "x":
         return (station.x + lo, station.y), (station.x + hi, station.y)
     return (station.x, station.y + lo), (station.x, station.y + hi)
 

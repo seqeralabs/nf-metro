@@ -2095,7 +2095,20 @@ class DiagonalOverlapViolation:
 
 
 _COLLINEAR_LATERAL_TOL = COORD_TOLERANCE
-_COLLINEAR_MIN_SPAN = 40.0
+_COLLINEAR_MIN_VISIBLE_SPAN = 20.0
+
+
+def _collinear_min_span() -> float:
+    """Overlap along a shared channel that two distinct lines may brush through.
+
+    Each end of an overlapping run is where a line turns onto or off it, and
+    each turn takes a curve radius of the run, so what a viewer sees stacked is
+    the span less two radii.  The threshold holds that visible length at
+    ``_COLLINEAR_MIN_VISIBLE_SPAN``; a radius below the base keeps the base
+    radius's 40px.
+    """
+    return max(40.0, _COLLINEAR_MIN_VISIBLE_SPAN + 2 * active_curve_radius())
+
 
 # A diagonal bundle's lines must keep a true perpendicular separation, not a
 # fixed-axis one whose perpendicular component degrades to zero as the diagonal
@@ -2132,7 +2145,7 @@ def _collinear_overlay_violations(
     final offset-applied axis-aligned segments, and flags any
     different-line pair whose channel coordinate coincides within
     ``_COLLINEAR_LATERAL_TOL`` and whose overlap along the axis exceeds
-    ``_COLLINEAR_MIN_SPAN``.  Overlaps that merely converge onto a shared
+    :func:`_collinear_min_span`.  Overlaps that merely converge onto a shared
     endpoint in ``endpoint_xy`` (a port for inter-section routes, any
     station for intra-section routes) are excused.
     """
@@ -2163,7 +2176,7 @@ def _collinear_overlay_violations(
                 continue
             olo, ohi = max(lo_a, lo_b), min(hi_a, hi_b)
             span = ohi - olo
-            if span <= _COLLINEAR_MIN_SPAN:
+            if span <= _collinear_min_span():
                 continue
             if _converges_at_shared_port(endpoint_xy, ea, eb, ax_a, c_a, olo, ohi):
                 continue
@@ -2195,7 +2208,7 @@ def _inter_section_collinear(
     final, offset-applied geometry: it flags pairs of DIFFERENT-line
     axis-aligned inter-section segments whose channel coordinate
     coincides within ``_COLLINEAR_LATERAL_TOL`` and whose overlap along
-    the axis exceeds ``_COLLINEAR_MIN_SPAN``.
+    the axis exceeds :func:`_collinear_min_span`.
 
     Legitimate cases are excluded: lines converging onto a shared
     endpoint port (an unavoidable single approach), tight parallel
@@ -2263,7 +2276,7 @@ def _converges_at_shared_port(
     single point), but a long co-run alongside the port is a real overlay:
     the convergence must collapse to the port, not run parallel-on-top for
     a meaningful length.  Excuse the overlap only when it reaches the port
-    marker AND extends no further than ``_COLLINEAR_MIN_SPAN`` from it.
+    marker AND extends no further than :func:`_collinear_min_span` from it.
     """
     tol = COORD_TOLERANCE + _COLLINEAR_LATERAL_TOL
     for pid in (set(edge_a) & set(edge_b)) & port_xy.keys():
@@ -2278,7 +2291,7 @@ def _converges_at_shared_port(
             continue
         # Distance the overlap reaches away from the port along the axis.
         reach = max(anchor - olo, ohi - anchor)
-        if reach <= _COLLINEAR_MIN_SPAN:
+        if reach <= _collinear_min_span():
             return True
     return False
 
@@ -2344,7 +2357,7 @@ def _diagonal_coincidence(seg_a: _Seg, seg_b: _Seg) -> tuple[float, float] | Non
     pb_lo, pb_hi = perp(bx1, by1), perp(bx2, by2)
     olo, ohi = max(0.0, min(tb_lo, tb_hi)), min(length, max(tb_lo, tb_hi))
     span = ohi - olo
-    if span <= _COLLINEAR_MIN_SPAN:
+    if span <= _collinear_min_span():
         return None
     if abs(tb_hi - tb_lo) < COORD_TOLERANCE:
         return None
@@ -2377,7 +2390,7 @@ def _diagonal_collinear(
     axis, so on a diagonal the perpendicular separation shrinks to
     ``OFFSET_STEP * sin(theta)`` and the lines fuse into one stroke.  This flags
     any different-line pair whose diagonals run near-parallel, overlap by more
-    than ``_COLLINEAR_MIN_SPAN``, and stay closer than ``_DIAGONAL_MIN_PERP_SEP``
+    than :func:`_collinear_min_span`, and stay closer than ``_DIAGONAL_MIN_PERP_SEP``
     apart without crossing.  Rail-section internal edges (rendered on explicit
     parallel rails) are excluded, matching the axis-aligned intra check.
     """
@@ -2542,7 +2555,7 @@ def check_no_same_line_parallel_descents(
     source or target endpoint, sit more than ``_COLLINEAR_LATERAL_TOL`` but
     no more than ``EDGE_TO_BUNDLE_CLEARANCE`` apart (a merged trunk falls
     below the floor; genuinely-distant corridors above the ceiling), and
-    overlap by more than ``_COLLINEAR_MIN_SPAN``.
+    overlap by more than :func:`_collinear_min_span`.
     """
     segs: list[tuple[str, tuple[str, str], float, float, float]] = []
     for rp in routes:
@@ -2571,7 +2584,7 @@ def check_no_same_line_parallel_descents(
                 continue
             olo, ohi = max(lo_a, lo_b), min(hi_a, hi_b)
             span = ohi - olo
-            if span <= _COLLINEAR_MIN_SPAN:
+            if span <= _collinear_min_span():
                 continue
             violations.append(
                 SameLineParallelRun(
@@ -5371,13 +5384,8 @@ def check_no_hanging_routes(
         else None
     )
     from nf_metro.layout.routing.offsets import drawn_lane_span
-    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 
-    positive_fan = tb_positive_fan_sections(graph)
-    anchors = [
-        drawn_lane_span(graph, st, offsets, positive_fan)
-        for st in graph.stations.values()
-    ]
+    anchors = [drawn_lane_span(graph, st, offsets) for st in graph.stations.values()]
     rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
     polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
 

@@ -12,16 +12,12 @@ from nf_metro.parser.route_topology import build_route_topology_query
 
 
 def _required_junction_margin(n: int) -> float:
-    """Margin needed so an n-line fan's leftmost lead-in clears the source.
+    """Margin a junction of *n* lines keeps: ``JUNCTION_MARGIN`` for any *n*.
 
-    For an n-line concentric fan-out the per-line ``fan_delta`` stagger
-    and per-line ``r_wrap`` curve radius cancel exactly: every line's
-    first-corner curve start lands at ``junction.x``.  The required
-    clearance therefore depends only on the lead-in length immediately
-    before the curve (``CURVE_RADIUS``), not on the fan width.
-
-    Returns ``JUNCTION_MARGIN`` directly: the baseline already exceeds the
-    curve-start clearance at any fan width.
+    The fan's width needs no extra margin here.  Routing places each line's
+    first corner a curve radius plus half the fan's width past the junction
+    (``_l_shape_fan_source_turn``) and holds the fan's lead-in, which launches
+    half that width behind the junction, at the exit port.
     """
     del n
     return JUNCTION_MARGIN
