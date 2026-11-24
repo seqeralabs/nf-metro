@@ -16,6 +16,7 @@ from typing import Literal
 from nf_metro.options import (
     INVALID,
     LAYOUT_OPTIONS,
+    MODES,
     LayoutOption,
     coerce,
     is_line_order,
@@ -86,14 +87,9 @@ def _dir_style(value: str, graph: MetroGraph) -> None:
     graph.style = value
 
 
-# The two display modes a theme can render in, shared with the per-output
-# `mode=` override below.
-_MODE_CHOICES: tuple[str, ...] = ("light", "dark")
-
-
 def _dir_mode(value: str, graph: MetroGraph) -> None:
     mode = value.strip().lower()
-    if mode not in _MODE_CHOICES:
+    if mode not in MODES:
         _warn_malformed("mode", value, "light/dark")
         return
     graph.mode = mode
@@ -157,7 +153,7 @@ def _output_override_value(key: str, raw: str) -> object | None:
         # empty payload as off, which only applies to an explicit `key=`.
         return True
     if kind == "mode":
-        opt = LayoutOption(name=key, kind="choice", choices=_MODE_CHOICES, help="")
+        opt = LayoutOption(name=key, kind="choice", choices=MODES, help="")
     elif kind in ("float", "int"):
         numeric_kind: Literal["float", "int"] = "float" if kind == "float" else "int"
         opt = LayoutOption(name=key, kind=numeric_kind, sign="positive", help="")

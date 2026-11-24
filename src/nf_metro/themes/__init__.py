@@ -1,18 +1,17 @@
 """Built-in themes and theme resolution.
 
-Every built-in theme is a YAML file in this package, loaded and validated the
-same way as a user's theme file. A ``%%metro style:`` or ``--theme`` value is a
-stack of theme names and files (a single name is a stack of one), resolved by
+Every built-in theme is a YAML file in this package, in the same format as a
+user's theme file. A ``%%metro style:`` or ``--theme`` value is a stack of
+theme names and files (a single name is a stack of one), resolved by
 :func:`resolve_stack` to a :class:`ResolvedTheme` carrying the light theme, the
 dark theme, and the stack's layout options. See :mod:`nf_metro.themes.stack`.
 """
 
 from __future__ import annotations
 
-import dataclasses
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from nf_metro.render.style import Theme
 from nf_metro.themes.stack import (
@@ -21,7 +20,6 @@ from nf_metro.themes.stack import (
     MODES,
     ResolvedTheme,
     ThemeError,
-    ThemeFile,
     ThemeLayer,
     is_theme_file_entry,
     load_theme_file,
@@ -47,51 +45,24 @@ _BUILTIN_FILES = {
     "transparent": "transparent.yaml",
 }
 
-# ``dark`` is ``MetroGraph.style``'s default, so a map with no style directive
-# arrives as ``dark``. ``light`` names the transparent theme; both names are
-# accepted wherever a theme name is.
-_ALIASES = {"dark": "nfcore", "light": "transparent"}
+#: Every built-in theme name.
+STYLE_NAMES = frozenset(_BUILTIN_FILES)
 
 
-def _load_builtin(name: str) -> ThemeLayer:
-    loaded = load_theme_file(_BUILTIN_DIR / _BUILTIN_FILES[name])
-    if loaded.extends:
-        raise ThemeError(f"built-in theme {name!r} may not use extends")
-    return loaded.layer
+@lru_cache(maxsize=None)
+def _builtin(name: str) -> ThemeLayer:
+    return load_theme_file(_BUILTIN_DIR / _BUILTIN_FILES[name], validate=False)
 
 
-_BUILTIN_LAYERS: dict[str, ThemeLayer] = {
-    name: _load_builtin(name) for name in _BUILTIN_FILES
-}
-
-#: Built-in themes with both palettes, which also accept a ``-light`` or
-#: ``-dark`` suffix to pin the baked mode.
-PAIRED_THEMES = tuple(
-    name for name, layer in _BUILTIN_LAYERS.items() if layer.fixed_mode is None
-)
-
-#: Every accepted built-in name: themes, mode-pinned variants, and aliases.
-STYLE_NAMES = frozenset(
-    [*_BUILTIN_LAYERS, *_ALIASES]
-    + [f"{name}-{mode}" for name in PAIRED_THEMES for mode in MODES]
-)
-
-
-def _parse_name(entry: str) -> tuple[str, str | None]:
-    """A built-in entry's canonical theme name and the mode it pins, if any."""
+def _builtin_name(entry: str) -> str:
     name = entry.strip().lower()
-    name = _ALIASES.get(name, name)
-    if name in _BUILTIN_LAYERS:
-        return name, None
-    for mode in MODES:
-        base = name.removesuffix(f"-{mode}")
-        if base != name and base in PAIRED_THEMES:
-            return base, mode
-    raise ThemeError(
-        f"unknown theme {entry!r}; expected one of "
-        + ", ".join(sorted(STYLE_NAMES))
-        + ", or a .yaml theme file"
-    )
+    if name not in _BUILTIN_FILES:
+        raise ThemeError(
+            f"unknown theme {entry!r}; expected one of "
+            + ", ".join(sorted(STYLE_NAMES))
+            + ", or a .yaml theme file"
+        )
+    return name
 
 
 def _file_path(entry: str, base_dir: Path) -> Path:
@@ -115,7 +86,7 @@ def check_stack(
     root = Path(base_dir) if base_dir else Path.cwd()
     for entry in entries:
         if not is_theme_file_entry(entry):
-            _parse_name(entry)
+            _builtin_name(entry)
         elif must_exist:
             load_theme_file(_file_path(entry, root))
     return entries
@@ -130,111 +101,58 @@ def anchor_stack(value: str, base_dir: Path | str) -> str:
     )
 
 
-def resolve_style(style: str) -> str:
-    """The canonical spelling of a ``style``/``--theme`` value.
-
-    Aliases resolve to the theme they name and entries are comma-joined, so a
-    caller can report the theme a map renders with.
-    """
-    entries = check_stack(style)
-    return ", ".join(
-        entry
-        if is_theme_file_entry(entry)
-        else "-".join(filter(None, _parse_name(entry)))
-        for entry in entries
-    )
-
-
-def _expand(
-    entry: str, base_dir: Path, seen: tuple[Path, ...]
-) -> tuple[list[ThemeLayer | ThemeFile], str | None]:
-    """An entry's layers in stack order (its ``extends`` first) and its pin.
+def _expand(entry: str, base_dir: Path, seen: tuple[Path, ...]) -> list[ThemeLayer]:
+    """An entry's layers in stack order, its ``extends`` first.
 
     A theme file's ``extends`` entries resolve against that file's folder.
     """
     if not is_theme_file_entry(entry):
-        name, pin = _parse_name(entry)
-        return [_BUILTIN_LAYERS[name]], pin
+        return [_builtin(_builtin_name(entry))]
     path = _file_path(entry, base_dir)
     if path in seen:
         chain = " -> ".join(str(p) for p in (*seen, path))
         raise ThemeError(f"theme files extend each other in a cycle: {chain}")
-    loaded = load_theme_file(path)
-    layers: list[ThemeLayer | ThemeFile] = []
-    for base in loaded.extends:
-        base_layers, _ = _expand(base, path.parent, (*seen, path))
-        layers += base_layers
-    return [*layers, loaded], None
+    layer = load_theme_file(path)
+    layers: list[ThemeLayer] = []
+    for base in layer.extends:
+        layers += _expand(base, path.parent, (*seen, path))
+    return [*layers, layer]
 
 
 def resolve_stack(value: str, base_dir: Path | str = "") -> ResolvedTheme:
     """Resolve a stack of theme names and files, laid over :data:`BASE_THEME`.
 
     Relative theme file entries resolve against *base_dir* (the working
-    directory when empty). A mode-suffixed name pins the baked mode; the last
-    pin in the stack wins. The result is shared by every resolution of the
+    directory when empty). The result is shared by every resolution of the
     same stack whose files have the same content.
     """
-    entries = check_stack(value)
     root = Path(base_dir) if base_dir else Path.cwd()
-    parts: list[ThemeLayer | ThemeFile] = []
+    layers: list[ThemeLayer] = []
     names: list[str] = []
-    pinned: str | None = None
-    for entry in entries:
-        entry_parts, pin = _expand(entry, root, ())
-        parts += entry_parts
-        pinned = pin or pinned
-        names.append(entry if is_theme_file_entry(entry) else _parse_name(entry)[0])
-    resolved = _merge_cached(tuple(parts), ", ".join(names))
-    return dataclasses.replace(resolved, pinned_mode=pinned) if pinned else resolved
+    for entry in check_stack(value):
+        layers += _expand(entry, root, ())
+        names.append(entry if is_theme_file_entry(entry) else _builtin_name(entry))
+    return _merge_cached(tuple(layers), ", ".join(names))
 
 
 @lru_cache(maxsize=128)
-def _merge_cached(
-    parts: tuple[ThemeLayer | ThemeFile, ...], name: str
-) -> ResolvedTheme:
-    layers = [_BUILTIN_LAYERS[BASE_THEME]] + [
-        part.layer if isinstance(part, ThemeFile) else part for part in parts
-    ]
-    return merge_layers(layers, name=name)
+def _merge_cached(layers: tuple[ThemeLayer, ...], name: str) -> ResolvedTheme:
+    return merge_layers([_builtin(BASE_THEME), *layers], name=name)
 
 
-def resolve_graph_stack(theme: str | None, graph: MetroGraph) -> ResolvedTheme:
-    """The stack *graph* renders with: the caller's *theme* if given, else the
-    stack it was prepared with, else its ``%%metro style:``.
+def bound_stack(graph: MetroGraph, theme: str | None = None) -> ResolvedTheme:
+    """The stack *graph* lays out and renders with, bound on the graph.
 
-    A caller's theme files resolve against the working directory and the map's
-    against the ``.mmd``'s folder.
+    A caller's *theme*, its files relative to the working directory, binds in
+    place of any earlier stack. Without one the bound stack stays, and an
+    unbound graph binds its ``%%metro style:``, its files relative to the
+    map's folder.
     """
     if theme is not None:
-        return resolve_stack(theme)
-    if graph.resolved_theme is not None:
-        return graph.resolved_theme
-    return resolve_stack(graph.style, graph.source_dir)
-
-
-def bind_graph_stack(
-    graph: MetroGraph, theme: str | None, source_dir: str
-) -> ResolvedTheme:
-    """Resolve the stack *graph*'s layout and render use and cache it there.
-
-    Layout passes that borrow render geometry read it back through
-    :func:`layout_theme`, and the render through :func:`resolve_theme` with no
-    explicit theme, so both measure with the same theme.
-    """
-    graph.resolved_theme = (
-        resolve_stack(theme)
-        if theme is not None
-        else resolve_stack(graph.style, source_dir)
-    )
-    return graph.resolved_theme
-
-
-def layout_theme(graph: MetroGraph) -> Theme:
-    """The theme *graph* renders with, in the mode it will be baked in."""
-    if graph.resolved_theme is None:
+        graph.resolved_theme = resolve_stack(theme)
+    elif graph.resolved_theme is None:
         graph.resolved_theme = resolve_stack(graph.style, graph.source_dir)
-    return graph.resolved_theme.for_mode(resolve_mode(None, graph))
+    return graph.resolved_theme
 
 
 def resolve_mode(mode: str | None, graph: MetroGraph) -> str:
@@ -242,48 +160,46 @@ def resolve_mode(mode: str | None, graph: MetroGraph) -> str:
     return (mode or graph.mode).strip().lower() or DEFAULT_MODE
 
 
-def resolve_theme(
-    theme: str | None, graph: MetroGraph, mode: str | None = None
-) -> Theme:
-    """The theme to render *graph* with.
-
-    The stack is the explicit *theme* or the graph's style; the mode is the
-    explicit *mode*, the graph's ``%%metro mode:``, or :data:`DEFAULT_MODE`.
-    """
-    return resolve_graph_stack(theme, graph).for_mode(resolve_mode(mode, graph))
+def resolve_theme(graph: MetroGraph, mode: str | None = None) -> Theme:
+    """The theme *graph*'s bound stack bakes in *mode* (see :func:`resolve_mode`)."""
+    return bound_stack(graph).for_mode(resolve_mode(mode, graph))
 
 
-#: Every accepted built-in name resolved at :data:`DEFAULT_MODE`, for callers
-#: that need a concrete theme without a graph.
-THEMES: dict[str, Theme] = {
-    name: resolve_stack(name).for_mode(DEFAULT_MODE) for name in sorted(STYLE_NAMES)
+# Concrete themes for callers without a graph, resolved on first use.
+_NAMED_THEMES = {
+    "NFCORE_LIGHT_THEME": ("nfcore", LIGHT),
+    "NFCORE_DARK_THEME": ("nfcore", DARK),
+    "SEQERA_LIGHT_THEME": ("seqera", LIGHT),
+    "SEQERA_DARK_THEME": ("seqera", DARK),
+    "TRANSPARENT_THEME": ("transparent", DEFAULT_MODE),
 }
 
-NFCORE_LIGHT_THEME = THEMES["nfcore-light"]
-NFCORE_DARK_THEME = THEMES["nfcore-dark"]
-SEQERA_LIGHT_THEME = THEMES["seqera-light"]
-SEQERA_DARK_THEME = THEMES["seqera-dark"]
-TRANSPARENT_THEME = THEMES["transparent"]
+
+def __getattr__(name: str) -> Any:  # noqa: ANN401
+    """``THEMES``, every built-in at :data:`DEFAULT_MODE`, and the named themes."""
+    if name == "THEMES":
+        return {n: resolve_stack(n).for_mode(DEFAULT_MODE) for n in sorted(STYLE_NAMES)}
+    if name in _NAMED_THEMES:
+        stack, mode = _NAMED_THEMES[name]
+        return resolve_stack(stack).for_mode(mode)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "BASE_THEME",
+    "DARK",
     "DEFAULT_MODE",
     "LIGHT",
-    "DARK",
-    "PAIRED_THEMES",
+    "MODES",
     "STYLE_NAMES",
     "THEMES",
     "ResolvedTheme",
     "ThemeError",
     "anchor_stack",
-    "bind_graph_stack",
+    "bound_stack",
     "check_stack",
-    "layout_theme",
-    "resolve_graph_stack",
     "resolve_mode",
     "resolve_stack",
-    "resolve_style",
     "resolve_theme",
     "NFCORE_LIGHT_THEME",
     "NFCORE_DARK_THEME",

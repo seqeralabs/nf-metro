@@ -43,7 +43,7 @@ from nf_metro.text_metrics import (
     metrics_face_context,
     metrics_face_for_portability,
 )
-from nf_metro.themes import ResolvedTheme, bind_graph_stack, resolve_theme
+from nf_metro.themes import ResolvedTheme, bound_stack, resolve_theme
 from nf_metro.themes.stack import THEMEABLE_LAYOUT_OPTIONS
 
 
@@ -310,11 +310,12 @@ def _prepare_graph_state(
             "recognised"
         )
 
-    apply_theme_layout(graph, bind_graph_stack(graph, theme, source_dir))
+    if source_dir:
+        graph.source_dir = source_dir
+    apply_theme_layout(graph, bound_stack(graph, theme))
     apply_layout_overrides(graph, opts)
 
     if source_dir:
-        graph.source_dir = source_dir
         for attr in MetroGraph.LOGO_PATH_FIELDS:
             raw: str = getattr(graph, attr)
             if not raw:
@@ -598,5 +599,5 @@ def render_string(
     )
     if config is None and flat.baked_mode is None:
         flat.baked_mode = graph.mode.strip() or None
-    theme_obj = resolve_theme(None, graph, mode=mode)
+    theme_obj = resolve_theme(graph, mode=mode)
     return render_graph(graph, theme_obj, effective_cfg)

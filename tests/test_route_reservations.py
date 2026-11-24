@@ -696,7 +696,7 @@ def test_reservation_corpus_has_one_linked_record_per_observed_claim() -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-            observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+            observed = build_observed_render_plan(graph, resolve_theme(graph))
         routes = observed.plan.routes
         plan = observed.route_plan
         query = build_route_plan_query(plan)
@@ -793,7 +793,7 @@ def test_reservation_corpus_has_one_linked_record_per_observed_claim() -> None:
 def test_observed_run_blockers_intersect_the_exact_final_run(name: str) -> None:
     path = TOPOLOGIES / name
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
     query = build_route_plan_query(observed.route_plan)
 
     assert len(observed.route_plan.realised_reservations) == len(
@@ -835,10 +835,8 @@ def test_observed_render_plan_is_byte_and_metric_neutral(path: Path) -> None:
     if path == REPORT_HO:
         plain_graph.permissive = True
         observed_graph.permissive = True
-    plain_plan = build_render_plan(plain_graph, resolve_theme(None, plain_graph))
-    observed = build_observed_render_plan(
-        observed_graph, resolve_theme(None, observed_graph)
-    )
+    plain_plan = build_render_plan(plain_graph, resolve_theme(plain_graph))
+    observed = build_observed_render_plan(observed_graph, resolve_theme(observed_graph))
 
     assert freeze_render_value(observed.plan) == freeze_render_value(plain_plan)
     plain_svg = emit_render_plan(plain_plan)

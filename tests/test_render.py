@@ -14,7 +14,6 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import ICON_TYPE_FILES, Station
 from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO, ICON_NAME_GAP
 from nf_metro.render.svg import (
-    _label_halo_color_for,
     _terminus_icon_centers,
     _terminus_icon_centers_for,
     _terminus_icon_flow_sign,
@@ -25,13 +24,8 @@ from nf_metro.themes import (
     SEQERA_DARK_THEME,
     SEQERA_LIGHT_THEME,
     TRANSPARENT_THEME,
+    resolve_stack,
 )
-
-
-def _halo(theme):
-    return _label_halo_color_for(
-        theme.label_halo_width, theme.label_halo_color, theme.background_color
-    )
 
 
 def _render_simple():
@@ -109,7 +103,7 @@ def test_label_angle_default_no_rotate():
 
 def test_render_nfcore_theme_background():
     svg = _render_simple()
-    assert NFCORE_DARK_THEME.background_color in svg
+    assert NFCORE_DARK_THEME.background_fill in svg
 
 
 def test_render_light_theme():
@@ -122,7 +116,7 @@ def test_render_light_theme():
     compute_layout(graph)
     svg = render_svg(graph, TRANSPARENT_THEME)
     # Light theme uses transparent background (no background rectangle)
-    assert TRANSPARENT_THEME.background_color == "none"
+    assert TRANSPARENT_THEME.background_fill == "none"
     assert "#333333" in svg  # label/stroke color present
 
 
@@ -136,7 +130,7 @@ def test_render_seqera_theme():
     compute_layout(graph)
     for theme in (SEQERA_LIGHT_THEME, SEQERA_DARK_THEME):
         svg = render_svg(graph, theme, chrome_css=False)
-        assert f'fill="{theme.background_color}"' in svg
+        assert f'fill="{theme.background_fill}"' in svg
         assert theme.title_color in svg
 
 
@@ -326,7 +320,7 @@ def test_font_scale_multiplies_all_text_sizes():
         NFCORE_DARK_THEME.title_font_size,
         NFCORE_DARK_THEME.section_label_font_size,
         NFCORE_DARK_THEME.legend_font_size,
-        NFCORE_DARK_THEME.terminus_font_size,
+        NFCORE_DARK_THEME.icon_font_size,
     ):
         assert size in _font_sizes(svg1)
         assert size * scale in _font_sizes(svg2)
@@ -712,7 +706,7 @@ def test_multiline_icon_caption_fits_render_obstacle(direction):
     obstacle = _icon_obstacles_by_station(graph, NFCORE_DARK_THEME, offsets)[station.id]
     caption_height = 2 * NFCORE_DARK_THEME.label_font_size * ICON_NAME_FONT_SCALE
     caption_reach = (
-        NFCORE_DARK_THEME.terminus_height / 2
+        NFCORE_DARK_THEME.icon_height / 2
         + ICON_NAME_GAP
         + caption_height
         + ICON_CLEARANCE_MARGIN
@@ -752,10 +746,7 @@ def test_vertical_icon_stack_reserves_multiline_caption(direction):
     )
     caption_height = 2 * NFCORE_DARK_THEME.label_font_size * ICON_NAME_FONT_SCALE
     expected_step = (
-        NFCORE_DARK_THEME.terminus_height
-        + ICON_INTER_GAP
-        + ICON_NAME_GAP
-        + caption_height
+        NFCORE_DARK_THEME.icon_height + ICON_INTER_GAP + ICON_NAME_GAP + caption_height
     )
 
     assert abs(centers[1][1] - centers[0][1]) == pytest.approx(expected_step)
@@ -850,7 +841,7 @@ def test_wide_file_icon_label_wraps_within_icon_width():
         "label must wrap rather than render as a single over-wide line"
     )
 
-    max_width = NFCORE_DARK_THEME.terminus_width - 2 * ICON_LABEL_CLEARANCE
+    max_width = NFCORE_DARK_THEME.icon_width - 2 * ICON_LABEL_CLEARANCE
     tolerance = 1.0
     for font_size, text in pieces:
         line_width = DEFAULT_TEXT_METRICS.reserve_width(
@@ -1111,7 +1102,7 @@ def test_stacked_files_icon_back_page_does_not_crowd_marker(direction, role):
     front_cx, front_cy = _terminus_icon_centers_for(
         station, graph, NFCORE_DARK_THEME, 0.0, 0.0
     )[0]
-    off = NFCORE_DARK_THEME.terminus_width * FILES_ICON_OFFSET_RATIO
+    off = NFCORE_DARK_THEME.icon_width * FILES_ICON_OFFSET_RATIO
     flow_sign = _terminus_icon_flow_sign(direction, is_source)
     is_vertical_flow = lanes_run_along_x(direction)
 
@@ -1356,27 +1347,18 @@ def test_standalone_nodes_render_as_unlinked_labels():
         assert t in svg
 
 
-def test_label_halo_color_resolves_to_opaque_background():
-    color = _halo(replace(NFCORE_DARK_THEME, label_halo_color=""))
-    assert color == NFCORE_DARK_THEME.background_color
+def test_knockout_fill_takes_the_opaque_background():
+    assert NFCORE_DARK_THEME.knockout_fill == NFCORE_DARK_THEME.background_fill
 
 
-def test_label_halo_color_resolves_to_white_on_transparent_theme():
-    color = _halo(replace(TRANSPARENT_THEME, label_halo_color=""))
-    assert color == "#ffffff"
+def test_knockout_fill_is_white_on_a_transparent_canvas():
+    assert TRANSPARENT_THEME.knockout_fill == "#ffffff"
 
 
-def test_label_halo_color_honours_explicit_colour():
-    color = _halo(replace(NFCORE_DARK_THEME, label_halo_color="#123456"))
-    assert color == "#123456"
-
-
-def test_label_halo_disabled_by_zero_width():
-    assert _halo(replace(NFCORE_DARK_THEME, label_halo_width=0.0)) is None
-
-
-def test_label_halo_disabled_by_none_colour():
-    assert _halo(replace(NFCORE_DARK_THEME, label_halo_color="none")) is None
+def test_knockout_fill_honours_an_explicit_colour(tmp_path):
+    theme_file = tmp_path / "k.yaml"
+    theme_file.write_text('name: k\nknockout_fill: "#123456"\n')
+    assert resolve_stack(str(theme_file)).dark.knockout_fill == "#123456"
 
 
 def test_label_halo_emits_aria_hidden_backing_copy():
@@ -1402,7 +1384,7 @@ def test_label_halo_emits_aria_hidden_backing_copy():
 
     # The halo is a stroked knockout: it must paint the resolved halo colour on
     # both fill and stroke at the theme width, and sit under the visible glyph.
-    resolved = _halo(NFCORE_DARK_THEME)
+    resolved = NFCORE_DARK_THEME.knockout_fill
     assert halo[0].get("stroke") == halo[0].get("fill") == resolved
     assert float(halo[0].get("stroke-width")) == NFCORE_DARK_THEME.label_halo_width
     assert texts.index(halo[0]) < texts.index(fill[0]), (
@@ -1628,7 +1610,7 @@ def test_terminus_caption_sits_outboard_of_its_icon(case):
 
     station = graph.stations[station_id]
     icon_cx, icon_cy = _terminus_icon_centers_for(station, graph, theme, 0.0, 0.0)[0]
-    icon_half_h = theme.terminus_height / 2
+    icon_half_h = theme.icon_height / 2
     caption_box, _ = _caption_and_marker_boxes(svg, caption, station_id)
     assert caption_box is not None, f"{case}: caption {caption!r} not rendered"
 
@@ -1649,7 +1631,7 @@ def test_terminus_caption_sits_outboard_of_its_icon(case):
 def test_terminus_caption_gap_equals_icon_name_gap(case):
     """The caption clears the *drawn* icon edge by exactly ``ICON_NAME_GAP``.
 
-    A stacked-files icon's back sheet peeks ``terminus_width *
+    A stacked-files icon's back sheet peeks ``icon_width *
     FILES_ICON_OFFSET_RATIO`` past the nominal edge toward the caption on a
     vertical flow, so the reserved gap must be measured from that drawn edge,
     not the nominal box. Ignoring it collapsed the real gap to ~0 (#1972).
@@ -1667,8 +1649,8 @@ def test_terminus_caption_gap_equals_icon_name_gap(case):
     )
     stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
     back_dy = flow_sign if is_vertical_flow else -1.0
-    off = theme.terminus_width * FILES_ICON_OFFSET_RATIO if stacked else 0.0
-    half_h = theme.terminus_height / 2
+    off = theme.icon_width * FILES_ICON_OFFSET_RATIO if stacked else 0.0
+    half_h = theme.icon_height / 2
 
     caption_box, _ = _caption_and_marker_boxes(svg, caption, station_id)
     assert caption_box is not None, f"{case}: caption {caption!r} not rendered"

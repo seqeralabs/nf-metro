@@ -498,7 +498,7 @@ class MetroGraph:
 
     title: str = ""
     caption: str = ""
-    style: str = "dark"
+    style: str = "nfcore"
     # Display mode (``light`` / ``dark``), orthogonal to the brand in ``style``.
     # Empty means unset: the brand's own default mode applies.
     mode: str = ""

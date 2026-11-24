@@ -31,7 +31,7 @@ def _observed(path: Path):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        return build_observed_render_plan(graph, resolve_theme(None, graph))
+        return build_observed_render_plan(graph, resolve_theme(graph))
 
 
 def _route(observed, source: str, target: str, line_id: str):

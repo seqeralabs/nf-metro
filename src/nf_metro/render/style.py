@@ -2,46 +2,40 @@
 
 :class:`Theme` is the single definition of what a theme is. Each field's
 metadata records what it means (``doc``), which reference group it belongs to
-(``group``), whether its value is a colour (``color``), its allowed values
-(``choices``), and, for the chrome colours a host page may recolour, which SVG
-class and property it paints and the ``--nfm-map-*`` custom property that
-overrides it (``chrome``, ``css_var``). Theme files are validated against this
-schema, the light/dark chrome CSS is generated from it, and the field reference
-in ``docs/theming.mdx`` is checked against it.
+(``group``), whether its value is a colour (``color``), and its allowed values
+(``choices``, ``pattern``, ``maximum``). Theme files are validated against the
+JSON Schema generated from it, and the field reference in ``docs/theming.mdx``
+is generated from that schema. :data:`CHROME` says which colours reach the
+stylesheet, where a host page may recolour them.
 """
 
 from __future__ import annotations
 
 __all__ = [
+    "CHROME",
+    "FONT_FAMILY_PATTERN",
+    "DASHARRAY_PATTERN",
+    "FONT_WEIGHTS",
     "GLYPH_PILL",
     "GLYPH_RING",
     "GLYPH_TICK",
+    "MUTED_FILL_CLASS",
+    "MUTED_STROKE_CLASS",
     "RING_CHAIN",
     "RING_GROW",
     "TERMINUS_BAR",
     "TERMINUS_NUB",
-    "ChromeBinding",
-    "ChromeTarget",
-    "EMIT_CONDITIONS",
+    "Chrome",
     "Theme",
     "adaptive_value",
     "authored_fields",
-    "chrome_bindings",
     "color_pair",
-    "MUTED_FILL_CLASS",
-    "MUTED_STROKE_CLASS",
-    "binding_pair",
+    "colors_adapt",
     "is_adaptive",
-    "muted_adapts",
     "muted_paint_class",
-    "draws_rings",
-    "opaque_or_white",
-    "target_applies",
-    "theme_color",
 ]
 
 import dataclasses
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
@@ -56,6 +50,7 @@ from nf_metro.render.constants import (
     ANIMATION_BALL_OPACITY,
     BRIDGE_GAP_HALF,
     CANVAS_PADDING,
+    CAPTION_FILL,
     CAPTION_FONT_SIZE,
     FALLBACK_LINE_COLOR,
     GROUP_LABEL_UNDERLINE_OPACITY,
@@ -70,6 +65,7 @@ from nf_metro.render.constants import (
     SECTION_NUM_FONT_SIZE,
     SECTION_STROKE_WIDTH,
     STROKE_DASHARRAY,
+    TERMINUS_FONT_COLOR,
     WATERMARK_FILL,
 )
 from nf_metro.render.ns import ns as _ns
@@ -84,19 +80,16 @@ RING_GROW = "grow"
 TERMINUS_NUB = "nub"
 TERMINUS_BAR = "bar"
 
-
-class ChromeTarget(NamedTuple):
-    """One CSS property a chrome colour paints on one element class.
-
-    ``when`` names the condition in :data:`EMIT_CONDITIONS` under which the
-    element is drawn at all (empty: always); ``muted`` gives the class a rule
-    that greys it when every line touching it is inactive.
-    """
-
-    cls: str
-    prop: str
-    when: str = ""
-    muted: bool = False
+# Free text that lands in SVG attributes, held to what CSS needs.
+FONT_FAMILY_PATTERN = r"^[\w\s,'.-]+$"
+DASHARRAY_PATTERN = r"^\s*(\d+(\.\d+)?([\s,]+\d+(\.\d+)?)*\s*)?$"
+FONT_WEIGHTS = (
+    "normal",
+    "bold",
+    "bolder",
+    "lighter",
+    *(f"{w}00" for w in range(1, 10)),
+)
 
 
 def _field(
@@ -106,10 +99,7 @@ def _field(
     group: str,
     color: bool = False,
     choices: tuple[str, ...] = (),
-    chrome: tuple[ChromeTarget | tuple[str, str], ...] = (),
-    css_var: str = "",
-    fallback: str = "",
-    opaque: bool = False,
+    pattern: str = "",
     maximum: float | None = None,
 ) -> Any:  # noqa: ANN401
     return dataclasses.field(
@@ -119,13 +109,14 @@ def _field(
             "group": group,
             "color": color,
             "choices": choices,
-            "chrome": tuple(ChromeTarget(*target) for target in chrome),
-            "css_var": css_var,
-            "fallback": fallback,
-            "opaque": opaque,
+            "pattern": pattern,
             "maximum": maximum,
         },
     )
+
+
+def _font_weight(default: Any = _MISSING, *, doc: str, group: str) -> Any:  # noqa: ANN401
+    return _field(default, doc=doc, group=group, choices=FONT_WEIGHTS)
 
 
 def _derived(default: Any) -> Any:  # noqa: ANN401
@@ -137,50 +128,40 @@ class Theme:
     """Visual theme for a metro map, resolved for one display mode.
 
     Fields without a default are set by the base theme every stack starts
-    from (``nfcore``). The chrome fields are declared in the order their CSS
-    rules are emitted, which keeps the generated stylesheet stable.
+    from (``nfcore``). A colour whose doc says it takes another field when
+    empty is filled in when the stack is resolved, so a resolved theme's
+    fields are all concrete.
     """
 
     # The palette this theme is resolved for, set by the resolver.
     mode: str = _derived("dark")
-    # ``(field, light value, dark value)`` for every colour field when the
-    # theme has both palettes; empty for a single-palette theme.
+    # ``(field, light value, dark value)`` for every colour field.
     mode_colors: tuple[tuple[str, str, str], ...] = _derived(())
 
-    background_color: str = _field(
+    background_fill: str = _field(
         doc="Canvas fill. `none` leaves the canvas transparent.",
         group="Canvas and text",
         color=True,
-        chrome=(("nf-metro-bg", "fill"),),
-        css_var="--nfm-map-bg",
     )
     title_color: str = _field(
-        doc="Map title text.",
-        group="Canvas and text",
-        color=True,
-        chrome=(("nf-metro-title", "fill"),),
-        css_var="--nfm-map-title-color",
+        doc="Map title text.", group="Canvas and text", color=True
     )
     title_font_size: float = _field(doc="Map title size, px.", group="Canvas and text")
-    title_font_weight: str = _field(
+    title_font_weight: str = _font_weight(
         "bold", doc="Map title weight.", group="Canvas and text"
     )
     label_color: str = _field(
-        doc="Station label text.",
-        group="Canvas and text",
-        color=True,
-        chrome=(ChromeTarget("nf-metro-station-label", "fill", muted=True),),
-        css_var="--nfm-map-label-color",
+        doc="Station label text.", group="Canvas and text", color=True
     )
     label_font_family: str = _field(
         doc="CSS font stack for station labels, and for every other text element.",
         group="Canvas and text",
+        pattern=FONT_FAMILY_PATTERN,
     )
     label_font_size: float = _field(
-        doc="Station label size, px.",
-        group="Canvas and text",
+        doc="Station label size, px.", group="Canvas and text"
     )
-    label_font_weight: str = _field(
+    label_font_weight: str = _font_weight(
         doc="Station label weight (`bold`, `normal`, `600`, ...).",
         group="Canvas and text",
     )
@@ -189,24 +170,20 @@ class Theme:
         doc="Width of the knockout halo behind station labels, px. 0 disables it.",
         group="Canvas and text",
     )
-    label_halo_color: str = _field(
+    knockout_fill: str = _field(
         "",
-        doc="Halo colour. Empty takes the background, or white on a transparent "
-        "canvas.",
+        doc="Halo behind station labels and the inside of `open` markers. Empty "
+        "takes the background, or white on a transparent canvas.",
         group="Canvas and text",
         color=True,
     )
-
     caption_color: str = _field(
-        "",
-        doc="`%%metro caption:` text, in colours that follow the viewer's light "
-        "or dark mode. Empty draws a fixed light grey.",
+        CAPTION_FILL,
+        doc="`%%metro caption:` text.",
         group="Canvas and text",
         color=True,
-        chrome=(ChromeTarget("nf-metro-caption", "fill", "set"),),
-        css_var="--nfm-map-caption-color",
     )
-    caption_font_size: int = _field(
+    caption_font_size: float = _field(
         CAPTION_FONT_SIZE, doc="Caption size, px.", group="Canvas and text"
     )
     watermark_color: str = _field(
@@ -220,38 +197,25 @@ class Theme:
         doc="Margin around the map on every side, px.",
         group="Canvas and text",
     )
+
     section_fill: str = _field(
         doc="Section box fill. `transparent` draws an outline only.",
         group="Sections",
         color=True,
-        chrome=(("nf-metro-section-box", "fill"),),
-        css_var="--nfm-map-section-fill",
     )
     section_stroke: str = _field(
-        doc="Section box outline.",
-        group="Sections",
-        color=True,
-        chrome=(("nf-metro-section-box", "stroke"),),
-        css_var="--nfm-map-section-stroke",
+        doc="Section box outline.", group="Sections", color=True
     )
     section_label_color: str = _field(
-        doc="Section titles and group captions.",
-        group="Sections",
-        color=True,
-        chrome=(
-            ("nf-metro-section-label", "fill"),
-            ("nf-metro-group-label", "fill"),
-            ("nf-metro-group-underline", "stroke"),
-        ),
-        css_var="--nfm-map-section-label-color",
+        doc="Section titles and group captions.", group="Sections", color=True
     )
     section_label_font_size: float = _field(
         doc="Section title size, px.", group="Sections"
     )
-    section_label_font_weight: str = _field(
+    section_label_font_weight: str = _font_weight(
         "bold", doc="Section title weight.", group="Sections"
     )
-    section_label_uppercase: bool = _field(
+    uppercase_section_labels: bool = _field(
         False, doc="Draw section titles in capitals.", group="Sections"
     )
     section_label_letter_spacing: float = _field(
@@ -262,34 +226,32 @@ class Theme:
     )
     section_stroke_dasharray: str = _field(
         "",
-        doc="SVG dash pattern for the section outline (`2 4`). Empty is solid.",
+        doc="SVG dash pattern for the section outline, px (`2 4`). Empty is solid.",
         group="Sections",
+        pattern=DASHARRAY_PATTERN,
     )
     section_corner_radius: float = _field(
         SECTION_BOX_RADIUS, doc="Section box corner radius, px.", group="Sections"
     )
-    section_badges: bool = _field(
+    number_sections: bool = _field(
         True,
-        doc="Draw the numbered circle beside each section title. Off, titles "
+        doc="Draw the numbered badge beside each section title. Off, titles "
         "start where the badge would be.",
         group="Sections",
     )
-
     section_badge_fill: str = _field(
         "",
         doc="Number badge fill. Empty takes `station_stroke`.",
         group="Sections",
         color=True,
-        fallback="station_stroke",
     )
     section_badge_text_color: str = _field(
         "",
         doc="Number badge digit. Empty takes `station_fill`.",
         group="Sections",
         color=True,
-        fallback="station_fill",
     )
-    section_badge_font_size: int = _field(
+    section_badge_font_size: float = _field(
         SECTION_NUM_FONT_SIZE, doc="Number badge digit size, px.", group="Sections"
     )
     group_rule_width: float = _field(
@@ -303,28 +265,15 @@ class Theme:
         group="Sections",
         maximum=1,
     )
-    legend_background: str = _field(
-        doc="Legend box fill.",
-        group="Legend",
-        color=True,
-        chrome=(("nf-metro-legend-bg", "fill"),),
-        css_var="--nfm-map-legend-bg",
-    )
+
+    legend_fill: str = _field(doc="Legend box fill.", group="Legend", color=True)
     legend_stroke: str = _field(
         "",
         doc="Legend box outline. Empty draws none.",
         group="Legend",
         color=True,
-        chrome=(("nf-metro-legend-bg", "stroke"),),
-        css_var="--nfm-map-legend-stroke",
     )
-    legend_text_color: str = _field(
-        doc="Legend text.",
-        group="Legend",
-        color=True,
-        chrome=(("nf-metro-legend-text", "fill"),),
-        css_var="--nfm-map-legend-text-color",
-    )
+    legend_text_color: str = _field(doc="Legend text.", group="Legend", color=True)
     legend_font_size: float = _field(doc="Legend text size, px.", group="Legend")
     legend_stroke_width: float = _field(
         0.0, doc="Legend outline width, px. 0 draws none.", group="Legend"
@@ -332,7 +281,6 @@ class Theme:
     legend_corner_radius: float = _field(
         LEGEND_BORDER_RADIUS, doc="Legend box corner radius, px.", group="Legend"
     )
-
     legend_padding: float = _field(
         LEGEND_PADDING, doc="Space inside the legend box, px.", group="Legend"
     )
@@ -342,57 +290,34 @@ class Theme:
     legend_swatch_width: float = _field(
         LEGEND_SWATCH_WIDTH, doc="Length of each line swatch, px.", group="Legend"
     )
+
+    station_fill: str = _field(
+        doc="Inside of station capsules, interchange rings and the strip "
+        "bridging a chain of them.",
+        group="Stations",
+        color=True,
+    )
+    station_stroke: str = _field(
+        doc="Outline of station capsules and interchange rings, and the `bar` "
+        "line end.",
+        group="Stations",
+        color=True,
+    )
+    station_stroke_width: float = _field(
+        doc="Station capsule outline width, px.", group="Stations"
+    )
+    station_radius: float = _field(
+        STATION_RADIUS_APPROX, doc="Station capsule end radius, px.", group="Stations"
+    )
     marker_stroke: str = _field(
         "",
         doc="Outline of `%%metro marker:` glyphs and their legend swatches. "
         "Empty takes `station_stroke`.",
         group="Stations",
         color=True,
-        chrome=(ChromeTarget("nf-metro-marker-stroke", "stroke", muted=True),),
-        css_var="--nfm-map-marker-stroke",
-        fallback="station_stroke",
-    )
-    marker_open_fill: str = _field(
-        "",
-        doc="Inside of `open` markers. Empty takes the background, or white on "
-        "a transparent canvas.",
-        group="Stations",
-        color=True,
-    )
-    glyph_stroke: str = _field(
-        "",
-        doc="Outline of interchange rings and their links, the `bar` terminus, "
-        "and station capsules, in colours that follow the viewer's light or dark "
-        "mode. Empty takes `station_stroke`, and capsules keep it in both modes.",
-        group="Stations",
-        color=True,
-        chrome=(
-            ChromeTarget("nf-metro-ring", "stroke", "rings", muted=True),
-            ChromeTarget("nf-metro-ring-link", "fill", "rings", muted=True),
-            ChromeTarget("nf-metro-terminus-bar", "fill", "bar", muted=True),
-            ChromeTarget("nf-metro-capsule", "stroke", "set", muted=True),
-            ChromeTarget("nf-metro-capsule-outline", "stroke", "set", muted=True),
-            ChromeTarget("nf-metro-capsule-outline", "fill", "set", muted=True),
-        ),
-        css_var="--nfm-map-glyph-stroke",
-        fallback="station_stroke",
-    )
-    ring_fill: str = _field(
-        "",
-        doc="Inside of interchange rings and the strip bridging a chain of "
-        "them. Empty takes the background, or white on a transparent canvas.",
-        group="Stations",
-        color=True,
-        chrome=(
-            ChromeTarget("nf-metro-ring-hole", "fill", "rings"),
-            ChromeTarget("nf-metro-ring-bridge", "fill", "rings"),
-        ),
-        css_var="--nfm-map-ring-fill",
-        fallback="background_color",
-        opaque=True,
     )
     station_glyph: str = _field(
-        "pill",
+        GLYPH_PILL,
         doc="How a station on one line is drawn. `pill` draws a capsule. "
         "`tick` draws a tab in the line's colour on the label's side, "
         "and a bar across the line's end (a buffer stop) at a terminus.",
@@ -400,42 +325,13 @@ class Theme:
         choices=(GLYPH_PILL, GLYPH_TICK),
     )
     interchange_glyph: str = _field(
-        "pill",
+        GLYPH_PILL,
         doc="How a station on several lines is drawn. `pill` draws a capsule "
         "across them. `ring` draws one ring centred on the lines, or a chain "
         "of touching rings bridged by a strip when the lines are too wide for "
         "one.",
         group="Stations",
         choices=(GLYPH_PILL, GLYPH_RING),
-    )
-    station_fill: str = _field(
-        doc="Station capsule fill.", group="Stations", color=True
-    )
-    station_stroke: str = _field(
-        doc="Station capsule outline; also the default marker and file-icon outline.",
-        group="Stations",
-        color=True,
-    )
-    station_stroke_width: float = _field(
-        doc="Station capsule outline width, px.", group="Stations"
-    )
-    capsule_fill: str = _field(
-        "",
-        doc="Inside of station capsules and interchanges, in colours that follow "
-        "the viewer's light or dark mode. Empty takes `station_fill` in both "
-        "modes.",
-        group="Stations",
-        color=True,
-        chrome=(
-            ChromeTarget("nf-metro-capsule", "fill", "set"),
-            ChromeTarget("nf-metro-capsule-core", "stroke", "set"),
-            ChromeTarget("nf-metro-capsule-core", "fill", "set"),
-        ),
-        css_var="--nfm-map-capsule-fill",
-        fallback="station_fill",
-    )
-    station_radius: float = _field(
-        STATION_RADIUS_APPROX, doc="Station capsule end radius, px.", group="Stations"
     )
     terminus_glyph: str = _field(
         TERMINUS_NUB,
@@ -450,35 +346,34 @@ class Theme:
     station_tick_width: float = _field(
         0.66,
         doc="Thickness of a `tick` tab along its line, and of a terminus bar, "
-        "in multiples of `line_width`.",
+        "× `line_width`.",
         group="Stations",
     )
     station_tick_length: float = _field(
         0.66,
         doc="How far a `tick` tab reaches past the edge of its line, and how "
-        "far a terminus bar overhangs each side, in multiples of `line_width`.",
+        "far a terminus bar overhangs each side, × `line_width`.",
         group="Stations",
     )
     ring_inner_diameter: float = _field(
         2.0,
-        doc="Inside diameter of an interchange ring, in multiples of `line_width`.",
+        doc="Inside diameter of an interchange ring, × `line_width`.",
         group="Stations",
     )
     ring_stroke_width: float = _field(
         0.5,
-        doc="Interchange ring outline width, in multiples of `line_width`.",
+        doc="Interchange ring outline width, × `line_width`.",
         group="Stations",
     )
     ring_bridge_width: float = _field(
         0.5,
-        doc="Width of the strip bridging a chain of rings, in multiples of "
-        "`line_width`.",
+        doc="Width of the strip bridging a chain of rings, × `line_width`.",
         group="Stations",
     )
     ring_max_lines: int = _field(
         3,
         doc="Most lines on one track a single ring of `ring_inner_diameter` "
-        "covers; a wider bundle follows `ring_overflow`.",
+        "covers, a count; a wider bundle follows `ring_overflow`.",
         group="Stations",
     )
     ring_overflow: str = _field(
@@ -498,12 +393,26 @@ class Theme:
     )
     dashed_dasharray: str = _field(
         STROKE_DASHARRAY["dashed"],
-        doc="SVG dash pattern of a `dashed` line.",
+        doc="SVG dash pattern of a `dashed` line, px.",
         group="Lines",
+        pattern=DASHARRAY_PATTERN,
     )
     dotted_dasharray: str = _field(
         STROKE_DASHARRAY["dotted"],
-        doc="SVG dash pattern of a `dotted` line.",
+        doc="SVG dash pattern of a `dotted` line, px.",
+        group="Lines",
+        pattern=DASHARRAY_PATTERN,
+    )
+    muted_line_color: str = _field(
+        FALLBACK_LINE_COLOR,
+        doc="Grey for inactive lines and the stations, labels and icons only "
+        "they touch.",
+        group="Lines",
+        color=True,
+    )
+    bridge_lines: bool = _field(
+        True,
+        doc="Break the lower line where two unrelated lines cross.",
         group="Lines",
     )
     bridge_gap: float = _field(
@@ -511,59 +420,59 @@ class Theme:
         doc="Gap a line leaves either side of a line it hops over, px.",
         group="Lines",
     )
-    muted_line_color: str = _field(
-        FALLBACK_LINE_COLOR,
-        doc="Grey for inactive lines and the stations, labels and icons only "
-        "they touch. A two-palette SVG switches it with the viewer's mode.",
-        group="Lines",
-        color=True,
-    )
-    bridge_glyph: bool = _field(
-        True,
-        doc="Break the lower line where two unrelated lines cross.",
+    chevron_size: float = _field(
+        4.0,
+        doc="Half-length and half-width of `--directional` chevrons, px.",
         group="Lines",
     )
-    directional_marker_size: float = _field(
-        4.0, doc="Half-size of `--directional` chevrons, px.", group="Lines"
-    )
-    directional_marker_spacing: float = _field(
+    chevron_spacing: float = _field(
         64.0, doc="Distance between chevrons along a route, px.", group="Lines"
     )
-    directional_marker_opacity: float = _field(
-        0.75, doc="Chevron opacity, 0 to 1.", group="Lines"
+    chevron_opacity: float = _field(
+        0.75, doc="Chevron opacity, 0 to 1.", group="Lines", maximum=1
     )
-    directional_marker_color: str = _field(
+    chevron_color: str = _field(
         "",
         doc="Chevron colour. Empty takes the line's colour.",
         group="Lines",
         color=True,
     )
 
-    terminus_width: float = _field(
+    icon_width: float = _field(
         TERMINUS_WIDTH, doc="File icon width, px.", group="File icons"
     )
-    terminus_height: float = _field(
+    icon_height: float = _field(
         2 * ICON_HALF_HEIGHT, doc="File icon height, px.", group="File icons"
     )
-    terminus_fold_size: float = _field(
+    icon_fold_size: float = _field(
         8.0, doc="Size of the folded corner, px.", group="File icons"
     )
-    terminus_fill: str = _field(
+    icon_corner_radius: float = _field(
+        2.0, doc="Icon corner radius, px.", group="File icons"
+    )
+    icon_fill: str = _field(
         "",
         doc="Icon fill. Empty takes `station_fill`.",
         group="File icons",
         color=True,
-        fallback="station_fill",
     )
-    terminus_stroke: str = _field(
+    icon_stroke: str = _field(
         "",
         doc="Icon outline. Empty takes `station_stroke`.",
         group="File icons",
         color=True,
-        fallback="station_stroke",
     )
-    terminus_stroke_width: float = _field(
+    icon_stroke_width: float = _field(
         1.5, doc="Icon outline width, px.", group="File icons"
+    )
+    icon_font_size: float = _field(
+        7.5, doc="Size of the format label inside the icon, px.", group="File icons"
+    )
+    icon_text_color: str = _field(
+        TERMINUS_FONT_COLOR,
+        doc="Format label inside the icon.",
+        group="File icons",
+        color=True,
     )
     icon_banner_fill: str = _field(
         ICON_BANNER_FILL,
@@ -577,23 +486,11 @@ class Theme:
         group="File icons",
         color=True,
     )
-    terminus_corner_radius: float = _field(
-        2.0, doc="Icon corner radius, px.", group="File icons"
-    )
-    terminus_font_size: float = _field(
-        7.5, doc="Size of the format label inside the icon, px.", group="File icons"
-    )
-    terminus_font_color: str = _field(
-        "",
-        doc="Format label colour. Empty takes the built-in dark ink.",
-        group="File icons",
-        color=True,
-    )
 
     animation_ball_radius: float = _field(
         3.0, doc="Radius of `--animate` balls, px.", group="Animation"
     )
-    animation_ball_color: str = _field(
+    animation_ball_fill: str = _field(
         "#ffffff", doc="Ball fill.", group="Animation", color=True
     )
     animation_ball_opacity: float = _field(
@@ -609,59 +506,11 @@ class Theme:
         1.0, doc="Ball outline width, px.", group="Animation"
     )
     animation_balls_per_line: int = _field(
-        1, doc="Balls travelling along each route.", group="Animation"
+        1, doc="Balls travelling along each route, a count.", group="Animation"
     )
     animation_speed: float = _field(
         80.0, doc="Ball speed, px per second.", group="Animation"
     )
-
-
-_THEME_FIELDS: MappingProxyType[str, dataclasses.Field[Any]] = MappingProxyType(
-    {f.name: f for f in dataclasses.fields(Theme)}
-)
-
-
-class ChromeBinding(NamedTuple):
-    """One chrome colour: the field, its custom property, and what it paints.
-
-    ``fallback`` names the field an empty value takes; ``opaque`` turns a
-    transparent value into white.
-    """
-
-    field: str
-    css_var: str
-    targets: tuple[ChromeTarget, ...]
-    fallback: str
-    opaque: bool
-
-
-def draws_rings(theme: object) -> bool:
-    """Whether *theme* draws interchange rings, at interchanges or line ends."""
-    return GLYPH_RING in (
-        getattr(theme, "interchange_glyph"),
-        getattr(theme, "terminus_glyph"),
-    )
-
-
-EMIT_CONDITIONS: MappingProxyType[str, Callable[[object], bool]] = MappingProxyType(
-    {
-        "rings": draws_rings,
-        "bar": lambda theme: getattr(theme, "terminus_glyph") == TERMINUS_BAR,
-    }
-)
-
-
-def target_applies(theme: object, binding: ChromeBinding, target: ChromeTarget) -> bool:
-    """Whether *theme* draws the elements *target* paints.
-
-    ``set`` targets apply only when the theme sets the colour itself, so a
-    theme that leaves it empty keeps fixed colours there.
-    """
-    if not target.when:
-        return True
-    if target.when == "set":
-        return bool(getattr(theme, binding.field))
-    return EMIT_CONDITIONS[target.when](theme)
 
 
 @lru_cache(maxsize=1)
@@ -676,25 +525,84 @@ def authored_fields() -> MappingProxyType[str, dataclasses.Field[Any]]:
     )
 
 
-@lru_cache(maxsize=1)
-def chrome_bindings() -> tuple[ChromeBinding, ...]:
-    """Every chrome colour, in the order its CSS rules are emitted."""
-    return tuple(
-        ChromeBinding(
-            f.name,
-            f.metadata["css_var"],
-            f.metadata["chrome"],
-            f.metadata["fallback"],
-            f.metadata["opaque"],
-        )
-        for f in dataclasses.fields(Theme)
-        if f.metadata.get("chrome")
-    )
+class Chrome(NamedTuple):
+    """How a chrome colour reaches the stylesheet.
+
+    ``targets`` are the ``(class, property, muted)`` rules it paints; a muted
+    target also gets a rule greying it when every line touching it is
+    inactive. An ``adaptive_only`` colour gets its rules only when its light
+    and dark values differ, and is otherwise left to the baked attribute.
+    """
+
+    css_var: str
+    targets: tuple[tuple[str, str, bool], ...]
+    adaptive_only: bool = False
 
 
-def opaque_or_white(color: str) -> str:
-    """*color*, or white when it is empty or ``none``."""
-    return color if color and color != "none" else "#ffffff"
+#: Every chrome colour, in the order its CSS rules are emitted.
+CHROME: MappingProxyType[str, Chrome] = MappingProxyType(
+    {
+        "background_fill": Chrome("--nfm-map-bg", (("nf-metro-bg", "fill", False),)),
+        "title_color": Chrome(
+            "--nfm-map-title-color", (("nf-metro-title", "fill", False),)
+        ),
+        "label_color": Chrome(
+            "--nfm-map-label-color", (("nf-metro-station-label", "fill", True),)
+        ),
+        "caption_color": Chrome(
+            "--nfm-map-caption-color", (("nf-metro-caption", "fill", False),), True
+        ),
+        "section_fill": Chrome(
+            "--nfm-map-section-fill", (("nf-metro-section-box", "fill", False),)
+        ),
+        "section_stroke": Chrome(
+            "--nfm-map-section-stroke", (("nf-metro-section-box", "stroke", False),)
+        ),
+        "section_label_color": Chrome(
+            "--nfm-map-section-label-color",
+            (
+                ("nf-metro-section-label", "fill", False),
+                ("nf-metro-group-label", "fill", False),
+                ("nf-metro-group-underline", "stroke", False),
+            ),
+        ),
+        "legend_fill": Chrome(
+            "--nfm-map-legend-bg", (("nf-metro-legend-bg", "fill", False),)
+        ),
+        "legend_stroke": Chrome(
+            "--nfm-map-legend-stroke", (("nf-metro-legend-bg", "stroke", False),)
+        ),
+        "legend_text_color": Chrome(
+            "--nfm-map-legend-text-color", (("nf-metro-legend-text", "fill", False),)
+        ),
+        "marker_stroke": Chrome(
+            "--nfm-map-marker-stroke", (("nf-metro-marker-stroke", "stroke", True),)
+        ),
+        "station_stroke": Chrome(
+            "--nfm-map-station-stroke",
+            (
+                ("nf-metro-ring", "stroke", True),
+                ("nf-metro-ring-link", "fill", True),
+                ("nf-metro-terminus-bar", "fill", True),
+                ("nf-metro-capsule", "stroke", True),
+                ("nf-metro-capsule-outline", "stroke", True),
+                ("nf-metro-capsule-outline", "fill", True),
+            ),
+            True,
+        ),
+        "station_fill": Chrome(
+            "--nfm-map-station-fill",
+            (
+                ("nf-metro-ring-hole", "fill", False),
+                ("nf-metro-ring-bridge", "fill", False),
+                ("nf-metro-capsule", "fill", False),
+                ("nf-metro-capsule-core", "stroke", False),
+                ("nf-metro-capsule-core", "fill", False),
+            ),
+            True,
+        ),
+    }
+)
 
 
 def adaptive_value(light: str, dark: str) -> str:
@@ -704,59 +612,33 @@ def adaptive_value(light: str, dark: str) -> str:
     return f"light-dark({light}, {dark})"
 
 
-def is_adaptive(theme: object) -> bool:
-    """Whether *theme* carries both palettes, so chrome can follow the viewer."""
-    return bool(getattr(theme, "mode_colors"))
-
-
-def color_pair(theme: object, name: str) -> tuple[str, str]:
-    """``(light, dark)`` values of colour field *name*; the baked value twice
-    for a single-palette theme."""
-    for field, light, dark in getattr(theme, "mode_colors"):
+def color_pair(theme: Theme, name: str) -> tuple[str, str]:
+    """``(light, dark)`` values of colour field *name*."""
+    for field, light, dark in theme.mode_colors:
         if field == name:
             return light, dark
     value: str = getattr(theme, name)
     return value, value
 
 
-def binding_pair(theme: object, binding: ChromeBinding) -> tuple[str, str]:
-    """A chrome colour's ``(light, dark)`` values after its fallback rules."""
-    light, dark = color_pair(theme, binding.field)
-    if binding.fallback:
-        fb_light, fb_dark = color_pair(theme, binding.fallback)
-        light, dark = light or fb_light, dark or fb_dark
-    if binding.opaque:
-        light, dark = opaque_or_white(light), opaque_or_white(dark)
-    return light, dark
+def colors_adapt(theme: Theme, *names: str) -> bool:
+    """Whether any of colour fields *names* differs between the two palettes."""
+    return any(len(set(color_pair(theme, name))) > 1 for name in names)
 
 
-def theme_color(theme: object, name: str) -> str:
-    """Colour field *name* of *theme* after the fallback and opacity rules its
-    schema metadata declares."""
-    meta = _THEME_FIELDS[name].metadata
-    value: str = getattr(theme, name)
-    if not value and meta["fallback"]:
-        value = getattr(theme, meta["fallback"])
-    return opaque_or_white(value) if meta["opaque"] else value
+def is_adaptive(theme: Theme) -> bool:
+    """Whether any of *theme*'s colours differs between its two palettes, so
+    chrome can follow the viewer."""
+    return any(light != dark for _, light, dark in theme.mode_colors)
 
 
 MUTED_STROKE_CLASS = "nf-metro-muted-stroke"
 MUTED_FILL_CLASS = "nf-metro-muted-fill"
 
 
-def muted_adapts(theme: object) -> bool:
-    """Whether *theme*'s inactive grey differs between its light and dark palettes.
-
-    Only then do muted line strokes and glyph fills need a class for the chrome
-    CSS to switch them; otherwise the baked attribute is right in both modes.
-    """
-    light, dark = color_pair(theme, "muted_line_color")
-    return light != dark
-
-
-def muted_paint_class(theme: object, muted: bool, prop: str) -> str:
+def muted_paint_class(theme: Theme, muted: bool, prop: str) -> str:
     """The class that lets a muted line ``stroke`` or glyph ``fill`` follow the
-    viewer's mode, or ``""`` when nothing needs it."""
-    if not (muted and muted_adapts(theme)):
+    viewer's mode, or ``""`` when the inactive grey is the same in both."""
+    if not (muted and colors_adapt(theme, "muted_line_color")):
         return ""
     return _ns(MUTED_STROKE_CLASS if prop == "stroke" else MUTED_FILL_CLASS)

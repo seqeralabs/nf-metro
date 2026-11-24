@@ -2484,7 +2484,7 @@ def _guard_no_line_crosses_file_icon(
         except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
             return
 
-    icon_boxes = _icon_obstacles_by_station(graph, resolve_theme(None, graph), offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, resolve_theme(graph), offsets)
     if not icon_boxes:
         return
     index = BBoxXIndex(list(icon_boxes.items()))
@@ -2703,7 +2703,7 @@ def iter_line_label_strikes(
             graph,
             station_offsets=offsets,
             icon_obstacles=_compute_icon_obstacles(
-                graph, resolve_theme(None, graph), offsets
+                graph, resolve_theme(graph), offsets
             ),
             routes=routes,
             label_angle=graph.label_angle or 0.0,
@@ -2861,7 +2861,7 @@ def _guard_no_wrapped_label_trunk_strike(
             graph,
             station_offsets=offsets,
             icon_obstacles=_compute_icon_obstacles(
-                graph, resolve_theme(None, graph), offsets
+                graph, resolve_theme(graph), offsets
             ),
             routes=routes,
             label_angle=graph.label_angle or 0.0,

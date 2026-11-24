@@ -37,7 +37,7 @@ def test_diagonal_run_sets_the_transition_length():
 
     def runs(directive: str) -> list[float]:
         graph = prepare_graph(directive + _MAP)
-        plan = build_render_plan(graph, resolve_theme(None, graph))
+        plan = build_render_plan(graph, resolve_theme(graph))
         return [
             abs(p1[0] - p0[0])
             for polyline in plan.route_polylines

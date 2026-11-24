@@ -453,7 +453,7 @@ grazing it.  Enforced by ``test_routed_paths_clear_next_row_headers``."""
 DIRECTIONAL_MARKER_HALF_EXTENT: float = 4.0
 """Half-extent of a direction chevron about the path point carrying it.
 
-Mirrors ``Theme.directional_marker_size`` (the arm half-length and
+Mirrors ``Theme.chevron_size`` (the arm half-length and
 half-width), which the reservation ledger cannot read: a corridor's
 clearances are a property of its region, resolved before any theme is in
 hand."""
@@ -654,7 +654,7 @@ TERMINUS_WIDTH: float = 28.0
 """Default width of terminus (file) icons.
 
 Used by both layout (for clearance calculations) and render (as the
-Theme.terminus_width default).
+Theme.icon_width default).
 """
 
 ICON_TERMINUS_FORK_LEAD: float = 38.0
@@ -686,7 +686,7 @@ caption text doesn't visually crash into the icon stroke."""
 ICON_HALF_HEIGHT: float = 16.0
 """Half-height of a terminus file icon for layout calculations.
 
-Single source of truth for the default icon half-height: ``Theme.terminus_height``
+Single source of truth for the default icon half-height: ``Theme.icon_height``
 defaults to ``2 * ICON_HALF_HEIGHT`` (see ``render.style.Theme``)."""
 
 ICON_CAPTION_GAP: float = 4.0

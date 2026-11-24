@@ -4255,8 +4255,8 @@ def test_off_track_output_icon_clears_on_track_markers(fixture):
     overlaps the icon box in both axes.
     """
     theme = THEMES["nfcore"]
-    icon_half_w = theme.terminus_width / 2
-    icon_half_h = theme.terminus_height / 2
+    icon_half_w = theme.icon_width / 2
+    icon_half_h = theme.icon_height / 2
     r = theme.station_radius
 
     graph = _layout(fixture)
@@ -6937,7 +6937,7 @@ def test_section_bbox_contains_all_content(fixture, params):
     bbox top so the icon spills outside the section background.
 
     Margin: on-track station markers reach ~9.5 px above the centre,
-    file icons reach ``terminus_height / 2 = 16`` px above the centre
+    file icons reach ``icon_height / 2 = 16`` px above the centre
     (both off-track inputs and on-track terminus stations render the
     same icon at ``station.y + bundle_mid``).  We assert
     ``station.y - reach >= bbox_y - 0.5`` (sub-pixel tolerance) and
@@ -9196,7 +9196,7 @@ def test_auto_y_spacing_fits_content(example):
 
 def _icon_half_height_default() -> float:
     """Vertical reach (half-height) of a file-input icon.  Mirrors the
-    renderer's default ``terminus_height`` of 32 px.
+    renderer's default ``icon_height`` of 32 px.
     """
     return 16.0
 
@@ -9208,7 +9208,7 @@ def _icon_x_extent(graph: MetroGraph, station, section) -> tuple[float, float]:
     """
     r = 5.0  # station_radius
     icon_gap = 5.0  # ICON_STATION_GAP
-    icon_half_w = 14.0  # terminus_width / 2 = 28 / 2
+    icon_half_w = 14.0  # icon_width / 2 = 28 / 2
     icon_step = icon_gap + r + icon_half_w
     is_source = not any(e.target == station.id for e in graph.edges)
     if section.direction == "RL":
@@ -11079,7 +11079,7 @@ def test_cross_row_top_entry_bundle_corners_are_concentric():
 
     path = _resolve_fixture("topologies/cross_row_gap_wrap.mmd")
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
 
     bundle = []
     for record in observed.plan.routes:

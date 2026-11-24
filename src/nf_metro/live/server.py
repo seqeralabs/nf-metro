@@ -133,7 +133,7 @@ class MapModel:
 
     def __init__(self, graph: MetroGraph, theme: Theme) -> None:
         self.mapping = graph.process_mapping
-        self.is_light = _is_light_bg(theme.background_color)
+        self.is_light = _is_light_bg(theme.background_fill)
         svg = render_svg(graph, theme)
         self.svg_body = _strip_xml_decl(svg)
 
@@ -687,7 +687,7 @@ class RunRegistry:
         self.theme = theme = stack.for_mode(DEFAULT_MODE)
         self.max_runs = max_runs
         self.overlay = overlay if overlay in OVERLAY_STYLES else DEFAULT_OVERLAY
-        self.is_light = _is_light_bg(theme.background_color)
+        self.is_light = _is_light_bg(theme.background_fill)
         self.lock = threading.Lock()
         self.runs: dict[str, dict[str, Any]] = {}
 

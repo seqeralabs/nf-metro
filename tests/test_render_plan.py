@@ -30,7 +30,7 @@ ROOT = Path(__file__).parents[1]
 def _plan(path: str) -> tuple[MetroGraph, RenderPlan]:
     source = ROOT / path
     graph = prepare_graph(source.read_text(), source_dir=str(source.parent))
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     return graph, build_render_plan(graph, theme)
 
 
@@ -150,7 +150,7 @@ def test_route_metadata_is_excluded_from_render_artifacts(path: str) -> None:
 def test_rendering_does_not_mutate_prepared_graph() -> None:
     source = ROOT / "examples" / "sarek_metro.mmd"
     graph = prepare_graph(source.read_text(), source_dir=str(source.parent))
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     before = copy.deepcopy(graph)
 
     render_svg(graph, theme)

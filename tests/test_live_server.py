@@ -22,7 +22,7 @@ from nf_metro.live.server import (
     serve,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.themes import THEMES, resolve_stack
+from nf_metro.themes import SEQERA_LIGHT_THEME, THEMES, resolve_stack
 
 MMD = (
     "%%metro line: a | A | #ff0000 | solid\n"
@@ -205,7 +205,7 @@ def test_dark_theme_page_uses_dark_chrome():
 
 
 def test_light_theme_page_uses_light_chrome():
-    page = build_page(MapModel(_graph(), THEMES["seqera-light"]))
+    page = build_page(MapModel(_graph(), SEQERA_LIGHT_THEME))
     assert "color-scheme: light" in page
     assert "--bg: #f8f9fa" in page
 

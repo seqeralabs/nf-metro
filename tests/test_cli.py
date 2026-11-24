@@ -693,7 +693,7 @@ def test_render_with_theme(tmp_path):
     out = tmp_path / "output.svg"
     runner = CliRunner()
     result = runner.invoke(
-        cli, ["render", str(RNASEQ_MMD), "-o", str(out), "--theme", "light"]
+        cli, ["render", str(RNASEQ_MMD), "-o", str(out), "--theme", "transparent"]
     )
     assert result.exit_code == 0, result.output
     assert out.exists()
@@ -1308,7 +1308,7 @@ def test_render_many_theme_option(tmp_path):
     out = tmp_path / "out.svg"
     manifest = _write_manifest(
         tmp_path,
-        [{"input": str(RNASEQ_MMD), "output": str(out), "theme": "light"}],
+        [{"input": str(RNASEQ_MMD), "output": str(out), "theme": "transparent"}],
     )
     result = CliRunner().invoke(cli, ["render-many", str(manifest)])
     assert result.exit_code == 0, result.output
@@ -1721,8 +1721,8 @@ def test_info_verbose_carries_warnings_once(tmp_path):
     "style, expected",
     [
         ("", "nfcore"),
-        ("%%metro style: dark\n", "nfcore"),
         ("%%metro style: seqera\n", "seqera"),
+        ("%%metro style: seqera, london-tube\n", "seqera, london-tube"),
         ("%%metro style: nonesuch\n", "nfcore"),
     ],
 )
@@ -1780,37 +1780,33 @@ def test_theme_option_accepts_every_style_directive_value(tmp_path):
         assert out.exists()
 
 
-def test_theme_alias_renders_as_the_brand_it_names(tmp_path):
-    """`--theme dark` draws what `--theme nfcore` draws."""
+def test_a_mode_is_not_a_theme_name(tmp_path):
+    """`--mode` picks the palette; `--theme dark` names no theme."""
     src = _simple_map(tmp_path)
-    aliased = tmp_path / "aliased.svg"
-    canonical = tmp_path / "canonical.svg"
-    for target, name in ((aliased, "dark"), (canonical, "nfcore")):
-        result = CliRunner().invoke(
-            cli, ["render", str(src), "-o", str(target), "--theme", name]
-        )
-        assert result.exit_code == 0, result.output
-    assert aliased.read_text() == canonical.read_text()
+    result = CliRunner().invoke(
+        cli, ["render", str(src), "-o", str(tmp_path / "x.svg"), "--theme", "dark"]
+    )
+    assert result.exit_code != 0
+    assert "unknown theme 'dark'" in result.output
 
 
 class _ServerStarted(Exception):
     """Raised by a stub server to end the command before it binds a port."""
 
 
-def test_serve_multi_accepts_the_theme_alias(monkeypatch):
-    """The alias resolves before `serve-multi` looks the theme up."""
-    from nf_metro.themes import THEMES
+def test_serve_multi_serves_its_theme_stack(monkeypatch):
+    from nf_metro.themes import resolve_stack
 
     started: dict[str, object] = {}
 
-    def _stub_serve_multi(theme, **kwargs):
-        started["theme"] = theme
+    def _stub_serve_multi(stack, **kwargs):
+        started["stack"] = stack
         raise _ServerStarted
 
     monkeypatch.setattr("nf_metro.live.server.serve_multi", _stub_serve_multi)
-    result = CliRunner().invoke(cli, ["serve-multi", "--theme", "dark"])
+    result = CliRunner().invoke(cli, ["serve-multi", "--theme", "seqera"])
     assert isinstance(result.exception, _ServerStarted), result.output
-    assert started["theme"] is THEMES["nfcore"]
+    assert started["stack"] is resolve_stack("seqera")
 
 
 @pytest.mark.parametrize(

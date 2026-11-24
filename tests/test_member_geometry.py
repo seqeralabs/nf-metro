@@ -732,7 +732,7 @@ def test_owned_corner_preview_regressions_match_plans_and_render(
     assert (
         render_graph(
             graph,
-            resolve_theme(None, graph),
+            resolve_theme(graph),
             RenderConfig(chrome_css=False),
         ).find("<svg ")
         > 0

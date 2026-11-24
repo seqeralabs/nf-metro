@@ -155,7 +155,7 @@ def test_default_bottom_legend_clears_a_wrapped_header():
     offsets = S.compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
     polylines = [S.apply_route_offsets(route, offsets) for route in routes]
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     header_placements = resolve_all_section_headers(
         graph, theme.section_label_font_size, polylines, theme.title_font_size
     )

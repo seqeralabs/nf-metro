@@ -36,7 +36,6 @@ import yaml
 
 from nf_metro.parser.provenance import ConnectorEndpointRole, EffectiveDecision
 from nf_metro.parser.route_topology import build_route_topology_query
-from nf_metro.themes import resolve_style
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, Section
@@ -314,7 +313,7 @@ def build_info(
     return {
         "title": graph.title or None,
         "caption": graph.caption or None,
-        "style": resolve_style(graph.style),
+        "style": graph.style,
         "warnings": list(warnings or []),
         "counts": {
             "stations": len(graph.stations),

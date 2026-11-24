@@ -175,7 +175,7 @@ def _render(
     )
     result = render_graph_result(
         graph,
-        resolve_theme(None, graph),
+        resolve_theme(graph),
         RenderConfig(output_format=output_format),  # type: ignore[arg-type]
     )
     content = result.content
@@ -238,7 +238,7 @@ def test_a_thick_section_outline_is_ink_the_title_starts_at(tmp_path: Path) -> N
         theme=str(theme),
         source_dir=str(path.parent),
     )
-    result = render_graph_result(graph, resolve_theme(None, graph), RenderConfig())
+    result = render_graph_result(graph, resolve_theme(graph), RenderConfig())
     root = ET.fromstring(result.content)
     ink = leftmost_ink(root, skip_images=False)
     title_x = float(_title(root).attrib["x"])

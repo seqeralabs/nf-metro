@@ -4,17 +4,12 @@ The dataclass is the typed source of truth; :func:`theme_schema` derives the
 schema (draft 2020-12) from its field types, defaults and metadata, and from the
 layout options a theme may set. ``theme.schema.json`` beside this module is that
 schema as shipped, for editors and other tools; a test fails when it drifts.
-Rewrite it with ``python -m nf_metro.themes.schema --write``.
+Rewrite it with ``python scripts/theme_docs.py --write``.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import json
-import sys
-from functools import lru_cache
-from importlib.resources import files
-from pathlib import Path
 from typing import Any
 
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
@@ -24,7 +19,6 @@ __all__ = [
     "SCHEMA_FILE",
     "THEMEABLE_LAYOUT_OPTIONS",
     "theme_schema",
-    "shipped_theme_schema",
 ]
 
 SCHEMA_FILE = "theme.schema.json"
@@ -32,7 +26,6 @@ SCHEMA_URL = (
     "https://raw.githubusercontent.com/seqeralabs/nf-metro/main/"
     f"src/nf_metro/themes/{SCHEMA_FILE}"
 )
-
 # Layout options that shape a map's look. Options that change what is drawn
 # or how a render behaves (size pinning, animation, guards, folding) stay with
 # the map and the caller.
@@ -88,6 +81,8 @@ def _field_schema(field: dataclasses.Field[Any]) -> dict[str, Any]:
     if meta["color"]:
         schema["pattern"] = COLOR_PATTERN
         schema["x-colour"] = True
+    elif meta["pattern"]:
+        schema["pattern"] = meta["pattern"]
     if kind in ("float", "int"):
         schema["minimum"] = 0
     if meta.get("maximum") is not None:
@@ -97,35 +92,19 @@ def _field_schema(field: dataclasses.Field[Any]) -> dict[str, Any]:
     return schema
 
 
-def _layout_schema(opt: LayoutOption) -> dict[str, Any]:
-    schema: dict[str, Any] = {"description": opt.help}
-    if opt.kind == "choice":
-        schema["enum"] = list(opt.choices)
-    else:
-        schema["type"] = {
-            "bool": "boolean",
-            "int": "integer",
-            "float": "number",
-            "str": "string",
-        }[opt.kind]
-    if opt.sign == "nonneg":
-        schema["minimum"] = 0
-    elif opt.sign == "positive":
-        schema["exclusiveMinimum"] = 0
-    if opt.max_val is not None:
-        schema["maximum"] = opt.max_val
-    return schema
-
-
 def theme_schema() -> dict[str, Any]:
     """The JSON Schema (draft 2020-12) of a theme file."""
-    fields = {name: _field_schema(f) for name, f in authored_fields().items()}
+    authored = authored_fields()
+    fields = {name: _field_schema(f) for name, f in authored.items()}
     refs = {name: {"$ref": f"#/$defs/fields/{name}"} for name in fields}
-    palette = {"type": "object", "properties": refs, "additionalProperties": False}
+    colours = {
+        name: ref for name, ref in refs.items() if authored[name].metadata["color"]
+    }
+    palette = {"type": "object", "properties": colours, "additionalProperties": False}
     layout = {
         "type": "object",
         "properties": {
-            name: _layout_schema(opt) for name, opt in THEMEABLE_LAYOUT_OPTIONS.items()
+            name: opt.json_schema() for name, opt in THEMEABLE_LAYOUT_OPTIONS.items()
         },
         "additionalProperties": False,
     }
@@ -137,13 +116,8 @@ def theme_schema() -> dict[str, Any]:
             "file relative to this file, or a list of them.",
             "oneOf": [stack_entry, {"type": "array", "items": stack_entry}],
         },
-        "fixed_mode": {
-            "description": "Render one palette, in this mode, whatever mode is "
-            "asked for; `none` clears a fixed mode set earlier in the stack.",
-            "enum": ["light", "dark", "none", None],
-        },
-        "light": {**palette, "description": "Fields for the light palette only."},
-        "dark": {**palette, "description": "Fields for the dark palette only."},
+        "light": {**palette, "description": "Colours for the light palette only."},
+        "dark": {**palette, "description": "Colours for the dark palette only."},
         "layout": {
             **layout,
             "description": "Layout options, below `%%metro` directives and "
@@ -155,7 +129,7 @@ def theme_schema() -> dict[str, Any]:
         "$id": SCHEMA_URL,
         "title": "nf-metro theme",
         "description": "A theme file: top-level fields apply to both palettes, "
-        "`light:` and `dark:` to one each.",
+        "`light:` and `dark:` colours to one each.",
         "type": "object",
         "required": ["name"],
         "properties": {
@@ -165,23 +139,3 @@ def theme_schema() -> dict[str, Any]:
         "additionalProperties": False,
         "$defs": {"fields": fields},
     }
-
-
-def render_schema() -> str:
-    """The shipped schema file's text."""
-    return json.dumps(theme_schema(), indent=2) + "\n"
-
-
-@lru_cache(maxsize=1)
-def shipped_theme_schema() -> dict[str, Any]:
-    """The schema as shipped beside this module."""
-    text = files(__package__).joinpath(SCHEMA_FILE).read_text(encoding="utf-8")
-    schema: dict[str, Any] = json.loads(text)
-    return schema
-
-
-if __name__ == "__main__":
-    if "--write" in sys.argv:
-        (Path(__file__).parent / SCHEMA_FILE).write_text(render_schema())
-    else:
-        print(render_schema(), end="")

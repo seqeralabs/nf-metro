@@ -5,7 +5,6 @@
 # sans in navy. Glyph sizes are multiples of line_width. Also the worked
 # example of the theme file format.
 name: london-tube
-fixed_mode: none # both palettes, even over a single-palette theme
 
 station_glyph: tick
 station_tick_width: 1
@@ -15,50 +14,48 @@ station_tick_length: 1.5
 interchange_glyph: pill
 ring_max_lines: 2
 terminus_glyph: bar
-station_fill: "#ffffff"
-station_stroke: "#000000"
+icon_fill: "#ffffff"
+icon_stroke: "#000000"
 station_stroke_width: 2.5
 line_width: 4
 label_font_family: "'Gill Sans', 'Gill Sans MT', 'Hammersmith One', Calibri, 'Trebuchet MS', sans-serif"
 label_font_weight: normal
 section_stroke_width: 1.5
 section_stroke_dasharray: "6 4"
-section_badges: false
+number_sections: false
 section_label_font_size: 13
 section_label_font_weight: normal
-section_label_uppercase: true
+uppercase_section_labels: true
 section_label_letter_spacing: 2
 legend_stroke_width: 1.5
 legend_corner_radius: 0
 
 light:
-  background_color: "#ffffff"
+  background_fill: "#ffffff"
   label_color: "#1c3f94"
   title_color: "#000000"
   marker_stroke: "#000000"
-  glyph_stroke: "#000000"
-  capsule_fill: "#ffffff"
-  ring_fill: "#ffffff"
+  station_fill: "#ffffff"
+  station_stroke: "#000000"
   muted_line_color: "#b3b3b3"
   section_fill: transparent
   section_stroke: "#8b919c"
   section_label_color: "#7a8291"
-  legend_background: "#ffffff"
+  legend_fill: "#ffffff"
   legend_text_color: "#111111"
   legend_stroke: "#000000"
 
 dark:
-  background_color: "#10141c"
+  background_fill: "#10141c"
   label_color: "#dfe6ff"
   title_color: "#ffffff"
   marker_stroke: "#f0f0f0"
-  glyph_stroke: "#ffffff"
-  capsule_fill: "#10141c"
-  ring_fill: "#10141c"
+  station_fill: "#10141c"
+  station_stroke: "#ffffff"
   muted_line_color: "#585a60"
   section_fill: transparent
   section_stroke: "#5f6779"
   section_label_color: "#9aa3b5"
-  legend_background: "#10141c"
+  legend_fill: "#10141c"
   legend_text_color: "#e6e6e6"
   legend_stroke: "#ffffff"

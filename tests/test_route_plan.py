@@ -1034,7 +1034,7 @@ def test_observer_toggle_is_exactly_render_neutral() -> None:
     assert freeze_render_value(observation.routes) == freeze_render_value(plain_routes)
 
     def render(graph):
-        plan = build_render_plan(graph, resolve_theme(None, graph))
+        plan = build_render_plan(graph, resolve_theme(graph))
         svg = emit_render_plan(plan)
         return (
             freeze_render_value(plan),

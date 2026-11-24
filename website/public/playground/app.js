@@ -610,10 +610,8 @@ function zoomFit() {
 // animate/chevrons/debug toggles are preview overlays handled separately.)
 
 // The selector picks the brand (palette identity); light/dark is the separate
-// Mode control, so brand and mode stay independent. Legacy sources may still
-// carry `%%metro style: dark`, which reads back as the nfcore brand.
+// Mode control, so brand and mode stay independent.
 const THEME_KEYS = ["nfcore", "seqera", "london-tube"];
-const STYLE_ALIASES = { dark: "nfcore" };
 
 // [control id, directive key, kind]
 const DIRECTIVE_CONTROLS = [
@@ -685,8 +683,7 @@ function themeKeyFromSource() {
     .toLowerCase()
     .split(",")
     .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => STYLE_ALIASES[entry] || entry);
+    .filter(Boolean);
   if (entries.length && entries.every((key) => THEME_KEYS.includes(key)))
     return entries.join(", ");
   return "nfcore";

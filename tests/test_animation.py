@@ -247,7 +247,7 @@ def test_dots_ride_their_lines_drawn_stroke(fixture: Path):
     from nf_metro.themes import resolve_theme
 
     graph = prepare_graph(fixture.read_text(), source_dir=str(fixture.parent))
-    plan = build_render_plan(graph, resolve_theme(None, graph))
+    plan = build_render_plan(graph, resolve_theme(graph))
     timeline = build_animation_timeline(
         plan.graph,
         plan.routes,

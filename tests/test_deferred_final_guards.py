@@ -122,7 +122,7 @@ def test_validated_layout_runs_deferred_route_guards_at_settled_chokepoint(
 def test_validated_layout_uses_caller_selected_theme_for_deferred_route_guards(
     monkeypatch,
 ) -> None:
-    from nf_metro.themes import resolve_theme
+    from nf_metro.themes import SEQERA_LIGHT_THEME
 
     seen: list[object] = []
 
@@ -130,7 +130,7 @@ def test_validated_layout_uses_caller_selected_theme_for_deferred_route_guards(
         seen.append(theme)
 
     graph = _deferred_route_guard_harness(monkeypatch, render_plan=capture)
-    theme = resolve_theme("seqera", graph, mode="light")
+    theme = SEQERA_LIGHT_THEME
 
     engine.compute_layout(graph, validate=True, validation_theme=theme)
 
@@ -296,4 +296,4 @@ def test_render_consumes_discovery_deferral_at_final_route_guard(
     monkeypatch.setattr(render_svg, "assert_render_layout_invariants", reject)
 
     with pytest.raises(RuntimeError, match="post-cohort route guard failed"):
-        render_svg._settled_render_graph(graph, resolve_theme(None, graph))
+        render_svg._settled_render_graph(graph, resolve_theme(graph))

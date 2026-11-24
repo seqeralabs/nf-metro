@@ -445,7 +445,7 @@ def _reflowed_labels_beside_a_free_side(graph: MetroGraph) -> list[str]:
     """
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
-    obstacles = _compute_icon_obstacles(graph, resolve_theme(None, graph), offsets)
+    obstacles = _compute_icon_obstacles(graph, resolve_theme(graph), offsets)
     placements = place_labels(
         graph,
         station_offsets=offsets,

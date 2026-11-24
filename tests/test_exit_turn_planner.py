@@ -3526,7 +3526,7 @@ def _corpus_disposition_overrides() -> dict[str, int]:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-                observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+                observed = build_observed_render_plan(graph, resolve_theme(graph))
         except Exception:  # noqa: BLE001 - erroring fixtures have their own tests
             continue
         plan = observed.route_plan

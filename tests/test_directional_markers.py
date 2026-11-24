@@ -103,7 +103,7 @@ DRAWN_STROKE_CASES = {
 def _directional_svg(text: str, source_dir: str) -> str:
     graph = prepare_graph(text, source_dir=source_dir)
     graph.directional = True
-    return render_graph(graph, resolve_theme(None, graph), RenderConfig())
+    return render_graph(graph, resolve_theme(graph), RenderConfig())
 
 
 @pytest.mark.parametrize("case", sorted(DRAWN_STROKE_CASES))
@@ -237,7 +237,7 @@ def test_same_line_chevrons_form_one_evenly_spaced_set(stem):
     text, source_dir = _example_text(stem)
     svg = _directional_svg(text, source_dir)
     graph = prepare_graph(text, source_dir=source_dir)
-    spacing = resolve_theme(None, graph).directional_marker_spacing
+    spacing = resolve_theme(graph).chevron_spacing
     doubled = [
         f"line {line_id!r} near ({x:.1f},{y:.1f}): {gap:.2f}px"
         for gap, line_id, (x, y) in chevron_run_gaps(svg)

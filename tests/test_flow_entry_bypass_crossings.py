@@ -173,7 +173,7 @@ _CROSSING_MAPS = {
 
 
 def _drawn(graph: MetroGraph) -> dict[tuple[str, str, str], list[Point]]:
-    plan = build_render_plan(graph, resolve_theme(None, graph))
+    plan = build_render_plan(graph, resolve_theme(graph))
     return {
         (r.edge.source, r.edge.target, r.line_id): [tuple(p) for p in points]
         for r, points in zip(plan.routes, plan.route_polylines)

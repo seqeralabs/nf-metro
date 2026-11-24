@@ -55,7 +55,7 @@ def nfm_render(mmd, opts_json):
             for k, v in render_only.items():
                 setattr(graph, k, bool(v))
 
-            theme_obj = resolve_theme(opts.get("theme") or None, graph, mode=opts.get("mode") or None)
+            theme_obj = resolve_theme(graph, opts.get("mode") or None)
             svg = render_svg(
                 graph,
                 theme_obj,

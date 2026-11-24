@@ -8,7 +8,6 @@ __all__ = [
     "logo_is_resolvable",
     "marker_corner_radius",
     "marker_fill_color",
-    "marker_stroke_color",
     "open_logo_image",
     "render_legend",
     "resolve_logo_file",
@@ -49,7 +48,7 @@ from nf_metro.render.constants import (
 )
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import ns as _ns
-from nf_metro.render.style import Theme, muted_paint_class, theme_color
+from nf_metro.render.style import Theme, muted_paint_class
 from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
 
 
@@ -126,18 +125,13 @@ def logo_image_kwargs(path: str) -> dict[str, str | bool]:
 def marker_fill_color(fill: str, theme: Theme) -> str:
     """Resolve a marker fill keyword/colour to an SVG fill value.
 
-    ``open`` renders the theme's open-marker interior (falling back to the
-    background, or white on transparent themes); ``solid`` uses the default
-    station fill; anything else is taken as a literal colour, directive-
+    ``open`` renders the theme's knockout fill; ``solid`` uses the station
+    fill; anything else is taken as a literal colour, directive-
     authored text that is HTML-escaped here before it lands in an SVG
     attribute (a no-op on every legitimate CSS colour form).
     """
     if fill == MARKER_FILL_OPEN:
-        if theme.marker_open_fill:
-            return theme.marker_open_fill
-        if theme.background_color and theme.background_color != "none":
-            return theme.background_color
-        return "#ffffff"
+        return theme.knockout_fill
     if fill == MARKER_FILL_SOLID:
         return theme.station_fill
     return html.escape(fill)
@@ -150,15 +144,6 @@ def marker_corner_radius(shape: str, r: float) -> float:
     (``r``), giving circles, capsules and stadium-ended pills.
     """
     return 0.0 if shape == MARKER_SHAPE_SQUARE else r
-
-
-def marker_stroke_color(theme: Theme) -> str:
-    """Resolve the outline colour for marker glyphs and their swatches.
-
-    A dedicated light outline keeps dark-filled markers visible against a
-    dark background; an empty ``marker_stroke`` inherits ``station_stroke``.
-    """
-    return theme_color(theme, "marker_stroke")
 
 
 @dataclass
@@ -421,7 +406,7 @@ def render_legend(
             legend_height,
             rx=theme.legend_corner_radius,
             ry=theme.legend_corner_radius,
-            fill=theme.legend_background,
+            fill=theme.legend_fill,
             class_=_ns("nf-metro-legend-bg"),
             **frame,
         )
@@ -538,7 +523,7 @@ def _render_marker_key(
     """Render the marker shape/fill key rows below the line legend."""
     swatch_cx = left_x + theme.legend_swatch_width / 2
     r = LEGEND_MARKER_RADIUS
-    stroke = marker_stroke_color(theme)
+    stroke = theme.marker_stroke
     stroke_cls = _ns("nf-metro-marker-stroke")
     for i, entry in enumerate(graph.marker_legend):
         entry_y = top_y + i * line_height + line_height / 2

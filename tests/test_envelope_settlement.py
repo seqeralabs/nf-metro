@@ -235,7 +235,7 @@ def _rendered_plan(path: Path, *, permissive: bool = False):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         graph.permissive = permissive
-        return build_observed_render_plan(graph, resolve_theme(None, graph))
+        return build_observed_render_plan(graph, resolve_theme(graph))
 
 
 @pytest.mark.parametrize(("path", "expected_ledger_reroutes"), LEDGER_REROUTE_CORPUS)
@@ -263,7 +263,7 @@ def _settled(path: Path):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         graph.permissive = True
-        theme = resolve_theme(None, graph)
+        theme = resolve_theme(graph)
         route_plan = build_observed_render_plan(graph, theme).route_plan
         return _settled_render_graph(graph, theme), route_plan
 
@@ -521,7 +521,7 @@ def test_a_group_band_render_is_gated_by_the_geometry_it_draws() -> None:
             GROUP_BAND_MAP.read_text(), source_dir=str(GROUP_BAND_MAP.parent)
         )
         graph.strict = True
-        theme = resolve_theme(None, graph)
+        theme = resolve_theme(graph)
         drawn = _settled_render_graph(graph, theme)
         plan = build_observed_render_plan(graph, theme).route_plan
 
@@ -781,7 +781,7 @@ def test_a_boundary_is_charged_for_the_unfiled_leg_drawn_in_it() -> None:
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         graph.strict = True
-        theme = resolve_theme(None, graph)
+        theme = resolve_theme(graph)
         drawn = _settled_render_graph(graph, theme)
         observed = build_observed_render_plan(graph, theme)
 
@@ -933,7 +933,7 @@ def test_the_whole_route_settle_route_pipeline_reaches_a_fixpoint(path: Path) ->
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         graph.permissive = True
-        theme = resolve_theme(None, graph)
+        theme = resolve_theme(graph)
         once = _settled_render_graph(graph, theme)
         twice = _settled_render_graph(once, theme)
     assert _geometry(twice) == _geometry(once)
@@ -1551,9 +1551,7 @@ def test_a_convergence_pair_shortfall_widens_its_column_boundary(
     )
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        rendered = build_observed_render_plan(
-            render_graph, resolve_theme(None, render_graph)
-        )
+        rendered = build_observed_render_plan(render_graph, resolve_theme(render_graph))
     assert not rendered.route_plan.boundary_clearance_requirements
     moves = [
         item
@@ -1565,9 +1563,7 @@ def test_a_convergence_pair_shortfall_widens_its_column_boundary(
     assert any("widened by 3.00px" in item.message for item in moves)
     assert any("widened by 4.00px" in item.message for item in moves)
     assert not any(issubclass(item.category, PermissiveGuardWarning) for item in caught)
-    settled_graph = _settled_render_graph(
-        render_graph, resolve_theme(None, render_graph)
-    )
+    settled_graph = _settled_render_graph(render_graph, resolve_theme(render_graph))
     left, right = column_gap_edges(settled_graph, boundary - 1, boundary, row=0)
     assert right - left >= requirement.required
     assert right - left == pytest.approx(47.0)
@@ -1683,7 +1679,7 @@ def test_the_canvas_edge_clearance_bounds_every_theme() -> None:
     widest = max(theme.line_width for theme in THEMES.values())
     assert WIDEST_THEME_LINE_WIDTH == pytest.approx(widest)
     assert DIRECTIONAL_MARKER_HALF_EXTENT == pytest.approx(
-        max(theme.directional_marker_size for theme in THEMES.values())
+        max(theme.chevron_size for theme in THEMES.values())
     )
     assert CANVAS_EDGE_CLEARANCE >= DIRECTIONAL_MARKER_HALF_EXTENT + widest / 2
 
@@ -1718,7 +1714,7 @@ def test_a_short_canvas_margin_fails_the_strict_path_at_full_capacity() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).route_plan
+        plan = build_observed_render_plan(graph, resolve_theme(graph)).route_plan
     reservation = next(
         item
         for item in plan.reservations
@@ -1769,7 +1765,7 @@ def test_every_canvas_corridor_holds_its_content_side(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).route_plan
+        plan = build_observed_render_plan(graph, resolve_theme(graph)).route_plan
     query = build_route_plan_query(plan)
     reservation = next(
         item
@@ -1808,7 +1804,7 @@ def test_a_top_canvas_corridor_is_bounded_by_content_over_its_own_run(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).route_plan
+        plan = build_observed_render_plan(graph, resolve_theme(graph)).route_plan
     reservation = next(
         item
         for item in plan.reservations
@@ -1828,7 +1824,7 @@ def test_a_short_canvas_content_side_fails_the_strict_path() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).route_plan
+        plan = build_observed_render_plan(graph, resolve_theme(graph)).route_plan
     reservation = next(
         item
         for item in plan.reservations
@@ -1867,7 +1863,7 @@ def test_a_canvas_edge_clearance_is_what_is_drawn_beside_the_edge() -> None:
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
             graph.permissive = True
-            theme = resolve_theme(None, graph)
+            theme = resolve_theme(graph)
             plan = build_observed_render_plan(graph, theme).route_plan
         query = build_route_plan_query(plan)
         checked = 0
@@ -2277,7 +2273,7 @@ def test_a_rail_layout_keeps_the_row_pitch_its_idiom_set(path: Path) -> None:
         warnings.simplefilter("ignore")
         source = prepare_graph(path.read_text(), source_dir=str(path.parent))
         assert source.has_rail_sections
-        settled = _settled_render_graph(source, resolve_theme(None, source))
+        settled = _settled_render_graph(source, resolve_theme(source))
         held = observe(settled)
         before = _route_decision_fingerprint(held.routes)
 

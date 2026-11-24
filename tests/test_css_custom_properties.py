@@ -75,7 +75,7 @@ def test_chrome_css_fallbacks_are_light_dark_of_both_palettes():
     svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
     light, dark = NFCORE_LIGHT_THEME, NFCORE_DARK_THEME
     assert (
-        f"--nfm-map-bg, light-dark({light.background_color}, {dark.background_color})"
+        f"--nfm-map-bg, light-dark({light.background_fill}, {dark.background_fill})"
         in svg
     )
     assert (
@@ -145,7 +145,7 @@ def test_render_string_no_mode_keeps_adaptive_color_scheme():
 def test_chrome_css_fallbacks_single_value_for_unfamilied_theme():
     """A theme with no light/dark family falls back to its single baked value.
 
-    Transparent themes (background_color='none') emit no ``.nf-metro-bg`` fill
+    Transparent themes (background_fill='none') emit no ``.nf-metro-bg`` fill
     rule; the halo knockout references --nfm-map-bg with a solid fallback.
     """
     theme = TRANSPARENT_THEME
@@ -233,7 +233,7 @@ def test_chrome_css_false_omits_var_references():
 def test_chrome_css_false_keeps_concrete_chrome_colors():
     """Dropping the var() block leaves the resolved mode's colors baked on chrome."""
     svg = render_svg(_make_graph(), NFCORE_DARK_THEME, chrome_css=False)
-    assert f'fill="{NFCORE_DARK_THEME.background_color}"' in svg
+    assert f'fill="{NFCORE_DARK_THEME.background_fill}"' in svg
     assert f'fill="{NFCORE_DARK_THEME.section_fill}"' in svg
 
 

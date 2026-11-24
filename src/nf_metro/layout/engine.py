@@ -543,7 +543,7 @@ def compute_layout(
         graph.section_y_padding = section_y_padding
     from nf_metro.themes import resolve_theme
 
-    graph.layout_metrics = LayoutMetrics.of(graph, resolve_theme(None, graph))
+    graph.layout_metrics = LayoutMetrics.of(graph, resolve_theme(graph))
     section_x_padding = graph.layout_metrics.section_x_padding
     section_y_padding = graph.layout_metrics.section_y_padding
 
@@ -609,7 +609,7 @@ def compute_layout(
             from nf_metro.render.svg import build_render_plan
 
             try:
-                build_render_plan(graph, validation_theme or resolve_theme(None, graph))
+                build_render_plan(graph, validation_theme or resolve_theme(graph))
             except (
                 CurveInvariantError,
                 FanRouteInvariantError,

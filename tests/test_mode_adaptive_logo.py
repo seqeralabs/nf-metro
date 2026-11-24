@@ -374,7 +374,7 @@ def test_baked_mode_embeds_matching_logo_variant(tmp_path):
 
     text = (
         f"%%metro logo: {light_file} | {dark_file}\n"
-        "%%metro style: dark\n"
+        "%%metro style: nfcore\n"
         "%%metro line: main | Main | #0570b0\n"
         "graph LR\n"
         "    a[A] -->|main| b[B]\n"

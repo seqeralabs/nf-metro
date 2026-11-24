@@ -157,7 +157,7 @@ def _settled(path: Path, monkeypatch: pytest.MonkeyPatch):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        build_observed_render_plan(graph, resolve_theme(None, graph))
+        build_observed_render_plan(graph, resolve_theme(graph))
     assert final, "the render chokepoint never ran the check"
     return final[0]
 
@@ -288,7 +288,7 @@ def _unreported_fused_pairs(path: Path) -> set[tuple[str, str, str, float, float
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-            build_observed_render_plan(graph, resolve_theme(None, graph))
+            build_observed_render_plan(graph, resolve_theme(graph))
     except Exception:  # noqa: BLE001 - the check ran before any abort
         pass
     finally:
@@ -346,7 +346,7 @@ def test_seed_15_preserves_its_stable_render_exception() -> None:
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
 
     with pytest.raises(invariants.CurveInvariantError, match="bundle order"):
-        build_observed_render_plan(graph, resolve_theme(None, graph))
+        build_observed_render_plan(graph, resolve_theme(graph))
 
 
 @pytest.mark.parametrize(
@@ -472,7 +472,7 @@ def test_analytic_candidate_segments_match_the_plan_mover(
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-                build_observed_render_plan(graph, resolve_theme(None, graph))
+                build_observed_render_plan(graph, resolve_theme(graph))
         except Exception:  # noqa: BLE001 - invalid fixtures may abort after scoring
             pass
 
@@ -598,7 +598,7 @@ def test_inter_row_corridor_seats_its_shared_destination_pair_together(
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         graph.strict = True
-        build_observed_render_plan(graph, resolve_theme(None, graph))
+        build_observed_render_plan(graph, resolve_theme(graph))
 
     graph, routes, offsets, _violations = _settled(path, monkeypatch)
     step = graph_offset_step(graph)

@@ -267,7 +267,7 @@ def _ball_prefix(theme: Theme) -> str:
         )
     return (
         f'<circle r="{theme.animation_ball_radius}" '
-        f'fill="{theme.animation_ball_color}" '
+        f'fill="{theme.animation_ball_fill}" '
         f'opacity="{theme.animation_ball_opacity}"{stroke_attr} '
     )
 

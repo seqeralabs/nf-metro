@@ -99,11 +99,11 @@ class LayoutMetrics(NamedTuple):
             stroke_scale=graph.stroke_scale,
             station_radius=theme.station_radius,
             station_stroke_width=theme.station_stroke_width,
-            icon_width=theme.terminus_width,
-            icon_half_height=theme.terminus_height / 2,
+            icon_width=theme.icon_width,
+            icon_half_height=theme.icon_height / 2,
             line_width=theme.line_width,
             label_font_size=theme.label_font_size,
-            chevron_size=theme.directional_marker_size,
+            chevron_size=theme.chevron_size,
             diagonal_run=option("diagonal_run", defaults.diagonal_run),
             label_offset=option("label_offset", defaults.label_offset),
             section_x_padding=option("section_x_padding", defaults.section_x_padding),
@@ -146,7 +146,7 @@ def graph_layout_context(graph: MetroGraph) -> AbstractContextManager[None]:
     if metrics is None:
         from nf_metro.themes import resolve_theme
 
-        metrics = LayoutMetrics.of(graph, resolve_theme(None, graph))
+        metrics = LayoutMetrics.of(graph, resolve_theme(graph))
     return metrics_context(metrics)
 
 

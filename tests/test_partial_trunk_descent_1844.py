@@ -48,7 +48,7 @@ SIDE_BRANCH_PARTIAL = "down"
 # descent onto the carrier slot.  A blind re-add would double-apply it.
 EXPLICIT_GRID_MMD = """\
 %%metro title: Adjacent Direct Partial Descent
-%%metro style: dark
+%%metro style: nfcore
 %%metro compact_offsets: true
 %%metro line: main | Main | #4CAF50
 %%metro line: side | Side | #ff9800

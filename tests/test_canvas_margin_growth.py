@@ -55,7 +55,7 @@ def _plan(
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         plan = build_render_plan(
-            graph, resolve_theme(None, graph), legend_position=legend_position
+            graph, resolve_theme(graph), legend_position=legend_position
         )
     downgraded = [
         item for item in caught if issubclass(item.category, PermissiveGuardWarning)

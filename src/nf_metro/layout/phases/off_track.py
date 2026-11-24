@@ -1196,7 +1196,7 @@ def _line_crossed_file_icon_sinks(graph: MetroGraph) -> set[str]:
     from nf_metro.themes import resolve_theme
 
     offsets = compute_station_offsets(graph)
-    icon_boxes = _icon_obstacles_by_station(graph, resolve_theme(None, graph), offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, resolve_theme(graph), offsets)
     leaf_sinks = {
         sid
         for sid in icon_boxes

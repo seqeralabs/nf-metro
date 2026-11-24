@@ -272,7 +272,7 @@ def effective_line_color(
     site (edge, chevron, legend swatch); every other line keeps its own colour,
     falling back to :data:`FALLBACK_LINE_COLOR` when it has none. *active_color*,
     when given, is the colour for an *active* line, taking priority over the
-    line's own (the chevron site passes ``theme.directional_marker_color`` so a
+    line's own (the chevron site passes ``theme.chevron_color`` so a
     themed marker colour wins); an inactive line mutes regardless.
 
     The line's own colour is directive-authored text that lands verbatim in

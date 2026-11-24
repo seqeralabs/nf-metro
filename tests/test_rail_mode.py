@@ -667,7 +667,7 @@ def test_stacked_rail_section_bbox_contains_hanging_labels():
 
     src = (
         "%%metro title: t\n"
-        "%%metro style: dark\n"
+        "%%metro style: nfcore\n"
         "%%metro line_spread: rails\n"
         "%%metro label_angle: 45\n"
         "%%metro line: a | A | #2db572\n"

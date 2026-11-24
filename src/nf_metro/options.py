@@ -24,6 +24,11 @@ from typing import Any, Literal, TypeGuard
 # Returned by :func:`coerce` in place of a value when the payload is unusable.
 INVALID = object()
 
+#: The two display modes a theme renders in.
+LIGHT = "light"
+DARK = "dark"
+MODES = (LIGHT, DARK)
+
 OptionKind = Literal["float", "int", "bool", "choice", "str"]
 NumberSign = Literal["any", "nonneg", "positive"]
 LineOrder = Literal["definition", "span"]
@@ -66,6 +71,24 @@ class LayoutOption:
     def cli_flag(self) -> str:
         """Long CLI flag for this option (kebab-cased ``name``)."""
         return "--" + self.name.replace("_", "-")
+
+    def json_schema(self) -> dict[str, Any]:
+        """The JSON Schema of this option's value in a theme file."""
+        schema: dict[str, Any] = {"description": self.help}
+        if self.kind == "choice":
+            schema["enum"] = list(self.choices)
+        else:
+            schema["type"] = _JSON_TYPES[self.kind]
+        if self.sign == "nonneg":
+            schema["minimum"] = 0
+        elif self.sign == "positive":
+            schema["exclusiveMinimum"] = 0
+        if self.max_val is not None:
+            schema["maximum"] = self.max_val
+        return schema
+
+
+_JSON_TYPES = {"bool": "boolean", "int": "integer", "float": "number", "str": "string"}
 
 
 def coerce(opt: LayoutOption, raw: str) -> tuple[Any, str]:

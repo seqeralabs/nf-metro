@@ -82,7 +82,7 @@ def _published_plan(path: Path) -> RoutePlan:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).route_plan
+        plan = build_observed_render_plan(graph, resolve_theme(graph)).route_plan
     assert plan is not None
     return plan
 

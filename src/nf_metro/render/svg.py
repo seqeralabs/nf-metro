@@ -150,7 +150,6 @@ from nf_metro.parser.model import (
 from nf_metro.render.bridges import BridgeBreak, compute_bridges
 from nf_metro.render.constants import (
     CANVAS_ORIGIN_MARGIN,
-    CAPTION_FILL,
     DEBUG_DIAMOND_RADIUS,
     DEBUG_ENTRY_PORT_COLOR,
     DEBUG_EXIT_PORT_COLOR,
@@ -190,7 +189,6 @@ from nf_metro.render.constants import (
     SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
     SVG_CURVE_RADIUS,
-    TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
     TEXT_VCENTER_EM,
     TITLE_ASCENT_RATIO,
@@ -215,7 +213,6 @@ from nf_metro.render.legend import (
     logo_image_kwargs,
     marker_corner_radius,
     marker_fill_color,
-    marker_stroke_color,
     open_logo_image,
     render_legend,
     resolve_logo_file,
@@ -248,6 +245,7 @@ from nf_metro.render.section_header import (
     resolve_all_section_headers,
 )
 from nf_metro.render.style import (
+    CHROME,
     GLYPH_RING,
     GLYPH_TICK,
     MUTED_FILL_CLASS,
@@ -256,14 +254,10 @@ from nf_metro.render.style import (
     TERMINUS_BAR,
     Theme,
     adaptive_value,
-    binding_pair,
-    chrome_bindings,
     color_pair,
+    colors_adapt,
     is_adaptive,
-    muted_adapts,
     muted_paint_class,
-    target_applies,
-    theme_color,
 )
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
@@ -547,12 +541,12 @@ def _position_legend(
 def _terminus_stacked_pad(theme: Theme, has_stacked: bool) -> float:
     """Extent a stacked-files icon's back sheet peeks past the nominal edge.
 
-    ``render_files_icon`` offsets the back sheet by ``terminus_width *
+    ``render_files_icon`` offsets the back sheet by ``icon_width *
     FILES_ICON_OFFSET_RATIO`` along each axis; anything reserving space around
     the drawn icon adds this so the back sheet is covered. Zero for a
     single-sheet icon.
     """
-    return theme.terminus_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
+    return theme.icon_width * FILES_ICON_OFFSET_RATIO if has_stacked else 0.0
 
 
 @dataclass(frozen=True)
@@ -626,8 +620,8 @@ def _icon_obstacles_by_station(
         # Stacked-files icons extend beyond nominal size by the offset.
         has_stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
         stacked_pad = _terminus_stacked_pad(theme, has_stacked)
-        icon_half_w = theme.terminus_width / 2 + stacked_pad
-        icon_half_h = theme.terminus_height / 2 + stacked_pad
+        icon_half_w = theme.icon_width / 2 + stacked_pad
+        icon_half_h = theme.icon_height / 2 + stacked_pad
 
         x_min = min(cx for cx, _ in centers) - icon_half_w
         x_max = max(cx for cx, _ in centers) + icon_half_w
@@ -897,9 +891,7 @@ def _build_render_plan_result(
     """Build a render plan alongside the routing observation that settled it."""
     if padding is None:
         padding = theme.canvas_padding
-    scaled_theme = _scale_theme_strokes(
-        _scale_theme_fonts(theme, graph.font_scale), graph.stroke_scale
-    )
+    scaled_theme = _drawn_theme(theme, graph)
     with graph_layout_context(graph), metrics_face_context(metrics_face):
         try:
             plan, route_plan = _build_render_plan_scaled(
@@ -1036,6 +1028,30 @@ def _fold_back_under_compression(graph: MetroGraph) -> bool:
     return any(iter_opposing_line_overlaps(graph))
 
 
+# Theme text that lands in SVG attributes verbatim; drawsvg does not escape.
+_FREE_TEXT_FIELDS = (
+    "label_font_family",
+    "title_font_weight",
+    "label_font_weight",
+    "section_label_font_weight",
+    "section_stroke_dasharray",
+    "dashed_dasharray",
+    "dotted_dasharray",
+)
+
+
+def _drawn_theme(theme: Theme, graph: MetroGraph) -> Theme:
+    """*theme* as drawn for *graph*: sizes under its scales, free text escaped."""
+    escaped = {
+        name: html.escape(getattr(theme, name), quote=False).replace('"', "&quot;")
+        for name in _FREE_TEXT_FIELDS
+    }
+    return _scale_theme_strokes(
+        _scale_theme_fonts(replace(theme, **escaped), graph.font_scale),
+        graph.stroke_scale,
+    )
+
+
 def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:
     """Return a theme with every text size multiplied by ``scale``.
 
@@ -1058,11 +1074,11 @@ def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:
         title_font_size=theme.title_font_size * scale,
         section_label_font_size=theme.section_label_font_size * scale,
         legend_font_size=theme.legend_font_size * scale,
-        terminus_font_size=theme.terminus_font_size * scale,
-        terminus_width=theme.terminus_width * scale,
-        terminus_height=theme.terminus_height * scale,
-        terminus_fold_size=theme.terminus_fold_size * scale,
-        terminus_corner_radius=theme.terminus_corner_radius * scale,
+        icon_font_size=theme.icon_font_size * scale,
+        icon_width=theme.icon_width * scale,
+        icon_height=theme.icon_height * scale,
+        icon_fold_size=theme.icon_fold_size * scale,
+        icon_corner_radius=theme.icon_corner_radius * scale,
     )
 
 
@@ -2276,9 +2292,7 @@ def _settled_render_graph(source_graph: MetroGraph, theme: Theme) -> MetroGraph:
     that need to reason about what was actually drawn ask for the settled copy
     rather than re-deriving those steps.
     """
-    scaled_theme = _scale_theme_strokes(
-        _scale_theme_fonts(theme, source_graph.font_scale), source_graph.stroke_scale
-    )
+    scaled_theme = _drawn_theme(theme, source_graph)
     section_y_gap = (
         source_graph.section_y_gap
         if source_graph.section_y_gap is not None
@@ -2371,7 +2385,7 @@ def _build_render_plan_scaled(
             curve_radii=edge_radii,
             gap_half=theme.bridge_gap / 2,
         )
-        if theme.bridge_glyph
+        if theme.bridge_lines
         else {}
     )
     bridge_breaks = tuple(tuple(bridges.get(id(route), ())) for route in edge_routes)
@@ -2386,7 +2400,7 @@ def _build_render_plan_scaled(
     # Resolve headers against the final section bboxes (label and group
     # reservations above can grow a box, moving where its header sits).
     lettering = HeaderLettering(
-        theme.section_label_uppercase, theme.section_label_letter_spacing
+        theme.uppercase_section_labels, theme.section_label_letter_spacing
     )
     with header_lettering_context(lettering):
         header_placements = resolve_all_section_headers(
@@ -2394,7 +2408,7 @@ def _build_render_plan_scaled(
             theme.section_label_font_size,
             header_polylines,
             theme.title_font_size,
-            badges=theme.section_badges,
+            badges=theme.number_sections,
         )
         _guard_section_headers_clear_routes(header_placements, header_polylines)
         _guard_section_headers_fit_box_width(graph, header_placements)
@@ -2779,21 +2793,21 @@ def _emit_render_plan(
     # title) remain readable when the browser provides a dark background.
     # Must follow the chrome CSS so the media-query rule wins by source order.
     if inject_dark_mode_css and (
-        not theme.background_color or theme.background_color == "none"
+        not theme.background_fill or theme.background_fill == "none"
     ):
         _inject_dark_mode_style(
             d, theme, follow_color_scheme=dark_mode_css_follows_color_scheme
         )
 
     # Background (skip for transparent themes)
-    if theme.background_color and theme.background_color != "none":
+    if theme.background_fill and theme.background_fill != "none":
         d.append(
             draw.Rectangle(
                 0,
                 0,
                 svg_width,
                 svg_height,
-                fill=theme.background_color,
+                fill=theme.background_fill,
                 class_=_ns("nf-metro-bg"),
             )
         )
@@ -2935,10 +2949,14 @@ def _emit_render_plan(
                 theme.caption_font_size,
                 watermark_x_inset,
                 svg_height - WATERMARK_Y_INSET,
-                fill=theme.caption_color or CAPTION_FILL,
+                fill=theme.caption_color,
                 font_family=theme.label_font_family,
                 text_anchor="start",
-                **({"class": _ns("nf-metro-caption")} if theme.caption_color else {}),
+                **(
+                    {"class": _ns("nf-metro-caption")}
+                    if colors_adapt(theme, "caption_color")
+                    else {}
+                ),
             )
         )
 
@@ -3113,7 +3131,7 @@ def _leftmost_ink(
             continue
         reach.append(section.bbox_x - theme.section_stroke_width / 2)
         placement = header_placements[section.id]
-        if section.has_badge and theme.section_badges:
+        if section.has_badge and theme.number_sections:
             reach.append(placement.badge_cx - SECTION_NUM_CIRCLE_R_LARGE)
         reach.append(
             placement.keepout[0] if placement.label_rotation else placement.label_x
@@ -3310,7 +3328,7 @@ def _maybe_muted_class(name: str, muted: bool) -> str:
 
 def _capsule_adapts(theme: Theme) -> bool:
     """Whether *theme* gives station capsules colours that follow the mode."""
-    return bool(theme.glyph_stroke or theme.capsule_fill)
+    return colors_adapt(theme, "station_fill", "station_stroke")
 
 
 def _capsule_attrs(
@@ -3318,8 +3336,8 @@ def _capsule_attrs(
 ) -> dict[str, Any]:
     """Paint and data attributes of a station capsule or blank-terminus nub."""
     attrs: dict[str, Any] = {
-        "fill": theme_color(theme, "capsule_fill"),
-        "stroke": theme_color(theme, "glyph_stroke"),
+        "fill": theme.station_fill,
+        "stroke": theme.station_stroke,
         "stroke_width": theme.station_stroke_width,
         **station_data,
     }
@@ -3338,9 +3356,9 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     fallback for each property is the mode-adaptive ``light-dark()`` of the
     theme's light and dark values (or the baked value for a single-palette
     theme), so the map follows the viewer's ``color-scheme`` with no host
-    intervention.  The rules come from the chrome bindings declared on the
-    :class:`~nf_metro.render.style.Theme` schema.  Line/route colors carry
-    semantic meaning and are baked presentation attributes.
+    intervention.  The rules come from
+    :data:`~nf_metro.render.style.CHROME`.  Line/route colors carry semantic
+    meaning and are baked presentation attributes.
 
     ``any_inactive`` adds the muted-state rules; a map with no inactive line
     has nothing for them to match, so it ships without them.
@@ -3350,12 +3368,9 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
     # The label halo is a knockout of the background, so it tracks --nfm-map-bg
     # and must flip with the mode too; otherwise a dark-baked halo blots out
     # labels in light mode. Disabled-halo themes draw no halo, so emit nothing.
-    bg_light, bg_dark = color_pair(theme, "background_color")
-    halo_light_set, halo_dark_set = color_pair(theme, "label_halo_color")
-    halo_light = _label_halo_color_for(theme.label_halo_width, halo_light_set, bg_light)
-    halo_dark = _label_halo_color_for(theme.label_halo_width, halo_dark_set, bg_dark)
-    if halo_light is not None and halo_dark is not None:
-        halo_val = f"var(--nfm-map-bg, {adaptive_value(halo_light, halo_dark)})"
+    if theme.label_halo_width > 0:
+        halo = adaptive_value(*color_pair(theme, "knockout_fill"))
+        halo_val = f"var(--nfm-map-bg, {halo})"
         lines.append(
             _css_rule("nf-metro-label-halo", f"fill: {halo_val}; stroke: {halo_val}")
         )
@@ -3370,19 +3385,21 @@ def _css_rule(cls: str, props: str, *also: str) -> str:
     return f"{selector} {{ {props}; }}"
 
 
+def _chrome_applies(theme: Theme, field: str) -> bool:
+    """Whether chrome colour *field* gets stylesheet rules under *theme*."""
+    return not CHROME[field].adaptive_only or colors_adapt(theme, field)
+
+
 def _chrome_binding_rules(theme: Theme) -> list[str]:
-    """One rule per element class the theme's chrome bindings paint."""
+    """One rule per element class the theme's chrome colours paint."""
     rules: dict[str, list[str]] = {}
-    for binding in chrome_bindings():
-        baked = theme_color(theme, binding.field)
-        if not baked or baked == "none":
+    for name, chrome in CHROME.items():
+        baked = getattr(theme, name)
+        if not baked or baked == "none" or not _chrome_applies(theme, name):
             continue
-        value = (
-            f"var({binding.css_var}, {adaptive_value(*binding_pair(theme, binding))})"
-        )
-        for target in binding.targets:
-            if target_applies(theme, binding, target):
-                rules.setdefault(target.cls, []).append(f"{target.prop}: {value}")
+        value = f"var({chrome.css_var}, {adaptive_value(*color_pair(theme, name))})"
+        for cls, prop, _muted in chrome.targets:
+            rules.setdefault(cls, []).append(f"{prop}: {value}")
     return [_css_rule(cls, "; ".join(props)) for cls, props in rules.items()]
 
 
@@ -3399,14 +3416,16 @@ def _muted_chrome_rules(theme: Theme) -> list[str]:
         f"{adaptive_value(*color_pair(theme, 'muted_line_color'))})"
     )
     rules: dict[str, list[str]] = {}
-    for binding in chrome_bindings():
-        for target in binding.targets:
-            if target.muted and target_applies(theme, binding, target):
-                rules.setdefault(target.cls, []).append(f"{target.prop}: {muted_val}")
+    for name, chrome in CHROME.items():
+        if not _chrome_applies(theme, name):
+            continue
+        for cls, prop, muted in chrome.targets:
+            if muted:
+                rules.setdefault(cls, []).append(f"{prop}: {muted_val}")
     lines = [
         _css_rule(cls, "; ".join(props), _MUTED_CLASS) for cls, props in rules.items()
     ]
-    if muted_adapts(theme):
+    if colors_adapt(theme, "muted_line_color"):
         lines += [
             _css_rule(MUTED_STROKE_CLASS, f"stroke: {muted_val}"),
             _css_rule(MUTED_FILL_CLASS, f"fill: {muted_val}"),
@@ -3434,7 +3453,7 @@ def _inject_dark_mode_style(
     ti = _ns("nf-metro-title")
     if follow_color_scheme:
         label = theme.section_label_color
-        badge = theme_color(theme, "section_badge_fill")
+        badge = theme.section_badge_fill
         css = (
             f".{sl} {{ fill: var(--nfm-map-section-label-color,"
             f" light-dark({label}, #d0d0d0)); }}\n"
@@ -3500,14 +3519,14 @@ def _draw_section_badge(
     theme: Theme,
 ) -> None:
     """Draw the section's number badge; an unnumbered section draws none."""
-    if not (section.has_badge and theme.section_badges):
+    if not (section.has_badge and theme.number_sections):
         return
     d.append(
         draw.Circle(
             placement.badge_cx,
             placement.badge_cy,
             SECTION_NUM_CIRCLE_R_LARGE,
-            fill=theme_color(theme, "section_badge_fill"),
+            fill=theme.section_badge_fill,
             **{
                 "class": _ns("nf-metro-section-num-circle"),
                 "data-section-id": section.id,
@@ -3520,7 +3539,7 @@ def _draw_section_badge(
             theme.section_badge_font_size,
             placement.badge_cx,
             placement.badge_cy,
-            fill=theme_color(theme, "section_badge_text_color"),
+            fill=theme.section_badge_text_color,
             font_family=theme.label_font_family,
             font_weight="bold",
             text_anchor="middle",
@@ -3589,7 +3608,7 @@ def _render_first_class_sections(
         if theme.section_label_letter_spacing:
             label_kwargs["letter_spacing"] = theme.section_label_letter_spacing
         label_lines = placement.label_lines
-        if theme.section_label_uppercase:
+        if theme.uppercase_section_labels:
             label_lines = tuple(line.upper() for line in label_lines)
         section_label_style = text_style(theme.section_label_font_size, "bold")
         d.append(
@@ -3765,7 +3784,7 @@ def _render_directional_markers(
     for route, chevrons in zip(routes, route_chevrons, strict=True):
         line = graph.lines.get(route.line_id)
         color = effective_line_color(
-            line, theme, inactive_line_ids, theme.directional_marker_color
+            line, theme, inactive_line_ids, theme.chevron_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
         paint = muted_paint_class(theme, route.line_id in inactive_line_ids, "stroke")
@@ -3777,7 +3796,7 @@ def _render_directional_markers(
                 vertices,
                 color,
                 _chevron_stroke_width(theme),
-                theme.directional_marker_opacity,
+                theme.chevron_opacity,
                 class_name,
                 route.line_id,
             )
@@ -4311,8 +4330,8 @@ def _directional_chevrons(
     Same-line routes that paint the same ink share one set of chevrons, so no
     two chevrons of a line sit closer than half a spacing along a run.
     """
-    size = theme.directional_marker_size
-    spacing = max(theme.directional_marker_spacing, 1.0)
+    size = theme.chevron_size
+    spacing = max(theme.chevron_spacing, 1.0)
     reach = size + _chevron_stroke_width(theme) / 2
     # A route shorter than one chevron carries no useful direction cue.
     min_length = 2 * size
@@ -4654,7 +4673,7 @@ def _render_marker_station(
             rx=rx,
             ry=rx,
             fill=marker_fill_color(marker.fill, theme),
-            stroke=marker_stroke_color(theme),
+            stroke=theme.marker_stroke,
             stroke_width=theme.station_stroke_width,
             **marker_data,
         )
@@ -4715,13 +4734,13 @@ def _interchange_paint(
     """
     if fill_override is None:
         return _InterchangePaint(
-            theme_color(theme, "capsule_fill"),
-            theme_color(theme, "glyph_stroke"),
+            theme.station_fill,
+            theme.station_stroke,
             _capsule_adapts(theme),
         )
     return _InterchangePaint(
         theme.muted_line_color if muted else fill_override,
-        marker_stroke_color(theme),
+        theme.marker_stroke,
         False,
     )
 
@@ -5006,10 +5025,9 @@ def _muted_line_theme(theme: FrozenRecord) -> FrozenRecord:
     muted = theme.muted_line_color
     overrides: dict[str, Any] = {
         "station_stroke": muted,
-        "glyph_stroke": muted if theme.glyph_stroke else "",
         "marker_stroke": muted,
-        "terminus_stroke": muted,
-        "terminus_font_color": muted,
+        "icon_stroke": muted,
+        "icon_text_color": muted,
         "label_color": muted,
     }
     entries = tuple(
@@ -5383,8 +5401,8 @@ def _draw_ring_chain(
     lw = theme.line_width
     stroke = theme.ring_stroke_width * lw
     half_bridge = theme.ring_bridge_width * lw / 2
-    fill = theme_color(theme, "ring_fill")
-    color = theme_color(theme, "glyph_stroke")
+    fill = theme.station_fill
+    color = theme.station_stroke
 
     group_el = draw.Group(**station_data)
     for prev, nxt in zip(groups, groups[1:]):
@@ -5459,7 +5477,7 @@ def _draw_line_station_glyph(
             d.append(
                 draw.Rectangle(
                     *bundle_end_bar_box(bundle, theme),
-                    fill=theme_color(theme, "glyph_stroke"),
+                    fill=theme.station_stroke,
                     **{
                         **station_data,
                         "class_": station_data["class_"]
@@ -5495,18 +5513,18 @@ def _draw_bundle_rings(
 def caption_aware_icon_step(
     names: list[str],
     name_widths: list[float],
-    terminus_width: float,
+    icon_width: float,
 ) -> float:
     """Return the horizontal centre-to-centre step for adjacent icons.
 
-    The default step is ``terminus_width + ICON_INTER_GAP``.  When two
+    The default step is ``icon_width + ICON_INTER_GAP``.  When two
     adjacent icons both carry a caption whose estimated width would
     overrun that step (causing captions to overlap on the same row),
     widen the step so the wider of the two captions fits with a small
     visual gap on each side.  The widened step is shared by every icon
     in the row, keeping spacing uniform.
     """
-    default_step = terminus_width + ICON_INTER_GAP
+    default_step = icon_width + ICON_INTER_GAP
     required = default_step
     for i in range(len(names) - 1):
         if not names[i] or not names[i + 1]:
@@ -5545,9 +5563,9 @@ def _terminus_icon_marching(
             if caption_line_count
             else 0.0
         )
-        step = theme.terminus_height + ICON_INTER_GAP + caption_room
+        step = theme.icon_height + ICON_INTER_GAP + caption_room
     else:
-        step = caption_aware_icon_step(names, name_widths, theme.terminus_width)
+        step = caption_aware_icon_step(names, name_widths, theme.icon_width)
     return step, name_widths
 
 
@@ -5575,8 +5593,8 @@ def _terminus_icon_centers_for(
 
     r = theme.station_radius
     icon_gap = r + ICON_STATION_GAP
-    icon_half_w = theme.terminus_width / 2
-    icon_half_h = theme.terminus_height / 2
+    icon_half_w = theme.icon_width / 2
+    icon_half_h = theme.icon_height / 2
     icon_half_flow = icon_half_h if ctx.is_vertical_flow else icon_half_w
 
     bundle_center = (min_off + max_off) / 2
@@ -5678,8 +5696,8 @@ def _render_terminus_icons(
     """
     ctx = _terminus_flow_context(station, graph)
     section = ctx.section
-    icon_half_w = theme.terminus_width / 2
-    icon_half_h = theme.terminus_height / 2
+    icon_half_w = theme.icon_width / 2
+    icon_half_h = theme.icon_height / 2
 
     icon_types = station.terminus_icon_types or [ICON_TYPE_FILE] * len(
         station.terminus_labels
@@ -5731,15 +5749,15 @@ def _render_terminus_icons(
         common: dict[str, Any] = dict(
             cx=icon_cx,
             cy=icon_cy,
-            width=theme.terminus_width,
-            height=theme.terminus_height,
-            fill=theme_color(theme, "terminus_fill"),
-            stroke=theme_color(theme, "terminus_stroke"),
-            stroke_width=theme.terminus_stroke_width,
-            corner_radius=theme.terminus_corner_radius,
+            width=theme.icon_width,
+            height=theme.icon_height,
+            fill=theme.icon_fill,
+            stroke=theme.icon_stroke,
+            stroke_width=theme.icon_stroke_width,
+            corner_radius=theme.icon_corner_radius,
             label=label,
-            font_size=theme.terminus_font_size,
-            font_color=theme.terminus_font_color or TERMINUS_FONT_COLOR,
+            font_size=theme.icon_font_size,
+            font_color=theme.icon_text_color,
             font_family=theme.label_font_family,
         )
 
@@ -5757,7 +5775,7 @@ def _render_terminus_icons(
             render_files_icon(
                 d,
                 **common,
-                fold_size=theme.terminus_fold_size,
+                fold_size=theme.icon_fold_size,
                 banner=banner,
                 back_dx_sign=back_dx_sign,
                 back_dy_sign=back_dy_sign,
@@ -5768,7 +5786,7 @@ def _render_terminus_icons(
             render_file_icon(
                 d,
                 **common,
-                fold_size=theme.terminus_fold_size,
+                fold_size=theme.icon_fold_size,
                 banner=banner,
                 banner_fill=banner_fill,
                 banner_text_color=banner_text_color,
@@ -5788,7 +5806,7 @@ def _render_terminus_icons(
             stacked_pad = _terminus_stacked_pad(
                 theme, ctx.is_vertical_flow and icon_type == ICON_TYPE_FILES
             )
-            icon_edge_gap = theme.terminus_height / 2 + stacked_pad + ICON_NAME_GAP
+            icon_edge_gap = theme.icon_height / 2 + stacked_pad + ICON_NAME_GAP
             stagger_step = caption_font_size * 1.4
             # When adjacent icon captions would overlap horizontally
             # (their estimated width exceeds the per-icon X step), drop
@@ -5832,21 +5850,6 @@ def _render_terminus_icons(
             )
 
 
-def _label_halo_color_for(width: float, color: str, background: str) -> str | None:
-    """Resolve a halo colour, or ``None`` when haloing is disabled.
-
-    Haloing is disabled by a non-positive *width* or an explicit *color* of
-    ``"none"`` (matching the SVG ``fill="none"`` convention). An empty colour
-    resolves to the *background*, so the name punches a knockout through any
-    route it crosses, or white on a transparent canvas.
-    """
-    if width <= 0 or color == "none":
-        return None
-    if color:
-        return color
-    return background if background and background != "none" else "#ffffff"
-
-
 def _render_labels(
     d: draw.Drawing,
     labels: list[LabelPlacement],
@@ -5855,9 +5858,7 @@ def _render_labels(
     inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Render station name labels."""
-    halo_color = _label_halo_color_for(
-        theme.label_halo_width, theme.label_halo_color, theme.background_color
-    )
+    halo_color = theme.knockout_fill if theme.label_halo_width > 0 else None
     label_style = text_style(theme.label_font_size, theme.label_font_weight)
     line_height_ratio = (
         DEFAULT_TEXT_METRICS.line_height(label_style, TextRole.STATION_LABEL)

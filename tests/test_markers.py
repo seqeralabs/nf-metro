@@ -1,7 +1,6 @@
 """Tests for per-station marker styles and the marker legend."""
 
 import xml.etree.ElementTree as ET
-from dataclasses import replace
 
 import pytest
 
@@ -9,13 +8,9 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MarkerStyle
 from nf_metro.render.constants import MARKER_PILL_LENGTH_RATIO
-from nf_metro.render.legend import (
-    marker_corner_radius,
-    marker_fill_color,
-    marker_stroke_color,
-)
+from nf_metro.render.legend import marker_corner_radius, marker_fill_color
 from nf_metro.render.svg import render_svg
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import NFCORE_DARK_THEME, TRANSPARENT_THEME
 
 _BASE = (
     "%%metro line: a | Line A | #4CAF50\n"
@@ -109,7 +104,7 @@ def test_marker_fill_color_keywords_and_literal():
     # open falls back to the background colour on the dark theme.
     assert (
         marker_fill_color("open", NFCORE_DARK_THEME)
-        == NFCORE_DARK_THEME.background_color
+        == NFCORE_DARK_THEME.background_fill
     )
 
 
@@ -209,18 +204,13 @@ def test_no_marker_directives_byte_identical():
 # --- Marker outline visibility ----------------------------------------------
 
 
-def test_marker_stroke_color_uses_theme_marker_stroke():
-    # The dark theme sets a dedicated light marker outline so dark-filled
-    # markers stay visible against the background.
-    assert NFCORE_DARK_THEME.marker_stroke
-    assert marker_stroke_color(NFCORE_DARK_THEME) == NFCORE_DARK_THEME.marker_stroke
-    assert marker_stroke_color(NFCORE_DARK_THEME) != NFCORE_DARK_THEME.station_stroke
+def test_dark_marker_outline_differs_from_the_station_outline():
+    # A light outline keeps dark-filled markers visible on the dark canvas.
+    assert NFCORE_DARK_THEME.marker_stroke != NFCORE_DARK_THEME.station_stroke
 
 
-def test_marker_stroke_color_falls_back_to_station_stroke():
-    # A theme that does not set marker_stroke inherits station_stroke.
-    theme = replace(NFCORE_DARK_THEME, marker_stroke="")
-    assert marker_stroke_color(theme) == theme.station_stroke
+def test_an_unset_marker_outline_takes_the_station_stroke():
+    assert TRANSPARENT_THEME.marker_stroke == TRANSPARENT_THEME.station_stroke
 
 
 def test_dark_marker_glyph_has_light_outline():

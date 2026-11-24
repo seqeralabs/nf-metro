@@ -31,7 +31,7 @@ FIXTURE = (
 
 def _rendered_digest() -> str:
     graph = prepare_graph(FIXTURE.read_text(), source_dir=str(FIXTURE.parent))
-    svg = render_graph(graph, resolve_theme(None, graph), RenderConfig())
+    svg = render_graph(graph, resolve_theme(graph), RenderConfig())
     return hashlib.sha256(svg.encode()).hexdigest()
 
 

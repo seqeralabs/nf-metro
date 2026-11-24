@@ -88,7 +88,7 @@ def test_touching_fan_corners_leave_no_seam(name, prefix):
     path = _ROOT / "examples" / name
     text = prefix + path.read_text()
     graph = prepare_graph(text, source_dir=str(path.parent))
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     plan = build_render_plan(graph, theme)
     lanes = defaultdict(list)
     for route, points, radii in zip(

@@ -43,7 +43,7 @@ def _seed_routes():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(SEED_72.read_text(), source_dir=str(SEED_72.parent))
-        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = build_observed_render_plan(graph, resolve_theme(graph))
     return graph, {
         (route.edge.source, route.edge.target, route.line_id): route
         for route in observed.plan.routes

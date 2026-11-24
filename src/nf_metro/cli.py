@@ -83,9 +83,10 @@ from nf_metro.render.constants import LOGO_GAP
 from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
 from nf_metro.themes import (
     DEFAULT_MODE,
+    MODES,
     ThemeError,
     anchor_stack,
-    bind_graph_stack,
+    bound_stack,
     check_stack,
     resolve_stack,
 )
@@ -339,25 +340,16 @@ def _graph_key(
     return _svg_format_for(out_format), animated, theme
 
 
-class _ThemeStack(click.ParamType[str]):
-    """A theme stack: built-in names and existing .yaml theme files."""
-
-    name = "theme"
-
-    def get_metavar(  # type: ignore[override]
-        self, param: click.Parameter, ctx: click.Context | None = None
-    ) -> str:
-        return "THEMES"
-
-    def convert(
-        self, value: object, param: click.Parameter | None, ctx: click.Context | None
-    ) -> str:
-        text = str(value)
+def _theme_stack(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> str | None:
+    """Check a theme stack: built-in names and existing .yaml theme files."""
+    if value is not None:
         try:
-            check_stack(text, must_exist=True)
+            check_stack(value, must_exist=True)
         except ThemeError as e:
-            self.fail(str(e), param, ctx)
-        return text
+            raise click.BadParameter(str(e), ctx, param) from None
+    return value
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -808,19 +800,19 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--theme",
-    type=_ThemeStack(),
+    metavar="THEMES",
+    callback=_theme_stack,
     default=None,
     cls=_DescribedDefault,
     default_text="from %%metro style, else nfcore",
     help=(
-        "Visual theme: nfcore, seqera, london-tube or transparent (each but "
-        "transparent also as NAME-light/NAME-dark), a .yaml theme file, or a "
-        "comma list of these merged left to right."
+        "Visual theme: nfcore, seqera, london-tube or transparent, a .yaml "
+        "theme file, or a comma list of these merged left to right."
     ),
 )
 @click.option(
     "--mode",
-    type=click.Choice(["light", "dark"]),
+    type=click.Choice(MODES),
     default=None,
     cls=_DescribedDefault,
     default_text="from %%metro mode",
@@ -1418,7 +1410,7 @@ def _render_one_unsafe(
         embed_font = not text_to_paths
         mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
 
-    theme_obj = resolve_theme(None, graph, mode=mode)
+    theme_obj = resolve_theme(graph, mode=mode)
 
     if format_ == "html":
         # The interactive page supplies its own responsive frame, chrome, and
@@ -1900,7 +1892,8 @@ def explain(
 )
 @click.option(
     "--theme",
-    type=_ThemeStack(),
+    metavar="THEMES",
+    callback=_theme_stack,
     default=None,
     cls=_DescribedDefault,
     default_text="from %%metro style, else nfcore",
@@ -1979,12 +1972,12 @@ def serve(
         try:
             graph = parse_metro_mermaid(input_file.read_text())
             graph.source_dir = str(input_file.resolve().parent)
-            apply_theme_layout(graph, bind_graph_stack(graph, theme, graph.source_dir))
+            apply_theme_layout(graph, bound_stack(graph, theme))
             compute_layout(graph)
         except (ValueError, PhaseInvariantError) as e:
             raise click.ClickException(str(e))
 
-        theme_obj = resolve_theme(theme, graph)
+        theme_obj = resolve_theme(graph)
         mapped = sorted(graph.process_mapping)
         if not mapped:
             click.echo(
@@ -2036,7 +2029,8 @@ def serve(
 )
 @click.option(
     "--theme",
-    type=_ThemeStack(),
+    metavar="THEMES",
+    callback=_theme_stack,
     default="nfcore",
     show_default=True,
     help="Visual theme applied to every map registered with this server.",

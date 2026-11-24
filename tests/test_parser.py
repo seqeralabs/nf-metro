@@ -18,9 +18,9 @@ def test_parse_title():
 
 
 def test_parse_style():
-    text = "%%metro style: light\ngraph LR\n"
+    text = "%%metro style: transparent\ngraph LR\n"
     graph = parse_metro_mermaid(text)
-    assert graph.style == "light"
+    assert graph.style == "transparent"
 
 
 def test_parse_line_order():
@@ -1590,10 +1590,10 @@ graph LR
 def test_parse_style_unknown_warns_and_keeps_default():
     with pytest.warns(UserWarning, match=r"%%metro style: ignoring 'bogus'"):
         graph = parse_metro_mermaid("%%metro style: bogus\ngraph LR\n")
-    assert graph.style == "dark"
+    assert graph.style == "nfcore"
 
 
-@pytest.mark.parametrize("name", ["dark", "seqera", "nfcore-light"])
+@pytest.mark.parametrize("name", ["nfcore", "seqera", "nfcore, london-tube"])
 def test_parse_style_accepted_names_are_silent(name):
     with warnings.catch_warnings():
         warnings.simplefilter("error")

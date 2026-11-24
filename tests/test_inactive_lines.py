@@ -266,7 +266,7 @@ def _interchange_interior_colors(svg, station_id):
 
 def test_muted_rail_interchange_interior_greys_over_marker_fill():
     graph = prepare_graph(RAIL_MARKER_FILL)
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     muted = theme.muted_line_color
     svg = render_svg(graph, theme, inactive_line_ids=frozenset({"line_a", "line_b"}))
     bar_strokes, knob_fills = _interchange_interior_colors(svg, "interchange")
@@ -278,7 +278,7 @@ def test_muted_rail_interchange_interior_greys_over_marker_fill():
 
 def test_active_rail_interchange_interior_keeps_marker_fill():
     graph = prepare_graph(RAIL_MARKER_FILL)
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     svg = render_svg(graph, theme)
     bar_strokes, knob_fills = _interchange_interior_colors(svg, "interchange")
     # With no muting the declared marker tint is retained (the exemption stands).
@@ -472,7 +472,7 @@ def _mode_colors(value):
 # The muted rules are built from the theme, and a single-mode theme emits a bare
 # colour where a light/dark pair emits ``light-dark()``, so both shapes are worth
 # covering.
-@pytest.mark.parametrize("brand", ["nfcore", "seqera", "light"])
+@pytest.mark.parametrize("brand", ["nfcore", "seqera", "transparent"])
 def test_chrome_css_and_presentation_attribute_agree_on_muting(brand):
     # A presentation attribute loses to every author rule, so what a browser
     # paints is the winning rule, not the attribute.  The two must therefore
@@ -521,7 +521,7 @@ def test_chrome_css_and_presentation_attribute_agree_on_muting(brand):
 
 def _render_svg(src, **kwargs):
     graph = prepare_graph(src)
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     return graph, theme, render_svg(graph, theme, **kwargs)
 
 
@@ -535,7 +535,7 @@ def test_render_svg_mutes_declared_inactive_by_default():
 
 def test_render_svg_explicit_override_replaces_declared_set():
     graph = prepare_graph(DECLARED_INACTIVE_MAP)
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     svg = render_svg(graph, theme, inactive_line_ids=frozenset({"b"}))
     assert 'stroke="#ff0000"' in svg  # line a active
     assert 'stroke="#0000ff"' not in svg  # line b muted
@@ -546,7 +546,7 @@ def test_render_svg_explicit_override_replaces_declared_set():
 
 def test_render_svg_empty_override_forces_all_active():
     graph = prepare_graph(DECLARED_INACTIVE_MAP)
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     svg = render_svg(graph, theme, inactive_line_ids=frozenset())
     assert 'stroke="#ff0000"' in svg
     assert 'stroke="#0000ff"' in svg
@@ -557,7 +557,7 @@ def test_render_svg_empty_override_forces_all_active():
 
 def test_render_svg_unknown_inactive_line_raises():
     graph = prepare_graph(DECLARED_INACTIVE_MAP)
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     with pytest.raises(UnknownInactiveLineError) as exc:
         render_svg(graph, theme, inactive_line_ids=frozenset({"nope"}))
     assert "nope" in str(exc.value)
@@ -569,7 +569,7 @@ def test_muted_theme_overrides_every_field_on_a_frozen_theme():
     muted = _muted_line_theme(frozen)
     assert muted.station_stroke == MUTED
     assert muted.marker_stroke == MUTED
-    assert muted.terminus_stroke == MUTED
-    assert muted.terminus_font_color == MUTED
+    assert muted.icon_stroke == MUTED
+    assert muted.icon_text_color == MUTED
     assert muted.label_color == MUTED
     assert muted.station_fill == NFCORE_DARK_THEME.station_fill

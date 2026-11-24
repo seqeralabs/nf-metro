@@ -21,7 +21,7 @@ from nf_metro.options import INVALID, LAYOUT_OPTIONS, coerce
 from nf_metro.parser.directives import _GLOBAL_DIRECTIVE_HANDLERS
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
-from nf_metro.themes import THEMES
+from nf_metro.themes import THEMES, bound_stack
 
 _LINE = "%%metro line: a | A | #f00\n"
 _FLAT = _LINE + "graph LR\n  n1[N1] -->|a| n2[N2]\n"
@@ -237,9 +237,11 @@ def test_track_gap_widens_bundle_offsets():
 
 
 def test_style_directive_selects_theme_and_cli_overrides():
-    assert resolve_theme(None, MetroGraph(style="light")) is THEMES["light"]
-    assert resolve_theme(None, MetroGraph(style="dark")) is THEMES["nfcore"]
-    assert resolve_theme("nfcore", MetroGraph(style="light")) is THEMES["nfcore"]
+    assert resolve_theme(MetroGraph(style="transparent")) is THEMES["transparent"]
+    assert resolve_theme(MetroGraph()) is THEMES["nfcore"]
+    graph = MetroGraph(style="transparent")
+    bound_stack(graph, "nfcore")
+    assert resolve_theme(graph) is THEMES["nfcore"]
 
 
 def test_html_output_honours_graph_width_and_animate():

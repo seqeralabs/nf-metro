@@ -61,7 +61,7 @@ def _polylines(
             else prepare_graph(text)
         )
         plan = render_graph_result(
-            graph, resolve_theme(None, graph, "light"), RenderConfig()
+            graph, resolve_theme(graph, "light"), RenderConfig()
         ).plan
     return {
         (route.edge.source, route.edge.target, route.line_id): list(points)

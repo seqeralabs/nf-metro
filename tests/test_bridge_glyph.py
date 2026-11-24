@@ -509,7 +509,7 @@ def test_theme_toggle_disables_bridges():
 
     graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
     compute_layout(graph)
-    theme_off = dataclasses.replace(NFCORE_DARK_THEME, bridge_glyph=False)
+    theme_off = dataclasses.replace(NFCORE_DARK_THEME, bridge_lines=False)
     svg = render_svg(graph, theme_off)
     assert not any(d.count("M") > 1 for d in _edge_path_ds(svg))
 
@@ -526,7 +526,7 @@ def test_animation_paths_flow_over_gaps():
     off = _motion_paths(
         render_svg(
             graph,
-            dataclasses.replace(NFCORE_DARK_THEME, bridge_glyph=False),
+            dataclasses.replace(NFCORE_DARK_THEME, bridge_lines=False),
             animate=True,
         )
     )

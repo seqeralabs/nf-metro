@@ -306,7 +306,7 @@ def test_render_html_transparent_labels_follow_page_mode(tmp_path):
     label colours for a canvas the page may not be showing.
     """
     for args in ((), ("--mode", "light"), ("--mode", "dark")):
-        page = _render_cli(tmp_path, "--theme", "light", *args)
+        page = _render_cli(tmp_path, "--theme", "transparent", *args)
         assert "prefers-color-scheme" not in page
         assert "light-dark(#666666, #d0d0d0)" in page
         assert "light-dark(#111111, #ffffff)" in page

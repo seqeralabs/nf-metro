@@ -89,7 +89,7 @@ def test_a_render_reseats_junctions_a_row_translation_stranded(amount: int) -> N
     """
     graph = prepare_graph(FIXTURE.read_text(), source_dir=str(FIXTURE.parent))
     _translate_rows_stranding_junctions(graph, 1, amount)
-    drawn = _settled_render_graph(graph, resolve_theme(None, graph))
+    drawn = _settled_render_graph(graph, resolve_theme(graph))
     _guard_fanout_junction_shares_exit_port_y(drawn, "render")
 
 
@@ -104,6 +104,6 @@ def test_rail_layout_junctions_keep_their_rail_y() -> None:
     graph = prepare_graph(RAIL_DIVERGENCE)
     junction_id = next(iter(graph.junctions))
     rail_xy = (graph.stations[junction_id].x, graph.stations[junction_id].y)
-    plan = build_render_plan(graph, resolve_theme(None, graph))
+    plan = build_render_plan(graph, resolve_theme(graph))
     planned = plan.graph.stations[junction_id]
     assert (planned.x, planned.y) == rail_xy

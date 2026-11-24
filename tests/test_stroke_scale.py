@@ -103,7 +103,7 @@ def test_pitch_clears_the_drawn_stroke() -> None:
 
 def test_scaled_theme_coarsens_every_ink_dimension() -> None:
     graph = _graph()
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     scaled = _scale_theme_strokes(theme, 2.0)
 
     assert scaled.line_width == pytest.approx(theme.line_width * 2.0)
@@ -120,7 +120,7 @@ def test_the_two_scales_own_disjoint_theme_fields() -> None:
     multiplied by ``font_scale * stroke_scale`` -- the label halo, which belongs
     to the text, read 2.08x on a map setting 1.3 font and 1.6 stroke.
     """
-    theme = resolve_theme(None, _graph())
+    theme = resolve_theme(_graph())
     font_only = _scale_theme_fonts(theme, 2.0)
     stroke_only = _scale_theme_strokes(theme, 2.0)
 
@@ -147,7 +147,7 @@ def test_layout_reserves_against_the_drawn_pill(scale: float) -> None:
     footprints that layout sized for an unscaled marker.
     """
     graph = _graph(stroke_scale=scale)
-    drawn = _scale_theme_strokes(resolve_theme(None, graph), scale)
+    drawn = _scale_theme_strokes(resolve_theme(graph), scale)
 
     with metrics_context(stroke_scale=scale):
         assert station_radius_approx() == pytest.approx(drawn.station_radius)
@@ -198,7 +198,7 @@ def test_a_coarsened_canvas_margin_reads_back_outside_its_pass() -> None:
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).route_plan
+        plan = build_observed_render_plan(graph, resolve_theme(graph)).route_plan
     query = build_route_plan_query(plan)
 
     canvas = [
@@ -226,17 +226,15 @@ def test_a_coarsened_canvas_margin_reads_back_outside_its_pass() -> None:
 
 
 def test_unit_scale_returns_the_same_theme() -> None:
-    theme = resolve_theme(None, _graph())
+    theme = resolve_theme(_graph())
     assert _scale_theme_strokes(theme, 1.0) is theme
 
 
 def test_render_emits_coarser_tracks() -> None:
     """The scale reaches the drawn SVG, not just the layout reservation."""
 
-    plain = render_graph(_graph(), resolve_theme(None, _graph()), RenderConfig())
+    plain = render_graph(_graph(), resolve_theme(_graph()), RenderConfig())
     coarse_graph = _graph(stroke_scale=2.0)
-    coarse = render_graph(
-        coarse_graph, resolve_theme(None, coarse_graph), RenderConfig()
-    )
+    coarse = render_graph(coarse_graph, resolve_theme(coarse_graph), RenderConfig())
     assert plain != coarse
     assert 'stroke-width="6' in coarse

@@ -2,9 +2,8 @@
 # One palette on a transparent canvas, for embedding in a page that supplies
 # its own background. It renders the same whatever mode is asked for.
 name: transparent
-fixed_mode: dark
 
-background_color: "none"
+background_fill: "none"
 station_fill: "#ffffff"
 station_stroke: "#333333"
 station_radius: 6
@@ -20,9 +19,9 @@ section_fill: "#ededed"
 section_stroke: "#e6e6e6"
 section_label_color: "#666666"
 section_label_font_size: 17
-legend_background: "rgba(255, 255, 255, 0.8)"
+legend_fill: "rgba(255, 255, 255, 0.8)"
 legend_text_color: "#333333"
 legend_font_size: 16
 animation_ball_stroke: "#333333"
 animation_ball_stroke_width: 1.5
-marker_stroke: "" # outline markers with station_stroke
+marker_stroke: "" # one outline on any page, not nfcore's pair for its own canvases

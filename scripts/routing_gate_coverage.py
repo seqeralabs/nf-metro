@@ -234,7 +234,7 @@ def _render_under_coverage(corpus: list[tuple[Path, bool]]):
                 text = convert_nextflow_dag(text)
             graph = parse_metro_mermaid(text)
             compute_layout(graph)
-            theme = resolve_theme(None, graph)
+            theme = resolve_theme(graph)
             render_svg(graph, theme)
             if ctx in OBSERVATION_PROBES:
                 observe_route_edges(

@@ -280,7 +280,7 @@ def test_render_plan_reuses_one_materialized_turnout_geometry(
     )
     path = TOPOLOGIES / "same_destination_short_overlap.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
     captured = {}
     real_render_edges = render_svg._render_edges
 
@@ -390,8 +390,8 @@ def test_short_same_destination_overlap_settles_as_one_planned_cohort(
         baseline_target_y = graph.sections["target"].bbox_y
         source = graph.sections["source"]
         source_bottom = source.bbox_y + source.bbox_h
-        first = build_observed_render_plan(graph, resolve_theme(None, graph))
-        second = build_observed_render_plan(graph, resolve_theme(None, graph))
+        first = build_observed_render_plan(graph, resolve_theme(graph))
+        second = build_observed_render_plan(graph, resolve_theme(graph))
 
     (requirement,), (demand,) = measured[0]
 
@@ -571,7 +571,7 @@ def test_same_row_short_overlap_settles_every_route_system_owner(
             section_id: graph.sections[section_id].bbox_y
             for section_id in ("target", "second_target")
         }
-        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = build_observed_render_plan(graph, resolve_theme(graph))
 
     requirements, demands = measured[0]
 
@@ -900,7 +900,7 @@ def test_route_system_owned_approach_tail_refuses_the_slot_move() -> None:
 def test_settled_destination_axis_lands_in_realised_reservation_band() -> None:
     path = TOPOLOGIES / "same_destination_short_overlap.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
     target_id = observed.plan.graph.sections["target"].entry_ports[0]
     route_rank, route = next(
         (rank, route)

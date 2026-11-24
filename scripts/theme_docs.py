@@ -1,19 +1,25 @@
-"""The theme field reference, generated from the theme file's JSON Schema.
+"""Generated theme documents: the shipped JSON Schema and the field reference.
 
-``docs/theming.mdx`` embeds this reference between the
-``theme-field-reference`` markers, and a test fails when the two differ.
-Rewrite it in place with ``python -m nf_metro.themes.reference --write``.
+``src/nf_metro/themes/theme.schema.json`` is :func:`theme_schema` as shipped,
+for editors and other tools, and ``docs/theming.mdx`` embeds the field
+reference between the ``theme-field-reference`` markers. Tests fail when
+either drifts; rewrite both with ``python scripts/theme_docs.py --write``.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
 
-from nf_metro.render.style import chrome_bindings
+from nf_metro.render.style import CHROME
 from nf_metro.themes import BASE_THEME
-from nf_metro.themes.schema import THEMEABLE_LAYOUT_OPTIONS, theme_schema
+from nf_metro.themes.schema import SCHEMA_FILE, THEMEABLE_LAYOUT_OPTIONS, theme_schema
+
+ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_PATH = ROOT / "src" / "nf_metro" / "themes" / SCHEMA_FILE
+DOC_PATH = ROOT / "docs" / "theming.mdx"
 
 START = "{/* theme-field-reference:start */}"
 END = "{/* theme-field-reference:end */}"
@@ -62,7 +68,7 @@ def field_reference() -> str:
             f"### {group}\n\n| Field | Value | Default | Effect |\n"
             "| --- | --- | --- | --- |\n" + "\n".join(rows)
         )
-    chrome = "\n".join(f"| `{b.field}` | `{b.css_var}` |" for b in chrome_bindings())
+    chrome = "\n".join(f"| `{name}` | `{c.css_var}` |" for name, c in CHROME.items())
     parts.append(
         "### Chrome colors and host overrides\n\n"
         "These colors also emit a CSS custom property, so a page that inlines "
@@ -81,16 +87,22 @@ def field_reference() -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def write(doc: Path) -> None:
-    """Replace the reference between the markers in *doc*."""
-    text = doc.read_text()
+def render_schema() -> str:
+    """The shipped schema file's text."""
+    return json.dumps(theme_schema(), indent=2) + "\n"
+
+
+def write() -> None:
+    """Rewrite the schema file and the reference between the doc's markers."""
+    SCHEMA_PATH.write_text(render_schema())
+    text = DOC_PATH.read_text()
     head, rest = text.split(START, 1)
     _, tail = rest.split(END, 1)
-    doc.write_text(f"{head}{START}\n\n{field_reference()}\n{END}{tail}")
+    DOC_PATH.write_text(f"{head}{START}\n\n{field_reference()}\n{END}{tail}")
 
 
 if __name__ == "__main__":
     if "--write" in sys.argv:
-        write(Path(__file__).resolve().parents[3] / "docs" / "theming.mdx")
+        write()
     else:
         print(field_reference(), end="")
