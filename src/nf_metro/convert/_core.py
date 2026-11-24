@@ -14,10 +14,11 @@ import warnings
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from itertools import pairwise
 
 import networkx as nx
 
-from nf_metro.graph_views import directed_graph
+from nf_metro.graph_views import directed_graph, longest_path_layers
 
 # ---------------------------------------------------------------------------
 # Colour palette for auto-generated metro lines
@@ -556,9 +557,9 @@ class _LineAssignment:
 
     ``main`` carries adjacent flow; ``bypass_lines`` keys a ``(src_sec,
     tgt_sec)`` section pair to its ``(id, name, color)``; ``spur`` (when
-    present) carries dead-end branches. ``edge_line`` maps every emitted edge
-    to its line id; its insertion order (intra-section, adjacent, bypass, then
-    spur edges) is the emission order.
+    present) carries dead-end branches; ``side`` lists the further lines a
+    front end planned (see :data:`LinePlan`). ``edge_line`` maps every emitted
+    edge to its line id; its insertion order is the emission order.
     """
 
     main: tuple[str, str, str]
@@ -571,19 +572,19 @@ class _LineAssignment:
 LinePlan = list[tuple[tuple[str, str, str], list[tuple[str, str]]]]
 """Lines a front end draws itself: each ``(id, name, colour)`` with its edges.
 
-The first line is the trunk. Edges absent from every line go on the trunk.
+The first line is the trunk. Every edge must be on exactly one line.
 """
 
 
 def _planned_lines(plan: LinePlan) -> _LineAssignment:
-    (main, _), *side = plan
+    (main, _) = plan[0]
     edge_line = {edge: line[0] for line, line_edges in plan for edge in line_edges}
     return _LineAssignment(
         main=main,
         spur=None,
         bypass_lines={},
         edge_line=edge_line,
-        side=[line for line, _ in side],
+        side=[line for line, _ in plan[1:]],
     )
 
 
@@ -820,74 +821,69 @@ def _warn_feedback_edges_dropped(
 
 
 def _longest_path(
-    graph: nx.DiGraph[str], key: Callable[[str], str], end: str | None = None
+    graph: nx.DiGraph[str],
+    key: Callable[[str], tuple[str, str]],
+    end: str | None = None,
 ) -> list[str]:
     """The longest path in *graph*, ending at *end* if given, ties by *key*."""
-    best: dict[str, tuple[int, str | None]] = {}
-    for node in nx.lexicographical_topological_sort(graph, key=key):
-        preds = sorted(graph.predecessors(node), key=lambda p: (-best[p][0], key(p)))
-        best[node] = (best[preds[0]][0] + 1, preds[0]) if preds else (0, None)
+    layers = longest_path_layers(graph, sorted(graph, key=key))
     if end is None:
-        end = min(best, key=lambda n: (-best[n][0], key(n)))
+        end = min(layers, key=lambda n: (-layers[n], key(n)))
     path = [end]
-    while (prev := best[path[-1]][1]) is not None:
-        path.append(prev)
+    while preds := [
+        p for p in graph.predecessors(path[-1]) if layers[p] == layers[path[-1]] - 1
+    ]:
+        path.append(min(preds, key=key))
     return path[::-1]
 
 
 def branch_line_planner(
-    nodes: dict[str, DagNode],
-) -> Callable[[list[tuple[str, str]]], LinePlan]:
+    nodes: dict[str, DagNode], edges: list[tuple[str, str]]
+) -> LinePlan:
     """Plan lines from the graph's shape rather than from its sections.
 
     The trunk, ``main``, is the longest chain into the main sink: the sink with
     the most direct inputs, ties going to the one with more upstream nodes,
     then to the first by label. Each remaining chain, longest first, becomes
     its own line, named after its first node not already on a line. Ties
-    break on node labels, so the plan does not depend on hash order.
+    break on node labels, then ids, so the plan does not depend on hash order.
     """
+    if not edges:
+        return []
 
-    def label(nid: str) -> str:
-        return nodes[nid].label
+    def key(nid: str) -> tuple[str, str]:
+        return nodes[nid].label, nid
 
-    def plan(edges: list[tuple[str, str]]) -> LinePlan:
-        if not edges:
-            return []
-        graph = directed_graph(sorted({n for edge in edges for n in edge}), edges)
-        sink = min(
-            (n for n in graph if graph.out_degree(n) == 0),
-            key=lambda n: (-graph.in_degree(n), -len(nx.ancestors(graph, n)), label(n)),
+    graph = directed_graph(sorted({n for edge in edges for n in edge}), edges)
+    sink = min(
+        (n for n in graph if graph.out_degree(n) == 0),
+        key=lambda n: (-graph.in_degree(n), -len(nx.ancestors(graph, n)), key(n)),
+    )
+    trunk = _longest_path(graph, key, sink)
+    lines: LinePlan = [(("main", "Main", LINE_COLORS[0]), list(pairwise(trunk)))]
+    used_ids = {"main"}
+    on_line = set(trunk)
+    while True:
+        graph.remove_edges_from(lines[-1][1])
+        graph.remove_nodes_from(list(nx.isolates(graph)))
+        if not graph:
+            return lines
+        path = _longest_path(graph, key)
+        first = next((n for n in path if n not in on_line), path[-1])
+        line_id = _allocate_unique_id(nodes[first].label, used_ids, "line")
+        color = LINE_COLORS[len(lines) % len(LINE_COLORS)]
+        lines.append(
+            ((line_id, _display_label(nodes[first]), color), list(pairwise(path)))
         )
-        path = _longest_path(graph, label, sink)
-        lines: LinePlan = []
-        used_ids: set[str] = set()
-        on_line: set[str] = set()
-        while True:
-            path_edges = list(zip(path, path[1:], strict=False))
-            if lines:
-                first = next((n for n in path if n not in on_line), path[-1])
-                line_id = _allocate_unique_id(label(first), used_ids, "line")
-                name = _display_label(nodes[first])
-            else:
-                line_id, name = "main", "Main"
-                used_ids.add(line_id)
-            color = LINE_COLORS[len(lines) % len(LINE_COLORS)]
-            lines.append(((line_id, name, color), path_edges))
-            on_line.update(path)
-            graph.remove_edges_from(path_edges)
-            graph.remove_nodes_from([n for n in list(graph) if graph.degree(n) == 0])
-            if not graph:
-                return lines
-            path = _longest_path(graph, label)
-
-    return plan
+        on_line.update(path)
 
 
 def dag_to_mmd(
     dag: ParsedDag,
     kept_ids: set[str],
     title: str = "",
-    plan_lines: Callable[[list[tuple[str, str]]], LinePlan] | None = None,
+    plan_lines: Callable[[dict[str, DagNode], list[tuple[str, str]]], LinePlan]
+    | None = None,
 ) -> str:
     """Convert a parsed DAG to nf-metro ``.mmd`` text, keeping only *kept_ids*.
 
@@ -895,9 +891,10 @@ def dag_to_mmd(
     nodes they linked. Kept nodes inside a named group become that group's
     section; the rest share one synthesised section.
 
-    *plan_lines*, when given, receives the final acyclic edges and returns the
-    map's lines. Without it, or when it plans none, edges go on ``main`` with
-    ``spur`` and ``bypass`` lines derived from the sections.
+    *plan_lines*, when given, receives the nodes and the final acyclic edges
+    and returns the map's lines, such as :func:`branch_line_planner`. Without
+    it, or when it plans none, edges go on ``main`` with ``spur`` and
+    ``bypass`` lines derived from the sections.
 
     Warns
     -----
@@ -922,7 +919,7 @@ def dag_to_mmd(
     )
 
     intra_edges, inter_edges = _classify_edges(edges, sections.node_section)
-    plan = plan_lines(edges) if plan_lines else []
+    plan = plan_lines(dag.nodes, edges) if plan_lines else []
     lines = (
         _planned_lines(plan)
         if plan

@@ -195,17 +195,17 @@ def test_a_branch_line_is_named_after_its_first_rule_off_the_trunk():
     assert lines[("d", "e")] == "main"
 
 
-@pytest.mark.parametrize("workflow", WORKFLOWS)
-def test_the_line_plan_does_not_depend_on_hash_order(workflow):
+def test_the_line_plan_does_not_depend_on_hash_order():
     script = (
         "import sys, warnings; warnings.simplefilter('ignore');"
         "from nf_metro.convert import convert_snakemake_dag;"
-        "sys.stdout.write(convert_snakemake_dag(open(sys.argv[1]).read()))"
+        "sys.stdout.write(''.join(convert_snakemake_dag(open(f).read())"
+        " for f in sys.argv[1:]))"
     )
-    src = FIXTURES / f"{workflow}.rulegraph.dot"
+    sources = [str(FIXTURES / f"{w}.rulegraph.dot") for w in WORKFLOWS]
     outputs = {
         subprocess.run(
-            [sys.executable, "-c", script, str(src)],
+            [sys.executable, "-c", script, *sources],
             env={**os.environ, "PYTHONHASHSEED": seed},
             capture_output=True,
             text=True,

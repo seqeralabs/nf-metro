@@ -152,4 +152,4 @@ def convert_snakemake_dag(text: str, title: str = "") -> str:
         for nid, node in dag.nodes.items()
         if not (node.label == _TARGET_RULE and nid not in has_outgoing)
     }
-    return dag_to_mmd(dag, kept_ids, title, branch_line_planner(dag.nodes))
+    return dag_to_mmd(dag, kept_ids, title, branch_line_planner)
