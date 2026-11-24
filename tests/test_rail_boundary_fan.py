@@ -45,7 +45,7 @@ _Y_TOLERANCE = 1.0
 def _rendered(path: Path) -> MetroGraph:
     graph = parse_metro_mermaid(path.read_text())
     compute_layout(graph, validate=True)
-    render_svg(graph, THEMES[graph.style if graph.style in THEMES else "nfcore"])
+    render_svg(graph, THEMES[graph.style if graph.style in THEMES else "default"])
     return graph
 
 

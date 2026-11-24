@@ -80,11 +80,15 @@ def test_right_angle_turns_keep_the_existing_concentric_rule():
     assert 10.0 + turn_shift(*inner, (0.0, 0.0)) == pytest.approx(10.0)
 
 
-def test_touching_fan_corners_leave_no_seam():
-    path = _ROOT / "examples" / "rnaseq_sections.mmd"
-    text = "%%metro track_gap: 0\n" + path.read_text()
+@pytest.mark.parametrize(
+    ("name", "prefix"),
+    [("rnaseq_sections.mmd", "%%metro track_gap: 0\n"), ("rnaseq_london_tube.mmd", "")],
+)
+def test_touching_fan_corners_leave_no_seam(name, prefix):
+    path = _ROOT / "examples" / name
+    text = prefix + path.read_text()
     graph = prepare_graph(text, source_dir=str(path.parent))
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     plan = build_render_plan(graph, theme)
     lanes = defaultdict(list)
     for route, points, radii in zip(

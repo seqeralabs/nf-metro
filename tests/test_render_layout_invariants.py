@@ -85,7 +85,7 @@ def test_clean_fixture_emits_no_layout_invariant_warning(name: str) -> None:
     graph = _laid_out(name)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     offenders = [
         str(w.message) for w in caught if "Tier-A invariants" in str(w.message)
     ]
@@ -98,7 +98,7 @@ def test_injected_violation_warns_by_default(name: str) -> None:
     graph = _laid_out(name)
     _inject_coincident_stations(graph)
     with pytest.warns(UserWarning, match="Tier-A invariants"):
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
 
 
 @pytest.mark.parametrize("name", CLEAN_FIXTURES)
@@ -108,7 +108,7 @@ def test_injected_violation_warning_is_a_permissive_guard_warning(name: str) -> 
     graph = _laid_out(name)
     _inject_coincident_stations(graph)
     with pytest.warns(PermissiveGuardWarning, match="Tier-A invariants"):
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
 
 
 @pytest.mark.parametrize("name", CLEAN_FIXTURES)
@@ -118,7 +118,7 @@ def test_injected_violation_raises_under_strict(name: str) -> None:
     graph.strict = True
     _inject_coincident_stations(graph)
     with pytest.raises(LayoutInvariantError, match="Tier-A invariants"):
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
 
 
 def test_strict_error_is_a_phase_invariant_error() -> None:
@@ -239,7 +239,7 @@ ROW_GAP_FIXTURES = [
 
 def _render_time_wrapped_labels(name: str) -> list[str]:
     """Station ids the renderer wrapped: single-line node label, wrapped drawn."""
-    plan = build_render_plan(_laid_out(name), THEMES["nfcore"])
+    plan = build_render_plan(_laid_out(name), THEMES["default"])
     stations = plan.graph.stations
     return [
         place.station_id
@@ -301,7 +301,7 @@ def test_rendered_sections_clear_header_after_label_wrap(name: str) -> None:
 
     graph = _laid_out(name)
     assert not graph.has_rail_sections, f"{name}: rail graphs are reflow-exempt"
-    theme_name = graph.style if graph.style in THEMES else "nfcore"
+    theme_name = graph.style if graph.style in THEMES else "default"
     rects = _rendered_section_rects(render_svg(graph, THEMES[theme_name]))
 
     smallest = _min_rendered_row_gap(graph, rects)
@@ -326,7 +326,7 @@ def test_header_collision_reflow_restores_section_y_gap(name: str) -> None:
     assert _render_time_wrapped_labels(name), f"{name}: no label wrapped at render"
 
     graph = _laid_out(name)
-    rects = _rendered_section_rects(render_svg(graph, THEMES["nfcore"]))
+    rects = _rendered_section_rects(render_svg(graph, THEMES["default"]))
     gap = _min_rendered_row_gap(graph, rects)
     assert gap is not None, f"{name}: no column-overlapping adjacent-row pair"
     assert gap >= SECTION_Y_GAP - SAME_COORD_TOLERANCE, (
@@ -351,7 +351,7 @@ def test_render_does_not_reflow_rail_mode_graph() -> None:
     assert graph.has_rail_sections, "expected sarek_metro to have a rail-mode section"
     pre_y = {sid: st.y for sid, st in graph.stations.items()}
 
-    render_svg(graph, THEMES["nfcore"])
+    render_svg(graph, THEMES["default"])
 
     moved = {
         sid: (pre_y[sid], graph.stations[sid].y)
@@ -365,7 +365,7 @@ def _render_fixture(name: str, *, strict: bool = False) -> None:
     graph = parse_metro_mermaid((FIXTURES / name).read_text())
     graph.strict = strict
     compute_layout(graph)
-    render_svg(graph, THEMES["nfcore"])
+    render_svg(graph, THEMES["default"])
 
 
 @pytest.mark.parametrize(
@@ -386,7 +386,7 @@ def test_planned_fan_local_offset_frames_render_strictly(name: str) -> None:
     graph = parse_metro_mermaid((EXAMPLES / name).read_text())
     graph.strict = True
     compute_layout(graph)
-    plan = build_render_plan(graph, THEMES["nfcore"])
+    plan = build_render_plan(graph, THEMES["default"])
 
     forks = {fan.fork_station_id for fan in graph.fan_plans}
     assert forks, f"{name}: expected at least one recognised fan"
@@ -477,7 +477,7 @@ def test_away_facing_exit_renders_without_wrap_warning(
     graph = _laid_out_repro(fixture_dir, name, fold)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     tier_a = [w for w in caught if "Tier-A invariants" in str(w.message)]
     assert not tier_a, (
         f"{name}: unexpected Tier-A wrap warning(s): {[str(w.message) for w in tier_a]}"
@@ -604,7 +604,7 @@ def test_entry_runway_clears_trunk_row_non_consumer(name: str) -> None:
     compute_layout(graph)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     crossings = [
         str(w.message)
         for w in caught
@@ -695,7 +695,7 @@ def test_entry_trunk_row_bow_clears_non_consumer(name: str) -> None:
     compute_layout(graph)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     crossings = [
         str(w.message)
         for w in caught
@@ -723,7 +723,7 @@ def test_tb_exit_port_stays_on_bbox_boundary(name: str) -> None:
     compute_layout(graph)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     off_boundary = [
         str(w.message) for w in caught if "_guard_ports_on_boundaries" in str(w.message)
     ]
@@ -760,7 +760,7 @@ def test_label_grown_box_edge_carries_its_port(name: str) -> None:
     compute_layout(graph)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     stranded = [
         str(w.message)
         for w in caught
@@ -774,7 +774,7 @@ def test_settled_ports_sit_on_their_section_box_edge(name: str) -> None:
     """Every port of the drawn geometry is on the box edge its side names."""
     graph = parse_metro_mermaid((EXAMPLES / name).read_text())
     compute_layout(graph)
-    settled = _settled_render_graph(graph, THEMES["nfcore"])
+    settled = _settled_render_graph(graph, THEMES["default"])
     _guard_ports_on_boundaries(settled, "settled")
 
 

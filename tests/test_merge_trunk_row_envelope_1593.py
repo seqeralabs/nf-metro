@@ -99,7 +99,7 @@ def test_the_settled_report_corridor_lands_inside_the_band_it_reserves() -> None
     graph = _laid_out(REPORT_HO)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = build_observed_render_plan(graph, resolve_theme(graph))
 
     plan = observed.route_plan
     query = build_route_plan_query(plan)

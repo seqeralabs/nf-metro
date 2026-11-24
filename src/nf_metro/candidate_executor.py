@@ -511,6 +511,7 @@ def _evaluate_attempt(
                 source_dir=production.source_dir,
                 bare=production.render.bare,
                 output_format="svg",
+                theme=production.theme,
                 layout_commitments=LayoutCommitmentOverlay(
                     production.caller_pins, attempt.commitments
                 ),
@@ -573,7 +574,7 @@ def _evaluate_attempt(
 
         try:
             begin(CandidateStage.LAYOUT)
-            theme = resolve_theme(production.theme, graph, mode=production.mode)
+            theme = resolve_theme(graph, mode=production.mode)
             compute_layout(graph, validate=True, validation_theme=theme)
             graph_evidence = _graph_evidence(graph, GraphState.SETTLED)
         except Exception as exc:  # noqa: BLE001

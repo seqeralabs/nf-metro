@@ -114,8 +114,7 @@ A consumer can therefore go from manifest to element and back without guessing.
 A machine-readable JSON Schema (draft 2020-12) ships with the package as `nf_metro/manifest/schema.json`, and `manifest_schema()` returns it as a dict.
 Its required fields are exactly the [minimum-conforming](#the-minimum-conforming-file) set.
 
-To validate an SVG, read its manifest out and check it against the schema.
-`jsonschema` is not an nf-metro runtime dependency, and `pip install "nf-metro[validate]"` adds it:
+To validate an SVG, read its manifest out and check it against the schema with `jsonschema`, which installs with nf-metro:
 
 ```python
 import jsonschema
@@ -133,8 +132,6 @@ Or from the command line, without writing any code:
 $ nf-metro validate-svg pipeline.svg
 # Valid: 42 nodes, schema version 1.0   (exits non-zero if it doesn't conform)
 ```
-
-`validate-svg` needs the same package, and `pip install "nf-metro[validate]"` covers it too.
 
 Add `--geometry` to check the _drawn_ picture as well as the schema.
 It flags a route drawn through a station's label or marker, with rail interchanges excepted, and a direction chevron off its own line's drawn stroke.

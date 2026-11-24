@@ -348,14 +348,14 @@ Gates with an un-exercised arm:
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
 | 192 | `for handler in (_route_tb_section, _route_entry_runway, _route_intra_section):` | `->L197` |  |
-| 234 | `if scaffold is None:` | `->L241` |  |
-| 256 | `if rail_execution is not None:` | `->L260` |  |
-| 460 | `if result is not None:` | `->L-410` | **defensive** -- Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable. |
-| 462 | `if system_execution is not None:` | `->L464` |  |
-| 482 | `if system.system_id != expected.system_id:` | `->L485` |  |
-| 503 | `if system_execution is not None and next_system_rank != len(` | `->L506` |  |
-| 633 | `if system_execution is not None:` | `->L641` |  |
-| 665 | `if validate_final_route_frames:` | `->L667` |  |
+| 233 | `if scaffold is None:` | `->L240` |  |
+| 255 | `if rail_execution is not None:` | `->L259` |  |
+| 459 | `if result is not None:` | `->L-409` | **defensive** -- Append-guard after the priority-ordered handler chain. The final handler _route_intra_section is total: its three early returns and its _route_diagonal fallback (annotated -> RoutedPath, single return statement) always yield a RoutedPath, so result is never None and every edge appends. The None arm is unreachable. |
+| 461 | `if system_execution is not None:` | `->L463` |  |
+| 481 | `if system.system_id != expected.system_id:` | `->L484` |  |
+| 502 | `if system_execution is not None and next_system_rank != len(` | `->L505` |  |
+| 632 | `if system_execution is not None:` | `->L640` |  |
+| 664 | `if validate_final_route_frames:` | `->L666` |  |
 
 ## `corners.py`
 

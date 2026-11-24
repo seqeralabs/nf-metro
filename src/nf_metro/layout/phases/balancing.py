@@ -7,12 +7,14 @@ from collections import defaultdict
 from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_COARSE,
     COORD_GROUP_DIGITS_FINE,
-    DIAGONAL_RUN,
     SAME_COORD_TOLERANCE,
-    SECTION_Y_PADDING,
 )
 from nf_metro.layout.geometry import quantize_coord
-from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
+from nf_metro.layout.pass_metrics import (
+    active_metrics,
+    icon_half_height_approx,
+    station_radius_approx,
+)
 from nf_metro.layout.phases._common import (
     _ref_bbox_top,
     _ref_y,
@@ -1009,7 +1011,8 @@ def _recenter_section_loop_sides(
         ):
             continue
         is_multiline = len(graph.edges_to(sid)) > 1 or len(graph.edges_from(sid)) > 1
-        min_recenter_delta = DIAGONAL_RUN / 4.0 if is_multiline else DIAGONAL_RUN / 3.0
+        run = active_metrics().diagonal_run
+        min_recenter_delta = run / 4.0 if is_multiline else run / 3.0
         if abs(midpoint - st.x) < min_recenter_delta:
             continue
         st.x = midpoint
@@ -1243,7 +1246,7 @@ def _inbound_bundle_spans_x(graph: MetroGraph, consumer: Station, x: float) -> b
 def _shift_sparse_loop_stations_to_clear_bundle(
     graph: MetroGraph,
     y_spacing: float,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_y_padding: float | None = None,
 ) -> None:
     """Phase 1 of :func:`_shift_and_propagate_loop_stations`.
 
@@ -1270,6 +1273,8 @@ def _shift_sparse_loop_stations_to_clear_bundle(
     the sibling's bundle Y range.  The section bbox is grown when
     necessary; phase 2 then closes the row gap that growth opened.
     """
+    if section_y_padding is None:
+        section_y_padding = active_metrics().section_y_padding
     if y_spacing <= 0:
         return
 

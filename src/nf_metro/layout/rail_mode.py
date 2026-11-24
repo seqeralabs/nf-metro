@@ -27,30 +27,29 @@ from __future__ import annotations
 __all__ = ["compute_rail_layout"]
 
 from nf_metro.layout.constants import (
-    DIAGONAL_RUN,
     INTER_ROW_EDGE_CLEARANCE,
     INTER_ROW_HEADER_CLEARANCE,
     MIN_STRAIGHT_EDGE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     RAIL_ABOVE_LABEL_TOP_PAD,
     SECTION_HEADER_PROTRUSION,
-    SECTION_X_PADDING,
     SECTION_Y_GAP,
-    SECTION_Y_PADDING,
     X_OFFSET,
     X_SPACING,
     Y_OFFSET,
     graph_offset_step,
 )
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.parser.model import MetroGraph, PortSide, Section
 from nf_metro.text_metrics import TextRole
 
-# Horizontal room a blank terminus's fan-out/fan-in needs to ease between the
-# convergence point and the rails without compressing: a flat lead plus the
-# 45-degree diagonal plus a straight stub each side.  Reserved as the gap
-# between a fanning terminus and its neighbour column so the S-curves keep
-# their shape no matter how tight the shared (diagonal-label) column pitch is.
-_TERMINUS_FAN_ROOM = DIAGONAL_RUN + 3.0 * MIN_STRAIGHT_EDGE
+# The straight runs a blank terminus's fan-out/fan-in needs besides its
+# 45-degree diagonal to ease between the convergence point and the rails
+# without compressing: a flat lead plus a straight stub each side.  With the
+# diagonal they are reserved as the gap between a fanning terminus and its
+# neighbour column, so the S-curves keep their shape no matter how tight the
+# shared (diagonal-label) column pitch is.
+_TERMINUS_STUBS = 3.0 * MIN_STRAIGHT_EDGE
 
 
 def _section_lines_in_order(graph: MetroGraph, section: Section) -> list[str]:
@@ -76,8 +75,8 @@ def compute_rail_layout(
     y_spacing: float,
     x_offset: float = X_OFFSET,
     y_offset: float = Y_OFFSET,
-    section_x_padding: float = SECTION_X_PADDING,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_x_padding: float | None = None,
+    section_y_padding: float | None = None,
     section_y_gap: float = SECTION_Y_GAP,
 ) -> None:
     """Lay the whole graph out in rail mode.
@@ -88,6 +87,10 @@ def compute_rail_layout(
     (then by grid-col, then by section number) so the result is a vertically
     stacked set of parallel-rail panels.
     """
+    if section_x_padding is None:
+        section_x_padding = active_metrics().section_x_padding
+    if section_y_padding is None:
+        section_y_padding = active_metrics().section_y_padding
     # Sort sections into a stable top-to-bottom reading order.  When the
     # auto-layout / explicit grid set grid_row, honour it; otherwise fall
     # back to declaration order via the section number.
@@ -175,8 +178,8 @@ def retrofit_section_rails(
     *,
     x_spacing: float = X_SPACING,
     y_spacing: float,
-    section_x_padding: float = SECTION_X_PADDING,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_x_padding: float | None = None,
+    section_y_padding: float | None = None,
 ) -> None:
     """Re-lay one already-placed section as parallel rails (per-section mode).
 
@@ -190,6 +193,10 @@ def retrofit_section_rails(
     Used by ``compute_layout`` for a section that resolves to ``rails`` while
     the graph-wide default is some other mode (the per-section override case).
     """
+    if section_x_padding is None:
+        section_x_padding = active_metrics().section_x_padding
+    if section_y_padding is None:
+        section_y_padding = active_metrics().section_y_padding
     # ``_layout_section_rails`` anchors the box top at
     # ``section_top + SECTION_HEADER_PROTRUSION`` and positions stations from
     # ``x_offset``; feeding it the placement-chosen bbox top-left (offsetting
@@ -360,8 +367,9 @@ def _layout_section_rails(
 
     head_fan = any(_fans(sid) for sid in real_ids if layers.get(sid, 0) == 0)
     tail_fan = any(_fans(sid) for sid in real_ids if layers.get(sid, 0) == max_layer)
-    head_extra = max(0.0, _TERMINUS_FAN_ROOM - x_spacing) if head_fan else 0.0
-    tail_extra = max(0.0, _TERMINUS_FAN_ROOM - x_spacing) if tail_fan else 0.0
+    fan_room = active_metrics().diagonal_run + _TERMINUS_STUBS
+    head_extra = max(0.0, fan_room - x_spacing) if head_fan else 0.0
+    tail_extra = max(0.0, fan_room - x_spacing) if tail_fan else 0.0
 
     # A sink terminus marches its file icons rightward from the last column.
     # The normal-section layout reserves room for them via
@@ -371,6 +379,7 @@ def _layout_section_rails(
     # clearance beyond the standard padding (right side only, without shifting
     # the terminus itself).
     from nf_metro.layout.phases.single_section import (
+        _stacked_page_excess,
         _terminus_icon_clearance,
         terminus_icon_flow_reach,
     )
@@ -390,7 +399,7 @@ def _layout_section_rails(
             continue
         need = _terminus_icon_clearance(
             len(st.terminus_labels), st.terminus_names or None
-        )
+        ) + _stacked_page_excess(st)
         tail_icon_extra = max(tail_icon_extra, need - section_x_padding)
     tail_icon_extra = max(0.0, tail_icon_extra)
 
@@ -558,7 +567,6 @@ def _rail_label_band(
     """
     import math
 
-    from nf_metro.layout.constants import LABEL_OFFSET
     from nf_metro.layout.labels import _label_text_height, label_text_width
 
     angle = abs(graph.label_angle or 0.0)
@@ -575,7 +583,7 @@ def _rail_label_band(
         h = _label_text_height(st.label)
         w = label_text_width(st.label, TextRole.RAIL_LABEL)
         footprint = h * cos_a + w * sin_a if angle else h
-        band = max(band, LABEL_OFFSET + footprint)
+        band = max(band, active_metrics().label_offset + footprint)
     return band
 
 

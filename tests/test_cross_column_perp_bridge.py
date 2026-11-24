@@ -316,7 +316,7 @@ def test_bridged_port_lands_each_line_on_its_dealt_channel(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         result = render_graph_result(
-            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+            graph, resolve_theme(graph, mode=None), RenderConfig()
         )
     routes = list(zip(result.plan.routes, result.plan.route_polylines))
     departures = {

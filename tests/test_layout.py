@@ -2594,7 +2594,6 @@ def test_cross_col_top_entry_port_on_boundary():
     """
     mmd = """\
 %%metro title: Cross-Column Top Entry
-%%metro style: dark
 %%metro line: l1 | Line 1 | #0570b0
 
 graph LR
@@ -2658,7 +2657,6 @@ def test_cross_col_top_entry_channel_clears_title_band():
 
     mmd = """\
 %%metro title: Cross-Column Top Entry
-%%metro style: dark
 %%metro line: l1 | Line 1 | #0570b0
 
 graph LR

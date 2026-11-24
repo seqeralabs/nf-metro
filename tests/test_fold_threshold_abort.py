@@ -48,7 +48,7 @@ def _render_at(name: str, fold: int | None) -> None:
     graph = prepare_graph(
         path.read_text(), layout_options=opts, source_dir=str(path.parent)
     )
-    render_svg(graph, THEMES["nfcore"])
+    render_svg(graph, THEMES["default"])
 
 
 # (fixture, aggressive fold) - each renders at its default width but, folded to

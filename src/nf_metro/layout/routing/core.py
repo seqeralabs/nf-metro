@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
-    DIAGONAL_RUN,
 )
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.route_plan import RouteSystemId
 from nf_metro.layout.route_reservations import reservation_ids_by_claimant_member
 from nf_metro.layout.routing.common import (
@@ -199,7 +199,6 @@ def _route_classified_edge(
 
 def _route_edges(  # noqa: C901
     graph: MetroGraph,
-    diagonal_run: float,
     curve_radius: float,
     station_offsets: dict[tuple[str, str], float] | None,
     *,
@@ -308,7 +307,7 @@ def _route_edges(  # noqa: C901
 
     ctx = _build_routing_context(
         graph,
-        diagonal_run,
+        active_metrics().diagonal_run,
         curve_radius,
         station_offsets,
         offset_step=offset_step,
@@ -678,7 +677,6 @@ def _route_edges(  # noqa: C901
 
 def route_edges(
     graph: MetroGraph,
-    diagonal_run: float = DIAGONAL_RUN,
     curve_radius: float = CURVE_RADIUS,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
@@ -697,7 +695,6 @@ def route_edges(
     """
     routes, _moves, _plan = _route_edges(
         graph,
-        diagonal_run,
         curve_radius,
         station_offsets,
         observe_plan=False,
@@ -719,7 +716,6 @@ def route_edges_for_placement_guards(
     """
     routes, _moves, _plan = _route_edges(
         graph,
-        DIAGONAL_RUN,
         CURVE_RADIUS,
         station_offsets,
         observe_plan=False,
@@ -730,7 +726,6 @@ def route_edges_for_placement_guards(
 
 def observe_route_edges(
     graph: MetroGraph,
-    diagonal_run: float = DIAGONAL_RUN,
     curve_radius: float = CURVE_RADIUS,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
@@ -742,7 +737,6 @@ def observe_route_edges(
 
     routes, _moves, plan = _route_edges(
         graph,
-        diagonal_run,
         curve_radius,
         station_offsets,
         observe_plan=True,
@@ -762,7 +756,6 @@ def _settle_station_moves(graph: MetroGraph, moves: dict[str, float]) -> None:
 
 def route_edges_centred(
     graph: MetroGraph,
-    diagonal_run: float = DIAGONAL_RUN,
     curve_radius: float = CURVE_RADIUS,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
@@ -785,7 +778,6 @@ def route_edges_centred(
     """
     routes, moves, _plan = _route_edges(
         graph,
-        diagonal_run,
         curve_radius,
         station_offsets,
         observe_plan=False,
@@ -799,7 +791,6 @@ def route_edges_centred(
 
 def observe_route_edges_centred(
     graph: MetroGraph,
-    diagonal_run: float = DIAGONAL_RUN,
     curve_radius: float = CURVE_RADIUS,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
@@ -813,7 +804,6 @@ def observe_route_edges_centred(
 
     routes, moves, plan = _route_edges(
         graph,
-        diagonal_run,
         curve_radius,
         station_offsets,
         observe_plan=True,

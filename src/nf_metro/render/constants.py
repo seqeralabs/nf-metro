@@ -272,7 +272,7 @@ def effective_line_color(
     site (edge, chevron, legend swatch); every other line keeps its own colour,
     falling back to :data:`FALLBACK_LINE_COLOR` when it has none. *active_color*,
     when given, is the colour for an *active* line, taking priority over the
-    line's own (the chevron site passes ``theme.directional_marker_color`` so a
+    line's own (the chevron site passes ``theme.chevron_color`` so a
     themed marker colour wins); an inactive line mutes regardless.
 
     The line's own colour is directive-authored text that lands verbatim in
@@ -478,9 +478,12 @@ STROKE_DASHARRAY: dict[str, str] = {
 """SVG stroke-dasharray values for non-solid line styles."""
 
 
-def line_style_kwargs(style: str) -> dict[str, str]:
+def line_style_kwargs(style: str, theme: Theme) -> dict[str, str]:
     """Return extra SVG kwargs for a metro line style (dashed/dotted)."""
-    dasharray = STROKE_DASHARRAY.get(style)
+    dasharray = {
+        "dashed": theme.dashed_dasharray,
+        "dotted": theme.dotted_dasharray,
+    }.get(style, "")
     if dasharray:
         return {"stroke_dasharray": dasharray}
     return {}

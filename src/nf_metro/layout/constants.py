@@ -75,7 +75,7 @@ stays decoupled from the theme layer.
 STATION_STROKE_APPROX: float = 1.5
 """Approximate station marker stroke width for layout spacing calculations.
 
-Matches the nfcore theme; other themes use 2 px, a difference small enough to
+Matches the default theme; other themes use 2 px, a difference small enough to
 absorb in the label-clearance math (mirrors :data:`DEFAULT_LINE_WIDTH`).  A
 plain marker's outline is centred on its radius (outer edge at
 ``radius + stroke/2``); an interchange knob's outline is drawn outside the knob
@@ -264,7 +264,7 @@ OFFSET_STEP: float = 4.0
 DEFAULT_LINE_WIDTH: float = 3.0
 """Stroke width used when converting a visual *track_gap* to an offset step.
 
-Matches the nfcore theme (3 px). The seqera theme uses 4 px; that 1 px
+Matches the default theme (3 px). The seqera theme uses 4 px; that 1 px
 difference is absorbed by rounding elsewhere in the layout pipeline.
 """
 
@@ -295,18 +295,24 @@ def graph_offset_step(
     Layout and render both resolve the step here so the pitch they assume can
     never diverge.  *drawn_line_width* is the width strokes are actually painted
     at, ``stroke_scale`` already applied -- the render side passes its scaled
-    theme's value; the layout side omits it and gets the theme-agnostic
-    :data:`DEFAULT_LINE_WIDTH` proxy, scaled to match.
+    theme's value; the layout side omits it and gets the line width of the
+    theme it lays out for, scaled to match.
 
     ``stroke_scale`` widens the gap as well as the stroke.  Thickening tracks
     while holding the inter-track gap at its absolute default would close that
     gap up as the map is downscaled, merging a bundle into one fat stroke and
     costing exactly the line-counting legibility the scaling is meant to buy.
     """
+    from nf_metro.layout.pass_metrics import active_metrics
+
     scale = graph.stroke_scale
     if graph.track_gap is None:
         return OFFSET_STEP * scale
-    width = DEFAULT_LINE_WIDTH * scale if drawn_line_width is None else drawn_line_width
+    width = (
+        active_metrics().line_width * scale
+        if drawn_line_width is None
+        else drawn_line_width
+    )
     return graph.track_gap * scale + width
 
 
@@ -447,16 +453,16 @@ grazing it.  Enforced by ``test_routed_paths_clear_next_row_headers``."""
 DIRECTIONAL_MARKER_HALF_EXTENT: float = 4.0
 """Half-extent of a direction chevron about the path point carrying it.
 
-Mirrors ``Theme.directional_marker_size`` (the arm half-length and
+Mirrors ``Theme.chevron_size`` (the arm half-length and
 half-width), which the reservation ledger cannot read: a corridor's
 clearances are a property of its region, resolved before any theme is in
 hand."""
 
 WIDEST_THEME_LINE_WIDTH: float = 4.0
-"""The widest ``Theme.line_width`` any registered brand sets.
+"""The widest ``Theme.line_width`` any built-in theme sets.
 
 A corridor's clearances are a property of its region, resolved before a theme
-is in hand, so a demand that has to hold for every brand takes the widest
+is in hand, so a demand that has to hold for every theme takes the widest
 stroke rather than the default one.  Pinned to the registry by
 ``test_the_canvas_edge_clearance_bounds_every_theme``."""
 
@@ -648,7 +654,7 @@ TERMINUS_WIDTH: float = 28.0
 """Default width of terminus (file) icons.
 
 Used by both layout (for clearance calculations) and render (as the
-Theme.terminus_width default).
+Theme.icon_width default).
 """
 
 ICON_TERMINUS_FORK_LEAD: float = 38.0
@@ -680,7 +686,7 @@ caption text doesn't visually crash into the icon stroke."""
 ICON_HALF_HEIGHT: float = 16.0
 """Half-height of a terminus file icon for layout calculations.
 
-Single source of truth for the default icon half-height: ``Theme.terminus_height``
+Single source of truth for the default icon half-height: ``Theme.icon_height``
 defaults to ``2 * ICON_HALF_HEIGHT`` (see ``render.style.Theme``)."""
 
 ICON_CAPTION_GAP: float = 4.0
@@ -719,27 +725,25 @@ TERMINUS_ICON_GAP: float = 6.0
 Layout-side mirror of the renderer's ``ICON_STATION_GAP`` so the two
 agree on where the icon stack starts without layout depending on render."""
 
-TERMINUS_ICON_CLEARANCE: float = 58.0
-"""Minimum clearance from terminus station center to section bbox edge.
+TERMINUS_ICON_ROOM: float = 30.0
+"""Clearance from a terminus station centre to the section bbox edge, besides
+the file icon's own width: station radius (~5px) + icon gap (6px) + ~19px
+visual margin so icons don't crowd the section border."""
 
-Accounts for station_radius (~5px) + icon gap (6px) + icon width (28px) = 39px
-extent, plus ~19px visual margin so icons don't crowd the section border.
-"""
-
-TERMINUS_ICON_CLEARANCE_V: float = (
+TERMINUS_ICON_ROOM_V: float = (
     STATION_RADIUS_APPROX
     + TERMINUS_ICON_GAP
-    + 2 * ICON_HALF_HEIGHT
     + ICON_CAPTION_GAP
     + ICON_CAPTION_FONT_HEIGHT
     + 14.0  # visual margin so captions don't crowd the section border
 )
-"""Minimum clearance from a terminus station center to the section bbox
-edge along the *vertical* (flow) axis, used by TB/BT sections.
+"""Clearance from a terminus station centre to the section bbox edge along
+the *vertical* (flow) axis of a TB/BT section, besides the file icon's own
+height.
 
 TB/BT termini stack their file icon (and under-icon caption) below or
-above the station instead of beside it, so the reservation uses icon
-height + caption height rather than icon width.
+above the station instead of beside it, so the reservation covers the
+caption rather than icon width.
 """
 
 EXIT_CORRIDOR_ICON_CLEARANCE: float = CURVE_RADIUS

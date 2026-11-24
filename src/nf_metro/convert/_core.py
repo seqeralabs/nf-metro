@@ -737,7 +737,6 @@ def _emit_mmd(
 
     out: list[str] = []
     out.append(f"%%metro title: {title}")
-    out.append("%%metro style: dark")
     out.append("%%metro line_order: span")
     out.append(f"%%metro line: {main_line_id} | {main_line_name} | {main_color}")
     if lines.spur:

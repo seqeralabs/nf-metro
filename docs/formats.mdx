@@ -34,7 +34,7 @@ An SVG is vector, so there is no resolution to pick. The same file is a thumbnai
 
 The labels are real `<text>`, which a reader can select, a browser can search, and a screen reader can announce.
 
-One file covers both colour schemes. The chrome colours emit as CSS `light-dark(<light>, <dark>)` and the root `<svg>` carries `color-scheme: light dark`, so the map follows whatever the reader's OS or host page is set to. You do not export twice. [Theming](/nf-metro/theming/) covers how to override that from a host page.
+One file covers both colour schemes. The chrome colours emit as CSS `light-dark(<light>, <dark>)` and the root `<svg>` carries `color-scheme: light dark`, so the map follows whatever the reader's OS or host page is set to. You do not export twice. [Light and dark mode](/nf-metro/light-dark/) covers how to override that from a host page.
 
 Every SVG also carries its own [data manifest](/nf-metro/manifest/): a JSON block in `<metadata>` plus `data-node-*` attributes on the drawn elements. That is what lets a host page find the station called `STAR` and colour it, which is how [live progress](/nf-metro/live/) works.
 

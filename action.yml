@@ -20,9 +20,9 @@ inputs:
     required: false
     default: ""
   theme:
-    description: "Visual theme (nfcore, seqera, ...)."
+    description: "Visual theme (default, seqera, ...)."
     required: false
-    default: nfcore
+    default: default
   mode:
     description: >-
       Display mode to bake (light or dark). Leave empty to keep the theme's own

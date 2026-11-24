@@ -732,7 +732,7 @@ def test_owned_corner_preview_regressions_match_plans_and_render(
     assert (
         render_graph(
             graph,
-            resolve_theme(None, graph),
+            resolve_theme(graph),
             RenderConfig(chrome_css=False),
         ).find("<svg ")
         > 0
@@ -922,7 +922,6 @@ def test_reservation_reroute_keeps_identity_and_reuses_settled_template() -> Non
     graph, first = _observe(ROOT / "examples" / "genomeassembly.mmd")
     routes, _moves, second_plan = _route_edges(
         graph,
-        DIAGONAL_RUN,
         CURVE_RADIUS,
         compute_station_offsets(graph),
         observe_plan=True,

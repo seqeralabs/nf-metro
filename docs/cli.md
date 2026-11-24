@@ -107,24 +107,28 @@ output is the same diagram:
 | `raster_width` | `--raster-width` | `raster_width=800`         |
 
 An unknown key, or a value the matching flag would reject, is warned about and
-ignored; the output itself still renders under the run's global options.
+ignored; the output renders under the run's global options.
 
-`mode` and `theme` are baked when the SVG is serialized rather than when the
-map is laid out, so the static SVG and both PNGs above share a single layout
-run — only the animated SVG needs one of its own. Four files, two layouts.
+`mode` is baked when the SVG is serialized rather than when the map is laid
+out, so the static SVG and both PNGs above share a single layout run — only the
+animated SVG needs one of its own. Four files, two layouts. Outputs with
+different `theme` values are laid out separately, because a theme can set
+layout options. `theme` takes the same stacks and theme files as `--theme`:
+quote a stack (`theme="seqera, london-tube"`), and theme files resolve against
+the `.mmd`.
 
 ### Theme and branding
 
-| Option                                                                                        | Default                      | Description                                                                                                                                                                                                                                                                                                                                        |
-| --------------------------------------------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--theme [dark\|light\|nfcore\|nfcore-dark\|nfcore-light\|seqera\|seqera-dark\|seqera-light]` | from `style:`, else `nfcore` | Visual theme. A bare brand name (`nfcore`, `seqera`) takes the mode from `--mode`, and the suffixed names pin a mode. `dark` is a legacy alias for `nfcore`. Takes the same names as its directive twin `%%metro style:`, but exactly as spelled here. An unknown or wrong-case name exits with an error, where the directive warns and falls back |
-| `--mode [light\|dark]`                                                                        | from `mode:`, else `dark`    | Display mode, independent of the brand. Bakes the chosen mode's palette. Use it for light or dark PNG export. Directive twin: `%%metro mode:`                                                                                                                                                                                                      |
-| `--logo PATH`                                                                                 | none                         | Logo image path (errors if the path does not exist). Directive twin: `%%metro logo:`                                                                                                                                                                                                                                                               |
-| `--title TEXT`                                                                                | from `title:`                | Pipeline title. Directive twin: `%%metro title:`                                                                                                                                                                                                                                                                                                   |
-| `--caption TEXT`                                                                              | none                         | Free-text caption or attribution line rendered bottom-left of the map (for example, `Adapted from Author et al., Journal (Year)`). Directive twin: `%%metro caption:`                                                                                                                                                                              |
+| Option                 | Default                       | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--theme THEMES`       | from `style:`, else `default` | Visual theme: a built-in name (`default`, `seqera`, `london-tube`, `transparent`), a `.yaml` theme file, or a comma-separated list of both, merged left to right over `default` (see [Themes](/nf-metro/themes/)). `--mode` picks the palette a PNG bakes. Takes the same values as its directive twin `%%metro style:`, whose theme files resolve against the `.mmd` rather than the working directory. An unknown name or missing file exits with an error, where the directive warns and falls back |
+| `--mode [light\|dark]` | from `mode:`, else `dark`     | Display mode, independent of the brand. Bakes the chosen mode's palette. Use it for light or dark PNG export. Directive twin: `%%metro mode:`                                                                                                                                                                                                                                                                                                                                                          |
+| `--logo PATH`          | none                          | Logo image path (errors if the path does not exist). Directive twin: `%%metro logo:`                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--title TEXT`         | from `title:`                 | Pipeline title. Directive twin: `%%metro title:`                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `--caption TEXT`       | none                          | Free-text caption or attribution line rendered bottom-left of the map (for example, `Adapted from Author et al., Journal (Year)`). Directive twin: `%%metro caption:`                                                                                                                                                                                                                                                                                                                                  |
 
-`--theme light` is the transparent embed theme rather than a brand.
-Because it has no light/dark pair, `--mode` does not apply to it.
+`--theme transparent` (also accepted as `light`) is the transparent embed theme.
+Because it has one palette, `--mode` does not apply to it.
 
 ### Legend and logo
 
@@ -144,6 +148,8 @@ Because it has no light/dark pair, `--mode` does not apply to it.
 | `--y-spacing FLOAT`                        | auto                   | Vertical spacing between tracks (auto is derived from the map's content so captioned icons and dense labels do not collide)                                                                                                                                                         |
 | `--section-x-gap FLOAT`                    | 50                     | Horizontal gap between sections                                                                                                                                                                                                                                                     |
 | `--section-y-gap FLOAT`                    | 50                     | Vertical gap between sections                                                                                                                                                                                                                                                       |
+| `--section-x-padding FLOAT`                | 50                     | Space between a section's box and its stations along x                                                                                                                                                                                                                              |
+| `--section-y-padding FLOAT`                | 50                     | Space between a section's box and its stations along y                                                                                                                                                                                                                              |
 | `--track-gap FLOAT`                        | 1                      | Visual gap in pixels (0 to 3) between adjacent line strokes in a bundle, edge to edge rather than center to center. 0 means the lines touch. Values above 3 are rejected                                                                                                            |
 | `--fold-threshold INTEGER`                 | 15                     | Max station-columns a section row may reach before the auto-layout wraps it onto the next row. Raise it to keep a long horizontal trunk on one row                                                                                                                                  |
 | `--diamond-style [straight\|symmetric]`    | `straight`             | Fork-join (diamond) layout: `straight` keeps the top branch on the main track, `symmetric` fans the branches evenly                                                                                                                                                                 |
@@ -152,6 +158,8 @@ Because it has no light/dark pair, `--mode` does not apply to it.
 | `--center-ports / --no-center-ports`       | off                    | Center inter-section ports on the shorter of the two connected sections. Lines then enter and exit at the visual midpoint                                                                                                                                                           |
 | `--compact-offsets / --no-compact-offsets` | off                    | Size each station only for the lines actually passing through it, rather than reserving a slot for every declared line                                                                                                                                                              |
 | `--label-angle FLOAT`                      | theme default (0)      | Angle in degrees for station labels (0 = horizontal). Useful for dense trunks where horizontal labels collide                                                                                                                                                                       |
+| `--label-offset FLOAT`                     | 11                     | Gap between a station marker and its label                                                                                                                                                                                                                                          |
+| `--diagonal-run FLOAT`                     | 30                     | Length of the 45-degree transition between two tracks                                                                                                                                                                                                                               |
 | `--font-scale FLOAT`                       | 1.0                    | Scale every text size and the label-width metrics that drive layout spacing                                                                                                                                                                                                         |
 | `--stroke-scale FLOAT`                     | 1.0                    | Scale track stroke weight and station pill size, widening bundle spacing, marker clearance, and rail pitch to match                                                                                                                                                                 |
 | `--scale FLOAT`                            | `2.0` png, `1.0` video | Raster formats only: multiply the rendered pixel dimensions                                                                                                                                                                                                                         |
@@ -307,7 +315,7 @@ Each job is an object with the required `input` and `output` keys, plus any subs
 | `input`                | Path to the source `.mmd` file (required)                                                                                                                                    |
 | `output`               | Path for the output file (required)                                                                                                                                          |
 | `format`               | `"svg"` (default) or `"html"`                                                                                                                                                |
-| `theme`                | Theme name (`nfcore`, `light`, `seqera`, and the mode-suffixed variants)                                                                                                     |
+| `theme`                | Theme stack, the same values as `render --theme`                                                                                                                             |
 | `mode`                 | `"light"` or `"dark"`. Bakes a concrete palette                                                                                                                              |
 | `debug`                | Show the debug overlay (default `false`)                                                                                                                                     |
 | `logo`                 | Logo image path (overrides `%%metro logo:`)                                                                                                                                  |
@@ -433,16 +441,16 @@ nf-metro serve [OPTIONS] INPUT_FILE [-- LAUNCH_CMD...]
 `%%metro process:` directives in the map tie stations to processes, and only mapped stations change state.
 [Live progress](/nf-metro/live/) covers the event format, the overlay styles, and the endpoints.
 
-| Option                                                                                        | Default       | Description                                                                                            |
-| --------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
-| `--port INTEGER`                                                                              | 8080          | Port to listen on                                                                                      |
-| `--host TEXT`                                                                                 | `127.0.0.1`   | Interface to bind. The default is local only. Use `0.0.0.0` to accept connections from other hosts     |
-| `--theme [dark\|light\|nfcore\|nfcore-dark\|nfcore-light\|seqera\|seqera-dark\|seqera-light]` | from `style:` | Visual theme, the same choices as `render --theme`                                                     |
-| `--overlay [ring\|pulse\|dot\|led]`                                                           | `ring`        | Status-overlay style shown until a viewer picks another in the page                                    |
-| `--token TEXT`                                                                                | none          | If set, `/events` POSTs must supply `?token=...` or an `X-Metro-Token` header                          |
-| `--open`                                                                                      | off           | Open the live page in a browser                                                                        |
-| `--shutdown-after-complete`                                                                   | off           | Stop the server shortly after the run's completed or error event (or after the launched command exits) |
-| `--shutdown-grace FLOAT`                                                                      | 10            | Seconds to keep the map up after the run finishes, with `--shutdown-after-complete`                    |
+| Option                              | Default       | Description                                                                                            |
+| ----------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `--port INTEGER`                    | 8080          | Port to listen on                                                                                      |
+| `--host TEXT`                       | `127.0.0.1`   | Interface to bind. The default is local only. Use `0.0.0.0` to accept connections from other hosts     |
+| `--theme THEMES`                    | from `style:` | Visual theme, the same values as `render --theme`                                                      |
+| `--overlay [ring\|pulse\|dot\|led]` | `ring`        | Status-overlay style shown until a viewer picks another in the page                                    |
+| `--token TEXT`                      | none          | If set, `/events` POSTs must supply `?token=...` or an `X-Metro-Token` header                          |
+| `--open`                            | off           | Open the live page in a browser                                                                        |
+| `--shutdown-after-complete`         | off           | Stop the server shortly after the run's completed or error event (or after the launched command exits) |
+| `--shutdown-grace FLOAT`            | 10            | Seconds to keep the map up after the run finishes, with `--shutdown-after-complete`                    |
 
 With an SVG input the map is served exactly as drawn.
 `--theme` therefore applies only to a `.mmd` input.
@@ -472,13 +480,13 @@ The index at `http://HOST:PORT/` lists every run with a live status.
 nf-metro serve-multi [OPTIONS]
 ```
 
-| Option                                                                                        | Default     | Description                                                                                        |
-| --------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
-| `--port INTEGER`                                                                              | 8080        | Port to listen on                                                                                  |
-| `--host TEXT`                                                                                 | `127.0.0.1` | Interface to bind. The default is local only. Use `0.0.0.0` to accept connections from other hosts |
-| `--theme [dark\|light\|nfcore\|nfcore-dark\|nfcore-light\|seqera\|seqera-dark\|seqera-light]` | `nfcore`    | Visual theme, the same choices as `render --theme`                                                 |
-| `--overlay [ring\|pulse\|dot\|led]`                                                           | `ring`      | Status-overlay style shown until a viewer picks another in the page                                |
-| `--token TEXT`                                                                                | none        | If set, POSTs to `/maps` and `/r/*/events` must supply `?token=...` or an `X-Metro-Token` header   |
+| Option                              | Default     | Description                                                                                        |
+| ----------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `--port INTEGER`                    | 8080        | Port to listen on                                                                                  |
+| `--host TEXT`                       | `127.0.0.1` | Interface to bind. The default is local only. Use `0.0.0.0` to accept connections from other hosts |
+| `--theme THEMES`                    | `default`   | Visual theme, the same values as `render --theme`                                                  |
+| `--overlay [ring\|pulse\|dot\|led]` | `ring`      | Status-overlay style shown until a viewer picks another in the page                                |
+| `--token TEXT`                      | none        | If set, POSTs to `/maps` and `/r/*/events` must supply `?token=...` or an `X-Metro-Token` header   |
 
 The `metro.server` mode of the nf-metro Nextflow plugin does the register-and-emit automatically.
 See [Live progress](/nf-metro/live/#2b-persistent-server-many-runs).
@@ -506,13 +514,6 @@ Validate a rendered SVG's embedded manifest against the [manifest JSON Schema](/
 
 ```bash frame="terminal"
 nf-metro validate-svg [OPTIONS] SVG_FILE
-```
-
-Schema validation needs `jsonschema`, which is not a runtime dependency.
-It ships in the `validate` extra:
-
-```bash frame="terminal"
-pip install "nf-metro[validate]"
 ```
 
 | Option       | Default | Description                                                                                                                                                                                                                                                                            |

@@ -20,13 +20,13 @@ from collections import defaultdict
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
-    DIAGONAL_RUN,
     MIN_STRAIGHT_EDGE,
     OFFSET_STEP,
     RAIL_TERMINUS_FAN_LEAD,
     X_SPACING,
     graph_offset_step,
 )
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.routing.bundle import build_offset_bundle, build_tapered_bundle
 from nf_metro.layout.routing.common import (
     OffsetRegime,
@@ -222,7 +222,7 @@ def _diagonal_placement(
     # The diagonal's horizontal span equals the vertical rail separation (a true
     # 45 degrees), clamped to DIAGONAL_RUN.  A station that both forks and joins
     # has no single convergence point to bias toward, so it centres.
-    diag = min(abs(ty - sy), DIAGONAL_RUN)
+    diag = min(abs(ty - sy), active_metrics().diagonal_run)
     return _compute_diagonal_placement(
         sx,
         tx,

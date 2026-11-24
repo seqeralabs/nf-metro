@@ -83,7 +83,7 @@ from nf_metro.layout.labels import (
     place_labels,
     segment_strikes_label,
 )
-from nf_metro.layout.pass_metrics import font_scale_context
+from nf_metro.layout.pass_metrics import metrics_context
 from nf_metro.layout.phases._common import (
     _is_side_entered_vertical_section,
     _row_contiguous_column_groups,
@@ -4254,9 +4254,9 @@ def test_off_track_output_icon_clears_on_track_markers(fixture):
     (their marker boxes don't overlap).  Assert no on-track same-section marker
     overlaps the icon box in both axes.
     """
-    theme = THEMES["nfcore"]
-    icon_half_w = theme.terminus_width / 2
-    icon_half_h = theme.terminus_height / 2
+    theme = THEMES["default"]
+    icon_half_w = theme.icon_width / 2
+    icon_half_h = theme.icon_height / 2
     r = theme.station_radius
 
     graph = _layout(fixture)
@@ -4373,7 +4373,7 @@ def _label_glyph_strikes(fixture: str) -> list[tuple[str, str]]:
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
     placements = place_labels(
         graph,
@@ -4786,7 +4786,7 @@ def test_downward_off_track_output_route_clears_producer_label(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
     placements = place_labels(
         graph,
@@ -4893,7 +4893,7 @@ def _segments_crossing_icons(
 
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    boxes = _icon_obstacles_by_station(graph, THEMES["default"], offsets)
     hits: list[tuple[str, str, str, str]] = []
     for r in routes:
         pts = apply_route_offsets(r, offsets)
@@ -4960,7 +4960,7 @@ def _exit_corridor_runs_over_icon(
     """
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    box = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)[sink_id]
+    box = _icon_obstacles_by_station(graph, THEMES["default"], offsets)[sink_id]
     icon_x_lo, _, icon_x_hi, icon_bottom = box
     section = graph.sections[graph.stations[sink_id].section_id]
     exit_ports = flow_axis_exit_ports(section, graph)
@@ -5034,7 +5034,7 @@ def test_off_track_output_icons_do_not_overlap(fixture):
     boxes = {
         sid: b
         for sid, b in _icon_obstacles_by_station(
-            graph, THEMES["nfcore"], offsets
+            graph, THEMES["default"], offsets
         ).items()
         if sid in sinks
     }
@@ -5066,7 +5066,7 @@ def test_captioned_sibling_outputs_clear_caption_band():
     boxes = {
         sid: b
         for sid, b in _icon_obstacles_by_station(
-            graph, THEMES["nfcore"], offsets
+            graph, THEMES["default"], offsets
         ).items()
         if sid in sinks
     }
@@ -5096,7 +5096,7 @@ def test_off_track_output_route_clears_non_producer_markers(fixture):
     The producer's trunk gap widens to fit the output, so the only marker an
     output route may touch is its own producer's.
     """
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     r = theme.station_radius
     graph = _layout(fixture)
     junction_ids = set(graph.junctions)
@@ -5182,7 +5182,7 @@ def test_off_track_output_clears_station_labels(fixture):
         pytest.skip(f"{fixture}: no off-track output sinks")
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    icon_boxes = _icon_obstacles_by_station(graph, THEMES["nfcore"], offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, THEMES["default"], offsets)
     labels = place_labels(
         graph,
         station_offsets=offsets,
@@ -6937,7 +6937,7 @@ def test_section_bbox_contains_all_content(fixture, params):
     bbox top so the icon spills outside the section background.
 
     Margin: on-track station markers reach ~9.5 px above the centre,
-    file icons reach ``terminus_height / 2 = 16`` px above the centre
+    file icons reach ``icon_height / 2 = 16`` px above the centre
     (both off-track inputs and on-track terminus stations render the
     same icon at ``station.y + bundle_mid``).  We assert
     ``station.y - reach >= bbox_y - 0.5`` (sub-pixel tolerance) and
@@ -7001,12 +7001,12 @@ def test_lr_section_all_perpendicular_ports_lays_out_in_its_box():
     assert not _bbox_spilled_stations(graph)
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     assert not [w for w in record if "Tier-A invariants" in str(w.message)]
 
     strict_graph = _laid_out()
     strict_graph.strict = True
-    render_svg(strict_graph, THEMES["nfcore"])
+    render_svg(strict_graph, THEMES["default"])
 
 
 def _bbox_spilled_stations(graph: MetroGraph) -> list[str]:
@@ -8076,11 +8076,12 @@ def _snap_to_grid_offenders(
 ) -> list[str]:
     """On-track stations whose Y is off every grid the section legitimately uses.
 
-    The trunk grid is ``trunk_y + k * y_spacing``.  A section fed by a half-grid
-    centred entry fork also carries a spine grid a half slot off the trunk: the
-    fork's branches sit on the trunk grid while its reconvergence fan rides
-    ``spine_y + k * y_spacing``.  A station off both, without a recognised
-    half-grid exception, is reported.
+    The trunk grid is ``trunk_y + k * pitch``, where ``pitch`` is the section's
+    row pitch: ``y_spacing`` unless the row's widest bundle and marker inflated
+    it.  A section fed by a half-grid centred entry fork also carries a spine
+    grid a half slot off the trunk: the fork's branches sit on the trunk grid
+    while its reconvergence fan rides ``spine_y + k * pitch``.  A station off
+    both, without a recognised half-grid exception, is reported.
     """
     from nf_metro.layout.engine import (
         _iter_symmetric_diamonds,
@@ -8088,6 +8089,7 @@ def _snap_to_grid_offenders(
     )
     from nf_metro.layout.phases.fan_bundles import (
         _section_has_symmetric_entry_fork,
+        _section_row_pitch,
     )
 
     half_grid_ids = (
@@ -8114,7 +8116,8 @@ def _snap_to_grid_offenders(
             continue
         anchor_id, anchor_y = anchor
         if anchor_id in half_grid_ids:
-            section_trunk_y[sec.id] = anchor_y + 0.5 * y_spacing
+            pitch = _section_row_pitch(graph, sec.id, y_spacing)
+            section_trunk_y[sec.id] = anchor_y + 0.5 * pitch
             section_spine_y[sec.id] = anchor_y
         else:
             section_trunk_y[sec.id] = anchor_y
@@ -8171,9 +8174,10 @@ def _snap_to_grid_offenders(
         trunk_y = section_trunk_y.get(st.section_id)
         if trunk_y is None:
             continue
-        offset = (st.y - trunk_y) / y_spacing
+        pitch = _section_row_pitch(graph, st.section_id, y_spacing)
+        offset = (st.y - trunk_y) / pitch
         nearest_int = round(offset)
-        on_grid = abs(offset - nearest_int) * y_spacing <= tol
+        on_grid = abs(offset - nearest_int) * pitch <= tol
         if on_grid:
             continue
         spine_y = section_spine_y.get(st.section_id)
@@ -8183,18 +8187,18 @@ def _snap_to_grid_offenders(
             # there, half a slot off the branch grid.
             continue
         # The centred entry fork's reconvergence fan re-fans on the spine grid
-        # (spine_y + k * y_spacing), a half slot off the trunk grid its sibling
+        # (spine_y + k * pitch), a half slot off the trunk grid its sibling
         # entry-fork branches use; those stations are registered half-grid and
         # land exactly on that spine grid.
         on_spine_grid = False
         if spine_y is not None:
-            spine_offset = (st.y - spine_y) / y_spacing
-            on_spine_grid = abs(spine_offset - round(spine_offset)) * y_spacing <= tol
+            spine_offset = (st.y - spine_y) / pitch
+            on_spine_grid = abs(spine_offset - round(spine_offset)) * pitch <= tol
         # Half-grid exception is allowed only for 2-branch fan members
         # whose section legitimately uses the half-grid layout.
         is_half = (
-            abs(offset - (nearest_int - 0.5)) * y_spacing <= tol
-            or abs(offset - (nearest_int + 0.5)) * y_spacing <= tol
+            abs(offset - (nearest_int - 0.5)) * pitch <= tol
+            or abs(offset - (nearest_int + 0.5)) * pitch <= tol
         )
         if (
             is_half
@@ -8209,7 +8213,7 @@ def _snap_to_grid_offenders(
             continue
         offenders.append(
             f"{sid!r} cy={st.y:.2f} trunk_y={trunk_y:.2f} "
-            f"offset/y_spacing={offset:.3f} "
+            f"offset/pitch={offset:.3f} "
             f"section={st.section_id!r} "
             f"in_half_grid_ids={sid in half_grid_ids} "
             f"section_uses_half_grid="
@@ -9192,7 +9196,7 @@ def test_auto_y_spacing_fits_content(example):
 
 def _icon_half_height_default() -> float:
     """Vertical reach (half-height) of a file-input icon.  Mirrors the
-    renderer's default ``terminus_height`` of 32 px.
+    renderer's default ``icon_height`` of 32 px.
     """
     return 16.0
 
@@ -9204,7 +9208,7 @@ def _icon_x_extent(graph: MetroGraph, station, section) -> tuple[float, float]:
     """
     r = 5.0  # station_radius
     icon_gap = 5.0  # ICON_STATION_GAP
-    icon_half_w = 14.0  # terminus_width / 2 = 28 / 2
+    icon_half_w = 14.0  # icon_width / 2 = 28 / 2
     icon_step = icon_gap + r + icon_half_w
     is_source = not any(e.target == station.id for e in graph.edges)
     if section.direction == "RL":
@@ -11075,7 +11079,7 @@ def test_cross_row_top_entry_bundle_corners_are_concentric():
 
     path = _resolve_fixture("topologies/cross_row_gap_wrap.mmd")
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
 
     bundle = []
     for record in observed.plan.routes:
@@ -11234,7 +11238,7 @@ def test_wrapped_label_clears_foreign_trunk(fixture):
     graph = _layout(fixture)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     icon_obstacles = _compute_icon_obstacles(graph, theme, offsets)
     placements = place_labels(
         graph,
@@ -11746,7 +11750,7 @@ def _interior_branch_label_struck(graph: MetroGraph, branch: str) -> bool:
     is exactly those same-line diagonals, and grazing the interior label with
     them is the defect #1259 addresses.
     """
-    with font_scale_context(graph.font_scale):
+    with metrics_context(font_scale=graph.font_scale):
         offsets = compute_station_offsets(
             graph, offset_step=resolve_offset_step(graph.track_gap, 3.0)
         )

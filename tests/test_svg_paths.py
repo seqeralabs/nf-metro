@@ -29,7 +29,7 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import build_render_plan, emit_render_plan
 from nf_metro.render.animate import _motion_path, _Track
 from nf_metro.render.svg import _drawn_pieces, apply_route_offsets, render_svg
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
@@ -88,7 +88,7 @@ def _layout_and_route(mmd_text: str, source_dir: str = "") -> tuple:
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     return graph, routes, offsets, svg
 
 
@@ -449,7 +449,7 @@ class TestCornerCountMatchesCorners:
         """
         graph = parse_metro_mermaid(mmd_text)
         compute_layout(graph)
-        plan = build_render_plan(graph, NFCORE_DARK_THEME)
+        plan = build_render_plan(graph, DEFAULT_DARK_THEME)
         expected_corners = sum(
             max(0, len(points) - 2) for points in plan.route_polylines
         )

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 RIBOSEQ_MMD = r"""%%metro title: nf-core/riboseq
 %%metro center_ports: true
-%%metro style: dark
 %%metro diamond_style: symmetric
 %%metro directional: true
 %%metro file: fastq_in | FASTQ

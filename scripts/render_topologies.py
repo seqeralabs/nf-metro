@@ -97,7 +97,7 @@ def render_file(
     except Exception as e:
         return name, [f"PARSE ERROR: {e}"]
 
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
 
     try:
         # chrome_css=False bakes concrete colors: a rasteriser cannot parse the

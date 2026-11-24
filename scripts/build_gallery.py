@@ -241,7 +241,7 @@ def render_mmd(
         source_dir=str(mmd_path.resolve().parent),
     )
     graph.embed_manifest = False
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     plan = build_render_plan(
         graph,
         theme,

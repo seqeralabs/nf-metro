@@ -14,17 +14,17 @@ from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import ICON_TYPE_FILES, Station
 from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO, ICON_NAME_GAP
 from nf_metro.render.svg import (
-    _label_halo_color,
     _terminus_icon_centers,
     _terminus_icon_centers_for,
     _terminus_icon_flow_sign,
     render_svg,
 )
 from nf_metro.themes import (
-    LIGHT_THEME,
-    NFCORE_DARK_THEME,
+    DEFAULT_DARK_THEME,
     SEQERA_DARK_THEME,
     SEQERA_LIGHT_THEME,
+    TRANSPARENT_THEME,
+    resolve_stack,
 )
 
 
@@ -38,7 +38,7 @@ def _render_simple():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    return render_svg(graph, NFCORE_DARK_THEME)
+    return render_svg(graph, DEFAULT_DARK_THEME)
 
 
 def test_render_produces_valid_svg():
@@ -72,7 +72,7 @@ def test_render_caption_appears_in_svg():
         "    a[Input] -->|main| b[Output]\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "Example attribution text" in svg
 
 
@@ -92,7 +92,7 @@ def test_label_angle_emits_rotate_transform():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "rotate(45" in svg
 
 
@@ -101,9 +101,9 @@ def test_label_angle_default_no_rotate():
     assert "rotate(" not in svg
 
 
-def test_render_nfcore_theme_background():
+def test_render_default_theme_background():
     svg = _render_simple()
-    assert NFCORE_DARK_THEME.background_color in svg
+    assert DEFAULT_DARK_THEME.background_fill in svg
 
 
 def test_render_light_theme():
@@ -114,9 +114,9 @@ def test_render_light_theme():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, LIGHT_THEME)
+    svg = render_svg(graph, TRANSPARENT_THEME)
     # Light theme uses transparent background (no background rectangle)
-    assert LIGHT_THEME.background_color == "none"
+    assert TRANSPARENT_THEME.background_fill == "none"
     assert "#333333" in svg  # label/stroke color present
 
 
@@ -130,7 +130,7 @@ def test_render_seqera_theme():
     compute_layout(graph)
     for theme in (SEQERA_LIGHT_THEME, SEQERA_DARK_THEME):
         svg = render_svg(graph, theme, chrome_css=False)
-        assert f'fill="{theme.background_color}"' in svg
+        assert f'fill="{theme.background_fill}"' in svg
         assert theme.title_color in svg
 
 
@@ -145,7 +145,7 @@ def test_render_dashed_line_has_dasharray():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert 'stroke-dasharray="8,4"' in svg or "stroke-dasharray='8,4'" in svg
 
 
@@ -160,7 +160,7 @@ def test_render_dotted_line_has_dasharray():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert 'stroke-dasharray="2,4"' in svg or "stroke-dasharray='2,4'" in svg
 
 
@@ -175,13 +175,13 @@ def test_render_solid_line_no_dasharray():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "stroke-dasharray" not in svg
 
 
 def test_render_empty_graph():
     graph = parse_metro_mermaid("graph LR\n")
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "svg" in svg
 
 
@@ -202,7 +202,7 @@ def test_legend_min_height_enlarges_legend():
         "    a -->|main| b\n"
     )
     graph_default = parse_metro_mermaid(base_text)
-    _, h_default = compute_legend_dimensions(graph_default, NFCORE_DARK_THEME)
+    _, h_default = compute_legend_dimensions(graph_default, DEFAULT_DARK_THEME)
 
     min_h_text = (
         "%%metro legend_min_height: 120\n"
@@ -212,7 +212,7 @@ def test_legend_min_height_enlarges_legend():
         "    a -->|main| b\n"
     )
     graph_min = parse_metro_mermaid(min_h_text)
-    _, h_min = compute_legend_dimensions(graph_min, NFCORE_DARK_THEME)
+    _, h_min = compute_legend_dimensions(graph_min, DEFAULT_DARK_THEME)
 
     assert h_min > h_default
     # content_height should be at least the minimum
@@ -234,10 +234,10 @@ def test_logo_scale_enlarges_bundled_logo():
     logo = (320.0, 120.0)  # original (w, h) aspect carrier
 
     g1 = parse_metro_mermaid(base)
-    w1, h1 = compute_legend_dimensions(g1, NFCORE_DARK_THEME, logo_size=logo)
+    w1, h1 = compute_legend_dimensions(g1, DEFAULT_DARK_THEME, logo_size=logo)
 
     g2 = parse_metro_mermaid("%%metro logo_scale: 2.0\n" + base)
-    w2, h2 = compute_legend_dimensions(g2, NFCORE_DARK_THEME, logo_size=logo)
+    w2, h2 = compute_legend_dimensions(g2, DEFAULT_DARK_THEME, logo_size=logo)
 
     # A larger logo widens the block and, once it exceeds the text block,
     # grows the legend height to contain it.
@@ -257,7 +257,7 @@ def test_logo_scale_default_no_change():
     g = parse_metro_mermaid(base)
     assert g.logo_scale == 1.0
     # Should not raise and should produce a positive-size legend.
-    w, h = compute_legend_dimensions(g, NFCORE_DARK_THEME, logo_size=logo)
+    w, h = compute_legend_dimensions(g, DEFAULT_DARK_THEME, logo_size=logo)
     assert w > 0 and h > 0
 
 
@@ -272,11 +272,11 @@ def test_legend_logo_gap_widens_block():
     logo = (320.0, 120.0)
 
     g1 = parse_metro_mermaid(base)
-    w1, _ = compute_legend_dimensions(g1, NFCORE_DARK_THEME, logo_size=logo)
+    w1, _ = compute_legend_dimensions(g1, DEFAULT_DARK_THEME, logo_size=logo)
 
     gap = LOGO_GAP + 30.0
     g2 = parse_metro_mermaid(f"%%metro legend_logo_gap: {gap}\n" + base)
-    w2, _ = compute_legend_dimensions(g2, NFCORE_DARK_THEME, logo_size=logo)
+    w2, _ = compute_legend_dimensions(g2, DEFAULT_DARK_THEME, logo_size=logo)
 
     assert w2 == pytest.approx(w1 + 30.0)
 
@@ -311,16 +311,16 @@ def test_font_scale_multiplies_all_text_sizes():
     """`font_scale: N` renders every text class at N times the default size."""
     scale = 2.0
     g1 = _load_font_scale_fixture()
-    svg1 = render_svg(g1, NFCORE_DARK_THEME)
+    svg1 = render_svg(g1, DEFAULT_DARK_THEME)
     g2 = _load_font_scale_fixture(scale)
-    svg2 = render_svg(g2, NFCORE_DARK_THEME)
+    svg2 = render_svg(g2, DEFAULT_DARK_THEME)
 
     for size in (
-        NFCORE_DARK_THEME.label_font_size,
-        NFCORE_DARK_THEME.title_font_size,
-        NFCORE_DARK_THEME.section_label_font_size,
-        NFCORE_DARK_THEME.legend_font_size,
-        NFCORE_DARK_THEME.terminus_font_size,
+        DEFAULT_DARK_THEME.label_font_size,
+        DEFAULT_DARK_THEME.title_font_size,
+        DEFAULT_DARK_THEME.section_label_font_size,
+        DEFAULT_DARK_THEME.legend_font_size,
+        DEFAULT_DARK_THEME.icon_font_size,
     ):
         assert size in _font_sizes(svg1)
         assert size * scale in _font_sizes(svg2)
@@ -334,7 +334,7 @@ def test_font_scale_widens_label_driven_layout():
     reserves a wider label.
     """
     from nf_metro.layout.labels import label_text_width
-    from nf_metro.layout.pass_metrics import font_scale_context
+    from nf_metro.layout.pass_metrics import metrics_context
 
     scale = 2.0
     g1 = _load_font_scale_fixture()
@@ -345,9 +345,9 @@ def test_font_scale_widens_label_driven_layout():
     assert sec2.bbox_w > sec1.bbox_w
 
     label = "Load Samples"
-    with font_scale_context(1.0):
+    with metrics_context(font_scale=1.0):
         base_w = label_text_width(label)
-    with font_scale_context(scale):
+    with metrics_context(font_scale=scale):
         scaled_w = label_text_width(label)
     assert scaled_w == base_w * scale
 
@@ -402,7 +402,7 @@ def test_font_scale_stacked_terminus_icons_do_not_overlap():
     stacked ``files:`` back page peeking up past its front page -- so a pitch
     derived from the unscaled icon lets an enlarged pair collide.
     """
-    from nf_metro.layout.pass_metrics import font_scale_context
+    from nf_metro.layout.pass_metrics import metrics_context
     from nf_metro.layout.phases.single_section import terminus_cross_extents
 
     graph = parse_metro_mermaid(_STACKED_INPUTS_MMD)
@@ -410,7 +410,7 @@ def test_font_scale_stacked_terminus_icons_do_not_overlap():
     upper, lower = sorted(
         (graph.stations["a_in"], graph.stations["b_in"]), key=lambda s: s.y
     )
-    with font_scale_context(graph.font_scale):
+    with metrics_context(font_scale=graph.font_scale):
         _, upper_below = terminus_cross_extents(upper)
         lower_above, _ = terminus_cross_extents(lower)
     gap = lower.y - upper.y
@@ -428,14 +428,14 @@ def test_font_scale_rails_source_icon_fits_section_bbox():
     icons march *leftward* out of the first column needs that padding topped up
     to the icons' drawn reach -- which grows with ``font_scale``.
     """
-    from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
+    from nf_metro.layout.pass_metrics import metrics_context
     from nf_metro.layout.phases.single_section import terminus_icon_flow_reach
 
     graph = parse_metro_mermaid(_RAILS_SOURCE_ICON_MMD)
     compute_layout(graph, validate=True)
     st = graph.stations["src"]
     section = graph.sections[st.section_id]
-    with font_scale_context(graph.font_scale), stroke_scale_context(graph.stroke_scale):
+    with metrics_context(font_scale=graph.font_scale, stroke_scale=graph.stroke_scale):
         reach = terminus_icon_flow_reach(st)
     available = st.x - section.bbox_x
     assert available >= reach, (
@@ -461,9 +461,9 @@ def test_font_scale_default_is_noop():
     """Without `font_scale`, the graph and render match the unscaled default."""
     g = _load_font_scale_fixture()
     assert g.font_scale == 1.0
-    svg_default = render_svg(g, NFCORE_DARK_THEME)
+    svg_default = render_svg(g, DEFAULT_DARK_THEME)
     g_explicit = _load_font_scale_fixture(1.0)
-    svg_explicit = render_svg(g_explicit, NFCORE_DARK_THEME)
+    svg_explicit = render_svg(g_explicit, DEFAULT_DARK_THEME)
     assert svg_default == svg_explicit
 
 
@@ -482,7 +482,7 @@ def test_render_file_size():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     # Should be well under 50KB for a small graph
     assert len(svg) < 50000
 
@@ -507,7 +507,7 @@ def test_render_first_class_sections():
         "    b -->|main| c\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "Processing" in svg
     assert "Output" in svg
     assert "Input" in svg
@@ -531,7 +531,7 @@ def test_render_sections_no_port_labels():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     # Port IDs should not appear in the SVG text
     for port_id in graph.ports:
         assert port_id not in svg, f"Port {port_id} should not appear in SVG"
@@ -548,7 +548,7 @@ def test_render_multiline_labels():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     # Both lines should appear in the SVG as separate tspan elements
     assert "Line One" in svg
     assert "Line Two" in svg
@@ -570,7 +570,7 @@ def test_render_rnaseq_sections_example():
     graph = parse_metro_mermaid(text)
     graph.source_dir = str(examples)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "Pre-processing" in svg
     assert "nf-core/rnaseq" in svg
     root = ET.fromstring(svg)
@@ -593,7 +593,7 @@ def test_render_single_file_icon():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "FASTQ" in svg
     root = ET.fromstring(svg)
     assert root.tag.endswith("svg") or "svg" in root.tag
@@ -612,7 +612,7 @@ def test_render_multiple_file_icons():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "FASTQ" in svg
     assert "BAM" in svg
     root = ET.fromstring(svg)
@@ -632,7 +632,7 @@ def test_render_file_icon_with_name_caption():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     # Caption name and inner type label should both appear
     assert "Samples" in svg
     assert "CSV" in svg
@@ -652,7 +652,7 @@ def test_render_icon_caption_with_linebreak():
     )
     compute_layout(graph)
 
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     root = ET.fromstring(svg)
     tspan_values = [
         element.text for element in root.iter() if element.tag.endswith("tspan")
@@ -699,14 +699,16 @@ def test_multiline_icon_caption_fits_render_obstacle(direction):
     centers = _terminus_icon_centers_for(
         station,
         graph,
-        NFCORE_DARK_THEME,
+        DEFAULT_DARK_THEME,
         min(line_offsets, default=0.0),
         max(line_offsets, default=0.0),
     )
-    obstacle = _icon_obstacles_by_station(graph, NFCORE_DARK_THEME, offsets)[station.id]
-    caption_height = 2 * NFCORE_DARK_THEME.label_font_size * ICON_NAME_FONT_SCALE
+    obstacle = _icon_obstacles_by_station(graph, DEFAULT_DARK_THEME, offsets)[
+        station.id
+    ]
+    caption_height = 2 * DEFAULT_DARK_THEME.label_font_size * ICON_NAME_FONT_SCALE
     caption_reach = (
-        NFCORE_DARK_THEME.terminus_height / 2
+        DEFAULT_DARK_THEME.icon_height / 2
         + ICON_NAME_GAP
         + caption_height
         + ICON_CLEARANCE_MARGIN
@@ -742,14 +744,11 @@ def test_vertical_icon_stack_reserves_multiline_caption(direction):
     )
     compute_layout(graph)
     centers = _terminus_icon_centers_for(
-        graph.stations["source"], graph, NFCORE_DARK_THEME, 0.0, 0.0
+        graph.stations["source"], graph, DEFAULT_DARK_THEME, 0.0, 0.0
     )
-    caption_height = 2 * NFCORE_DARK_THEME.label_font_size * ICON_NAME_FONT_SCALE
+    caption_height = 2 * DEFAULT_DARK_THEME.label_font_size * ICON_NAME_FONT_SCALE
     expected_step = (
-        NFCORE_DARK_THEME.terminus_height
-        + ICON_INTER_GAP
-        + ICON_NAME_GAP
-        + caption_height
+        DEFAULT_DARK_THEME.icon_height + ICON_INTER_GAP + ICON_NAME_GAP + caption_height
     )
 
     assert abs(centers[1][1] - centers[0][1]) == pytest.approx(expected_step)
@@ -762,7 +761,7 @@ def test_render_file_icon_with_outgoing_edge():
     )
     graph = parse_metro_mermaid(fixture.read_text())
     compute_layout(graph)
-    root = ET.fromstring(render_svg(graph, NFCORE_DARK_THEME))
+    root = ET.fromstring(render_svg(graph, DEFAULT_DARK_THEME))
     ns = {"svg": "http://www.w3.org/2000/svg"}
     visible_text = [
         "".join(element.itertext()) for element in root.findall(".//svg:text", ns)
@@ -792,8 +791,8 @@ def test_caption_font_smaller_than_label_font():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
-    label_size = NFCORE_DARK_THEME.label_font_size
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
+    label_size = DEFAULT_DARK_THEME.label_font_size
     # The caption text must reference a font-size strictly smaller than
     # the theme label_font_size (60% of it, per ICON_NAME_FONT_SCALE).
     import re
@@ -819,7 +818,7 @@ def test_render_file_icon_no_name_no_caption():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     # The station has no label and there's no caption directive, so the only
     # text inside the terminus block should be the type chip.
     assert "FASTQ" in svg
@@ -836,7 +835,7 @@ def test_wide_file_icon_label_wraps_within_icon_width():
     fixture = Path(__file__).parent / "fixtures" / "icon_caption_wrap.mmd"
     graph = parse_metro_mermaid(fixture.read_text())
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
 
     pieces = re.findall(r'font-size="([0-9.]+)"[^>]*>([^<]*BAM[^<]*|CRAM)</text>', svg)
     assert pieces, "wrapped BAM/CRAM label pieces not found in SVG"
@@ -844,7 +843,7 @@ def test_wide_file_icon_label_wraps_within_icon_width():
         "label must wrap rather than render as a single over-wide line"
     )
 
-    max_width = NFCORE_DARK_THEME.terminus_width - 2 * ICON_LABEL_CLEARANCE
+    max_width = DEFAULT_DARK_THEME.icon_width - 2 * ICON_LABEL_CLEARANCE
     tolerance = 1.0
     for font_size, text in pieces:
         line_width = DEFAULT_TEXT_METRICS.reserve_width(
@@ -876,7 +875,7 @@ def test_render_multi_icon_fixture():
     text = (examples / "05b_multi_icons.mmd").read_text()
     graph = parse_metro_mermaid(text)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     # All icon labels should be present
     assert "FASTQ" in svg
     assert "BAM" in svg
@@ -900,7 +899,7 @@ def test_render_files_icon():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "FASTQ" in svg
     root = ET.fromstring(svg)
     assert root.tag.endswith("svg") or "svg" in root.tag
@@ -919,7 +918,7 @@ def test_render_folder_icon():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "Results" in svg
     root = ET.fromstring(svg)
     assert root.tag.endswith("svg") or "svg" in root.tag
@@ -944,7 +943,7 @@ def test_render_mixed_icon_types():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "FASTA" in svg
     assert "FASTQ" in svg
     assert "Results" in svg
@@ -969,7 +968,7 @@ def test_file_icon_banner_option():
     # The caption (third field) is still parsed alongside the banner option.
     assert station.terminus_names == ["Alignments"]
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     from nf_metro.render.constants import ICON_BANNER_FILL
 
     assert ICON_BANNER_FILL in svg
@@ -1006,7 +1005,7 @@ def test_render_icon_type_guide_fixtures():
         text = fpath.read_text()
         graph = parse_metro_mermaid(text)
         compute_layout(graph)
-        svg = render_svg(graph, NFCORE_DARK_THEME)
+        svg = render_svg(graph, DEFAULT_DARK_THEME)
         root = ET.fromstring(svg)
         assert root.tag.endswith("svg") or "svg" in root.tag
 
@@ -1103,9 +1102,9 @@ def test_stacked_files_icon_back_page_does_not_crowd_marker(direction, role):
     is_source = role == "source"
 
     front_cx, front_cy = _terminus_icon_centers_for(
-        station, graph, NFCORE_DARK_THEME, 0.0, 0.0
+        station, graph, DEFAULT_DARK_THEME, 0.0, 0.0
     )[0]
-    off = NFCORE_DARK_THEME.terminus_width * FILES_ICON_OFFSET_RATIO
+    off = DEFAULT_DARK_THEME.icon_width * FILES_ICON_OFFSET_RATIO
     flow_sign = _terminus_icon_flow_sign(direction, is_source)
     is_vertical_flow = lanes_run_along_x(direction)
 
@@ -1180,7 +1179,7 @@ def test_render_tb_section_file_icon_below_station():
     assert abs(icon_cx - station.x) < 1e-6
     assert icon_cy > station.y
     # And the render still succeeds and carries the icon label.
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     assert "HTML" in svg
     root = ET.fromstring(svg)
     assert root.tag.endswith("svg") or "svg" in root.tag
@@ -1203,7 +1202,7 @@ def test_render_tb_terminus_pill_is_horizontal():
         "    end\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     # The terminus nub <rect> carries data-station-id="out"; in a TB section
     # it must be wider than tall (lines arrive vertically into it).
     m = re.search(r'<rect\b[^>]*data-station-id="out"[^>]*/?>', svg)
@@ -1230,7 +1229,7 @@ def test_render_group_label_caption_and_underline():
 
     base_graph = parse_metro_mermaid(base_src)
     compute_layout(base_graph)
-    base_svg = render_svg(base_graph, NFCORE_DARK_THEME)
+    base_svg = render_svg(base_graph, DEFAULT_DARK_THEME)
 
     grouped_graph = parse_metro_mermaid(grouped_src)
     compute_layout(grouped_graph)
@@ -1239,7 +1238,7 @@ def test_render_group_label_caption_and_underline():
         sid: (st.x, st.y) for sid, st in base_graph.stations.items()
     }
 
-    grouped_svg = render_svg(grouped_graph, NFCORE_DARK_THEME)
+    grouped_svg = render_svg(grouped_graph, DEFAULT_DARK_THEME)
     assert "Family" in grouped_svg
     assert "nf-metro-group-label" in grouped_svg
     assert "nf-metro-group-underline" in grouped_svg
@@ -1280,7 +1279,7 @@ def test_render_group_band_stays_inside_section_box():
     )
     graph = parse_metro_mermaid(src)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
 
     section_bottom = _section_box_bottoms(svg)["s"]
 
@@ -1345,34 +1344,23 @@ def test_standalone_nodes_render_as_unlinked_labels():
         assert sec.bbox_x <= st.x <= sec.bbox_x + sec.bbox_w
         assert sec.bbox_y <= st.y <= sec.bbox_y + sec.bbox_h
 
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     for t in standalone:
         assert t in svg
 
 
-def test_label_halo_color_resolves_to_opaque_background():
-    color = _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_color=""))
-    assert color == NFCORE_DARK_THEME.background_color
+def test_knockout_fill_takes_the_opaque_background():
+    assert DEFAULT_DARK_THEME.knockout_fill == DEFAULT_DARK_THEME.background_fill
 
 
-def test_label_halo_color_resolves_to_white_on_transparent_theme():
-    color = _label_halo_color(replace(LIGHT_THEME, label_halo_color=""))
-    assert color == "#ffffff"
+def test_knockout_fill_is_white_on_a_transparent_canvas():
+    assert TRANSPARENT_THEME.knockout_fill == "#ffffff"
 
 
-def test_label_halo_color_honours_explicit_colour():
-    color = _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_color="#123456"))
-    assert color == "#123456"
-
-
-def test_label_halo_disabled_by_zero_width():
-    assert _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_width=0.0)) is None
-
-
-def test_label_halo_disabled_by_none_colour():
-    assert (
-        _label_halo_color(replace(NFCORE_DARK_THEME, label_halo_color="none")) is None
-    )
+def test_knockout_fill_honours_an_explicit_colour(tmp_path):
+    theme_file = tmp_path / "k.yaml"
+    theme_file.write_text('name: k\nknockout_fill: "#123456"\n')
+    assert resolve_stack(str(theme_file)).dark.knockout_fill == "#123456"
 
 
 def test_label_halo_emits_aria_hidden_backing_copy():
@@ -1384,7 +1372,7 @@ def test_label_halo_emits_aria_hidden_backing_copy():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
 
     root = ET.fromstring(svg)
     ns = "{http://www.w3.org/2000/svg}"
@@ -1398,9 +1386,9 @@ def test_label_halo_emits_aria_hidden_backing_copy():
 
     # The halo is a stroked knockout: it must paint the resolved halo colour on
     # both fill and stroke at the theme width, and sit under the visible glyph.
-    resolved = _label_halo_color(NFCORE_DARK_THEME)
+    resolved = DEFAULT_DARK_THEME.knockout_fill
     assert halo[0].get("stroke") == halo[0].get("fill") == resolved
-    assert float(halo[0].get("stroke-width")) == NFCORE_DARK_THEME.label_halo_width
+    assert float(halo[0].get("stroke-width")) == DEFAULT_DARK_THEME.label_halo_width
     assert texts.index(halo[0]) < texts.index(fill[0]), (
         "halo must precede the visible label in document order so it draws under it"
     )
@@ -1415,7 +1403,7 @@ def test_label_halo_suppressed_when_disabled():
         "    a -->|main| b\n"
     )
     compute_layout(graph)
-    svg = render_svg(graph, replace(NFCORE_DARK_THEME, label_halo_width=0.0))
+    svg = render_svg(graph, replace(DEFAULT_DARK_THEME, label_halo_width=0.0))
 
     root = ET.fromstring(svg)
     ns = "{http://www.w3.org/2000/svg}"
@@ -1442,14 +1430,14 @@ def _graph_for_responsive():
 
 
 def test_responsive_render_omits_fixed_dimensions():
-    svg = render_svg(_graph_for_responsive(), NFCORE_DARK_THEME, responsive=True)
+    svg = render_svg(_graph_for_responsive(), DEFAULT_DARK_THEME, responsive=True)
     root = ET.fromstring(svg)
     assert root.get("width") is None, "responsive SVG must not carry a fixed width"
     assert root.get("height") is None, "responsive SVG must not carry a fixed height"
 
 
 def test_responsive_render_has_viewbox_and_aspect_ratio():
-    svg = render_svg(_graph_for_responsive(), NFCORE_DARK_THEME, responsive=True)
+    svg = render_svg(_graph_for_responsive(), DEFAULT_DARK_THEME, responsive=True)
     root = ET.fromstring(svg)
     assert root.get("viewBox") is not None, "responsive SVG must have a viewBox"
     assert root.get("preserveAspectRatio") == "xMinYMin meet", (
@@ -1458,7 +1446,7 @@ def test_responsive_render_has_viewbox_and_aspect_ratio():
 
 
 def test_default_render_retains_fixed_dimensions():
-    svg = render_svg(_graph_for_responsive(), NFCORE_DARK_THEME)
+    svg = render_svg(_graph_for_responsive(), DEFAULT_DARK_THEME)
     root = ET.fromstring(svg)
     assert root.get("width") is not None, "default SVG must carry a fixed width"
     assert root.get("height") is not None, "default SVG must carry a fixed height"
@@ -1591,7 +1579,7 @@ def _rendered_caption_case(case):
     _, _, source = _CAPTION_MARKER_CASES[case]
     graph = parse_metro_mermaid(source)
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     return graph, svg
 
 
@@ -1620,11 +1608,11 @@ def test_terminus_caption_sits_outboard_of_its_icon(case):
     """
     caption, station_id, _ = _CAPTION_MARKER_CASES[case]
     graph, svg = _rendered_caption_case(case)
-    theme = NFCORE_DARK_THEME
+    theme = DEFAULT_DARK_THEME
 
     station = graph.stations[station_id]
     icon_cx, icon_cy = _terminus_icon_centers_for(station, graph, theme, 0.0, 0.0)[0]
-    icon_half_h = theme.terminus_height / 2
+    icon_half_h = theme.icon_height / 2
     caption_box, _ = _caption_and_marker_boxes(svg, caption, station_id)
     assert caption_box is not None, f"{case}: caption {caption!r} not rendered"
 
@@ -1645,14 +1633,14 @@ def test_terminus_caption_sits_outboard_of_its_icon(case):
 def test_terminus_caption_gap_equals_icon_name_gap(case):
     """The caption clears the *drawn* icon edge by exactly ``ICON_NAME_GAP``.
 
-    A stacked-files icon's back sheet peeks ``terminus_width *
+    A stacked-files icon's back sheet peeks ``icon_width *
     FILES_ICON_OFFSET_RATIO`` past the nominal edge toward the caption on a
     vertical flow, so the reserved gap must be measured from that drawn edge,
     not the nominal box. Ignoring it collapsed the real gap to ~0 (#1972).
     """
     caption, station_id, _ = _CAPTION_MARKER_CASES[case]
     graph, svg = _rendered_caption_case(case)
-    theme = NFCORE_DARK_THEME
+    theme = DEFAULT_DARK_THEME
 
     station = graph.stations[station_id]
     _, icon_cy = _terminus_icon_centers_for(station, graph, theme, 0.0, 0.0)[0]
@@ -1663,8 +1651,8 @@ def test_terminus_caption_gap_equals_icon_name_gap(case):
     )
     stacked = ICON_TYPE_FILES in (station.terminus_icon_types or [])
     back_dy = flow_sign if is_vertical_flow else -1.0
-    off = theme.terminus_width * FILES_ICON_OFFSET_RATIO if stacked else 0.0
-    half_h = theme.terminus_height / 2
+    off = theme.icon_width * FILES_ICON_OFFSET_RATIO if stacked else 0.0
+    half_h = theme.icon_height / 2
 
     caption_box, _ = _caption_and_marker_boxes(svg, caption, station_id)
     assert caption_box is not None, f"{case}: caption {caption!r} not rendered"

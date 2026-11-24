@@ -178,7 +178,7 @@ def test_seed_72_png_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     # bytes a user actually gets.
     svg = render_svg(
         graph,
-        resolve_theme(None, graph),
+        resolve_theme(graph),
         chrome_css=False,
         font_portability="embed",
     )

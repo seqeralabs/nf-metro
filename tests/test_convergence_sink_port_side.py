@@ -97,7 +97,7 @@ def test_genomeassembly_gates_lowered_fold_as_authoring_error(fold: int) -> None
         layout_options={"fold_threshold": fold},
     )
     with pytest.raises(FoldThresholdError) as exc:
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     assert "fold" in str(exc.value).lower()
 
 

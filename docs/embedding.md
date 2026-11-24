@@ -129,7 +129,7 @@ Because they carry meaning, they stay baked in as presentation attributes.
 
 The fallback behind each property is a `light-dark()` pair rather than a single color.
 The map therefore already adapts to the viewer's `color-scheme` before any host override.
-See [Theming](/nf-metro/theming/) for how that mechanism works and how to reuse it in your own SVGs.
+See [Light and dark mode](/nf-metro/light-dark/) for how that mechanism works and how to reuse it in your own SVGs.
 
 ### Multiple maps on one page - `--svg-class-prefix`
 
@@ -158,7 +158,7 @@ nf-metro render pipeline.mmd -o pipeline.svg --no-self-color-scheme
 Your page then has to set `color-scheme` somewhere the map can inherit it.
 Use a class or `data-theme` attribute toggled by your theme switch, each setting `color-scheme: light` or `color-scheme: dark` on an ancestor.
 Set a single value, not `light dark`.
-See [Theming](/nf-metro/theming/) for why this flag exists and how the docs site itself uses it.
+See [Light and dark mode](/nf-metro/light-dark/) for why this flag exists and how the docs site itself uses it.
 
 ### Dark-mode opt-out - `--no-dark-mode-css`
 
@@ -171,7 +171,7 @@ nf-metro render pipeline.mmd -o pipeline.svg --no-dark-mode-css
 
 This block is a separate, coarser fallback from the `--nfm-*` custom properties described earlier.
 It exists because a transparent background has no color of its own to carry a `light-dark()` pair.
-See [Theming](/nf-metro/theming/) for why the two mechanisms differ.
+See [Light and dark mode](/nf-metro/light-dark/) for why the two mechanisms differ.
 
 ### Raster export (PNG)
 
@@ -297,7 +297,7 @@ The page and its snippet follow the map's mode.
 With `--mode` or `%%metro mode:` set, both use that palette everywhere.
 With no mode, both declare `color-scheme: light dark` and follow the viewer's light/dark preference, as a standalone SVG does.
 That suits a snippet pasted into a page with no opinion on theme.
-On a host with its own theme picker, pass `--no-self-color-scheme`: the snippet then leaves `color-scheme` to the host and follows its picker, like the inline SVGs in [Theming](/nf-metro/theming/#where-color-scheme-should-live).
+On a host with its own theme picker, pass `--no-self-color-scheme`: the snippet then leaves `color-scheme` to the host and follows its picker, like the inline SVGs in [Light and dark mode](/nf-metro/light-dark/#where-color-scheme-should-live).
 The page itself always declares its own, since it is a whole document.
 In an iframe with no mode, Chrome and Firefox show the page in the host's `color-scheme`, while Safari uses the viewer's own preference.
 Set `--mode` for an iframe whose look must be the same everywhere.

@@ -11,7 +11,6 @@ from typing import NamedTuple
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    DEFAULT_LINE_WIDTH,
     MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     TB_PILL_EDGE_OFFSET,
@@ -28,6 +27,7 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.labels import label_beside_pill, label_glyph_ink_bbox
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.routing.bundle import (
     build_tapered_bundle,
 )
@@ -854,7 +854,7 @@ def _passed_station_footprints(
     graph = ctx.graph
     frame = _section_lane_frame(graph, section, ctx.positive_fan)
     lo, hi = sorted((src.y, tgt.y))
-    half_stroke = DEFAULT_LINE_WIDTH / 2
+    half_stroke = active_metrics().line_width / 2
     boxes: list[_Box] = []
     for sid in section.station_ids:
         st = graph.stations[sid]

@@ -36,7 +36,7 @@ SegmentsByLine = dict[str, list[tuple[Point, Point]]]
 def _render(path: Path) -> tuple[MetroGraph, RenderPlan, str]:
     """Build a plan and SVG for one example map."""
     graph = parse_and_layout(path.read_text(), source_dir=str(path.parent))
-    theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
+    theme = THEMES[graph.style if graph.style in THEMES else "default"]
     plan = build_render_plan(graph, theme)
     return graph, plan, emit_render_plan(plan)
 

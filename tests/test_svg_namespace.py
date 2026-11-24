@@ -5,7 +5,7 @@ import re
 from nf_metro.layout.engine import compute_layout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes import LIGHT_THEME, NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME, TRANSPARENT_THEME
 
 _MMD = (
     "%%metro title: Test\n"
@@ -33,27 +33,29 @@ def _make_graph():
 
 
 def test_dark_mode_css_present_for_transparent_theme_by_default():
-    """LIGHT_THEME (background_color=none) injects the dark-mode block by default."""
-    svg = render_svg(_make_graph(), LIGHT_THEME)
+    """The transparent theme (no background) injects the dark-mode block by default."""
+    svg = render_svg(_make_graph(), TRANSPARENT_THEME)
     assert "prefers-color-scheme" in svg
 
 
 def test_dark_mode_css_absent_for_opaque_theme():
-    """NFCORE_DARK_THEME (opaque background) does not inject the dark-mode block."""
-    svg = render_svg(_make_graph(), NFCORE_DARK_THEME)
+    """DEFAULT_DARK_THEME (opaque background) does not inject the dark-mode block."""
+    svg = render_svg(_make_graph(), DEFAULT_DARK_THEME)
     assert "prefers-color-scheme" not in svg
 
 
 def test_inject_dark_mode_css_false_suppresses_block():
     """inject_dark_mode_css=False suppresses the media query regardless of theme."""
-    svg = render_svg(_make_graph(), LIGHT_THEME, inject_dark_mode_css=False)
+    svg = render_svg(_make_graph(), TRANSPARENT_THEME, inject_dark_mode_css=False)
     assert "prefers-color-scheme" not in svg
 
 
 def test_inject_dark_mode_css_true_matches_default():
     """inject_dark_mode_css=True is equivalent to the default for transparent themes."""
-    svg_default = render_svg(_make_graph(), LIGHT_THEME)
-    svg_explicit = render_svg(_make_graph(), LIGHT_THEME, inject_dark_mode_css=True)
+    svg_default = render_svg(_make_graph(), TRANSPARENT_THEME)
+    svg_explicit = render_svg(
+        _make_graph(), TRANSPARENT_THEME, inject_dark_mode_css=True
+    )
     assert svg_default == svg_explicit
 
 
@@ -85,7 +87,7 @@ def _extract_classes(svg: str) -> set[str]:
 
 def test_default_render_uses_unprefixed_classes():
     """Without a prefix the class names must be the documented bare names."""
-    svg = render_svg(_make_graph(), LIGHT_THEME)
+    svg = render_svg(_make_graph(), TRANSPARENT_THEME)
     classes = _extract_classes(svg)
     # At minimum title, section-box, section-label, station, station-label present
     assert "nf-metro-title" in classes
@@ -98,7 +100,7 @@ def test_default_render_uses_unprefixed_classes():
 def test_svg_class_prefix_applied_to_all_classes():
     """svg_class_prefix='abc' prepends abc- to every SVG presentation class."""
     prefix = "abc"
-    svg = render_svg(_make_graph(), LIGHT_THEME, svg_class_prefix=prefix)
+    svg = render_svg(_make_graph(), TRANSPARENT_THEME, svg_class_prefix=prefix)
     classes = _extract_classes(svg)
 
     # Unprefixed presentation classes must not appear
@@ -115,7 +117,7 @@ def test_svg_class_prefix_applied_to_all_classes():
 def test_svg_class_prefix_applied_to_metro_line_class():
     """metro-line-<id> is also prefixed."""
     prefix = "mymap"
-    svg = render_svg(_make_graph(), LIGHT_THEME, svg_class_prefix=prefix)
+    svg = render_svg(_make_graph(), TRANSPARENT_THEME, svg_class_prefix=prefix)
     assert "mymap-metro-line-main" in svg
     # Unprefixed form absent
     assert 'class="metro-line-main"' not in svg
@@ -124,7 +126,7 @@ def test_svg_class_prefix_applied_to_metro_line_class():
 def test_svg_class_prefix_applied_to_dark_mode_css_selectors():
     """Dark-mode CSS selectors are also prefixed so the block scopes correctly."""
     prefix = "ns1"
-    svg = render_svg(_make_graph(), LIGHT_THEME, svg_class_prefix=prefix)
+    svg = render_svg(_make_graph(), TRANSPARENT_THEME, svg_class_prefix=prefix)
     assert "prefers-color-scheme" in svg
     # Selectors in the <style> block must use the prefix
     assert ".ns1-nf-metro-section-label" in svg
@@ -140,8 +142,8 @@ def test_svg_class_prefix_applied_to_dark_mode_css_selectors():
 def test_two_renders_with_different_prefixes_dont_share_presentation_classes():
     """Demonstrates the embedding isolation property."""
     g = _make_graph()
-    svg1 = render_svg(g, LIGHT_THEME, svg_class_prefix="map1")
-    svg2 = render_svg(g, LIGHT_THEME, svg_class_prefix="map2")
+    svg1 = render_svg(g, TRANSPARENT_THEME, svg_class_prefix="map1")
+    svg2 = render_svg(g, TRANSPARENT_THEME, svg_class_prefix="map2")
 
     classes1 = {c for c in _extract_classes(svg1) if c.startswith("map")}
     classes2 = {c for c in _extract_classes(svg2) if c.startswith("map")}
@@ -154,8 +156,8 @@ def test_two_renders_with_different_prefixes_dont_share_presentation_classes():
 def test_empty_prefix_is_identical_to_no_prefix():
     """Passing svg_class_prefix='' is the same as omitting it."""
     g = _make_graph()
-    svg_default = render_svg(g, LIGHT_THEME)
-    svg_empty = render_svg(g, LIGHT_THEME, svg_class_prefix="")
+    svg_default = render_svg(g, TRANSPARENT_THEME)
+    svg_empty = render_svg(g, TRANSPARENT_THEME, svg_class_prefix="")
     assert svg_default == svg_empty
 
 
@@ -163,7 +165,7 @@ def test_manifest_ids_and_data_attrs_not_prefixed():
     """data-node-*, data-station-id, data-schema-version are not class names
     and must not be modified by the prefix."""
     prefix = "scoped"
-    svg = render_svg(_make_graph(), LIGHT_THEME, svg_class_prefix=prefix)
+    svg = render_svg(_make_graph(), TRANSPARENT_THEME, svg_class_prefix=prefix)
     assert "data-station-id" in svg
     assert "scoped-data-station-id" not in svg
     assert "data-section-id" in svg

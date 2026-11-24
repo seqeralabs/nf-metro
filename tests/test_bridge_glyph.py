@@ -43,7 +43,7 @@ from nf_metro.render.svg import (
     apply_route_offsets,
     render_svg,
 )
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
@@ -424,7 +424,7 @@ graph LR
         polylines,
         radii,
         ((BridgeBreak(1, (100.0, 30.0), (100.0, 40.0)),),),
-        NFCORE_DARK_THEME,
+        DEFAULT_DARK_THEME,
         CURVE_RADIUS,
     )
 
@@ -499,7 +499,7 @@ def test_rendered_under_line_has_pen_up():
     move (pen-up) - on ``main`` it is continuous."""
     graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     broken = [d for d in _edge_path_ds(svg) if d.count("M") > 1]
     assert broken, "expected at least one broken (bridged) under-line path"
 
@@ -509,7 +509,7 @@ def test_theme_toggle_disables_bridges():
 
     graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
     compute_layout(graph)
-    theme_off = dataclasses.replace(NFCORE_DARK_THEME, bridge_glyph=False)
+    theme_off = dataclasses.replace(DEFAULT_DARK_THEME, bridge_lines=False)
     svg = render_svg(graph, theme_off)
     assert not any(d.count("M") > 1 for d in _edge_path_ds(svg))
 
@@ -522,11 +522,11 @@ def test_animation_paths_flow_over_gaps():
 
     graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
     compute_layout(graph)
-    on = _motion_paths(render_svg(graph, NFCORE_DARK_THEME, animate=True))
+    on = _motion_paths(render_svg(graph, DEFAULT_DARK_THEME, animate=True))
     off = _motion_paths(
         render_svg(
             graph,
-            dataclasses.replace(NFCORE_DARK_THEME, bridge_glyph=False),
+            dataclasses.replace(DEFAULT_DARK_THEME, bridge_lines=False),
             animate=True,
         )
     )

@@ -60,7 +60,7 @@ def _layout(path: Path, *, softened: bool = False):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         result = render_graph_result(
-            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+            graph, resolve_theme(graph, mode=None), RenderConfig()
         )
     return graph, list(zip(result.plan.routes, result.plan.route_polylines))
 

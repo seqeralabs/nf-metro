@@ -37,7 +37,7 @@ def _tier_a_warnings(source: str) -> list[str]:
     compute_layout(graph)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        render_svg(graph, THEMES["nfcore"])
+        render_svg(graph, THEMES["default"])
     return [str(w.message) for w in caught if "Tier-A invariants" in str(w.message)]
 
 

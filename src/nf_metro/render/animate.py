@@ -30,7 +30,6 @@ from nf_metro.layout.routing.corners import (
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.animation_waves import LineWaves, Route, plan_line_waves
 from nf_metro.render.constants import (
-    ANIMATION_BALL_OPACITY,
     ANIMATION_CURVE_RADIUS,
     EDGE_CONNECT_TOLERANCE,
     MIN_ANIMATION_DURATION,
@@ -240,7 +239,9 @@ def render_animation(
         if hidden_from is None:
             kf_name = _travel_keyframes(travel, keyframes)
         else:
-            kf_name = _visibility_keyframes(travel, hidden_from, keyframes)
+            kf_name = _visibility_keyframes(
+                travel, hidden_from, keyframes, theme.animation_ball_opacity
+            )
         delay = _seconds(dot.depart - timeline.loop)
         motion = (
             f"offset-path: path('{dot.track.d_attr}'); offset-rotate: 0deg; "
@@ -266,8 +267,8 @@ def _ball_prefix(theme: Theme) -> str:
         )
     return (
         f'<circle r="{theme.animation_ball_radius}" '
-        f'fill="{theme.animation_ball_color}" '
-        f'opacity="{ANIMATION_BALL_OPACITY}"{stroke_attr} '
+        f'fill="{theme.animation_ball_fill}" '
+        f'opacity="{theme.animation_ball_opacity}"{stroke_attr} '
     )
 
 
@@ -565,7 +566,7 @@ def _travel_keyframes(move_frac: float, registry: dict[str, str]) -> str:
 
 
 def _visibility_keyframes(
-    travel: float, hidden_from: float, registry: dict[str, str]
+    travel: float, hidden_from: float, registry: dict[str, str], opacity: float
 ) -> str:
     """Return the @keyframes name for a dot that travels for *travel* of the
     loop, holds at the terminus, and is hidden from *hidden_from* on.
@@ -576,9 +577,9 @@ def _visibility_keyframes(
     """
     name = ns("nfm-dot-" + f"{travel:.4f}-{hidden_from:.4f}".replace(".", "_"))
     if name not in registry:
-        shown = f"offset-distance:100%;opacity:{ANIMATION_BALL_OPACITY}"
+        shown = f"offset-distance:100%;opacity:{opacity}"
         last_shown = round(hidden_from - _PERCENT_STEP, _PERCENT_DECIMALS)
-        stops = [f"0%{{offset-distance:0%;opacity:{ANIMATION_BALL_OPACITY}}}"]
+        stops = [f"0%{{offset-distance:0%;opacity:{opacity}}}"]
         if travel < last_shown:
             stops.append(f"{travel * 100:.2f}%{{{shown}}}")
         stops.append(f"{last_shown * 100:.2f}%{{{shown}}}")

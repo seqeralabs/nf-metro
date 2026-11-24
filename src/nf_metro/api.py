@@ -46,7 +46,8 @@ from nf_metro.text_metrics import (
     metrics_face_context,
     metrics_face_for_portability,
 )
-from nf_metro.themes import resolve_theme
+from nf_metro.themes import ResolvedTheme, bound_stack, resolve_theme
+from nf_metro.themes.stack import THEMEABLE_LAYOUT_OPTIONS
 
 
 @dataclass
@@ -109,6 +110,16 @@ def apply_layout_overrides(graph: MetroGraph, opts: Mapping[str, object]) -> Non
             setattr(graph, opt.target_attr, value)
             if opt.name == "line_order" and is_line_order(value):
                 graph.layout_provenance.record_caller_line_order(value)
+
+
+def apply_theme_layout(graph: MetroGraph, resolved: ResolvedTheme) -> None:
+    """Write the theme's layout options the map's directives left unset.
+
+    Explicit caller options are applied afterwards and win over both.
+    """
+    for name, value in resolved.layout.items():
+        if name not in graph.directive_options:
+            setattr(graph, THEMEABLE_LAYOUT_OPTIONS[name].target_attr, value)
 
 
 @dataclass(frozen=True)
@@ -288,6 +299,7 @@ def _prepare_graph_state(
     bare: bool = False,
     output_format: Literal["svg", "html"] = "svg",
     layout_commitments: LayoutCommitmentOverlay | None = None,
+    theme: str | None = None,
 ) -> MetroGraph:
     """Run the production preparation cascade up to the layout boundary.
 
@@ -319,10 +331,12 @@ def _prepare_graph_state(
             "recognised"
         )
 
+    if source_dir:
+        graph.source_dir = source_dir
+    apply_theme_layout(graph, bound_stack(graph, theme))
     apply_layout_overrides(graph, opts)
 
     if source_dir:
-        graph.source_dir = source_dir
         for attr in MetroGraph.LOGO_PATH_FIELDS:
             raw: str = getattr(graph, attr)
             if not raw:
@@ -379,6 +393,7 @@ def prepare_graph(
     bare: bool = False,
     output_format: Literal["svg", "html"] = "svg",
     metrics_face: MetricsFace = MetricsFace.FALLBACK,
+    theme: str | None = None,
 ) -> MetroGraph:
     """Parse *text*, apply option overrides, and compute the layout in place.
 
@@ -398,6 +413,11 @@ def prepare_graph(
     title and standalone logo the render will draw. HTML output always draws
     that band regardless of ``bare``, and its embedded SVG forces the legend
     off, so a configured logo is always standalone there.
+
+    ``theme`` is the render's theme stack when the caller picks one (the CLI's
+    ``--theme``); without it the map's ``%%metro style:`` applies. Layout
+    options the stack sets fill those the map's directives leave unset, and
+    ``layout_options`` override both.
 
     Returns the settled graph.
 
@@ -454,6 +474,7 @@ def prepare_graph(
         source_dir=source_dir,
         bare=bare,
         output_format=output_format,
+        theme=theme,
     )
 
     with metrics_face_context(metrics_face):
@@ -598,8 +619,9 @@ def render_string(
         bare=effective_cfg.bare,
         output_format=effective_cfg.output_format,
         metrics_face=effective_cfg.metrics_face,
+        theme=theme,
     )
     if config is None and flat.baked_mode is None:
         flat.baked_mode = graph.mode.strip() or None
-    theme_obj = resolve_theme(theme, graph, mode=mode)
+    theme_obj = resolve_theme(graph, mode=mode)
     return render_graph(graph, theme_obj, effective_cfg)

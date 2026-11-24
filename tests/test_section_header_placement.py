@@ -72,7 +72,7 @@ def _polylines_and_font(path: Path):
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
     polylines = [apply_route_offsets(route, offsets) for route in routes]
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     return graph, polylines, theme.section_label_font_size, theme.title_font_size
 
 

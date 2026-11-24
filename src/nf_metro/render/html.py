@@ -9,6 +9,7 @@ from importlib.resources import files
 from string import Template
 from typing import Literal
 
+from nf_metro.options import MODES
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.driver import get_driver_js
 from nf_metro.render.font_embed import apply_font_portability
@@ -89,7 +90,7 @@ def emit_render_plan_html(
     ``--no-self-color-scheme`` does for a bare SVG.
     """
     mode = (baked_mode or "").strip().lower()
-    baked = mode if mode in ("light", "dark") else None
+    baked = mode if mode in MODES else None
     color_scheme = baked or "light dark"
     svg = emit_render_plan(
         plan,

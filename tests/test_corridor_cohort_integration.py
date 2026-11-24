@@ -60,7 +60,7 @@ RESERVED_STAGES = {
 def _render(relative_path: str):
     path = ROOT / relative_path
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    return graph, svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    return graph, svg.build_observed_render_plan(graph, resolve_theme(graph))
 
 
 @pytest.mark.parametrize(

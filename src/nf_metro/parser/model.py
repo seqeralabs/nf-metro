@@ -13,12 +13,14 @@ from nf_metro.parser.provenance import LayoutProvenance
 
 if TYPE_CHECKING:
     from nf_metro.layout.fan_plans import FanPlanExecution, FanPlanQuery
+    from nf_metro.layout.pass_metrics import LayoutMetrics
     from nf_metro.layout.route_plan import FanPlan
     from nf_metro.parser.route_topology import (
         RouteResolutionTrace,
         RouteTopology,
         RouteTopologyQuery,
     )
+    from nf_metro.themes.stack import ResolvedTheme
 
 
 class RowGridInfo(TypedDict):
@@ -516,7 +518,7 @@ class MetroGraph:
 
     title: str = ""
     caption: str = ""
-    style: str = "dark"
+    style: str = "default"
     # Display mode (``light`` / ``dark``), orthogonal to the brand in ``style``.
     # Empty means unset: the brand's own default mode applies.
     mode: str = ""
@@ -546,6 +548,19 @@ class MetroGraph:
     layout_provenance: LayoutProvenance = field(
         default_factory=LayoutProvenance, repr=False
     )
+    # Registry options a ``%%metro`` directive set, so a theme's layout options
+    # fill only the ones the map left unset.
+    directive_options: set[str] = field(default_factory=set, repr=False)
+    # The resolved theme stack layout and render use (the caller's
+    # ``--theme``, else the map's style), once bound.
+    resolved_theme: ResolvedTheme | None = field(
+        default=None, repr=False, compare=False
+    )
+    # The metrics compute_layout reserved against. Later measurements of the
+    # laid-out geometry bind these, whatever theme the graph is drawn in.
+    layout_metrics: LayoutMetrics | None = field(
+        default=None, repr=False, compare=False
+    )
     # Multi-section grid cells: a ``%%metro grid:`` directive may name several
     # comma-separated sections that share one cell.  Keyed by (col, row); each
     # value is the listed-order member ids, which pack side-by-side along the
@@ -561,6 +576,12 @@ class MetroGraph:
     y_spacing: float | None = None
     section_x_gap: float | None = None
     section_y_gap: float | None = None
+    section_x_padding: float | None = None
+    section_y_padding: float | None = None
+    # None = the engine's default; layout passes read these through
+    # nf_metro.layout.pass_metrics.
+    label_offset: float | None = None
+    diagonal_run: float | None = None
     # Perpendicular offset step between parallel lines in bundles (px).
     # None = use the built-in default (4 px). Set to 0 to collapse all
     # lines to a single shared track with no lateral separation.

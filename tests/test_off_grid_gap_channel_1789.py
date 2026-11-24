@@ -144,7 +144,7 @@ def test_the_riboseq_map_settles_clear_of_the_canvas_margin() -> None:
     graph = prepare_graph(RIBOSEQ_MMD)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        build_render_plan(graph, resolve_theme(None, graph))
+        build_render_plan(graph, resolve_theme(graph))
     downgraded = [
         item for item in caught if issubclass(item.category, PermissiveGuardWarning)
     ]

@@ -39,7 +39,7 @@ REPO = Path(__file__).parent.parent
 EXAMPLES_DIR = REPO / "examples"
 TOPOLOGIES_DIR = EXAMPLES_DIR / "topologies"
 FIXTURES = Path(__file__).parent / "fixtures" / "animation"
-THEME = THEMES["nfcore"]
+THEME = THEMES["default"]
 REPRO3 = FIXTURES / "fork_rejoin_vs_branch_3.mmd"
 
 REJOIN_FIXTURES = [
@@ -467,7 +467,7 @@ for path in sys.argv[1:]:
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
     drawing = draw.Drawing(100, 100)
-    render_animation(drawing, graph, routes, offsets, THEMES["nfcore"])
+    render_animation(drawing, graph, routes, offsets, THEMES["default"])
     digest.update(drawing.as_svg().encode())
 print(digest.hexdigest())
 """

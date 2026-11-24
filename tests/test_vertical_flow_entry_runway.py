@@ -118,7 +118,7 @@ MAPS = {
 
 
 def _drawn(graph: MetroGraph) -> dict[tuple[str, str, str], list[Point]]:
-    plan = build_render_plan(graph, resolve_theme(None, graph))
+    plan = build_render_plan(graph, resolve_theme(graph))
     return {
         (r.edge.source, r.edge.target, r.line_id): apply_route_offsets(
             r, plan.station_offsets
@@ -130,7 +130,7 @@ def _drawn(graph: MetroGraph) -> dict[tuple[str, str, str], list[Point]]:
 def _drawn_and_labels(
     graph: MetroGraph,
 ) -> tuple[dict[tuple[str, str, str], list[Point]], dict[str, LabelPlacement]]:
-    plan = build_render_plan(graph, resolve_theme(None, graph))
+    plan = build_render_plan(graph, resolve_theme(graph))
     drawn = {
         (r.edge.source, r.edge.target, r.line_id): [tuple(p) for p in points]
         for r, points in zip(plan.routes, plan.route_polylines)

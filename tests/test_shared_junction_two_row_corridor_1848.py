@@ -66,7 +66,7 @@ def test_shared_junction_fan_keeps_distinct_descent_lanes(fixture):
 
     # The bug aborts here on the unfixed tree; reaching the assertions at all is
     # already the regression the fix repairs.
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
 
     legs = _descent_legs(observed)
     by_source: dict[str, list[tuple[str, str, tuple[float, float, float]]]] = {}

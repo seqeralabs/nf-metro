@@ -10,7 +10,6 @@ from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     CURVE_RADIUS,
-    DIAGONAL_RUN,
     MIN_BUNDLE_EDGE_CLEARANCE,
     MIN_INTER_SECTION_GAP,
     MIN_STATION_FLAT_LENGTH,
@@ -26,7 +25,7 @@ from nf_metro.layout.geometry import (
     shift_section,
 )
 from nf_metro.layout.labels import label_text_width
-from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
+from nf_metro.layout.pass_metrics import active_metrics, graph_layout_context
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _column_contiguous_row_groups,
@@ -375,7 +374,7 @@ def _loop_corner_x(
         src_min = max(src_min, label_text_width(a.label) / 2)
     if b.id in join_stations and b.label.strip():
         tgt_min = max(tgt_min, label_text_width(b.label) / 2)
-    half_diag = DIAGONAL_RUN / 2
+    half_diag = active_metrics().diagonal_run / 2
     is_fork = a.id in fork_stations
     is_join = b.id in join_stations
     if is_fork:
@@ -583,13 +582,10 @@ def _predict_section_content_bottom(
         from nf_metro.layout.routing import compute_station_offsets
 
         offsets = compute_station_offsets(graph)
-    # The label-reach and marker-footprint metrics scale with the graph's font
-    # and stroke; bind both from the graph so the prediction is reproducible
-    # whether or not a layout-wide scale context is active at the call site.
-    with (
-        font_scale_context(graph.font_scale),
-        stroke_scale_context(graph.stroke_scale),
-    ):
+    # The label-reach and marker-footprint metrics follow the graph's theme and
+    # scales; bind them from the graph so the prediction is reproducible whether
+    # or not a layout-wide context is active at the call site.
+    with graph_layout_context(graph):
         content_bots = [
             graph.stations[sid].y
             + max(
@@ -602,7 +598,8 @@ def _predict_section_content_bottom(
                     ),
                     sid in fan_ids,
                 ),
-                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
+                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1]
+                + (section_y_padding if is_horizontal else 0.0),
                 angled_label_reach(
                     graph.stations[sid],
                     0.0 if sid in rail_above_ids else label_angle,
@@ -839,8 +836,10 @@ def _section_content_hug_top(
             ),
             # A vertical-flow terminus's file icon reaches above its marker
             # (a top-entering source), so the box must clear the icon, not
-            # just a padding band above the marker.
-            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[0],
+            # just a padding band above the marker.  A horizontal-flow
+            # terminus owes the padding plus any larger-than-default icon.
+            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[0]
+            + (section_y_padding if is_horizontal else 0.0),
         )
 
     content_min_ys = [_content_min_y(sid) for sid in content_ids]

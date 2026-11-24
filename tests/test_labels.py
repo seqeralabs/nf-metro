@@ -324,7 +324,7 @@ graph LR
 
 def _drawn_label_texts(graph: MetroGraph) -> dict[str, str]:
     """Station id -> the name-label text the renderer will draw, wraps included."""
-    plan = build_render_plan(graph, THEMES["nfcore"])
+    plan = build_render_plan(graph, THEMES["default"])
     return {p.station_id: p.text for p in plan.labels if p.station_id}
 
 
@@ -445,7 +445,7 @@ def _reflowed_labels_beside_a_free_side(graph: MetroGraph) -> list[str]:
     """
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
-    obstacles = _compute_icon_obstacles(graph, resolve_theme(None, graph), offsets)
+    obstacles = _compute_icon_obstacles(graph, resolve_theme(graph), offsets)
     placements = place_labels(
         graph,
         station_offsets=offsets,
@@ -524,7 +524,7 @@ class TestReflowedBesidePillLabelsKeepTheirPill:
         self, fixture: str, x_spacing: float | None
     ) -> None:
         graph = _laid_out(fixture, x_spacing)
-        plan = build_render_plan(graph, THEMES["nfcore"])
+        plan = build_render_plan(graph, THEMES["default"])
         markers = _station_marker_boxes(graph, plan.station_offsets)
         checked: list[str] = []
         for placement in plan.labels:

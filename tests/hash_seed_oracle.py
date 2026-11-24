@@ -166,7 +166,7 @@ def observe_path(path: Path) -> Observation:
 
         graph_digest = _digest(_freeze_settled_graph(graph))
         try:
-            plan = build_render_plan(graph, resolve_theme(None, graph))
+            plan = build_render_plan(graph, resolve_theme(graph))
         except Exception as exc:  # noqa: BLE001 - the outcome is oracle data
             return _observation(
                 exception=_exception(exc, "plan"),

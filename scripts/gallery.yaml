@@ -18,6 +18,15 @@ gallery:
       how explicit directives can fine-tune placement.
 
   # ── Feature Showcase ───────────────────────────────────────────────────────
+  - id: rnaseq_london_tube
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "The rnaseq map under the built-in `london-tube` theme (`%%metro style: london-tube`):
+      track-weight tabs for stations on one line, a buffer-stop bar at every line end, bold capsules at
+      interchanges (or the standard's rings, with `interchange_glyph: ring`), bundled lines edge to
+      edge, unboxed sections and a humanist sans, after the geometry of TfL's Line Diagram Standard. Themes stack left to right (`%%metro style: seqera, london-tube`) and
+      can be [user-defined YAML files](/nf-metro/themes/#writing-your-own-theme)."
   - id: directional_flow
     source_dir: examples
     category: Feature Showcase

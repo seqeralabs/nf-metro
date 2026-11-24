@@ -23,7 +23,7 @@ from nf_metro.layout.labels import (
     LabelPlacement,
     segment_strikes_label,
 )
-from nf_metro.layout.pass_metrics import font_scale_context
+from nf_metro.layout.pass_metrics import metrics_context
 from nf_metro.layout.routing.corners import corner_from_arc
 from nf_metro.manifest import read_manifest
 from nf_metro.render.path_geometry import flatten_commands, iter_path_commands
@@ -287,7 +287,7 @@ def check_label_strikes(
             continue
         carried = set(node.get("groups", ()))
         scale = font_size / LABEL_FONT_SIZE
-        with font_scale_context(scale):
+        with metrics_context(font_scale=scale):
             for line_id, subpaths in routes:
                 if line_id in carried:
                     continue

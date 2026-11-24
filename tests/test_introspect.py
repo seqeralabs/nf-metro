@@ -53,7 +53,12 @@ def test_info_has_all_top_level_keys(fixture: str) -> None:
 
 @pytest.mark.parametrize(
     "style, expected",
-    [("", "nfcore"), ("dark", "nfcore"), ("seqera", "seqera"), ("nonesuch", "nfcore")],
+    [
+        ("", "default"),
+        ("dark", "default"),
+        ("seqera", "seqera"),
+        ("nonesuch", "default"),
+    ],
 )
 def test_style_reports_the_resolved_theme(style: str, expected: str) -> None:
     """The reported style is a name ``--theme`` accepts, whatever was authored."""

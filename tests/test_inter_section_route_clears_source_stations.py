@@ -52,7 +52,7 @@ def test_route_does_not_run_over_its_source_stations(path: Path) -> None:
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         plan = render_graph_result(
-            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+            graph, resolve_theme(graph, mode=None), RenderConfig()
         ).plan
     overruns = []
     for route, points in zip(plan.routes, plan.route_polylines, strict=True):

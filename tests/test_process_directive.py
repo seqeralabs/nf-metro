@@ -178,7 +178,7 @@ def test_process_directive_does_not_change_visual_render():
         mapped = parse_metro_mermaid("%%metro process: trim | TRIMGALORE\n" + BASE)
     compute_layout(plain)
     compute_layout(mapped)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     plain_svg = render_svg(plain, theme)
     mapped_svg = render_svg(mapped, theme)
 

@@ -21,7 +21,7 @@ from nf_metro.layout.phases.guards import (
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render.svg import render_svg
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -50,7 +50,7 @@ def _render_width(text: str, source_dir: str = "") -> int:
     graph = parse_metro_mermaid(text)
     graph.source_dir = source_dir
     compute_layout(graph)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     match = re.search(r'width="(\d+)"', svg)
     assert match is not None
     return int(match.group(1))
