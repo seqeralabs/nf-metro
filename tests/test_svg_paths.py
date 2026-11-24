@@ -21,7 +21,6 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import RoutedPath
 from nf_metro.layout.routing.corners import (
-    corner_arc_controls,
     curve_tangents,
     resolve_curve_radii,
 )
@@ -218,12 +217,12 @@ class TestCurveRadiiLength:
 
 
 # ---------------------------------------------------------------------------
-# 2. SVG path command structure: M then (L Q)* then L
+# 2. SVG path command structure: M then (L C)* then L
 # ---------------------------------------------------------------------------
 
 
 class TestSvgPathStructure:
-    """Every edge path must start with M and end with L, with Q at each corner."""
+    """Every edge path must start with M and end with L, with C at each corner."""
 
     def _check_svg(self, svg_str: str):
         paths = _parse_svg_edge_paths(svg_str)
@@ -438,15 +437,15 @@ class TestConcentricBundles:
 
 
 # ---------------------------------------------------------------------------
-# 6. Q corner count matches route corner count
+# 6. Rounded corner count matches route corner count
 # ---------------------------------------------------------------------------
 
 
-class TestQCountMatchesCorners:
-    """Number of Q commands in SVG path should equal number of corners in route."""
+class TestCornerCountMatchesCorners:
+    """Number of C commands in SVG path should equal number of corners in route."""
 
     def _check(self, mmd_text):
-        """Verify Q count in SVG matches the corners the renderer was handed.
+        """Verify C count in SVG matches the corners the renderer was handed.
 
         The count comes from the plan's drawable polylines rather than the
         routed ones: a source turnout is a corner shared with the incoming
@@ -747,20 +746,41 @@ def _corner_arcs(d: str) -> list[tuple[tuple, ...]]:
     return arcs
 
 
+def _circle_handles(before, corner, after):
+    """Handles of the cubic circle approximation, from the textbook form:
+    each sits ``4/3 * tan(phi / 4)`` radii along its tangent."""
+    arm = math.dist(before, corner)
+    u = ((corner[0] - before[0]) / arm, (corner[1] - before[1]) / arm)
+    out = math.dist(corner, after)
+    v = ((after[0] - corner[0]) / out, (after[1] - corner[1]) / out)
+    phi = math.acos(max(-1.0, min(1.0, u[0] * v[0] + u[1] * v[1])))
+    handle = (
+        4 / 3 * math.tan(phi / 4) * arm / math.tan(phi / 2)
+        if phi > 1e-9
+        else 2 / 3 * arm
+    )
+    return (
+        (before[0] + u[0] * handle, before[1] + u[1] * handle),
+        (after[0] - v[0] * handle, after[1] - v[1] * handle),
+    )
+
+
 def _expected_corner_arcs(tangents) -> list[tuple[tuple, ...]]:
-    """Curved tangents' arcs rounded to the 2dp that a path 'd' string emits."""
+    """The circular arc of every rounded corner with non-zero arms."""
     return [
-        tuple(
-            (round(x, 2), round(y, 2))
-            for x, y in (
-                t.before,
-                *corner_arc_controls(t.before, t.corner, t.after),
-                t.after,
-            )
-        )
+        (t.before, *_circle_handles(t.before, t.corner, t.after), t.after)
         for t in tangents
-        if t.curved
+        if t.curved and t.before != t.after
     ]
+
+
+def _same_arcs(drawn, expected) -> bool:
+    """Whether *drawn* (as a path ``d`` writes them, to 2dp) are *expected*."""
+    return len(drawn) == len(expected) and all(
+        math.dist(p, q) <= 0.01
+        for d_arc, e_arc in zip(drawn, expected)
+        for p, q in zip(d_arc, e_arc)
+    )
 
 
 def _svg_corners(pts, radii):
@@ -812,7 +832,7 @@ class TestSharedCornerTangents:
         resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
         shared = curve_tangents(pts, resolved)
         d = _points_to_svg_path(pts, curve_radius=CURVE_RADIUS)
-        assert _corner_arcs(d) == _expected_corner_arcs(shared)
+        assert _same_arcs(_corner_arcs(d), _expected_corner_arcs(shared))
 
     @pytest.mark.parametrize(
         "fixture",
@@ -834,7 +854,7 @@ class TestSharedCornerTangents:
             d = _points_to_svg_path(
                 pts, curve_radius=CURVE_RADIUS, route_curve_radii=route.curve_radii
             )
-            assert _corner_arcs(d) == _expected_corner_arcs(shared)
+            assert _same_arcs(_corner_arcs(d), _expected_corner_arcs(shared))
             checked += 1
         if checked == 0:
             pytest.skip(f"no multi-corner routes in {fixture.stem}")
