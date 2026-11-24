@@ -655,7 +655,13 @@ def _section_lane_frame(
     frame = AxisFrame.for_direction(
         section.direction, graph.x_spacing or 1.0, graph.y_spacing or 1.0
     )
-    fan = positive_fan if positive_fan is not None else tb_positive_fan_sections(graph)
+    if positive_fan is not None:
+        fan: set[str] = positive_fan
+    elif frame.secondary.name == "x":
+        fan = tb_positive_fan_sections(graph)
+    else:
+        # Only a vertical-flow section can be in the set.
+        fan = set()
     lane_sign = section_lane_sign(section, fan)
     if lane_sign != frame.secondary_sign:
         frame = replace(frame, secondary_sign=lane_sign)

@@ -5384,14 +5384,14 @@ def check_no_hanging_routes(
         else None
     )
     from nf_metro.layout.routing.offsets import drawn_lane_span
-    from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 
-    positive_fan = tb_positive_fan_sections(graph)
-    anchor_by_station = {
-        sid: drawn_lane_span(graph, st, offsets, positive_fan)
-        for sid, st in graph.stations.items()
-    }
-    anchors = list(anchor_by_station.values())
+    rail_anchors = [
+        drawn_lane_span(graph, st, offsets)
+        for st in graph.stations.values()
+        if graph.station_is_rail(st.id)
+    ]
+    own_spans: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
+    other_anchors: list[tuple[tuple[float, float], tuple[float, float]]] | None = None
     rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
     polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
 
@@ -5403,14 +5403,24 @@ def check_no_hanging_routes(
         for which, end, node in ends:
             if graph.station_is_rail(node):
                 continue
-            own = anchor_by_station.get(node)
-            if (
-                own is not None
-                and point_to_polyline_distance(end, own) <= _hanging_route_tol()
-            ):
-                continue
+            own = graph.stations.get(node)
+            if own is not None:
+                own_span = own_spans.get(node)
+                if own_span is None:
+                    own_span = own_spans[node] = drawn_lane_span(graph, own, offsets)
+                if point_to_polyline_distance(end, own_span) <= _hanging_route_tol():
+                    continue
+            if other_anchors is None:
+                other_anchors = [
+                    drawn_lane_span(graph, st, offsets)
+                    for st in graph.stations.values()
+                    if not graph.station_is_rail(st.id)
+                ]
             d_marker = min(
-                (point_to_polyline_distance(end, anchor) for anchor in anchors),
+                (
+                    point_to_polyline_distance(end, anchor)
+                    for anchor in (*rail_anchors, *other_anchors)
+                ),
                 default=float("inf"),
             )
             if d_marker <= _hanging_route_tol():
