@@ -17,6 +17,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import route_edges_centred
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import svg as S
+from nf_metro.render.constants import CANVAS_PADDING
 from nf_metro.render.section_header import resolve_all_section_headers
 from nf_metro.themes import NFCORE_DARK_THEME
 
@@ -54,9 +55,7 @@ def _place(text: str, source_dir: Path):
     offsets = S.compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
     polylines = [S.apply_route_offsets(route, offsets) for route in routes]
-    content_origin = S._content_origin(
-        graph, polylines, False, padding=S.CANVAS_PADDING
-    )
+    content_origin = S._content_origin(graph, polylines, False, padding=CANVAS_PADDING)
     max_x, max_y = S._compute_canvas_bounds(graph, routes, False)
     pos = graph.legend_position
     resolved_logo = S.resolve_logo_file(graph.logo_path, graph.source_dir)
@@ -69,7 +68,7 @@ def _place(text: str, source_dir: Path):
         NFCORE_DARK_THEME,
         max_x,
         max_y,
-        S.CANVAS_PADDING,
+        CANVAS_PADDING,
         logo_in_legend,
         logo_w,
         logo_h,
@@ -166,14 +165,14 @@ def test_default_bottom_legend_clears_a_wrapped_header():
         theme,
         max_x,
         max_y,
-        S.CANVAS_PADDING,
+        CANVAS_PADDING,
         False,
         0.0,
         0.0,
         graph.legend_position,
         routes,
         header_placements,
-        S._content_origin(graph, polylines, False, padding=S.CANVAS_PADDING),
+        S._content_origin(graph, polylines, False, padding=CANVAS_PADDING),
     )
     assert show
     assert not S._legend_overlaps_headers(lx, ly, lw, lh, header_placements)
