@@ -74,6 +74,10 @@ history.
   when it carries on into a section beside it. Where no row lies beyond every
   branch it passes, it takes the nearest row clear of those stations
   ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
+- An off-track input no longer lands on a station in its own column. It steps
+  further out until it clears that station, as it already did for the lines
+  running into later stations
+  ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
 - A source that feeds a station adding a second line stays on that station's
   row when other sources share its column. The other sources sit one row to
   either side and the added line's branch one row off, whichever source is

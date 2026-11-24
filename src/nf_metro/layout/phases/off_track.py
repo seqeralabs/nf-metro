@@ -1907,9 +1907,10 @@ def _bump_off_track_clear_of_trunks(
     (:func:`section_cross_axis`).  A trunk station downstream of the icon in
     flow carries a band of line tracks spread across the cross axis; when that
     band overlaps the icon's cross extent, the run into that trunk crosses the
-    icon.  Bump away from the anchor (``direction`` = the signed cross-step
-    that offsets the icon toward *candidate*) by ``step`` increments until it
-    clears.
+    icon.  A station in the icon's own column contests its slot by its marker
+    and the lanes through it, whatever runs feed it.  Bump away from the anchor
+    (``direction`` = the signed cross-step that offsets the icon toward
+    *candidate*) by ``step`` increments until it clears.
 
     ``consider_ports`` also treats the section's own entry/exit ports as
     contesting bands: a sibling branch's run into a shared port can cross an
@@ -1961,10 +1962,12 @@ def _bump_off_track_clear_of_trunks(
             continue
         if st2.off_track or st2.is_terminus:
             continue
-        if flow_sign * (getattr(st2, flow_axis) - off_flow) <= SAME_COORD_TOLERANCE:
-            continue
-        if not _feeding_run_spans_flow_coord(
-            graph, st2, off_flow, flow_axis, in_section
+        along = flow_sign * (getattr(st2, flow_axis) - off_flow)
+        if abs(along) > SAME_COORD_TOLERANCE and (
+            along < 0
+            or not _feeding_run_spans_flow_coord(
+                graph, st2, off_flow, flow_axis, in_section
+            )
         ):
             continue
         # The line-track band spread across the cross axis at this trunk
