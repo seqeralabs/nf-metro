@@ -31,6 +31,7 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     station_lane_coord,
 )
+from nf_metro.layout.ordering import line_reach
 from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
@@ -1292,11 +1293,13 @@ def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
     pin landing outermost.  A non-compact section, whose lines each hold one
     lane order, first moves its pinned lines to that end of the order, the
     other lines keeping theirs, so a station without a pinned line holds its
-    lanes unbroken.  A pin holds in every flat-frame member carrying the line,
-    so the line keeps its side of the bundle across the frame's boundaries; a
-    line pinned toward opposite ends stays where it is.  A pin does not hold
-    where the line runs on another of its runs (``Section.lane_end_exempt``),
-    and a line with such a run keeps its place in the lane order.
+    lanes unbroken.  A pin holds along the run that set it, into every
+    flat-frame member the run carries the line on, so the line keeps its side
+    of the bundle across the frame's boundaries; a line pinned toward opposite
+    ends stays where it is.  A pin does not hold where the line runs on
+    another of its runs, in the pinning section (``Section.lane_end_exempt``)
+    or in a frame member, and a line with such a run keeps its place in the
+    lane order.
     """
     graph = ctx.graph
     frames: dict[str, list[str]] = defaultdict(list)
@@ -1304,17 +1307,33 @@ def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
         frames[ctx.frame_roots.get(sec_id, sec_id)].append(sec_id)
     for members in frames.values():
         pins: dict[str, list[float]] = defaultdict(list)
-        exempt: dict[str, set[str]] = defaultdict(set)
+        runs: dict[str, set[str]] = defaultdict(set)
         for sec_id in members:
             section = graph.sections[sec_id]
             for lid, pin in section.lane_ends.items():
                 pins[lid].append(pin)
-            for lid, stations in section.lane_end_exempt.items():
-                exempt[lid] |= stations
+                off_run = section.lane_end_exempt.get(lid, frozenset())
+                runs[lid] |= {
+                    sid
+                    for sid in section.station_ids
+                    if sid not in off_run
+                    and not graph.stations[sid].is_port
+                    and lid in graph.station_lines(sid)
+                }
         agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
         ends = {lid: pin for lid, pin in agreed.items() if pin is not None}
         if not ends:
             continue
+        exempt = {
+            lid: {
+                sid
+                for m in members
+                for sid in graph.sections[m].station_ids
+                if lid in graph.station_lines(sid)
+            }
+            - line_reach(graph, lid, runs[lid])
+            for lid in ends
+        }
         ordered = {lid: pin for lid, pin in ends.items() if not exempt[lid]}
         present = {sid: _section_present_line_set(ctx, sid) for sid in members}
         for sec_id in (m for m in members if present[m] & ends.keys()):

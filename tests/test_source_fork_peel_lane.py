@@ -111,6 +111,7 @@ _KNOWN_DEFECTS = {
                 *(f"flat_frame_{order}" for order in DECLARATION_ORDERS),
                 *_FED_SHAPES,
                 "fed_bundle_with_the_peel_line_auto_grid",
+                "fed_bundle_with_the_contender_line",
             ]
             for o in _TB
         },
@@ -131,6 +132,13 @@ _KNOWN_DEFECTS = {
             for o in _BT
         },
         **{(shape, o): _CORRIDOR_SEATED_ON_MAIN for shape in _FED_SHAPES for o in _BT},
+        **{
+            ("fed_bundle_with_the_contender_line", o): (
+                f"{_CORRIDOR_NOT_ON_MAIN}; main aborts once the contender's line "
+                "is declared first and seats the contender on this side too"
+            )
+            for o in _BT
+        },
         **{
             ("fed_bundle_with_the_peel_line_auto_grid", o): (
                 "the bundle carried over the top keeps less canvas margin than "
@@ -398,7 +406,9 @@ def _framed_carried(lines: str) -> str:
 def _fed(lines: str, carried: str = "main,b", *, gridded: bool = True) -> str:
     """The fork's trunk fed from a neighbouring section carrying *carried*."""
     body = _P3_BODY.replace("        a -->|main| s\n", "")
-    if carried != "main,b":
+    if "c" in carried.split(","):
+        body += "        s -->|c| k\n"
+    elif carried != "main,b":
         body = "        r -->|b| s\n" + body.replace("|main|", f"|{carried}|")
     grid = "%%metro grid: u | 0,0\n%%metro grid: p | 1,0\n" if gridded else ""
     return (
@@ -447,6 +457,7 @@ SHAPES = {
     "fed_bundle_with_the_peel_line_sibling_line_first": _fed(_LINES_CB),
     "fed_bundle_with_the_peel_line_auto_grid": _fed(_LINES_BC, gridded=False),
     "fed_bundle_without_the_peel_line": _fed(_LINES_BC + _LINE_E, "main,e"),
+    "fed_bundle_with_the_contender_line": _fed(_LINES_BC, "main,b,c"),
     "contender_starts_the_peel_line": _one_section(
         _LINES_BC.replace(_LINES_BC.splitlines(True)[2], ""),
         _P3_BODY.replace("f -->|c| m", "f -->|b| m"),

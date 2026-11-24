@@ -331,7 +331,7 @@ def peel_lane_ends(
             pin = min(offsets, key=abs) * lane_sign
             for lid in graph.station_lines(node):
                 pins[lid].append(pin)
-                runs[lid] |= _line_run(node, lid, graph)
+                runs[lid] |= line_reach(graph, lid, (node,))
     agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
     ends = {lid: pin for lid, pin in agreed.items() if pin is not None}
     exempt = {
@@ -348,20 +348,16 @@ def peel_lane_ends(
     return ends, exempt
 
 
-def _line_run(node: str, lid: str, graph: MetroGraph) -> set[str]:
-    """Stations line *lid* reaches from *node* along its own edges, *node* included."""
-    targets: dict[str, list[str]] = defaultdict(list)
-    for edge in graph.edges:
-        if edge.line_id == lid:
-            targets[edge.source].append(edge.target)
-    run = {node}
-    stack = [node]
+def line_reach(graph: MetroGraph, lid: str, starts: Iterable[str]) -> set[str]:
+    """Stations line *lid* reaches from *starts* along its edges, *starts* included."""
+    reach = set(starts)
+    stack = list(reach)
     while stack:
-        for target in targets[stack.pop()]:
-            if target not in run:
-                run.add(target)
-                stack.append(target)
-    return run
+        for edge in graph.edges_from(stack.pop()):
+            if edge.line_id == lid and edge.target not in reach:
+                reach.add(edge.target)
+                stack.append(edge.target)
+    return reach
 
 
 def _step_off_exit_rows(
