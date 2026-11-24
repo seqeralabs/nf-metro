@@ -30,7 +30,6 @@ __all__ = [
     "color_pair",
     "MUTED_FILL_CLASS",
     "MUTED_STROKE_CLASS",
-    "baked_binding",
     "binding_pair",
     "is_adaptive",
     "muted_adapts",
@@ -613,11 +612,6 @@ def binding_pair(theme: object, binding: ChromeBinding) -> tuple[str, str]:
     if binding.opaque:
         light, dark = opaque_or_white(light), opaque_or_white(dark)
     return light, dark
-
-
-def baked_binding(theme: object, binding: ChromeBinding) -> str:
-    """A chrome colour's value for *theme*'s own mode after its fallback rules."""
-    return theme_color(theme, binding.field)
 
 
 def theme_color(theme: object, name: str) -> str:

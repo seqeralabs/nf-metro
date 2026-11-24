@@ -101,7 +101,6 @@ from nf_metro.layout.routing.corners import (
     corner_radius,
     corner_radius_budget,
     resolve_curve_radii,
-    resolve_curve_radius_at,
     turn_shift,
     wholesale_corner_translation,
     widest_coincident_radius,
@@ -1022,7 +1021,6 @@ class _ConcentricCorner(NamedTuple):
     incoming: tuple[float, float]
     outgoing: tuple[float, float]
     orthogonal: bool
-    owned: bool
 
 
 def _right_angle_directions(
@@ -1043,15 +1041,10 @@ def _right_angle_directions(
 def _keyed_concentric_corners(
     routes: list[RoutedPath],
     station_offsets: Mapping[tuple[str, str], float],
-    respect_owned_corners: bool,
 ) -> dict[tuple[object, ...], list[_ConcentricCorner]]:
     """The corners that may turn with others, keyed so only corners turning
     the same way at the same kind of place share a key."""
     keyed: defaultdict[tuple[object, ...], list[_ConcentricCorner]] = defaultdict(list)
-
-    def owned(route: RoutedPath, rank: int) -> bool:
-        return respect_owned_corners and planner_owns_segment_or_boundary(route, rank)
-
     for route in routes:
         if len(route.points) < 3:
             continue
@@ -1075,9 +1068,7 @@ def _keyed_concentric_corners(
                 (round(u_out[0], 3), round(u_out[1], 3)),
             )
             keyed[key].append(
-                _ConcentricCorner(
-                    route, rank, points, u_in, u_out, False, owned(route, rank)
-                )
+                _ConcentricCorner(route, rank, points, u_in, u_out, False)
             )
         if route.curve_radii is None or not right_angles:
             continue
@@ -1098,7 +1089,6 @@ def _keyed_concentric_corners(
                     (float(in_vec[0]), float(in_vec[1])),
                     (float(out_vec[0]), float(out_vec[1])),
                     True,
-                    owned(route, rank),
                 )
             )
     return keyed
@@ -1136,11 +1126,8 @@ def _split_at_bundle_gaps(
 ) -> list[list[_ConcentricCorner]]:
     """Split *component* wherever neighbouring lanes sit two bundle *pitches*
     or more apart across their incoming legs, so separate bundles that happen
-    to share a bisector turn on their own.
-
-    Lanes of one bundle sit a pitch apart where it leaves its stations, but a
-    diagonal leg carries that spacing measured across the station's flow, so
-    across the leg itself neighbours can sit up to about 1.3 pitches apart.
+    to share a bisector turn on their own. Neighbouring lanes of one bundle sit
+    at most about 1.15 pitches apart across the corpus.
     """
     anchor = component[0]
     normal = (-anchor.incoming[1], anchor.incoming[0])
@@ -1179,9 +1166,7 @@ def _concentric_corner_cohorts(
     *respect_owned_corners*) any corner a planner owns, is left alone.
     """
     cohorts: list[list[_ConcentricCorner]] = []
-    for key, corners in _keyed_concentric_corners(
-        routes, station_offsets, respect_owned_corners
-    ).items():
+    for key, corners in _keyed_concentric_corners(routes, station_offsets).items():
         for component in _translation_components(corners):
             groups = (
                 _split_at_bundle_gaps(component, pitch)
@@ -1192,7 +1177,13 @@ def _concentric_corner_cohorts(
                 if (
                     len(group) >= 2
                     and len({id(m.route) for m in group}) == len(group)
-                    and not any(m.owned for m in group)
+                    and not (
+                        respect_owned_corners
+                        and any(
+                            planner_owns_segment_or_boundary(m.route, m.rank)
+                            for m in group
+                        )
+                    )
                 ):
                     cohorts.append(group)
     return cohorts
@@ -1208,15 +1199,10 @@ def _rederive_semantic_end_corners(
 ) -> None:
     """Size every cohort of bundle corners about one shared centre.
 
-    One rule for every turn angle: the cohort's innermost lane is the
-    reference, and each lane's radius is the reference radius plus its
-    :func:`turn_shift` for its displacement from the reference lane. The
-    reference radius is the largest any lane's current radius asks for, capped
-    by the smallest leg budget (:func:`corner_radius_budget`) any lane's
-    corner leaves once its shift is taken off; a cohort whose cap would take a
-    lane's radius to zero keeps its radii. Right-angle corners also publish
-    their X offset and reference so the channel passes that read them stay
-    concentric.
+    Each lane's radius is the innermost lane's plus its :func:`turn_shift`,
+    with the innermost lane's the largest any lane asks for that every lane's
+    :func:`corner_radius_budget` allows. Right-angle corners also publish their
+    X offset and reference for the channel passes that read them.
     """
     for members in _concentric_corner_cohorts(
         routes, station_offsets, respect_owned_corners, pitch
@@ -2103,7 +2089,10 @@ def _unify_coincident_corner_radii(
     a turn vertex the two arcs draw concentrically a few pixels apart: the
     doubled corner :func:`check_coincident_corner_radii` forbids.  Snap each
     shared turn to the widest common reference radius every coincident leg can
-    draw without clamping, so the fused stroke reads as one clean arc.  Planning
+    draw without clamping, so the fused stroke reads as one clean arc: the
+    widest radius any leg asks for, capped by every leg's
+    :func:`corner_radius_budget`.  Buckets settle in turn, each against its
+    neighbouring corners' radii as they then stand.  Planning
     calls this with ``include_owned`` before immutable templates are published.
     The post-emission call leaves a complete cohort alone when any member is
     planner-owned.
@@ -2132,98 +2121,46 @@ def _unify_coincident_corner_radii(
             key = (rp.line_id, round(pts[k][0]), round(pts[k][1]))
             buckets[key].append((rp, k - 1))
 
-    # A radius on an adjacent corner shares segment budget, so repeat until a
-    # common reference can no longer alter a neighbouring coincident bucket: at
-    # worst each bucket propagates once, and one further sweep observes that
-    # nothing moved.
-    for _ in range(len(buckets) + 1):
-        changed = False
-        for members in buckets.values():
-            if len(members) < 2:
-                continue
-            if not include_owned and any(
-                corner_is_owned(route, radius_index) for route, radius_index in members
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        if not include_owned and any(
+            corner_is_owned(route, radius_index) for route, radius_index in members
+        ):
+            continue
+        reference = widest_coincident_radius(
+            _padded_radii(route)[radius_index] for route, radius_index in members
+        )
+        reference = min(
+            reference,
+            *(
+                corner_radius_budget(route.points, _padded_radii(route), radius_index)
+                for route, radius_index in members
+            ),
+        )
+        if reference < COORD_TOLERANCE_FINE:
+            continue
+        for route, radius_index in members:
+            assert route.curve_radii is not None
+            current_offset = route.concentric_corner_offsets_by_segment.get(
+                radius_index + 1, (None, None)
+            )[0]
+            current_base = route.concentric_corner_bases_by_segment.get(
+                radius_index + 1, (None, None)
+            )[0]
+            if (
+                abs(route.curve_radii[radius_index] - reference) > COORD_TOLERANCE_FINE
+                or current_offset != 0.0
+                or current_base != reference
             ):
-                continue
-            desired = []
-            for route, radius_index in members:
-                assert route.curve_radii is not None
-                desired.append(route.curve_radii[radius_index])
-            reference = widest_coincident_radius(desired)
+                route.curve_radii[radius_index] = reference
+                route.record_concentric_corner(radius_index, 0.0, reference)
 
-            def reference_fits(candidate: float) -> bool:
-                for route, radius_index in members:
-                    radii = route.curve_radii
-                    assert radii is not None
-                    previous, corner, following = route.points[
-                        radius_index : radius_index + 3
-                    ]
-                    proposed = concentric_corner_radius_at(
-                        previous, corner, following, 0.0, candidate
-                    )
-                    trial = list(radii)
-                    trial[radius_index] = proposed
-                    if (
-                        proposed < COORD_TOLERANCE_FINE
-                        or abs(
-                            resolve_curve_radius_at(route.points, trial, radius_index)
-                            - proposed
-                        )
-                        > 1e-9
-                    ):
-                        return False
-                return True
 
-            if not reference_fits(reference):
-                lower = max(
-                    concentric_reference_radius_at(
-                        route.points[radius_index],
-                        route.points[radius_index + 1],
-                        route.points[radius_index + 2],
-                        0.0,
-                        COORD_TOLERANCE_FINE,
-                    )
-                    for route, radius_index in members
-                )
-                if not reference_fits(lower):
-                    continue
-                upper = reference
-                for _step in range(64):
-                    midpoint = (lower + upper) / 2
-                    if reference_fits(midpoint):
-                        lower = midpoint
-                    else:
-                        upper = midpoint
-                reference = lower
-
-            for route, radius_index in members:
-                assert route.curve_radii is not None
-                previous, corner, following = route.points[
-                    radius_index : radius_index + 3
-                ]
-                proposed = concentric_corner_radius_at(
-                    previous, corner, following, 0.0, reference
-                )
-                current_offset = route.concentric_corner_offsets_by_segment.get(
-                    radius_index + 1, (None, None)
-                )[0]
-                current_base = route.concentric_corner_bases_by_segment.get(
-                    radius_index + 1, (None, None)
-                )[0]
-                if (
-                    abs(route.curve_radii[radius_index] - proposed)
-                    > COORD_TOLERANCE_FINE
-                    or current_offset != 0.0
-                    or current_base != reference
-                ):
-                    route.curve_radii[radius_index] = proposed
-                    route.record_concentric_corner(radius_index, 0.0, reference)
-                    changed = True
-        if not changed:
-            break
-    assert not changed, (
-        "coincident corner references did not settle within one pass per bucket"
-    )
+def _padded_radii(route: RoutedPath) -> list[float]:
+    """*route*'s corner radii, the base radius standing in for any it lacks."""
+    radii = list(route.curve_radii or [])
+    return radii + [CURVE_RADIUS] * (len(route.points) - 2 - len(radii))
 
 
 def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
@@ -5841,7 +5778,7 @@ def _reanchor_concentric_corner_fans(
             displacement = observation.points[observation.rank][0] - innermost_x
             shift = -displacement * (turn_out[0] - turn_in[0])
             budget = corner_radius_budget(
-                observation.points, list(observation.route.curve_radii or ()), index
+                observation.points, _padded_radii(observation.route), index
             )
             cap = min(cap, budget - shift)
             floor = max(floor, COORD_TOLERANCE_FINE - shift)

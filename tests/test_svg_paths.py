@@ -30,7 +30,7 @@ from nf_metro.layout.routing.invariants import (
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import build_render_plan, emit_render_plan
-from nf_metro.render.animate import _points_to_svg_path
+from nf_metro.render.animate import _motion_path, _Track
 from nf_metro.render.svg import _drawn_pieces, apply_route_offsets, render_svg
 from nf_metro.themes import NFCORE_DARK_THEME
 
@@ -831,7 +831,7 @@ class TestSharedCornerTangents:
         pts = self.POLYLINES[name]
         resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
         shared = curve_tangents(pts, resolved)
-        d = _points_to_svg_path(pts, curve_radius=CURVE_RADIUS)
+        d = _motion_path(_Track(list(pts), [0.0, *resolved, 0.0])).d_attr
         assert _same_arcs(_corner_arcs(d), _expected_corner_arcs(shared))
 
     @pytest.mark.parametrize(
@@ -851,9 +851,7 @@ class TestSharedCornerTangents:
             )
             shared = curve_tangents(pts, resolved)
             assert _svg_corners(pts, route.curve_radii) == _tangent_corners(shared)
-            d = _points_to_svg_path(
-                pts, curve_radius=CURVE_RADIUS, route_curve_radii=route.curve_radii
-            )
+            d = _motion_path(_Track(list(pts), [0.0, *resolved, 0.0])).d_attr
             assert _same_arcs(_corner_arcs(d), _expected_corner_arcs(shared))
             checked += 1
         if checked == 0:

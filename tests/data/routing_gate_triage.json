@@ -955,10 +955,6 @@
   "note": "Same-line dogleg move-up / give-up fallback, reached only when both L1296 and L1298 are false. The true arm (->1301, move up because the lower gap is too tight) needs down_ok False and the else arm (->1303, leave fused) needs both rooms below min_sep; the reachable regime's inter-row band is auto-widened so both rooms stay >= min_sep=6 (observed 14/26), so neither is reached by a valid topology.",
   "status": "defensive"
  },
- "normalize.py::for _ in range(len(buckets) + 1):::#1": {
-  "note": "Bounded fixpoint repair for coincident corner radii. The budget is one sweep per bucket plus one, and the pass asserts it always leaves through the early break, so exhausting the range is unreachable by construction. 347 fixtures enter the body; multi-bucket propagation is exercised directly by test_unify_refreshes_a_shared_route_after_changing_one_corner.",
-  "status": "defensive"
- },
  "normalize.py::for grp in groups:::#3": {
   "note": "_suboptimal_trunk_bands diagnostic loop: validate-only, not reached by the render-path coverage sweep (see the len(trunks)<2 note).",
   "status": "defensive"
@@ -967,11 +963,11 @@
   "note": "The settled exit-turn radius mismatch raises only after construction or a later pass changes a recorded planned corner without updating its concentric inputs. Valid production derives both values together; test_gap_plan_validator_rejects_a_changed_corner_radius exercises both failure flanks.",
   "status": "defensive"
  },
- "normalize.py::if (::#9": {
+ "normalize.py::if (::#7": {
   "note": "Fan-descent re-seating declines when any member's channel boundary is route-system-owned and the group is not already on adjacent tracks. Reaching this gate with an owned channel means the gate above it let the group through on `settle_frozen_arcs and tight`, since a route-system boundary is one of the ways `_planner_owns_channel` answers true, so `tight` is already true here and this arm's `not tight` cannot hold. Instrumented across the whole corpus under four option settings: 122,516 evaluations of the gate, zero fires, and still zero when the condition is widened to `_planner_owns_channel` itself. No construction reaches the arm.",
   "status": "candidate-dead"
  },
- "normalize.py::if (::#10": {
+ "normalize.py::if (::#8": {
   "note": "A secondary lane declines to move when it faces no pinned obstacle but the obstacle it would step around already holds a fixed segment, so stepping cannot separate them. Every corpus crowding either pins its obstacle or leaves the obstacle's segments free, so the skip has no fixture; it needs a topology where a non-primary lane meets a fixed-segment obstacle.",
   "status": "needs-review"
  },
@@ -1085,10 +1081,6 @@
  },
  "normalize.py::if not _lane_move_is_grounded(lane, target, ctx):::#2": {
   "note": "In _tighten_overwide_movable_lanes: the tighter slot is abandoned when it enters a section or overruns a claim band. The corpus's one tightening move (riboseq_inter_row_corridor's rnaseq) is grounded, so the not-grounded abandon arm is never taken. Defensive against a bundle whose inner slot is blocked by a section or reservation.",
-  "status": "defensive"
- },
- "normalize.py::if not reference_fits(lower):::#1": {
-  "note": "The lower bound is constructed from each member's minimum resolvable concentric radius, so at least that bound fits valid route geometry. Failure denotes contradictory synthetic corner inputs.",
   "status": "defensive"
  },
  "normalize.py::if not verticals:::#1": {
@@ -1753,6 +1745,14 @@
  },
  "normalize.py::if reference < floor or (reference < curve_radius and reference < floor_radius):::#1": {
   "note": "_reanchor_concentric_corner_fans leaves a fan unraised when its leg budgets cannot seat the innermost lane at the curve radius or at its own current floor. Every corpus fan the pass reaches fits the curve radius, so the keep arm has no fixture; it guards fans on legs too short for their lane offsets.",
+  "status": "defensive"
+ },
+ "normalize.py::if reference < COORD_TOLERANCE_FINE:::#1": {
+  "note": "A coincident-turn bucket whose leg budgets leave no positive common radius keeps its radii. Every corpus bucket's budget leaves a positive radius, so the keep arm has no fixture; it guards same-line turns squeezed onto legs shorter than a neighbouring corner's radius.",
+  "status": "defensive"
+ },
+ "normalize.py::or current_base != reference::#1": {
+  "note": "A coincident-turn member is recorded when its radius, its offset or its stored reference differs from the bucket's. In the corpus a member whose radius and zero offset already match always carries that reference too, since the reference is the radius it was last unified to, so the base-only arm has no fixture; it re-records a member whose stored reference was written by another pass.",
   "status": "defensive"
  }
 }

@@ -24,8 +24,8 @@ from nf_metro.layout.routing import RoutedPath
 from nf_metro.layout.routing.common import apply_route_offsets, point_on_polyline
 from nf_metro.layout.routing.corners import (
     corner_arc_controls,
-    cubic_point,
     curve_tangents,
+    flatten_cubic,
     resolve_curve_radii,
 )
 from nf_metro.parser.model import Edge, MetroGraph
@@ -328,8 +328,7 @@ def build_animation_timeline(
 
     Dots ride the drawn strokes: *route_polylines* and *route_curve_radii* are
     each route's drawn waypoints and corner radii, aligned with *routes*, as
-    the static render materializes them. Left out, they are materialized here
-    the same way.
+    the static render materializes them.
 
     Every dot is visible for one cycle (the longest route's at-speed travel
     time): it travels at the theme's speed, holds at its terminus, then is
@@ -464,6 +463,7 @@ def _plan_lines(
 ) -> list[_LineRoutes]:
     """Plan the waves of every animated line and gather its drawn route geometry."""
     route_tracks: dict[tuple[str, str, str], _Track] = {}
+    tracks_by_line: dict[str, list[_Track]] = {}
     for route, polyline, radii in zip(
         routes, route_polylines, route_curve_radii, strict=True
     ):
@@ -477,6 +477,8 @@ def _plan_lines(
         route_tracks[route.edge.source, route.edge.target, route.line_id] = _Track(
             points, ends[:1] + resolved + ends[1:]
         )
+    for (_source, _target, line_id), track in route_tracks.items():
+        tracks_by_line.setdefault(line_id, []).append(track)
 
     edges_by_line: dict[str, list[Edge]] = {}
     for edge in graph.edges:
@@ -494,9 +496,7 @@ def _plan_lines(
                 line_id=line_id,
                 plan=plan,
                 route_tracks=route_tracks,
-                line_tracks=[
-                    track for key, track in route_tracks.items() if key[2] == line_id
-                ],
+                line_tracks=tracks_by_line.get(line_id, []),
             )
         )
     return lines
@@ -541,8 +541,8 @@ def _flatten_path(
             push(pen)
         else:
             c1, c2, end = (nums[0], nums[1]), (nums[2], nums[3]), (nums[4], nums[5])
-            for step in range(1, _CURVE_FLATTEN_STEPS + 1):
-                push(cubic_point(pen, c1, c2, end, step / _CURVE_FLATTEN_STEPS))
+            for point in flatten_cubic(pen, c1, c2, end, _CURVE_FLATTEN_STEPS):
+                push(point)
             pen = end
 
     if not points:
@@ -741,16 +741,3 @@ def _motion_path(track: _Track) -> _MotionPath:
     parts.append(f"L {pts[-1][0]:.2f} {pts[-1][1]:.2f}")
     length += math.dist(pen, pts[-1])
     return _MotionPath(" ".join(parts), length)
-
-
-def _points_to_svg_path(
-    pts: list[tuple[float, float]],
-    curve_radius: float = ANIMATION_CURVE_RADIUS,
-    route_curve_radii: list[float] | None = None,
-) -> str:
-    """The motion path ``d`` along *pts*, cornered as a drawn route with the
-    given radii is."""
-    if len(pts) < 2:
-        return ""
-    resolved = resolve_curve_radii(pts, route_curve_radii, default_radius=curve_radius)
-    return _motion_path(_Track(list(pts), [0.0, *resolved, 0.0])).d_attr

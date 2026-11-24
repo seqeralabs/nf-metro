@@ -24,7 +24,7 @@ from nf_metro.layout.labels import (
     segment_strikes_label,
 )
 from nf_metro.layout.pass_metrics import font_scale_context
-from nf_metro.layout.routing.corners import corner_from_arc, cubic_point
+from nf_metro.layout.routing.corners import corner_from_arc, flatten_cubic
 from nf_metro.manifest import read_manifest
 from nf_metro.render.path_geometry import iter_path_commands
 
@@ -548,11 +548,8 @@ def parse_route_strokes(svg: str) -> list[StrokeTrace]:
             else:
                 c1, c2 = (nums[0], nums[1]), (nums[2], nums[3])
                 end = (nums[4], nums[5])
-                prev = pen
-                for k in range(1, _CORNER_CHORDS + 1):
-                    point = cubic_point(pen, c1, c2, end, k / _CORNER_CHORDS)
-                    chords.append((prev, point))
-                    prev = point
+                points = flatten_cubic(pen, c1, c2, end, _CORNER_CHORDS)
+                chords += list(zip([pen, *points], points))
                 pen = end
         traces.append(StrokeTrace(line_id, chords, gaps))
     return traces

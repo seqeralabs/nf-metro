@@ -203,14 +203,33 @@ def test_nfcore_balls_carry_a_stroke():
     assert f'stroke="{theme.animation_ball_stroke}"' in svg
 
 
-# genomeassembly and fan_in_merge are left out: at their merge feeders the
-# straight member's stroke stops short of where the curving member joins, so
-# no drawn centreline spans that stretch for a dot to ride.
 _STROKE_RIDING_FIXTURES = [
-    p
-    for p in [*ANIMATION_FIXTURES, EXAMPLES_DIR / "differentialabundance.mmd"]
-    if p.stem not in {"genomeassembly", "fan_in_merge"}
+    *ANIMATION_FIXTURES,
+    EXAMPLES_DIR / "differentialabundance.mmd",
 ]
+
+
+def _merge_feeder_windows(plan) -> dict[str, list[tuple[tuple[float, float], float]]]:
+    """Per line, ``(vertex, radius)`` around each merge feeder's notch.
+
+    Where one route of a line ends on a vertex that a sibling route of the
+    same line rounds, the ending stroke stops at the vertex while the sibling's
+    curve only rejoins a radius further on, so no drawn centreline spans that
+    stretch for a dot to ride.
+    """
+    import math
+
+    windows: dict[str, list[tuple[tuple[float, float], float]]] = {}
+    drawn = list(zip(plan.routes, plan.route_polylines, plan.route_curve_radii))
+    for route, polyline, _radii in drawn:
+        for sibling, sibling_polyline, sibling_radii in drawn:
+            if sibling is route or sibling.line_id != route.line_id:
+                continue
+            for index, vertex in enumerate(sibling_polyline[1:-1]):
+                radius = (sibling_radii or [10.0] * len(sibling_polyline))[index]
+                if radius > 0 and math.dist(polyline[-1], vertex) < 0.5:
+                    windows.setdefault(route.line_id, []).append((vertex, radius))
+    return windows
 
 
 @pytest.mark.parametrize(
@@ -266,10 +285,19 @@ def test_dots_ride_their_lines_drawn_stroke(fixture: Path):
             default=math.inf,
         )
 
+    windows = _merge_feeder_windows(plan)
+
+    def in_notch(line_id: str, point: tuple[float, float]) -> bool:
+        return any(
+            math.dist(point, vertex) <= radius + 1.0
+            for vertex, radius in windows.get(line_id, ())
+        )
+
     assert timeline.dots
     worst = max(
-        (off_stroke(dot.line_id, dot.track.point_at(k / 100)), dot.line_id)
+        (off_stroke(dot.line_id, point), dot.line_id, point)
         for dot in timeline.dots
-        for k in range(101)
+        for point in (dot.track.point_at(k / 100) for k in range(101))
+        if not in_notch(dot.line_id, point)
     )
     assert worst[0] <= 0.5, worst
