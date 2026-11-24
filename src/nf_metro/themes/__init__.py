@@ -232,7 +232,9 @@ def bind_graph_stack(
 
 def layout_theme(graph: MetroGraph) -> Theme:
     """The theme *graph* renders with, in the mode it will be baked in."""
-    return resolve_graph_stack(None, graph).for_mode(resolve_mode(None, graph))
+    if graph.resolved_theme is None:
+        graph.resolved_theme = resolve_stack(graph.style, graph.source_dir)
+    return graph.resolved_theme.for_mode(resolve_mode(None, graph))
 
 
 def resolve_mode(mode: str | None, graph: MetroGraph) -> str:

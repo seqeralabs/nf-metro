@@ -701,7 +701,7 @@ def test_inactive_lines_take_the_theme_muted_grey():
 # ---------------------------------------------------------------------------
 
 
-def test_unset_ring_colours_fall_back_and_still_follow_the_mode(tmp_path):
+def test_unset_ring_colours_fall_back_and_follow_the_mode(tmp_path):
     path = _write(
         tmp_path,
         "rings.yaml",

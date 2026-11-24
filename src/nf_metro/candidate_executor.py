@@ -573,7 +573,7 @@ def _evaluate_attempt(
 
         try:
             begin(CandidateStage.LAYOUT)
-            theme = resolve_theme(production.theme, graph, mode=production.mode)
+            theme = resolve_theme(None, graph, mode=production.mode)
             compute_layout(graph, validate=True, validation_theme=theme)
             graph_evidence = _graph_evidence(graph, GraphState.SETTLED)
         except Exception as exc:  # noqa: BLE001
