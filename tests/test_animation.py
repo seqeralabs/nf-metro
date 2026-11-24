@@ -301,3 +301,18 @@ def test_dots_ride_their_lines_drawn_stroke(fixture: Path):
         if not in_notch(dot.line_id, point)
     )
     assert worst[0] <= 0.5, worst
+
+
+def test_a_bridge_onto_a_sibling_never_runs_backwards():
+    """A bridge joined part-way along a sibling's leg keeps the sibling's
+    corner inside the leg it actually has."""
+    from nf_metro.render.animate import _find_bridge, _motion_path, _Track
+
+    sibling = _Track([(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)], [0.0, 10.0, 0.0])
+    bridge = _find_bridge((95.0, 0.0), (100.0, 50.0), [sibling])
+    assert bridge is not None
+
+    commands = re.findall(r"([MLC])\s*([-\d.\s]+)", _motion_path(bridge).d_attr)
+    xs = [float(nums.split()[-2]) for _, nums in commands]
+    assert xs == sorted(xs)
+    assert commands[0] == ("M", "95.00 0.00 ")

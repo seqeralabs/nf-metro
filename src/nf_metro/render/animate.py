@@ -716,13 +716,15 @@ def _motion_path(track: _Track) -> _MotionPath:
     static render draws it, and the length its travel is timed by.
 
     A rounded corner is timed as the mean of its chord and its two tangent
-    arms, measured on the unrounded geometry.
+    arms, measured on the unrounded geometry. A joined track can carry a
+    sibling's radius onto a leg a bridge or turnout shortened, so the radii are
+    clamped to the track's own legs as the renderer clamps a route's.
     """
     pts = track.points
     parts = [f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"]
     length = 0.0
     pen = pts[0]
-    for tan in curve_tangents(pts, track.radii[1:-1]):
+    for tan in curve_tangents(pts, resolve_curve_radii(pts, track.radii[1:-1])):
         if tan.curved and tan.before != tan.after:
             c1, c2 = corner_arc_controls(tan.before, tan.corner, tan.after)
             parts.append(
