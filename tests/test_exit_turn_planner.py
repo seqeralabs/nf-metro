@@ -2526,8 +2526,10 @@ def test_post_pass_snapshot_preserves_owned_corner_radius(
     points = route.points[radius_index : radius_index + 3]
     narrow_radius, wide_radius = sorted(
         {
-            concentric_corner_radius_at(*points, -OFFSET_STEP),
-            concentric_corner_radius_at(*points, OFFSET_STEP),
+            concentric_corner_radius_at(
+                *points, -OFFSET_STEP, base_radius=CURVE_RADIUS
+            ),
+            concentric_corner_radius_at(*points, OFFSET_STEP, base_radius=CURVE_RADIUS),
         }
     )
     route.curve_radii[radius_index] = narrow_radius
@@ -3329,21 +3331,24 @@ graph LR
     validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
 
-def test_opposed_merge_branch_keeps_whole_exit_group_on_legacy_geometry() -> None:
-    graph, _offsets, observation = _observe(
+def test_merge_branch_on_the_trunk_descent_plans_its_exit_group() -> None:
+    """A merge branch sharing its source column and line with the trunk leads
+    out in the trunk's own descent channel, the way its source runs, so its
+    whole exit group is planned rather than left on legacy geometry."""
+    graph, offsets, observation = _observe(
         TOPOLOGIES / "merge_feeder_shared_channel_gap.mmd"
     )
     plan = _plan_for_source(observation, "__junction_4")
 
-    assert plan.disposition is ExitTurnDisposition.LEGACY
-    assert plan.legacy_reason == "opposed-source-run"
-    assert plan.axes == ()
+    assert plan.disposition is ExitTurnDisposition.PLANNED
+    assert plan.legacy_reason is None
     source_x = graph.stations[plan.source_id].x
     routes = [
         route for route in observation.routes if route.edge.source == plan.source_id
     ]
     assert routes
     assert all(route.points[1][0] > source_x for route in routes)
+    validate_exit_turn_plans(graph, observation.routes, observation.plan, offsets)
 
 
 def test_aligned_top_entry_peeloff_keeps_its_structural_axis() -> None:

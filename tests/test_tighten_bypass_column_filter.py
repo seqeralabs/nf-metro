@@ -19,8 +19,13 @@ from __future__ import annotations
 
 import pytest
 
-from nf_metro.layout.constants import BYPASS_CLEARANCE, SECTION_Y_GAP
+from nf_metro.layout.constants import (
+    SECTION_Y_GAP,
+)
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.pass_metrics import (
+    bypass_clearance,
+)
 from nf_metro.layout.phases.bbox import (
     _aggregate_bypass_spans,
     _tighten_lower_rows_after_shrink,
@@ -104,13 +109,13 @@ def _push_lower_row_down(graph, delta: float) -> None:
 
 def test_bypass_span_aggregated_over_intervening_section():
     """Guard the precondition: the topology really does generate a bypass over
-    columns (0, 2) that dips ``BYPASS_CLEARANCE`` below the intervening row."""
+    columns (0, 2) that dips ``bypass_clearance()`` below the intervening row."""
     graph = _layout(low_col=3)
     row0 = [s for s in graph.sections.values() if s.grid_row == 0 and s.bbox_h > 0]
     spans = _aggregate_bypass_spans(graph, row0)
     assert (0, 2) in spans
     row0_bot = max(s.bbox_y + s.bbox_h for s in row0)
-    assert spans[(0, 2)] == pytest.approx(row0_bot + BYPASS_CLEARANCE, abs=1.0)
+    assert spans[(0, 2)] == pytest.approx(row0_bot + bypass_clearance(), abs=1.0)
 
 
 def test_tighten_ignores_bypass_over_non_overlapping_column():
@@ -131,7 +136,7 @@ def test_tighten_ignores_bypass_over_non_overlapping_column():
 
 def test_tighten_keeps_bypass_clearance_for_overlapping_column():
     """The fix is narrow: a stacked section whose column *is* under the bypass
-    keeps the ``BYPASS_CLEARANCE`` reservation -- it would otherwise sit in the
+    keeps the ``bypass_clearance()`` reservation -- it would otherwise sit in the
     bypass route's path."""
     graph = _layout(low_col=1)
     row0 = [s for s in graph.sections.values() if s.grid_row == 0 and s.bbox_h > 0]

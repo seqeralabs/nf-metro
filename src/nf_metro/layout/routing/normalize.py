@@ -14,11 +14,7 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
     NEXT_ROW_HEADER_BADGE_CLEARANCE,
     SECTION_HEADER_PROTRUSION,
     graph_offset_step,
@@ -27,6 +23,12 @@ from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     cotravelling_lanes_fuse,
     spans_share_corridor,
+)
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    inter_row_edge_clearance,
+    inter_row_header_clearance,
+    min_corridor_y_overlap,
 )
 from nf_metro.layout.route_plan import ExitTurnPlanId
 from nf_metro.layout.routing.centrelines import (
@@ -177,7 +179,7 @@ def _split_corridors(chans: list[_VChannel]) -> list[list[_VChannel]]:
     """Split a bucket into corridors of substantially y-overlapping channels.
 
     Only channels whose y-spans overlap by more than
-    :data:`MIN_CORRIDOR_Y_OVERLAP` share a true corridor; independent
+    ``min_corridor_y_overlap()`` share a true corridor; independent
     vertical runs at different heights - including two stacked descents that
     merely touch at a shared elbow band - must NOT be merged, so the gap
     layout can distribute them across the gap width instead of packing their
@@ -372,7 +374,7 @@ def _required_channel_clearance(
     if a.down is b.down:
         return 0.0
     overlap = min(a.y_hi, b.y_hi) - max(a.y_lo, b.y_lo)
-    if overlap <= MIN_CORRIDOR_Y_OVERLAP:
+    if overlap <= min_corridor_y_overlap():
         return 0.0
     return cotravelling_lane_clearance(
         same_line=a.route.line_id == b.route.line_id,
@@ -2739,7 +2741,7 @@ def _nest_bypass_above_over_top_wrap(
         # row, the deepest lane clear of that row.  Placement reserves a gap
         # wide enough (see ``_inter_row_routing_minimums``) that this lane sits
         # above the wrap's peak, so the local wrap nests beneath the bundle.
-        target = gap_top + INTER_ROW_EDGE_CLEARANCE
+        target = gap_top + inter_row_edge_clearance()
         max_leg_y = max(y for _r, _k, y in crossing)
         delta = min(target - max_leg_y, 0.0)
         if abs(delta) <= COORD_TOLERANCE:
@@ -2849,7 +2851,7 @@ def _reseat_concentric_flanking(
     axis: int,
     offset_in: float = 0.0,
     offset_out: float = 0.0,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float | None = None,
     base_radius_out: float | None = None,
 ) -> None:
     """Move the ``points[k] -> points[k+1]`` segment onto *new_coord* and re-derive
@@ -2865,6 +2867,8 @@ def _reseat_concentric_flanking(
     two corners may pass different reference radii when they belong to separate
     concentric families; otherwise both use ``base_radius``.
     """
+    if base_radius is None:
+        base_radius = active_curve_radius()
     pts = rp.points
     for j in (k, k + 1):
         px, py = pts[j]
@@ -2895,7 +2899,7 @@ def _set_vchannel_x(
     offset: float = 0.0,
     *,
     offset_out: float | None = None,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float | None = None,
     base_radius_out: float | None = None,
 ) -> None:
     """Move a vertical channel to *new_x*, re-deriving its flanking corners.
@@ -2913,6 +2917,8 @@ def _set_vchannel_x(
     ``base_radius_out`` gives the outgoing corner family its own reference.
     When omitted, both corners use ``base_radius``.
     """
+    if base_radius is None:
+        base_radius = active_curve_radius()
     _reseat_concentric_flanking(
         ch.route,
         ch.idx,
@@ -2931,7 +2937,7 @@ def _set_htrunk_y(
     new_y: float,
     offset_in: float = 0.0,
     offset_out: float = 0.0,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float | None = None,
     base_radius_out: float | None = None,
 ) -> None:
     """Move an interior horizontal trunk (``points[k]->[k+1]``) to *new_y*.
@@ -2949,6 +2955,8 @@ def _set_htrunk_y(
     the line's rank displacement, but the outgoing corner -- where it peels off
     to its own port, alone -- keeps the base radius (zero).
     """
+    if base_radius is None:
+        base_radius = active_curve_radius()
     _reseat_concentric_flanking(
         rp,
         k,
@@ -4060,7 +4068,7 @@ def _clamp_inter_row_band_top(ctx: _RoutingCtx, top: float, total: float) -> flo
 
     Without a reservation the stack starts at the cluster *top* and slides
     upward if its bottom would breach the next row's header clearance
-    (``INTER_ROW_HEADER_CLEARANCE`` below the inter-row gap's lower edge),
+    (``inter_row_header_clearance()`` below the inter-row gap's lower edge),
     keeping the inter-band gap intact rather than crowding the lower band into
     the header.
     """
@@ -4071,7 +4079,7 @@ def _clamp_inter_row_band_top(ctx: _RoutingCtx, top: float, total: float) -> flo
     if band is None:
         return top
     _gap_top, gap_bottom = band
-    limit = gap_bottom - INTER_ROW_HEADER_CLEARANCE
+    limit = gap_bottom - inter_row_header_clearance()
     if top + total > limit:
         return limit - total
     return top

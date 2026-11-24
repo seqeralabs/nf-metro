@@ -211,52 +211,11 @@ places the icon and the router that seats the diagonal so the tail is uniform.
 """
 
 CURVE_RADIUS: float = 10.0
-"""Default corner radius for routed paths."""
+"""Base corner radius for routed paths, at ``stroke_scale`` 1.
 
-MIN_CORRIDOR_Y_OVERLAP: float = 2 * CURVE_RADIUS
-"""Minimum vertical overlap for two gap channels to share one corridor.
-
-Channels in the same inter-section gap and direction are grouped into a
-concentric corridor only when their vertical spans overlap by more than
-this much.  Two channels that overlap by less are not running parallel -
-they are stacked segments meeting at a single elbow (a deep descender
-landing on a port lane that another channel then leaves), and their
-turning corners sit within one corner-radius zone of each other.  Packing
-them into one ``OFFSET_STEP`` corridor makes those opposing elbows graze;
-treating them as separate corridors lets the gap layout distribute them
-across the gap width so the elbows stay clear.  Sized at twice the corner
-radius: an overlap that small is entirely inside the two corners' rounding
-zones, never a real parallel run."""
-
-PERP_PORT_EDGE_CLEARANCE: float = CURVE_RADIUS
-"""Minimum room a port keeps from the two bbox edges it is *not* anchored to.
-
-A port is pinned to one edge (a LEFT/RIGHT port to a vertical one, a TOP/BOTTOM
-port to a horizontal one) and is free along its other axis.  Flush against a
-second edge, its inbound run is drawn along the box border and the two read as
-one stroke; it also blocks the section header's above-left position, pushing
-the badge away from the corner it labels.  One curve radius is the shortest
-separation that still reads as a route inside the box rather than on its edge.
-"""
-
-MERGE_ROUTE_MARGIN: float = 2 * CURVE_RADIUS
-"""Distance between a section bbox edge and any merge branch/trunk
-vertical line in the inter-section gap."""
-
-MERGE_LINE_GAP: float = CURVE_RADIUS
-"""Minimum gap between a merge branch descent and trunk ascent."""
-
-MERGE_GAP_MIN: float = 2 * MERGE_ROUTE_MARGIN + MERGE_LINE_GAP
-"""Minimum inter-section gap for column pairs that have merge routing.
-
-Only applied to gaps where merge branches and trunks coexist."""
-
-MIN_INTER_SECTION_GAP: float = 4 * CURVE_RADIUS
-"""Minimum physical gap between adjacent section bboxes.
-
-Ensures the gap midpoint is at least 2*CURVE_RADIUS from each section
-edge, giving enough horizontal run for smooth curves at bypass route
-corners.  Derived as 4 * CURVE_RADIUS."""
+Layout and rendering read the radius in effect through
+:func:`nf_metro.layout.pass_metrics.active_curve_radius`, which a theme's
+``curve_radius_ratio`` replaces this with."""
 
 OFFSET_STEP: float = 4.0
 """Per-line offset increment for parallel lines in bundles."""
@@ -377,14 +336,19 @@ MIN_STRAIGHT_PORT: float = 5.0
 """Curve radius offset for port-adjacent edges."""
 
 MIN_STRAIGHT_EDGE: float = 10.0
-"""Minimum straight track for non-port edges."""
+"""Base minimum straight track at a non-port route end; read through
+:func:`nf_metro.layout.pass_metrics.min_straight_edge`, which keeps it room for
+a whole corner."""
 
 RAIL_TERMINUS_FAN_LEAD: float = 16.0
 """Flat lead a rail-mode blank terminus's fan runs along its convergence Y
 before fanning out to the rails, so the bundle reads as entering/leaving it."""
 
 MIN_STATION_FLAT_LENGTH: float = 20.0
-"""Minimum length of the visible horizontal flat segment THROUGH a station.
+"""Base minimum length of the visible horizontal flat segment THROUGH a
+station; read through
+:func:`nf_metro.layout.pass_metrics.min_station_flat_length`, which grows it
+with the corner radius.
 
 A station sitting on the polyline corner where two paths meet would
 otherwise have its flat fully consumed by the curve corner (CURVE_RADIUS
@@ -479,45 +443,18 @@ demanding one flags every run that turns beside the canvas as short of room
 it does not need."""
 
 INTER_ROW_EDGE_CLEARANCE: float = 26.0
-"""Minimum distance between an inter-row wrap channel and the *box edge*
-it runs beneath (the upper section's bbox bottom).
+"""Base minimum distance between an inter-row wrap channel and the *box edge*
+it runs beneath (the upper section's bbox bottom); read through
+:func:`nf_metro.layout.pass_metrics.inter_row_edge_clearance`, which widens it
+to two corner radii when the radius needs more.
 
 The universal ``EDGE_TO_BUNDLE_CLEARANCE`` (16px) is the floor for a line
 sitting beside a bundle; a horizontal inter-row run sitting that close to
 a *section box edge* reads as running flush along the underside of the
 box.  This wider margin gives the run a visibly clear gap below the box.
-It is the box-edge counterpart of ``INTER_ROW_HEADER_CLEARANCE`` on the
+It is the box-edge counterpart of the inter-row header clearance on the
 lower side, keeping the channel's two margins symmetric about the real
 obstacles (box edge above, header badge below)."""
-
-BYPASS_CLEARANCE: float = INTER_ROW_EDGE_CLEARANCE
-"""Vertical clearance below the lowest intervening section for bypass routes.
-
-A bypass channel is a horizontal run drawn beneath a section's box edge, which
-is the relationship ``INTER_ROW_EDGE_CLEARANCE`` states, and the reservation
-ledger insets every row-gap corridor by that same margin.  A narrower margin
-here would seat a bypass inside the band its own reservation allocates it."""
-
-ROW_BAND_SLACK: float = BYPASS_CLEARANCE + Y_SPACING
-"""Vertical slack a same-row inter-section route may extend past the row band.
-
-A same-row wrap routes below the row's tallest section through a bypass
-channel sitting ``BYPASS_CLEARANCE`` below the band bottom, then stacks the
-bundle's per-line nest offsets (a few ``OFFSET_STEP`` each) on top, and adds
-up to one ``Y_SPACING`` for the diagonal corner approach.  This slack bounds
-that legitimate excursion so the band guard / invariant test admit a clean
-below-row wrap while still rejecting a route that dips a full row down."""
-
-INTER_ROW_HEADER_CLEARANCE: float = SECTION_HEADER_PROTRUSION + INTER_ROW_EDGE_CLEARANCE
-"""Distance from a section's bbox top to an inter-row channel above it.
-
-An adjacent-row wrap channel approaching a section from above must clear
-the header *badge* (which protrudes ``SECTION_HEADER_PROTRUSION`` above
-``bbox_y``) by ``INTER_ROW_EDGE_CLEARANCE``, the same margin the source
-side keeps from its bbox bottom.  Section placement reserves this band
-(``_wrap_bundle_row_minimums``) and routing centres within it
-(``_center_inter_row_channel``); the single definition keeps the two in
-lockstep."""
 
 # ---------------------------------------------------------------------------
 # Engine: entry/exit alignment
@@ -563,7 +500,7 @@ A port seated further out -- a perpendicular entry sits a whole entry shift clea
 of the row -- would otherwise be left with only the remainder and read as pinched
 against the border, so the box extends to give it the same room instead.
 
-Distinct from ``PERP_PORT_EDGE_CLEARANCE``: that is the hard floor a runtime
+Distinct from ``perp_port_edge_clearance()``: that is the hard floor a runtime
 guard enforces, this is the wider spacing placement aims for.
 """
 
@@ -746,15 +683,6 @@ above the station instead of beside it, so the reservation covers the
 caption rather than icon width.
 """
 
-EXIT_CORRIDOR_ICON_CLEARANCE: float = CURVE_RADIUS
-"""Gap a flow-axis exit corridor keeps below a terminus icon hanging into
-the exit row of a vertical-flow (TB/BT) section.
-
-The exit port (and the horizontal corridor a route turns onto to leave
-the section) is clamped to at least the icon's drawn far edge plus this
-margin, so a route does not graze the file icon on its way out.  Sized
-to clear the bundle-offset spread of the lines on the corridor."""
-
 PORT_LABEL_MAX_DX: float = 120.0
 """Max horizontal distance for port-route label override.
 
@@ -850,13 +778,6 @@ def _check_constant_relations() -> None:
         SAME_COORD_TOLERANCE < OFFSET_STEP,
         f"SAME_COORD_TOLERANCE ({SAME_COORD_TOLERANCE}) must stay below "
         f"OFFSET_STEP ({OFFSET_STEP}) so offset slots are not merged",
-    )
-    # Bypass corners turn with CURVE_RADIUS each side; without 2*CURVE_RADIUS
-    # of vertical clearance the two corners overlap the channel.
-    require(
-        BYPASS_CLEARANCE >= 2 * CURVE_RADIUS,
-        f"BYPASS_CLEARANCE ({BYPASS_CLEARANCE}) must be >= 2*CURVE_RADIUS "
-        f"({2 * CURVE_RADIUS}) so bypass corners clear the channel",
     )
     # Nesting multiple bypass routes must step them apart by more than the
     # per-line offset, else stacked bypasses read as one bundle.

@@ -10,7 +10,9 @@ from typing import TypeVar
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
-    MIN_STRAIGHT_EDGE,
+)
+from nf_metro.layout.pass_metrics import (
+    min_straight_edge,
 )
 from nf_metro.layout.route_plan import (
     CoordinateRegime,
@@ -1095,7 +1097,7 @@ def _source_turn_requirement(
     if family_id is RouteFamilyId.MERGE_BRANCH:
         facts = _build_inter_facts(edge, src, tgt, ctx)
         assert facts.src_col is not None
-        axis = _merge_branch_lead_x(src, ctx, facts.src_col) + (
+        axis = _merge_branch_lead_x(src, ctx, facts.src_col, edge) + (
             ctx.station_offsets or {}
         ).get((edge.target, edge.line_id), 0.0)
         source_offset = (ctx.station_offsets or {}).get(
@@ -1461,7 +1463,7 @@ def _lane_transition(
     diagonal = abs(target_lateral - source_lateral)
     if diagonal <= COORD_TOLERANCE:
         return None
-    if primary_delta * run_direction.sign < 2 * MIN_STRAIGHT_EDGE + diagonal:
+    if primary_delta * run_direction.sign < 2 * min_straight_edge() + diagonal:
         return None
     return ExitLaneTransition(
         edge,
@@ -1475,8 +1477,8 @@ def _lane_transition(
         run_direction,
         placement,
         diagonal,
-        MIN_STRAIGHT_EDGE,
-        MIN_STRAIGHT_EDGE,
+        min_straight_edge(),
+        min_straight_edge(),
     )
 
 

@@ -9,7 +9,7 @@ above-left position is never clear, so the placement chain falls through to
 ``nudge`` and the number badge slides right, away from the box it labels.
 
 ``_compact_row_content_to_bbox_top`` (Stage 5.4) is what pulls a perpendicular
-port toward the top edge, and it reserves ``PERP_PORT_EDGE_CLEARANCE`` so the
+port toward the top edge, and it reserves ``perp_port_edge_clearance()`` so the
 port stops short of it.  The rotated case -- a horizontal flow's TOP/BOTTOM port
 approaching a vertical edge -- is held by ``_reserve_perp_port_edge_inset``
 (Stage 3.5), which grows the edge instead.
@@ -41,13 +41,15 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.constants import (
-    PERP_PORT_EDGE_CLEARANCE,
     PERP_PORT_EDGE_INSET,
     SAME_COORD_TOLERANCE,
     SECTION_Y_PADDING,
 )
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import AxisFrame, perpendicular_port_sides
+from nf_metro.layout.pass_metrics import (
+    perp_port_edge_clearance,
+)
 from nf_metro.layout.phases._common import port_bundle_edge_reach
 from nf_metro.layout.phases.guards import (
     PhaseInvariantError,
@@ -129,11 +131,11 @@ def test_ports_clear_unanchored_box_edges(path: Path) -> None:
     flush = [
         (sid, pid, clear)
         for sid, pid, clear in _unanchored_edge_clearances(graph)
-        if clear < PERP_PORT_EDGE_CLEARANCE - EPSILON
+        if clear < perp_port_edge_clearance() - EPSILON
     ]
     assert not flush, (
         "ports sit within "
-        f"{PERP_PORT_EDGE_CLEARANCE}px of a box edge they are not anchored to: "
+        f"{perp_port_edge_clearance()}px of a box edge they are not anchored to: "
         + ", ".join(f"{sid}/{pid} clearance={clear:.1f}" for sid, pid, clear in flush)
     )
 
@@ -164,7 +166,7 @@ def test_guard_catches_a_port_whose_bundle_alone_rides_the_edge() -> None:
     section = graph.sections["sec"]
     pid = next(iter(section.exit_ports))
     reach = port_bundle_edge_reach(graph, pid, offsets, "y")[1]
-    assert reach > PERP_PORT_EDGE_CLEARANCE + EPSILON, (
+    assert reach > perp_port_edge_clearance() + EPSILON, (
         f"{pid} carries only a {reach:.1f}px bundle reach; the plant needs one "
         "wider than the guard floor to hide a violation behind the station"
     )
@@ -182,7 +184,7 @@ def test_carrier_row_entry_port_keeps_headroom() -> None:
     section = graph.sections["quantification"]
     pid = next(iter(section.entry_ports))
     clearance = graph.stations[pid].y - section.bbox_y
-    assert clearance >= PERP_PORT_EDGE_CLEARANCE - EPSILON, (
+    assert clearance >= perp_port_edge_clearance() - EPSILON, (
         f"{pid} sits {clearance:.1f}px below its box top; the inbound bundle "
         "rides the border"
     )
@@ -260,7 +262,7 @@ def test_horizontal_perp_ports_keep_the_designed_inset(path: Path) -> None:
     """Every LR/RL perpendicular port keeps the full inset from both side edges.
 
     A corpus ratchet, not a runtime guard.  A render only aborts below the much
-    smaller ``PERP_PORT_EDGE_CLEARANCE``, which leaves a novel map free to land
+    smaller ``perp_port_edge_clearance()``, which leaves a novel map free to land
     a port short of the designed inset; the shipped corpus is held to it here.
     """
     graph = parse_metro_mermaid(path.read_text())

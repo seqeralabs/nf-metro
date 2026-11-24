@@ -39,8 +39,13 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import MIN_INTER_SECTION_GAP, SAME_COORD_TOLERANCE
+from nf_metro.layout.constants import (
+    SAME_COORD_TOLERANCE,
+)
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.pass_metrics import (
+    min_inter_section_gap,
+)
 from nf_metro.layout.phases._common import (
     _column_contiguous_row_groups,
     _content_station_ids,
@@ -225,7 +230,7 @@ def test_neighbour_limit_keeps_the_inter_column_corridor() -> None:
     """A left neighbour sharing the row band reserves the routing corridor."""
     graph = _stacked_column_graph()
     assert _column_neighbour_anchor_limit(graph, graph.sections["lower"], 1.0) == (
-        330.0 + MIN_INTER_SECTION_GAP
+        330.0 + min_inter_section_gap()
     )
     assert _column_neighbour_anchor_limit(graph, graph.sections["upper"], 1.0) == float(
         "-inf"
@@ -239,7 +244,7 @@ def test_alignment_stops_at_the_neighbour_corridor() -> None:
         _seat_one_station(graph, section_id, 450.0)
     _level_column_anchor_edges(graph)
     lower = graph.sections["lower"]
-    assert lower.bbox_x == 330.0 + MIN_INTER_SECTION_GAP
+    assert lower.bbox_x == 330.0 + min_inter_section_gap()
     assert lower.bbox_x + lower.bbox_w == 500.0
 
 

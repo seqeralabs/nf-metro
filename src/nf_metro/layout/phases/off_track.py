@@ -13,7 +13,6 @@ from nf_metro.layout.constants import (
     ICON_CAPTION_GAP,
     ICON_HALF_HEIGHT,
     LABEL_BBOX_MARGIN,
-    MIN_STRAIGHT_EDGE,
     OFF_TRACK_OUTPUT_TAIL,
     OFF_TRACK_TRUNK_CLEARANCE_MARGIN,
     SAME_COORD_TOLERANCE,
@@ -31,6 +30,7 @@ from nf_metro.layout.pass_metrics import (
     active_metrics,
     icon_half_height_approx,
     icon_width_approx,
+    min_straight_edge,
 )
 from nf_metro.layout.phases._common import (
     _content_station_ids,
@@ -213,7 +213,7 @@ def _off_track_output_lead(
     at the settled, label-side-known geometry -- the base lead cannot anticipate
     an upward output's label side, so the loop grows this once it knows.
     """
-    lead = MIN_STRAIGHT_EDGE
+    lead = min_straight_edge()
     if is_downward and producer.label.strip():
         lead = max(lead, label_text_width(producer.label) / 2 + LABEL_BBOX_MARGIN)
     return lead + extra
@@ -1063,7 +1063,7 @@ def _layer_gap_for(
     routing_clearance = (
         fj_label_half
         + active_metrics().diagonal_run
-        + MIN_STRAIGHT_EDGE
+        + min_straight_edge()
         - x_spacing
         + 1.0
     )

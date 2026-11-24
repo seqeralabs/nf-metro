@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
+)
+from nf_metro.layout.pass_metrics import (
+    min_corridor_y_overlap,
 )
 from nf_metro.layout.routing.normalize import (
     _corridor_bundles,
@@ -77,7 +79,7 @@ def test_legs_meeting_only_across_an_elbow_stay_apart() -> None:
     first = _run(0.0)
     second = _run(
         BUNDLE_TO_BUNDLE_CLEARANCE - OFFSET_STEP,
-        (100.0 - MIN_CORRIDOR_Y_OVERLAP, 200.0),
+        (100.0 - min_corridor_y_overlap(), 200.0),
     )
     assert not _legs_co_travel(first, second, OFFSET_STEP)
     assert [

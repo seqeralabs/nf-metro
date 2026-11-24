@@ -15,23 +15,42 @@ settlement, validators) binds the recorded metrics through
 The metrics are ambient for the duration of a pass rather than a parameter
 because the readers are geometry helpers taking a ``Station`` or a bare
 coordinate, far from any caller holding the ``MetroGraph``.
+
+The corner radius is one of them (:func:`active_curve_radius`), and so is
+every clearance that exists to make room for a corner.  Geometry follows the
+metrics the graph was *laid out* with: drawn in a theme with a different line
+width, a map keeps its laid-out radius, so the drawn ratio to the line differs.
 """
 
 from __future__ import annotations
 
 __all__ = [
     "LayoutMetrics",
+    "active_curve_radius",
     "active_font_scale",
     "active_metrics",
     "active_stroke_scale",
+    "bypass_clearance",
     "canvas_edge_clearance",
     "diagonal_label_offset",
+    "exit_corridor_icon_clearance",
     "graph_layout_context",
+    "graph_radius_context",
     "icon_half_height_approx",
     "icon_width_approx",
+    "inter_row_edge_clearance",
+    "inter_row_header_clearance",
     "label_font_size_approx",
     "label_height_approx",
+    "merge_gap_min",
+    "merge_route_margin",
     "metrics_context",
+    "min_corridor_y_overlap",
+    "min_inter_section_gap",
+    "min_station_flat_length",
+    "min_straight_edge",
+    "perp_port_edge_clearance",
+    "row_band_slack",
     "station_radius_approx",
     "station_stroke_approx",
 ]
@@ -41,20 +60,26 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Iterator, NamedTuple
 
 from nf_metro.layout.constants import (
+    CURVE_RADIUS,
     DEFAULT_LINE_WIDTH,
     DIAGONAL_LABEL_OFFSET,
     DIAGONAL_RUN,
     DIRECTIONAL_MARKER_HALF_EXTENT,
     FONT_HEIGHT,
     ICON_HALF_HEIGHT,
+    INTER_ROW_EDGE_CLEARANCE,
     LABEL_FONT_SIZE,
     LABEL_OFFSET,
+    MIN_STATION_FLAT_LENGTH,
+    MIN_STRAIGHT_EDGE,
+    SECTION_HEADER_PROTRUSION,
     SECTION_X_PADDING,
     SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
     STATION_STROKE_APPROX,
     TERMINUS_WIDTH,
     WIDEST_THEME_LINE_WIDTH,
+    Y_SPACING,
 )
 
 if TYPE_CHECKING:
@@ -83,6 +108,7 @@ class LayoutMetrics(NamedTuple):
     label_offset: float = LABEL_OFFSET
     section_x_padding: float = SECTION_X_PADDING
     section_y_padding: float = SECTION_Y_PADDING
+    curve_radius_ratio: float | None = None
 
     @classmethod
     def of(cls, graph: MetroGraph, theme: Theme) -> LayoutMetrics:
@@ -110,6 +136,7 @@ class LayoutMetrics(NamedTuple):
             label_offset=option("label_offset", defaults.label_offset),
             section_x_padding=option("section_x_padding", defaults.section_x_padding),
             section_y_padding=option("section_y_padding", defaults.section_y_padding),
+            curve_radius_ratio=graph.curve_radius_ratio,
         )
 
 
@@ -150,6 +177,25 @@ def graph_layout_context(graph: MetroGraph) -> AbstractContextManager[None]:
 
         metrics = LayoutMetrics.of(graph, resolve_theme(graph))
     return metrics_context(metrics)
+
+
+def graph_radius_context(graph: MetroGraph) -> AbstractContextManager[None]:
+    """Bind only the metrics that size *graph*'s corner radius.
+
+    For a router entered outside any bound pass (a validator, a test): the
+    radius has to be the one the graph was laid out with, while any other
+    metric a caller has bound stays in force.
+    """
+    metrics = graph.layout_metrics
+    if metrics is None:
+        from nf_metro.themes import resolve_theme
+
+        metrics = LayoutMetrics.of(graph, resolve_theme(graph))
+    return metrics_context(
+        curve_radius_ratio=metrics.curve_radius_ratio,  # type: ignore[arg-type]
+        line_width=metrics.line_width,
+        stroke_scale=metrics.stroke_scale,
+    )
 
 
 def active_font_scale() -> float:
@@ -230,3 +276,144 @@ def canvas_edge_clearance() -> float:
 def diagonal_label_offset() -> float:
     """Extra drop for an angled label, kept in proportion to the label offset."""
     return active_metrics().label_offset * DIAGONAL_LABEL_OFFSET / LABEL_OFFSET
+
+
+def active_curve_radius() -> float:
+    """Centreline radius a route turns a corner with, in the current pass.
+
+    ``curve_radius_ratio`` states it as a multiple of the theme's line width;
+    unset, the engine's base :data:`~nf_metro.layout.constants.CURVE_RADIUS`
+    applies.  ``stroke_scale`` scales either, as it scales the line.
+    """
+    metrics = active_metrics()
+    if metrics.curve_radius_ratio is None:
+        return CURVE_RADIUS * metrics.stroke_scale
+    return metrics.curve_radius_ratio * metrics.line_width * metrics.stroke_scale
+
+
+def min_corridor_y_overlap() -> float:
+    """Minimum overlap for two gap channels to share one corridor.
+
+    Channels in the same inter-section gap and direction are grouped into a
+    concentric corridor only when their spans overlap by more than this.  Two
+    channels overlapping by less are not running parallel: they are stacked
+    segments meeting at a single elbow, their turning corners within one
+    corner zone of each other, and packing them into one ``OFFSET_STEP``
+    corridor makes those opposing elbows graze.  Twice the corner radius: an
+    overlap that small lies wholly inside the two corners' rounding zones.
+    """
+    return 2 * active_curve_radius()
+
+
+def perp_port_edge_clearance() -> float:
+    """Room a port keeps from the two bbox edges it is *not* anchored to.
+
+    A port is pinned to one edge and free along its other axis.  Flush against
+    a second edge, its run is drawn along the box border and the two read as
+    one stroke; it also blocks the section header's above-left position.  One
+    corner radius is the shortest separation that still reads as a route
+    inside the box rather than on its edge.
+    """
+    return active_curve_radius()
+
+
+def exit_corridor_icon_clearance() -> float:
+    """Gap a flow-axis exit corridor keeps beyond a terminus icon hanging into
+    the exit row of a vertical-flow (TB/BT) section: one corner radius, so the
+    route turning onto the corridor does not graze the icon."""
+    return active_curve_radius()
+
+
+def merge_route_margin() -> float:
+    """Distance between a section bbox edge and a merge branch or trunk
+    vertical in the inter-section gap: room for a corner each side."""
+    return 2 * active_curve_radius()
+
+
+def merge_gap_min() -> float:
+    """Minimum inter-section gap for a column pair with merge routing.
+
+    A :func:`merge_route_margin` from each section edge, and one corner radius
+    between the branch descent and the trunk ascent.
+    """
+    return 2 * merge_route_margin() + active_curve_radius()
+
+
+def min_inter_section_gap() -> float:
+    """Minimum physical gap between adjacent section bboxes.
+
+    Puts the gap midpoint two corner radii from each section edge, room for a
+    bypass corner each side.  Past a radius of a quarter of
+    :data:`~nf_metro.layout.constants.SECTION_X_GAP` this floor, not the
+    configured gap, sets the column spacing.
+    """
+    return 4 * active_curve_radius()
+
+
+def min_station_flat_length() -> float:
+    """Minimum polyline run reaching a visible station's X along its track.
+
+    A corner consumes one radius of the run, so the run must exceed the radius
+    for a visible flat to be drawn through the marker.  The base length holds
+    that at the base radius; past it, two radii keep at least one radius of
+    flat.
+    """
+    return max(MIN_STATION_FLAT_LENGTH, 2 * active_curve_radius())
+
+
+def min_straight_edge() -> float:
+    """Minimum straight track at a route end that is not a port.
+
+    A corner off that end takes its radius out of the track, so the track is
+    never shorter than one radius.
+    """
+    return max(MIN_STRAIGHT_EDGE, active_curve_radius())
+
+
+def inter_row_edge_clearance(radius: float | None = None) -> float:
+    """Minimum distance between an inter-row channel and the box edge it runs
+    beneath, at *radius* (the active one when omitted).
+
+    :data:`~nf_metro.layout.constants.INTER_ROW_EDGE_CLEARANCE` is the visual
+    floor; the channel's two corners off and back onto it each take a radius,
+    so a large radius widens it.
+    """
+    if radius is None:
+        radius = active_curve_radius()
+    return max(INTER_ROW_EDGE_CLEARANCE, 2 * radius)
+
+
+def bypass_clearance() -> float:
+    """Clearance below the lowest intervening section for a bypass channel.
+
+    A bypass is a horizontal run beneath a section's box edge, the relationship
+    :func:`inter_row_edge_clearance` states, and the reservation ledger insets
+    every row-gap corridor by that same margin.  A narrower margin here would
+    seat a bypass inside the band its own reservation allocates it.
+    """
+    return inter_row_edge_clearance()
+
+
+def row_band_slack() -> float:
+    """Slack a same-row inter-section route may extend past the row band.
+
+    A same-row wrap routes below the row's tallest section through a bypass
+    channel :func:`bypass_clearance` below the band bottom, stacks the bundle's
+    nest offsets on it, and adds up to one ``Y_SPACING`` for the diagonal
+    approach.  The slack admits that excursion while rejecting a route that
+    dips a full row down.
+    """
+    return bypass_clearance() + Y_SPACING
+
+
+def inter_row_header_clearance(radius: float | None = None) -> float:
+    """Distance from a section's bbox top to an inter-row channel above it, at
+    *radius* (the active one when omitted).
+
+    A channel approaching a section from above clears the header badge (which
+    protrudes ``SECTION_HEADER_PROTRUSION`` above ``bbox_y``) by
+    :func:`inter_row_edge_clearance`, the margin the source side keeps from
+    its bbox bottom.  Section placement reserves this band and routing centres
+    within it, so the one definition keeps the two in lockstep.
+    """
+    return SECTION_HEADER_PROTRUSION + inter_row_edge_clearance(radius)

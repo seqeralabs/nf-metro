@@ -78,6 +78,12 @@ history.
 - Themes can set station and section shapes: tab-and-ring station glyphs in
   multiples of the line width, section outline width, dash and corners,
   number badges, title case and tracking, and a legend frame.
+- `curve_radius_ratio` (#2190) sets the corner radius as a multiple of the
+  theme's line width, measured at the line centre, as a `%%metro` directive,
+  a `--curve-radius-ratio` flag or a theme's `layout:` block. The
+  `london-tube` theme sets 3, so its corners bend at three line widths (12 px
+  on its 4 px lines). Every clearance that makes room for a corner grows with
+  the radius, so any positive ratio lays out cleanly.
 - `terminus_glyph` theme setting for a line end shared by several lines:
   `nub` (the default square box), `bar` (a track-weight buffer-stop bar
   across the bundle) or `ring`.
@@ -133,6 +139,11 @@ history.
 
 ### Changed
 
+- `stroke_scale` scales the corner radius along with the line, so a coarsened
+  map keeps its proportions (`stroke_scale: 1.6` bends at 16 px instead of
+  10 px).
+- A merge feeder leaving the same column as its merge trunk, on the same line,
+  descends in the trunk's own channel rather than a few pixels beside it.
 - Parallel lines turning together through any angle, not only 90 degrees,
   now turn about one shared centre, and rounded corners draw as circular arcs
   (cubic Bézier circle approximations) where they were quadratic curves. A

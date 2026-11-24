@@ -12,14 +12,16 @@ from typing import TYPE_CHECKING, TypeVar
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
 )
 from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
     measured_distance,
     spans_share_corridor,
+)
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    min_corridor_y_overlap,
 )
 from nf_metro.layout.route_plan import (
     ConvergenceDisposition,
@@ -1076,7 +1078,9 @@ def _seat_channel(channel: _VChannel, coordinate: float) -> None:
         if offset is not None and base_radius is not None:
             return offset, base_radius
         reference = (
-            radii[radius_index] if 0 <= radius_index < len(radii) else CURVE_RADIUS
+            radii[radius_index]
+            if 0 <= radius_index < len(radii)
+            else active_curve_radius()
         )
         return 0.0, reference
 
@@ -1275,7 +1279,7 @@ def _claim_clearance(
     if same_line and _claim_source_compatible(item, claim):
         return 0.0
     overlap = min(channel.y_hi, claim.y_hi) - max(channel.y_lo, claim.y_lo)
-    if overlap <= MIN_CORRIDOR_Y_OVERLAP:
+    if overlap <= min_corridor_y_overlap():
         return 0.0
     return cotravelling_lane_clearance(
         same_line=same_line,
@@ -1513,7 +1517,7 @@ def _carry_seated_run(
     the re-derivation anchors on, with no further displacement to apply.
     """
     radii = route.curve_radii
-    reference_in = reference_out = CURVE_RADIUS
+    reference_in = reference_out = active_curve_radius()
     if radii is not None:
         if 0 <= rank - 1 < len(radii):
             reference_in = radii[rank - 1]

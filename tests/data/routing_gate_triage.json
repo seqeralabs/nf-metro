@@ -367,11 +367,11 @@
   "note": "The shared-terminal convergence declines ownership when seating its carrier would strand the carrier's own exit turn (issue #1949). tests/fixtures/topologies/convergence_shared_terminal_exit_turn.mmd takes the decline arm, but the gate sweep globs tests/fixtures/ non-recursively, so the fixture under its topologies/ subdirectory is not evaluated here; the render-diff and the dedicated regression tests own it instead.",
   "status": "needs-review"
  },
- "convergences.py::if any(::#3": {
+ "convergences.py::if any(::#4": {
   "note": "_packed_lane's decline arm: packing a run onto the pitch of its nearest bundle neighbour would seat it inside a *second* neighbour's pitch. Reachable -- 3-lane bundles exist in the corpus (_packed_lane sees len(neighbours)==2 on examples/guide/03b_fan_in_merge.mmd) -- but no fixture makes the candidate breach the far lane. Wants a fixture.",
   "status": "needs-review"
  },
- "convergences.py::if any(::#6": {
+ "convergences.py::if any(::#7": {
   "note": "Reached by the corpus at 897747b0 and no longer: the branch's later commits (908637eb..04209e3d) changed which paths fire, so this arm lost its last covering fixture rather than becoming unreachable. Left un-exercised deliberately -- the render corpus is frozen for a measurement against main, so no fixture was authored.",
   "status": "needs-review"
  },

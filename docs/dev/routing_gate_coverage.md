@@ -255,7 +255,7 @@ Gates with an un-exercised arm:
 | 2720 | `if forked:` | `->L2721` |  |
 | 2721 | `if abs(flank_coordinate - landing_coordinate) <= COORD_TOLERANCE:` | `->L2722`, `->L2723` |  |
 | 2725 | `if abs(endpoint - flank_coordinate) <= clearance:` | `->L2726` |  |
-| 2749 | `if forked:` | `->L2750`, `->L2751` | **needs-review** -- _landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below MERGE_GAP_MIN carrying a chained convergence. |
+| 2749 | `if forked:` | `->L2750`, `->L2751` | **needs-review** -- _landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below merge_gap_min() carrying a chained convergence. |
 | 2824 | `if endpoint is None:` | `->L2825` | **defensive** -- _flank_lane needs the endpoint its flank turns onto to price the runway. ConvergenceTrunkAxis states source and target endpoint coordinates together or not at all, and every construction site in this module passes both, so the arm guards the Optional rather than a shape the planner builds. |
 | 2835 | `if coordinate is None:` | `->L2836` |  |
 | 2848 | `if reseated is not None:` | `->L2849`, `->L2852` |  |
@@ -686,7 +686,7 @@ Gates with an un-exercised arm:
 | 1041 | `if bounds.band is not None and not bounds.band.lo <= candidate <= bounds.band.hi:` | `->L1042` | **needs-review** -- _candidate_clears_runway's band rejection, unreachable while `if band is not None:::#1` never populates a band on this path. Reachable. |
 | 1181 | `if abs(channel.x - target) <= COORD_TOLERANCE:` | `->L1183` | **needs-review** -- _align_same_line_channels' re-seat arm. Its one fixture (genomeassembly_organellar) still reaches the gate but now finds the channel already on its carrier's claim coordinate, so the reseat is skipped. Bisecting the range shows 0f58d60c -- ranking member channels over a gap's whole population -- is what makes the claim and the channel coincide on arrival, not the bundle-pitch packing. Reachable; the frozen render corpus means no fixture was authored. |
 | 1206 | `if coordinate is not None:` | `->L1161`, `->L1207` |  |
-| 1278 | `if overlap <= MIN_CORRIDOR_Y_OVERLAP:` | `->L1279` |  |
+| 1278 | `if overlap <= min_corridor_y_overlap():` | `->L1279` |  |
 | 1372 | `if item.candidate.route.line_id in claim.line_ids and (` | `->L1375` | **needs-review** -- feasible()'s same-line-carrier clause, which forbids a candidate delta that would split a carrier the bundle already shares with a claim. No fixture reaches the feasibility search with a same-line source-compatible claim in range: _align_same_line_channels seats such a member on its claim before the bundle allocation runs. Reachable, wants a fixture. |
 | 1375 | `if abs(coordinate - claim.coordinate) > COORD_TOLERANCE:` | `->L1376`, `->L1377` | **needs-review** -- The rejection inside feasible()'s same-line-carrier clause. Unreached for the same reason as its enclosing gate `if item.candidate.route.line_id in claim.line_ids and (:::#1`. Reachable. |
 | 1517 | `if radii is not None:` | `->L1522` |  |

@@ -27,9 +27,6 @@ from __future__ import annotations
 __all__ = ["compute_rail_layout"]
 
 from nf_metro.layout.constants import (
-    INTER_ROW_EDGE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
-    MIN_STRAIGHT_EDGE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     RAIL_ABOVE_LABEL_TOP_PAD,
     SECTION_HEADER_PROTRUSION,
@@ -39,9 +36,15 @@ from nf_metro.layout.constants import (
     Y_OFFSET,
     graph_offset_step,
 )
-from nf_metro.layout.pass_metrics import active_metrics
+from nf_metro.layout.pass_metrics import (
+    active_metrics,
+    inter_row_edge_clearance,
+    inter_row_header_clearance,
+    min_straight_edge,
+)
 from nf_metro.parser.model import MetroGraph, PortSide, Section
 from nf_metro.text_metrics import TextRole
+
 
 # The straight runs a blank terminus's fan-out/fan-in needs besides its
 # 45-degree diagonal to ease between the convergence point and the rails
@@ -49,7 +52,8 @@ from nf_metro.text_metrics import TextRole
 # diagonal they are reserved as the gap between a fanning terminus and its
 # neighbour column, so the S-curves keep their shape no matter how tight the
 # shared (diagonal-label) column pitch is.
-_TERMINUS_STUBS = 3.0 * MIN_STRAIGHT_EDGE
+def _terminus_stubs() -> float:
+    return 3.0 * min_straight_edge()
 
 
 def _section_lines_in_order(graph: MetroGraph, section: Section) -> list[str]:
@@ -149,7 +153,7 @@ def _connector_gap(
     A whole-graph rail connector from *upper* to *lower* wraps its cross leg
     through the gap between them, spread vertically over the connector's rails.
     The band must fit that spread between ``INTER_ROW_EDGE_CLEARANCE`` below the
-    upper box and ``INTER_ROW_HEADER_CLEARANCE`` above the lower box's header
+    upper box and ``inter_row_header_clearance()`` above the lower box's header
     badge.  Returns the gap that satisfies this, or ``0`` when fewer than two
     lines connect the two sections (a single track needs no extra room).
     """
@@ -168,7 +172,7 @@ def _connector_gap(
     if len(ys) < 2:
         return 0.0
     spread = max(ys) - min(ys)
-    band = INTER_ROW_EDGE_CLEARANCE + spread + INTER_ROW_HEADER_CLEARANCE
+    band = inter_row_edge_clearance() + spread + inter_row_header_clearance()
     return band - SECTION_HEADER_PROTRUSION
 
 
@@ -367,7 +371,7 @@ def _layout_section_rails(
 
     head_fan = any(_fans(sid) for sid in real_ids if layers.get(sid, 0) == 0)
     tail_fan = any(_fans(sid) for sid in real_ids if layers.get(sid, 0) == max_layer)
-    fan_room = active_metrics().diagonal_run + _TERMINUS_STUBS
+    fan_room = active_metrics().diagonal_run + _terminus_stubs()
     head_extra = max(0.0, fan_room - x_spacing) if head_fan else 0.0
     tail_extra = max(0.0, fan_room - x_spacing) if tail_fan else 0.0
 

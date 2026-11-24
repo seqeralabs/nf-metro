@@ -17,10 +17,12 @@ from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
     DIAGONAL_RUN,
-    INTER_ROW_HEADER_CLEARANCE,
     SAME_Y_TOLERANCE,
 )
 from nf_metro.layout.fan_ordering import fanout_divergence_peel_order
+from nf_metro.layout.pass_metrics import (
+    inter_row_header_clearance,
+)
 from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.context import _build_routing_context, _RoutingCtx
 from nf_metro.layout.routing.corners import outer_lane_radius
@@ -286,7 +288,7 @@ def test_topmost_row_traverse_rides_over_the_header_headroom(
     ctx = _context(stacked)
     _gap_top, gap_bottom = _gap_above_target_y(stacked, 0)
     assert _gap_above_channel_y(ctx, 0) == (
-        gap_bottom - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
+        gap_bottom - inter_row_header_clearance() - ctx.curve_radius
     )
 
 
@@ -295,7 +297,7 @@ def test_traverse_below_another_row_centres_in_the_gap(stacked: MetroGraph) -> N
     gap_top, gap_bottom = _gap_above_target_y(stacked, 1)
     channel = _gap_above_channel_y(ctx, 1)
     assert gap_top < channel < gap_bottom
-    assert channel != gap_bottom - INTER_ROW_HEADER_CLEARANCE - ctx.curve_radius
+    assert channel != gap_bottom - inter_row_header_clearance() - ctx.curve_radius
 
 
 def _peel_order(text: str) -> list[str] | None:

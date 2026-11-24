@@ -44,12 +44,12 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 
 `--theme` replaces the map's `%%metro style:` entirely, so `--theme default` renders a map in the base theme whatever its own style says.
 
-| Theme         | Look                                                                                                                                            |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`     | The base every stack starts from: bold labels, filled section boxes with number badges, white station pills.                                    |
-| `seqera`      | Seqera brand colors and Inter type.                                                                                                             |
-| `london-tube` | A schematic transit look: track-weight tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, unboxed sections. |
-| `transparent` | One palette on a transparent canvas, for embedding. Looks the same in either mode.                                                              |
+| Theme         | Look                                                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default`     | The base every stack starts from: bold labels, filled section boxes with number badges, white station pills.                                                                          |
+| `seqera`      | Seqera brand colors and Inter type.                                                                                                                                                   |
+| `london-tube` | A schematic transit look: track-weight tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, corners bending at three line widths, unboxed sections. |
+| `transparent` | One palette on a transparent canvas, for embedding. Looks the same in either mode.                                                                                                    |
 
 `--mode light` or `--mode dark` picks the palette a PNG bakes.
 
@@ -132,6 +132,8 @@ So the three styles are: one standard-size ring (raise `ring_max_lines`), a brid
 Lines on separate tracks, as at a cross-track `%%metro interchange:` or a rail-mode station, get separate rings joined by a dumbbell link.
 `london-tube` draws a white capsule with a heavy black outline (a light outline round a dark capsule in dark mode) and a `bar` at every line end.
 The Line Diagram Standard's own idiom is rings, which a theme extending `london-tube` gets with `interchange_glyph: ring`: one ring for two lines, and a chain from three up.
+
+Corner radius is a layout option, `curve_radius_ratio`: the radius at the line centre as a multiple of the line width. `london-tube` sets `layout: {curve_radius_ratio: 3}`, so its 4 px lines bend at 12 px. Unset, corners bend at 10 px, and `stroke_scale` scales the radius either way.
 
 A line end shared by several lines follows `terminus_glyph` instead:
 
@@ -342,6 +344,6 @@ These colors also emit a CSS custom property, so a page that inlines the SVG can
 
 ### Layout options
 
-A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `section_x_padding`, `section_y_padding`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `label_offset`, `diagonal_run`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`, `directional`. A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
+A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `section_x_padding`, `section_y_padding`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `label_offset`, `diagonal_run`, `curve_radius_ratio`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`, `directional`. A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
 
 {/* theme-field-reference:end */}

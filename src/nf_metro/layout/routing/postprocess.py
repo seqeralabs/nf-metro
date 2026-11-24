@@ -10,10 +10,7 @@ from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     LABEL_BBOX_MARGIN,
-    MIN_STATION_FLAT_LENGTH,
-    MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     STATION_MOVE_TOLERANCE,
 )
@@ -23,7 +20,12 @@ from nf_metro.layout.geometry import (
     quantize_coord,
     segment_intersects_bbox,
 )
-from nf_metro.layout.pass_metrics import active_metrics
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    active_metrics,
+    min_station_flat_length,
+    min_straight_edge,
+)
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -196,10 +198,14 @@ def _stub_minimums(rp: RoutedPath) -> tuple[float, float]:
     seat V on the curve apex.
     """
     src_min = (
-        MIN_STATION_FLAT_LENGTH if is_bypass_v(rp.edge.source) else MIN_STRAIGHT_EDGE
+        min_station_flat_length()
+        if is_bypass_v(rp.edge.source)
+        else min_straight_edge()
     )
     tgt_min = (
-        MIN_STATION_FLAT_LENGTH if is_bypass_v(rp.edge.target) else MIN_STRAIGHT_EDGE
+        min_station_flat_length()
+        if is_bypass_v(rp.edge.target)
+        else min_straight_edge()
     )
     return src_min, tgt_min
 
@@ -570,8 +576,8 @@ def _far_stub_floor(graph: MetroGraph, node_id: str) -> float:
     """
     st = graph.stations.get(node_id)
     if st is not None and st.is_port:
-        return CURVE_RADIUS + MIN_STRAIGHT_PORT
-    return MIN_STRAIGHT_EDGE
+        return active_curve_radius() + MIN_STRAIGHT_PORT
+    return min_straight_edge()
 
 
 def _clamp_centering_shift(
@@ -1029,13 +1035,13 @@ def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) ->
                 far_target = min(
                     v_target + active_metrics().diagonal_run, far_end_x - far_min
                 )
-                v_target = min(v_target, far_target - CURVE_RADIUS)
+                v_target = min(v_target, far_target - active_curve_radius())
             else:
                 v_target = bx0 - LABEL_BBOX_MARGIN
                 far_target = max(
                     v_target - active_metrics().diagonal_run, far_end_x + far_min
                 )
-                v_target = max(v_target, far_target + CURVE_RADIUS)
+                v_target = max(v_target, far_target + active_curve_radius())
             # ``apply_route_offsets`` shifts only Y, so these X targets apply
             # directly to the raw waypoints.
             pts = list(r.points)

@@ -13,8 +13,10 @@ from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
+)
+from nf_metro.layout.pass_metrics import (
+    min_corridor_y_overlap,
 )
 
 if TYPE_CHECKING:
@@ -792,7 +794,9 @@ def spans_share_corridor(
     free to spread across the gap; only a substantial overlap makes them
     neighbours that have to be separated from each other.
     """
-    return min(first_hi, second_hi) - max(first_lo, second_lo) > MIN_CORRIDOR_Y_OVERLAP
+    return (
+        min(first_hi, second_hi) - max(first_lo, second_lo) > min_corridor_y_overlap()
+    )
 
 
 def cotravelling_lanes_fuse(

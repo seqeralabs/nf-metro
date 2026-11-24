@@ -10,7 +10,6 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, NamedTuple
 
 from nf_metro.layout.constants import (
-    BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     JUNCTION_MARGIN,
     SAME_Y_TOLERANCE,
@@ -22,6 +21,9 @@ from nf_metro.layout.geometry import (
     lane_delta,
     section_lane_sign,
     station_lane_coord,
+)
+from nf_metro.layout.pass_metrics import (
+    bypass_clearance,
 )
 from nf_metro.layout.route_topology import (
     convergence_junction_entry_ports,
@@ -338,7 +340,7 @@ def _classify_merge_edges(
                     graph,
                     pred_col,
                     tgt_col,
-                    BYPASS_CLEARANCE,
+                    bypass_clearance(),
                     src_row=pred_row,
                     cross_row=cross_row,
                     tgt_row=tgt_row,
@@ -1499,7 +1501,7 @@ def _fan_bypass_band(
             graph,
             src_col,
             tgt_col,
-            BYPASS_CLEARANCE,
+            bypass_clearance(),
             src_row=src_row,
             cross_row=tgt_row is not None and tgt_row != src_row,
             tgt_row=tgt_row,

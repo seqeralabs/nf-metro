@@ -227,6 +227,12 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         help="Length of the 45-degree transition between two tracks.",
     ),
     LayoutOption(
+        name="curve_radius_ratio",
+        kind="float",
+        sign="positive",
+        help="Corner radius at the line centre, in multiples of the line width.",
+    ),
+    LayoutOption(
         name="font_scale",
         kind="float",
         sign="positive",

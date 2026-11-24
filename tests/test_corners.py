@@ -81,25 +81,49 @@ class TestCornerRadius:
     """Test the unified corner radius primitive."""
 
     def test_outside_uses_raw_offset(self):
-        assert corner_radius(3.0, 6.0, outside=True) == CURVE_RADIUS + 3.0
+        assert (
+            corner_radius(3.0, 6.0, outside=True, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS + 3.0
+        )
 
     def test_inside_uses_reversed_offset(self):
-        assert corner_radius(3.0, 6.0, outside=False) == CURVE_RADIUS + 3.0
+        assert (
+            corner_radius(3.0, 6.0, outside=False, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS + 3.0
+        )
         # Middle offset reverses to itself
 
     def test_inside_endpoints(self):
         # offset=0 (inner edge) reversed to max -> largest radius
-        assert corner_radius(0.0, 6.0, outside=False) == CURVE_RADIUS + 6.0
+        assert (
+            corner_radius(0.0, 6.0, outside=False, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS + 6.0
+        )
         # offset=max reversed to 0 -> base radius
-        assert corner_radius(6.0, 6.0, outside=False) == CURVE_RADIUS
+        assert (
+            corner_radius(6.0, 6.0, outside=False, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS
+        )
 
     def test_outside_endpoints(self):
-        assert corner_radius(0.0, 6.0, outside=True) == CURVE_RADIUS
-        assert corner_radius(6.0, 6.0, outside=True) == CURVE_RADIUS + 6.0
+        assert (
+            corner_radius(0.0, 6.0, outside=True, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS
+        )
+        assert (
+            corner_radius(6.0, 6.0, outside=True, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS + 6.0
+        )
 
     def test_single_line(self):
-        assert corner_radius(0.0, 0.0, outside=True) == CURVE_RADIUS
-        assert corner_radius(0.0, 0.0, outside=False) == CURVE_RADIUS
+        assert (
+            corner_radius(0.0, 0.0, outside=True, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS
+        )
+        assert (
+            corner_radius(0.0, 0.0, outside=False, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS
+        )
 
     def test_custom_base(self):
         assert corner_radius(3.0, 6.0, outside=True, base_radius=5.0) == 8.0
@@ -113,11 +137,19 @@ class TestCornerRadius:
             off = (n - 1 - i) * OFFSET_STEP
             max_off = (n - 1) * OFFSET_STEP
             if vertical is Direction.D:
-                assert corner_radius(off, max_off, outside=True) == pytest.approx(r1)
-                assert corner_radius(off, max_off, outside=False) == pytest.approx(r2)
+                assert corner_radius(
+                    off, max_off, outside=True, base_radius=CURVE_RADIUS
+                ) == pytest.approx(r1)
+                assert corner_radius(
+                    off, max_off, outside=False, base_radius=CURVE_RADIUS
+                ) == pytest.approx(r2)
             else:
-                assert corner_radius(off, max_off, outside=False) == pytest.approx(r1)
-                assert corner_radius(off, max_off, outside=True) == pytest.approx(r2)
+                assert corner_radius(
+                    off, max_off, outside=False, base_radius=CURVE_RADIUS
+                ) == pytest.approx(r1)
+                assert corner_radius(
+                    off, max_off, outside=True, base_radius=CURVE_RADIUS
+                ) == pytest.approx(r2)
 
 
 class TestReferenceAnchoredRadius:
@@ -129,13 +161,19 @@ class TestReferenceAnchoredRadius:
     """
 
     def test_reference_line_is_base(self):
-        assert reference_anchored_radius(0.0) == CURVE_RADIUS
+        assert reference_anchored_radius(0.0, base_radius=CURVE_RADIUS) == CURVE_RADIUS
 
     def test_outside_adds_offset(self):
-        assert reference_anchored_radius(3.0) == CURVE_RADIUS + 3.0
+        assert (
+            reference_anchored_radius(3.0, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS + 3.0
+        )
 
     def test_inside_goes_below_base(self):
-        assert reference_anchored_radius(-3.0) == CURVE_RADIUS - 3.0
+        assert (
+            reference_anchored_radius(-3.0, base_radius=CURVE_RADIUS)
+            == CURVE_RADIUS - 3.0
+        )
 
     def test_custom_base(self):
         assert reference_anchored_radius(-2.0, base_radius=5.0) == 3.0
@@ -480,7 +518,12 @@ class TestConcentricCornerRadius:
 
     def test_reference_line_is_base(self):
         for turn_in, turn_out in ALL_TURNS:
-            assert concentric_corner_radius(turn_in, turn_out, 0.0) == CURVE_RADIUS
+            assert (
+                concentric_corner_radius(
+                    turn_in, turn_out, 0.0, base_radius=CURVE_RADIUS
+                )
+                == CURVE_RADIUS
+            )
 
     def test_arcs_are_concentric_in_every_orientation(self):
         # The concentric fan direction is turn-specific: translating each line's

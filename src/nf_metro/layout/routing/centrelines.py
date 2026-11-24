@@ -17,11 +17,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from nf_metro.layout.constants import COORD_TOLERANCE, MIN_STRAIGHT_EDGE
+from nf_metro.layout.constants import (
+    COORD_TOLERANCE,
+)
 from nf_metro.layout.fan_geometry import symmetric_lane_offsets
 from nf_metro.layout.geometry import (
     axis_point,
     axis_split,
+)
+from nf_metro.layout.pass_metrics import (
+    min_straight_edge,
 )
 from nf_metro.layout.routing.bundle import (
     build_concentric_bundle,
@@ -471,7 +476,7 @@ def _lane_change_step(
     run = abs(p_tgt[0] - p_src[0])
     if (
         diagonal_run <= COORD_TOLERANCE
-        or run + COORD_TOLERANCE < 2 * MIN_STRAIGHT_EDGE + diagonal_run
+        or run + COORD_TOLERANCE < 2 * min_straight_edge() + diagonal_run
         or edge.target not in ctx.graph.ports
         or run_direction is None
     ):
@@ -483,8 +488,8 @@ def _lane_change_step(
         source_offset=source_offset,
         target_offset=target_offset,
         run_direction=run_direction,
-        source_runway=MIN_STRAIGHT_EDGE,
-        target_runway=MIN_STRAIGHT_EDGE,
+        source_runway=min_straight_edge(),
+        target_runway=min_straight_edge(),
         diagonal_run=diagonal_run,
         place_at_source=_place_hand_off_at_source(
             ctx, edge, p_src, p_tgt, run_direction, source_offset, target_offset

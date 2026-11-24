@@ -12,7 +12,6 @@ from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     OFFSET_STEP,
     SAME_COORD_TOLERANCE,
@@ -23,6 +22,9 @@ from nf_metro.layout.geometry import (
     measured_distance,
     point_to_polyline_distance,
     spans_share_corridor,
+)
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
 )
 from nf_metro.layout.route_plan import (
     ConvergenceConflict,
@@ -585,7 +587,7 @@ def _landing_from_trial(
 
 
 def _seat_port_approaches_on_trunk_flank(
-    trunk: RoutedPath, routes: list[RoutedPath], ctx: _RoutingCtx
+    trunk: RoutedPath | None, routes: list[RoutedPath], ctx: _RoutingCtx
 ) -> None:
     """Fuse feeders' final port approaches onto the trunk's target flank.
 
@@ -596,7 +598,10 @@ def _seat_port_approaches_on_trunk_flank(
     states the feeder's opening column from this trial geometry.  Seating the
     feeder here, with the same grouping and reference, makes the plan state the
     fused column.  Only the feeders move: the trunk axis has already been read
-    off its route, so a group holding the trunk fuses onto its flank.
+    off its route, so a group holding the trunk fuses onto its flank.  With
+    no trunk (a shared-terminal convergence, whose carrier is read off the
+    approaches afterwards) every group fuses onto the reference the
+    post-emission pass would pick.
     """
     from nf_metro.layout.routing.normalize import (
         _convergent_port_groups,
@@ -976,6 +981,20 @@ def _build_planned_convergence(
     else:
         for edge_key in incoming_edges:
             _bake_route(trial_routes[edge_key], ctx)
+        exit_turn_geometry = {
+            edge_key: _exit_turn_geometry(trial_routes[edge_key])
+            for edge_key in incoming_edges
+        }
+        _seat_port_approaches_on_trunk_flank(
+            None, [trial_routes[edge_key] for edge_key in incoming_edges], ctx
+        )
+        if any(
+            exit_turn_geometry[edge_key] != _exit_turn_geometry(trial_routes[edge_key])
+            for edge_key in incoming_edges
+        ):
+            raise ConvergenceOwnershipConflict(
+                "convergence alignment conflicts with an upstream exit turn"
+            )
         try:
             trunk_axis, carrier_rank = _shared_terminal_axis(
                 tuple(trial_routes[edge_key] for edge_key in incoming_edges),
@@ -1951,7 +1970,7 @@ def _bundle_pitch(first: _CotravellingRun, second: _CotravellingRun) -> float:
     return cotravelling_lane_clearance(
         same_line=first.line_ids == second.line_ids,
         counter_running=False,
-        curve_radius=CURVE_RADIUS,
+        curve_radius=active_curve_radius(),
     )
 
 
@@ -3077,7 +3096,7 @@ def _gap_channels_crowd(first: _PlanGapChannel, second: _PlanGapChannel) -> bool
         return False
     clearance = (
         cotravelling_lane_clearance(
-            same_line=False, counter_running=True, curve_radius=CURVE_RADIUS
+            same_line=False, counter_running=True, curve_radius=active_curve_radius()
         )
         if first.down is not second.down
         else OFFSET_STEP
@@ -3109,7 +3128,7 @@ def _clearance_candidates(
                 * cotravelling_lane_clearance(
                     same_line=False,
                     counter_running=obstacle.down is not base_down,
-                    curve_radius=CURVE_RADIUS,
+                    curve_radius=active_curve_radius(),
                 )
                 for obstacle in obstacles
                 for sign in (-1.0, 1.0)
@@ -4868,8 +4887,8 @@ def _seat_planned_run(
     offset_out: float,
 ) -> None:
     """Move ``route.points[rank] -> [rank + 1]`` onto the coordinate *planned* names."""
-    base_radius_in = CURVE_RADIUS
-    base_radius_out = CURVE_RADIUS
+    base_radius_in = active_curve_radius()
+    base_radius_out = active_curve_radius()
     owned_offsets = route.concentric_corner_offsets_by_segment.get(rank)
     owned_bases = route.concentric_corner_bases_by_segment.get(rank)
     if owned_offsets is not None and owned_bases is not None:
@@ -5017,6 +5036,43 @@ def _assert_landing_geometry(
             )
 
 
+def _seat_landing_runway(
+    route: RoutedPath, landing: ConvergenceLanding, graph: MetroGraph
+) -> None:
+    """Seat the run a landing turns off at the far end of its planned runway.
+
+    The runway states where the approach's cross run stands
+    (:func:`_landing_cross_segment`), and the run's corner onto the approach
+    is owned with it, so emission puts that run on the stated coordinate
+    rather than wherever the member's template drew it.
+    """
+    join = landing.join_point
+    for rank, (start, end) in enumerate(zip(route.points, route.points[1:])):
+        runway = abs(start[0] - join[0]) + abs(start[1] - join[1])
+        if (
+            runway > COORD_TOLERANCE
+            and point_to_polyline_distance(join, (start, end)) <= COORD_TOLERANCE
+        ):
+            break
+    else:
+        return
+    if rank == 0 or abs(runway - landing.minimum_runway) <= COORD_TOLERANCE:
+        return
+    along = landing.approach_axis.point_index
+    coordinate = join[along] - landing.approach_direction.sign * landing.minimum_runway
+    cross = [list(point) for point in route.points[rank - 1 : rank + 1]]
+    for point in cross:
+        point[along] = coordinate
+    _seat_planned_run(
+        route,
+        rank - 1,
+        ((cross[0][0], cross[0][1]), (cross[1][0], cross[1][1])),
+        graph,
+        0.0,
+        0.0,
+    )
+
+
 def consume_convergence_route(route: RoutedPath, ctx: _RoutingCtx) -> None:
     query = ctx.convergences
     if query is None:
@@ -5088,6 +5144,7 @@ def consume_convergence_route(route: RoutedPath, ctx: _RoutingCtx) -> None:
         if plan.primary_trunk_reason is ConvergenceTrunkReason.SHARED_TERMINAL_APPROACH:
             _bake_route(route, ctx)
             _connect_route_endpoint(route, landing.join_point)
+            _seat_landing_runway(route, landing, ctx.graph)
         assert plan.trunk_axis is not None
         lane_rank = plan.lane_order.index(route.line_id)
         lane_offset = (len(plan.lane_order) - lane_rank - 1) * ctx.offset_step
@@ -5114,6 +5171,8 @@ def consume_convergence_route(route: RoutedPath, ctx: _RoutingCtx) -> None:
             _land_feeder_on_run(route, run, ctx)
     _bake_route(route, ctx)
     _connect_route_endpoint(route, landing.join_point)
+    if plan.primary_trunk_reason is not ConvergenceTrunkReason.LONGEST_BYPASS:
+        _seat_landing_runway(route, landing, ctx.graph)
     route.convergence_owned_segment_ranks = _ordered_unique(
         (len(route.points) - 2,) + (() if opening_rank is None else (opening_rank,))
     )

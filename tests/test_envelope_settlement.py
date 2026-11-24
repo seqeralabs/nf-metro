@@ -1499,7 +1499,7 @@ SETTLED_CONVERGENCE_SYSTEMS = (
 def test_a_convergence_pair_shortfall_widens_its_column_boundary(
     path: Path, boundary: int, monkeypatch
 ) -> None:
-    monkeypatch.setattr(section_placement, "MERGE_GAP_MIN", 40.0)
+    monkeypatch.setattr(section_placement, "merge_gap_min", lambda: 40.0)
     monkeypatch.setattr(
         section_placement, "_min_gap_for_bundles", lambda *args, **kwargs: 40.0
     )

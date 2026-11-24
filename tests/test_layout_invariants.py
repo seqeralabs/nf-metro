@@ -44,7 +44,6 @@ from nf_metro.layout.constants import (
     JUNCTION_MARGIN,
     LABEL_OFFSET,
     MIN_STATION_FLAT_LENGTH,
-    ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
@@ -83,7 +82,11 @@ from nf_metro.layout.labels import (
     place_labels,
     segment_strikes_label,
 )
-from nf_metro.layout.pass_metrics import metrics_context
+from nf_metro.layout.pass_metrics import (
+    inter_row_header_clearance,
+    metrics_context,
+    row_band_slack,
+)
 from nf_metro.layout.phases._common import (
     _is_side_entered_vertical_section,
     _row_contiguous_column_groups,
@@ -6404,10 +6407,10 @@ def test_corridor_viability_requires_full_clearance_band():
     """The inter-row-gap corridor is chosen only when the gap fits its band.
 
     The corridor's leftward traverse runs in a clamp band
-    ``[gap_top + INTER_ROW_EDGE_CLEARANCE, gap_bottom - INTER_ROW_HEADER_CLEARANCE]``;
+    ``[gap_top + INTER_ROW_EDGE_CLEARANCE, gap_bottom - inter_row_header_clearance()]``;
     a bundle of ``n`` lines needs ``(n - 1) * OFFSET_STEP`` of room inside
     it.  When the gap is narrower than
-    ``INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE`` the band
+    ``INTER_ROW_EDGE_CLEARANCE + span + inter_row_header_clearance()`` the band
     inverts and every line collapses onto one Y, producing a collinear
     overlay and a route through the source section's bottom edge (#722).
     Below that threshold the feeder must fall back to the around-below
@@ -6417,7 +6420,6 @@ def test_corridor_viability_requires_full_clearance_band():
         CURVE_RADIUS,
         DIAGONAL_RUN,
         INTER_ROW_EDGE_CLEARANCE,
-        INTER_ROW_HEADER_CLEARANCE,
     )
     from nf_metro.layout.routing.common import row_bottom_edge, row_top_edge
     from nf_metro.layout.routing.context import _resolve_section_colrow
@@ -6435,7 +6437,7 @@ def test_corridor_viability_requires_full_clearance_band():
     gap_top = row_bottom_edge(graph, src_row, col=src_col)
     gap_bottom = row_top_edge(graph, src_row + 1, col=src_col, default=gap_top)
     gap = gap_bottom - gap_top
-    floor = INTER_ROW_EDGE_CLEARANCE + INTER_ROW_HEADER_CLEARANCE
+    floor = INTER_ROW_EDGE_CLEARANCE + inter_row_header_clearance()
     assert gap < floor, (
         f"fixture precondition: gap below source row is {gap:.1f}px, "
         f"expected narrower than the {floor:.0f}px floor"
@@ -9558,7 +9560,7 @@ def test_inter_section_route_y_stays_within_row_band(fixture):
 
     # Slack: a clean below-row wrap channel (bypass clearance + bundle
     # nest + diagonal corner approach), shared with the runtime band guard.
-    SLACK = ROW_BAND_SLACK
+    SLACK = row_band_slack()
 
     offenders: list[str] = []
     for r in routes:

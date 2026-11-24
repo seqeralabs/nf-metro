@@ -19,7 +19,9 @@ from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     INTER_ROW_EDGE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
+)
+from nf_metro.layout.pass_metrics import (
+    inter_row_header_clearance,
 )
 from nf_metro.layout.route_plan import build_route_plan_query
 from nf_metro.layout.route_reservations import (
@@ -216,7 +218,7 @@ def test_published_bands_are_the_reservation_clearances_at_the_boundary() -> Non
         )
         expected_hi = (
             min(graph.sections[key].bbox_y for key in below)
-            - INTER_ROW_HEADER_CLEARANCE
+            - inter_row_header_clearance()
         )
         assert band.lo == pytest.approx(expected_lo)
         assert band.hi == pytest.approx(expected_hi)
@@ -230,7 +232,7 @@ def test_row_gap_clearances_are_the_ones_the_raw_derivation_uses() -> None:
         observed.route_plan, ROW_CORRIDOR_BOUNDARY
     ):
         assert reservation.negative_side_clearance == INTER_ROW_EDGE_CLEARANCE
-        assert reservation.positive_side_clearance == INTER_ROW_HEADER_CLEARANCE
+        assert reservation.positive_side_clearance == inter_row_header_clearance()
 
 
 def test_a_reserved_column_corridor_lands_on_the_band_its_reservation_realises() -> (
