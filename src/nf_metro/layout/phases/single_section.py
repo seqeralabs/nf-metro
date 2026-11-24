@@ -40,7 +40,11 @@ from nf_metro.layout.labels import (
     label_text_width,
 )
 from nf_metro.layout.layers import assign_layers
-from nf_metro.layout.ordering import assign_tracks, peel_lane_ends
+from nf_metro.layout.ordering import (
+    assign_tracks,
+    peel_lane_ends,
+    seated_contender_helpers,
+)
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
     icon_half_height_approx,
@@ -301,6 +305,7 @@ def _layout_single_section(
     section.lane_ends, section.lane_end_exempt = peel_lane_ends(
         sub, layers, tracks, priority_lane_sign
     )
+    seated_helpers = seated_contender_helpers(sub, layers, tracks)
 
     if not layers:
         return None
@@ -428,7 +433,7 @@ def _layout_single_section(
 
     # Put each bypass V on the side its carried line is drawn, so the fork
     # from the bypassed station's feeder reaches it without crossing the trunk.
-    _align_bypass_v_to_lane_side(sub, section, graph)
+    _align_bypass_v_to_lane_side(sub, section, graph, seated_helpers)
 
     # Bypass V helpers (``__bypass_``) have no rendered marker.  Use
     # them to extend the bbox only when V sits beyond the real-station
@@ -641,7 +646,10 @@ def _seat_fan_in_branches_on_lane_side(
 
 
 def _align_bypass_v_to_lane_side(
-    sub: MetroGraph, section: Section, graph: MetroGraph
+    sub: MetroGraph,
+    section: Section,
+    graph: MetroGraph,
+    seated: frozenset[str] = frozenset(),
 ) -> None:
     """Seat a bypass V on its section's lane side of the trunk.
 
@@ -662,33 +670,15 @@ def _align_bypass_v_to_lane_side(
     sections stack lanes on Y in the same order :func:`assign_tracks` uses, so
     they never transpose.
 
-    A V on the same side of the bypassed station as the station its run
-    leaves from carries a run already seated off the trunk (as a peel
-    contender's is) rather than a priority slot, so it stays, as it would on a
-    horizontal section.
+    A V in *seated* carries a peel contender's run, which
+    :func:`assign_tracks` laid on the contender's own side of the trunk, so it
+    stays, as it would on a horizontal section.
     """
     if not lanes_run_along_x(section.direction):
         return
     bypass_vs = [v for v in sub.stations.values() if is_bypass_v(v.id)]
     if not bypass_vs:
         return
-
-    feeder: dict[str, str] = {edge.target: edge.source for edge in sub.edges}
-
-    def _run_origin(vid: str) -> Station | None:
-        sid = feeder.get(vid)
-        seen = {vid}
-        while sid is not None and is_bypass_v(sid) and sid not in seen:
-            seen.add(sid)
-            sid = feeder.get(sid)
-        return sub.stations.get(sid) if sid is not None else None
-
-    def _on_seated_run(v: Station, anchor_x: float) -> bool:
-        origin = _run_origin(v.id)
-        if origin is None:
-            return False
-        lead, side = origin.x - anchor_x, v.x - anchor_x
-        return abs(lead) > SAME_COORD_TOLERANCE and lead * side > 0.0
 
     lane_sign = _lane_sign(section, graph)
     real_xs = [
@@ -702,7 +692,7 @@ def _align_bypass_v_to_lane_side(
         full = graph.stations.get(v.id)
         bypassed_id = full.bypasses_station_id if full else None
         anchor = sub.stations.get(bypassed_id) if bypassed_id else None
-        if anchor is None or _on_seated_run(v, anchor.x):
+        if anchor is None or v.id in seated:
             continue
         side_cols = [
             x for x in real_xs if (x - anchor.x) * lane_sign > SAME_COORD_TOLERANCE

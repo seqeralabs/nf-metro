@@ -274,6 +274,25 @@ def assign_tracks(
     return tracks
 
 
+def seated_contender_helpers(
+    graph: MetroGraph, layers: dict[str, int], tracks: dict[str, float]
+) -> frozenset[str]:
+    """Bypass helpers :func:`assign_tracks` stacked on a seated contender's side.
+
+    They hold the contender's side of the trunk by construction, not a
+    line-priority slot.
+    """
+    G = build_station_digraph(graph)
+    helpers: set[str] = set()
+    for node, passed in _peel_contenders(G, graph, layers).items():
+        far_sides = _far_sides(passed, tracks)
+        if len({sign for _, sign in far_sides}) == 1 and _on_far_sides(
+            tracks[node], far_sides
+        ):
+            helpers.update(_run_joins(node, G)[1])
+    return frozenset(helpers)
+
+
 def peel_lane_ends(
     graph: MetroGraph,
     layers: dict[str, int],
