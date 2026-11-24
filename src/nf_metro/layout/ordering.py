@@ -271,9 +271,9 @@ def peel_lane_ends(
     only along the contender's own run of the line; stations the line reaches
     by its other runs are exempt (``Section.lane_end_exempt``).
     *priority_lane_sign* names which end faces which side, so without it (a
-    seam may impose the order) nothing is pinned.  A contender with no passed
-    peel off its fork's track, or whose joins do not all lie on one side of
-    it, pins nothing, and a line two contenders would pin to opposite ends is
+    seam may impose the order) nothing is pinned.  A contender not seated on
+    the far side of the peels it passes, or whose joins do not all lie on one
+    side of it, pins nothing, and a line two contenders would pin to opposite ends is
     left on its priority lane.
     """
     if priority_lane_sign is None:
@@ -707,14 +707,14 @@ def _peel_contenders(
     """Sources whose line runs past a fork's peel branch, with the peels they pass.
 
     A source contends for a peel when one of its runs strictly spans the peel's
-    layer on its way to the trunk the peel leaves (every join carries the
-    fork's primary line), it feeds none of the fork's successors (so it is not
+    layer on its way to the trunk the peel leaves (the fork's primary line is
+    every join's primary line), it feeds none of the fork's successors (so it is not
     part of the fork's fan), and it is seated on its own rather than as a
     member of a fan.  Joins, successors and peels are found through bypass
     helpers (:func:`_run_joins`), so inserting one leaves the contender as it
-    was.  Its
-    seat waits until the layer before its first join, and every passed peel
-    must be placed by then.  Returns source -> ``(fork, peel)`` pairs.
+    was.  It is placed like any other source and moves to its contender seat
+    once the layer before its first join is placed, so every passed peel must
+    be placed by then.  Returns source -> ``(fork, peel)`` pairs.
     """
     peels = [
         (fork, peel, primary)

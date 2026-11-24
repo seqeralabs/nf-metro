@@ -65,14 +65,17 @@ history.
 
 ### Fixed
 
-- A source whose line runs past a branch station on its way to a later trunk
-  station keeps that line clear of the branch when the fork has stations
-  before it on the trunk. The source sits on the far side of the
+- A source whose line runs past a branch station on its way to a later station
+  of the same trunk keeps that line clear of the branch when the fork has
+  stations before it on the trunk. The source sits on the far side of the
   trunk from the branch, in the nearest row clear of the stations in its
   column and along its run, and its line joins the bundle on the outer lane
   of that side instead of crossing the trunk to reach it, keeping that side
-  when it carries on into a section beside it. Where no row lies beyond every
-  branch it passes, it takes the nearest row clear of those stations
+  when it carries on into a section beside it. The line takes that lane only
+  along the source's own run, so another run of the same line keeps its
+  place. A helper bowing the line around a station it skips leaves the
+  source where it was. Where no row lies beyond every branch it passes, the
+  source sits where any other source would
   ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
 - An off-track input steps further out until it clears an on-track station in
   its own column, as it does for stations downstream of it
