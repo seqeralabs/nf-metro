@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import functools
 import itertools
-import math
 from collections import defaultdict, deque
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -95,11 +94,12 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
-    concentric_corner_radius,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
     corner_radius,
     corner_radius_budget,
+    largest_concentric_reference,
+    padded_curve_radii,
     reference_anchored_radius,
     resolve_curve_radii,
     turn_shift,
@@ -1021,7 +1021,11 @@ class _ConcentricCorner(NamedTuple):
     points: list[tuple[float, float]]
     incoming: tuple[float, float]
     outgoing: tuple[float, float]
-    orthogonal: bool
+
+
+class _Cohort(NamedTuple):
+    members: list[_ConcentricCorner]
+    right_angle: bool
 
 
 def _right_angle_directions(
@@ -1029,23 +1033,26 @@ def _right_angle_directions(
 ) -> tuple[Direction, Direction] | None:
     """The travel directions into and out of *corner* when its legs are one
     horizontal and one vertical."""
+    if not is_orthogonal_turn(prev, corner, nxt):
+        return None
     incoming = segment_direction(prev, corner)
     outgoing = segment_direction(corner, nxt)
-    if incoming is None or outgoing is None:
-        return None
-    in_vec, out_vec = direction_vector(incoming), direction_vector(outgoing)
-    if in_vec[0] * out_vec[0] + in_vec[1] * out_vec[1] != 0:
-        return None
+    assert incoming is not None and outgoing is not None
     return incoming, outgoing
+
+
+_CornerKeys = defaultdict[tuple[object, ...], list[_ConcentricCorner]]
 
 
 def _keyed_concentric_corners(
     routes: list[RoutedPath],
     station_offsets: Mapping[tuple[str, str], float],
-) -> dict[tuple[object, ...], list[_ConcentricCorner]]:
-    """The corners that may turn with others, keyed so only corners turning
-    the same way at the same kind of place share a key."""
-    keyed: defaultdict[tuple[object, ...], list[_ConcentricCorner]] = defaultdict(list)
+) -> tuple[_CornerKeys, _CornerKeys]:
+    """The right-angle and the diagonal corners that may turn with others,
+    each keyed so only corners turning the same way at the same kind of place
+    share a key."""
+    right_angle: _CornerKeys = defaultdict(list)
+    diagonal: _CornerKeys = defaultdict(list)
     for route in routes:
         if len(route.points) < 3:
             continue
@@ -1064,13 +1071,10 @@ def _keyed_concentric_corners(
             if abs(u_in[0] * u_out[1] - u_in[1] * u_out[0]) <= COORD_TOLERANCE_FINE:
                 continue
             key = (
-                "turn",
                 (round(u_in[0], 3), round(u_in[1], 3)),
                 (round(u_out[0], 3), round(u_out[1], 3)),
             )
-            keyed[key].append(
-                _ConcentricCorner(route, rank, points, u_in, u_out, False)
-            )
+            diagonal[key].append(_ConcentricCorner(route, rank, points, u_in, u_out))
         if route.curve_radii is None or not right_angles:
             continue
         for kind, owner, (rank, incoming, outgoing) in (
@@ -1082,17 +1086,16 @@ def _keyed_concentric_corners(
             ) or (kind == "target" and route.exit_turn_segment_rank == rank):
                 continue
             in_vec, out_vec = direction_vector(incoming), direction_vector(outgoing)
-            keyed[kind, owner, incoming, outgoing].append(
+            right_angle[kind, owner, incoming, outgoing].append(
                 _ConcentricCorner(
                     route,
                     rank,
                     points,
                     (float(in_vec[0]), float(in_vec[1])),
                     (float(out_vec[0]), float(out_vec[1])),
-                    True,
                 )
             )
-    return keyed
+    return right_angle, diagonal
 
 
 def _translation_components(
@@ -1128,7 +1131,8 @@ def _split_at_bundle_gaps(
     """Split *component* wherever neighbouring lanes sit two bundle *pitches*
     or more apart across their incoming legs, so separate bundles that happen
     to share a bisector turn on their own. Neighbouring lanes of one bundle sit
-    at most about 1.15 pitches apart across the corpus.
+    a pitch apart where they leave their stations, a little more across a
+    diagonal leg.
     """
     anchor = component[0]
     normal = (-anchor.incoming[1], anchor.incoming[0])
@@ -1153,7 +1157,7 @@ def _concentric_corner_cohorts(
     station_offsets: Mapping[tuple[str, str], float],
     respect_owned_corners: bool,
     pitch: float,
-) -> list[list[_ConcentricCorner]]:
+) -> list[_Cohort]:
     """Group the bundle corners that turn together into cohorts.
 
     Two kinds of corner take part. A right-angle turn takes part only as a
@@ -1164,33 +1168,44 @@ def _concentric_corner_cohorts(
     than two *pitches* apart. Corners join one cohort when they turn the
     same way and are wholesale translations of one another along their turn's
     bisector. A cohort holding two corners of one route, or (when
-    *respect_owned_corners*) any corner a planner owns, is left alone.
+    *respect_owned_corners*) any corner a planner owns, is left alone. When
+    sizing for the plan (*respect_owned_corners* off), so is a cohort with a
+    route its handler left unsized: the plan records that route's radii as
+    ``None``, which later passes read as not handler-sized, so only the final
+    post-emission sizing may give it radii.
     """
-    cohorts: list[list[_ConcentricCorner]] = []
-    for key, corners in _keyed_concentric_corners(routes, station_offsets).items():
-        for component in _translation_components(corners):
-            groups = (
-                _split_at_bundle_gaps(component, pitch)
-                if key[0] == "turn"
-                else [component]
+    right_angle, diagonal = _keyed_concentric_corners(routes, station_offsets)
+    candidates = [
+        (component, True)
+        for corners in right_angle.values()
+        for component in _translation_components(corners)
+    ] + [
+        (group, False)
+        for corners in diagonal.values()
+        for component in _translation_components(corners)
+        for group in _split_at_bundle_gaps(component, pitch)
+    ]
+    cohorts: list[_Cohort] = []
+    for group, is_right_angle in candidates:
+        if (
+            len(group) >= 2
+            and len({id(m.route) for m in group}) == len(group)
+            and not (
+                respect_owned_corners
+                and any(
+                    planner_owns_segment_or_boundary(m.route, m.rank) for m in group
+                )
             )
-            for group in groups:
-                if (
-                    len(group) >= 2
-                    and len({id(m.route) for m in group}) == len(group)
-                    and not (
-                        respect_owned_corners
-                        and any(
-                            planner_owns_segment_or_boundary(m.route, m.rank)
-                            for m in group
-                        )
-                    )
-                ):
-                    cohorts.append(group)
+            and (
+                respect_owned_corners
+                or all(m.route.curve_radii is not None for m in group)
+            )
+        ):
+            cohorts.append(_Cohort(group, is_right_angle))
     return cohorts
 
 
-def _rederive_semantic_end_corners(
+def _size_concentric_cohorts(
     routes: list[RoutedPath],
     curve_radius: float,
     station_offsets: Mapping[tuple[str, str], float],
@@ -1205,7 +1220,7 @@ def _rederive_semantic_end_corners(
     :func:`corner_radius_budget` allows. Right-angle corners also publish their
     X offset and reference for the channel passes that read them.
     """
-    for members in _concentric_corner_cohorts(
+    for members, right_angle in _concentric_corner_cohorts(
         routes, station_offsets, respect_owned_corners, pitch
     ):
         turn_in, turn_out = members[0].incoming, members[0].outgoing
@@ -1219,14 +1234,12 @@ def _rederive_semantic_end_corners(
         inner_vertex = inner.points[inner.rank]
         prepared: list[tuple[_ConcentricCorner, int, float, list[float]]] = []
         ceiling = curve_radius
-        cap = math.inf
-        floor = -math.inf
         for member in members:
             vertex = member.points[member.rank]
             radius_index = member.rank - 1
-            corners = len(member.points) - 2
-            radii = list(member.route.curve_radii or [])
-            radii += [curve_radius] * (corners - len(radii))
+            radii = padded_curve_radii(
+                member.points, member.route.curve_radii, curve_radius
+            )
             shift = turn_shift(
                 member.points[member.rank - 1],
                 vertex,
@@ -1234,18 +1247,20 @@ def _rederive_semantic_end_corners(
                 (vertex[0] - inner_vertex[0], vertex[1] - inner_vertex[1]),
             )
             ceiling = max(ceiling, radii[radius_index] - shift)
-            cap = min(
-                cap, corner_radius_budget(member.points, radii, radius_index) - shift
-            )
-            floor = max(floor, COORD_TOLERANCE_FINE - shift)
             prepared.append((member, radius_index, shift, radii))
-        reference = min(ceiling, cap)
-        if reference < floor:
+        reference = largest_concentric_reference(
+            ceiling,
+            (
+                (corner_radius_budget(member.points, radii, radius_index), shift)
+                for member, radius_index, shift, radii in prepared
+            ),
+        )
+        if reference is None:
             continue
         for member, radius_index, shift, radii in prepared:
-            radii[radius_index] = reference + shift
+            radii[radius_index] = reference_anchored_radius(shift, reference)
             member.route.curve_radii = radii
-            if member.orthogonal:
+            if right_angle:
                 member.route.record_concentric_corner(
                     radius_index,
                     member.points[member.rank][0] - inner_vertex[0],
@@ -2129,17 +2144,21 @@ def _unify_coincident_corner_radii(
             corner_is_owned(route, radius_index) for route, radius_index in members
         ):
             continue
-        reference = widest_coincident_radius(
-            _padded_radii(route)[radius_index] for route, radius_index in members
-        )
-        reference = min(
-            reference,
-            *(
-                corner_radius_budget(route.points, _padded_radii(route), radius_index)
-                for route, radius_index in members
+        padded = [
+            padded_curve_radii(route.points, route.curve_radii)
+            for route, _radius_index in members
+        ]
+        reference = largest_concentric_reference(
+            widest_coincident_radius(
+                radii[radius_index]
+                for radii, (_route, radius_index) in zip(padded, members)
+            ),
+            (
+                (corner_radius_budget(route.points, radii, radius_index), 0.0)
+                for radii, (route, radius_index) in zip(padded, members)
             ),
         )
-        if reference < COORD_TOLERANCE_FINE:
+        if reference is None:
             continue
         for route, radius_index in members:
             assert route.curve_radii is not None
@@ -2154,16 +2173,8 @@ def _unify_coincident_corner_radii(
                 or current_offset != 0.0
                 or current_base != reference
             ):
-                route.curve_radii[radius_index] = reference_anchored_radius(
-                    0.0, reference
-                )
+                route.curve_radii[radius_index] = reference
                 route.record_concentric_corner(radius_index, 0.0, reference)
-
-
-def _padded_radii(route: RoutedPath) -> list[float]:
-    """*route*'s corner radii, the base radius standing in for any it lacks."""
-    radii = list(route.curve_radii or [])
-    return radii + [CURVE_RADIUS] * (len(route.points) - 2 - len(radii))
 
 
 def _reconcile_port_peeloff_risers(routes: list[RoutedPath], ctx: _RoutingCtx) -> None:
@@ -5728,7 +5739,7 @@ def _reanchor_concentric_corner_fans(
     short for it would draw a hard corner where a curve was asked for.  When
     *curve_radius* does not fit, the reference is the largest every lane's leg
     budget (:func:`corner_radius_budget`) allows once its offset is taken off,
-    as :func:`_rederive_semantic_end_corners` sizes it.  A fan whose budget
+    as :func:`_size_concentric_cohorts` sizes it.  A fan whose budget
     cannot even reach its own floor is left unraised, which
     :func:`check_orthogonal_turns_form_curves` reads as a deliberately tight
     inner arc.
@@ -5736,16 +5747,7 @@ def _reanchor_concentric_corner_fans(
     from nf_metro.layout.routing.invariants import concentric_corner_fans
 
     for fan in concentric_corner_fans(population, offsets):
-        members: list[
-            tuple[
-                _CornerObservation,
-                int,
-                float,
-                float,
-                tuple[float, float],
-                tuple[float, float],
-            ]
-        ] = []
+        members: list[tuple[_CornerObservation, int, float, float]] = []
         for observation in fan:
             route = observation.route
             if route.curve_radii is None:
@@ -5759,45 +5761,40 @@ def _reanchor_concentric_corner_fans(
                 observation.points[observation.rank + 1],
             )
             term = observation.points[observation.rank][0] * (turn_out[0] - turn_in[0])
-            members.append(
-                (observation, index, resolved[index], term, turn_in, turn_out)
-            )
+            members.append((observation, index, resolved[index], term))
         if not members:
             continue
-        floor_radius = min(radius for _o, _i, radius, _t, _ti, _to in members)
+        floor_radius = min(radius for _o, _i, radius, _t in members)
         if abs(floor_radius - curve_radius) <= COORD_TOLERANCE:
             continue
         innermost = max(members, key=lambda member: member[3])[0]
-        innermost_x = innermost.points[innermost.rank][0]
+        innermost_vertex = innermost.points[innermost.rank]
+        innermost_x = innermost_vertex[0]
 
-        prepared: list[
-            tuple[
-                _CornerObservation, int, float, tuple[float, float], tuple[float, float]
-            ]
-        ] = []
-        cap = math.inf
-        floor = -math.inf
-        for observation, index, _resolved, _term, turn_in, turn_out in members:
+        prepared: list[tuple[_CornerObservation, int, float, float]] = []
+        lanes: list[tuple[float, float]] = []
+        for observation, index, _resolved, _term in members:
             displacement = observation.points[observation.rank][0] - innermost_x
-            shift = -displacement * (turn_out[0] - turn_in[0])
             budget = corner_radius_budget(
-                observation.points, _padded_radii(observation.route), index
+                observation.points,
+                padded_curve_radii(observation.points, observation.route.curve_radii),
+                index,
             )
-            cap = min(cap, budget - shift)
-            floor = max(floor, COORD_TOLERANCE_FINE - shift)
-            prepared.append((observation, index, displacement, turn_in, turn_out))
-        reference = min(curve_radius, cap)
-        if reference < floor or (reference < curve_radius and reference < floor_radius):
+            vertex = observation.points[observation.rank]
+            shift = turn_shift(
+                observation.points[observation.rank - 1],
+                vertex,
+                observation.points[observation.rank + 1],
+                (vertex[0] - innermost_vertex[0], vertex[1] - innermost_vertex[1]),
+            )
+            lanes.append((budget, shift))
+            prepared.append((observation, index, displacement, shift))
+        reference = largest_concentric_reference(curve_radius, lanes)
+        if reference is None or (reference < curve_radius and reference < floor_radius):
             continue
 
-        for observation, index, displacement, turn_in, turn_out in prepared:
-            radius = concentric_corner_radius(
-                turn_in,
-                turn_out,
-                displacement,
-                reference,
-            )
+        for observation, index, displacement, shift in prepared:
             radii = list(observation.route.curve_radii or ())
-            radii[index] = radius
+            radii[index] = reference_anchored_radius(shift, reference)
             observation.route.curve_radii = radii
             observation.route.record_concentric_corner(index, displacement, reference)

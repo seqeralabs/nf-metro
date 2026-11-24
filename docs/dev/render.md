@@ -69,7 +69,7 @@ Animation uses the same offset paths.
 `emit_render_plan` draws in layers:
 
 1. **Section boxes.** Rounded rectangles with optional section labels and tick marks for group labels.
-2. **Edges.** Polylines from `RoutedPath.points`, with rounded corners drawn as circular arcs (cubic Bézier circle approximations, `corner_arc_controls` in `routing/corners.py`) between the tangent points that file computes. Concentric lanes stay exactly one lane step apart at every turn angle.
+2. **Edges.** Polylines from `RoutedPath.points`, with rounded corners drawn as circular arcs (cubic Bézier circle approximations, `corner_arc_controls` in `routing/corners.py`) between the tangent points that file computes. Concentric lanes stay one lane step apart, within a fraction of a percent, at every turn angle.
    Where `compute_bridges` identifies a non-merging crossing, `_render_bridged_edge` draws the under-route with a gap (see [Bridges](#bridges-bridgespy)).
 3. **Station markers.** Pill-shaped rectangles, or circles and squares for alternative marker styles.
    Rail-mode interchange stations span several rails and are drawn by `_render_rail_pill`.

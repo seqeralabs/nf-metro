@@ -30,7 +30,7 @@ from nf_metro.layout.routing.corners import (
     concentric_corner_radius_at,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
-from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners, _VChannel
+from nf_metro.layout.routing.normalize import _size_concentric_cohorts, _VChannel
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.routing.planning import _allocation_eligible_system_ids
 from nf_metro.layout.routing.reserved_bands import (
@@ -671,7 +671,7 @@ def test_reportho_owned_lead_is_frozen_at_its_concentric_radius() -> None:
         dict(route.concentric_corner_offsets_by_segment),
         dict(route.concentric_corner_bases_by_segment),
     )
-    _rederive_semantic_end_corners(
+    _size_concentric_cohorts(
         observation.routes,
         CURVE_RADIUS,
         compute_station_offsets(graph),

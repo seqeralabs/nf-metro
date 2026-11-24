@@ -86,15 +86,11 @@ history.
 ### Changed
 
 - Parallel lines turning together through any angle, not only 90 degrees,
-  now turn about one shared centre, so a bundle on a diagonal turn keeps its
-  lines touching instead of opening a thin gap between them. Maps with
-  diagonal bundle turns redraw those curves slightly.
-- Rounded corners draw as circular arcs (cubic Bézier circle
-  approximations) where they were quadratic curves, with the same tangent
-  points and radii. Parallel lines turning together stay exactly one stroke
-  apart through the whole turn at every angle, closing the thin seam that a
-  right-angle bundle turn showed between touching lines. Every rounded corner
-  on every map redraws very slightly fuller.
+  now turn about one shared centre, and rounded corners draw as circular arcs
+  (cubic Bézier circle approximations) where they were quadratic curves. A
+  bundle keeps its lines touching through the whole turn instead of opening a
+  thin seam between them. Every rounded corner redraws very slightly fuller,
+  and outer lines of diagonal bundle turns take wider curves.
 - Animated dots ride the drawn strokes: each dot turns about a corner with its
   lane's own radius, so dots keep to their lines through concentric turns and
   source turnouts. Animation timing is measured on the unrounded geometry.

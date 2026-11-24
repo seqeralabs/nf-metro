@@ -25,7 +25,6 @@ from nf_metro.layout.routing.common import apply_route_offsets, point_on_polylin
 from nf_metro.layout.routing.corners import (
     corner_arc_controls,
     curve_tangents,
-    flatten_cubic,
     resolve_curve_radii,
 )
 from nf_metro.parser.model import Edge, MetroGraph
@@ -37,7 +36,7 @@ from nf_metro.render.constants import (
 )
 from nf_metro.render.ns import ns
 from nf_metro.render.path_geometry import (
-    iter_path_commands,
+    flatten_path,
     materialize_source_turnout_paths,
 )
 from nf_metro.render.style import Theme
@@ -528,23 +527,12 @@ def _flatten_path(
     chord.
     """
     points: list[tuple[float, float]] = []
-
-    def push(point: tuple[float, float]) -> None:
-        # Repeated waypoints are common (a zero-length corner); a duplicate
-        # would add a zero-length segment for point_at to divide by.
-        if not points or points[-1] != point:
-            points.append(point)
-
-    pen = (0.0, 0.0)
-    for command, nums in iter_path_commands(d_attr):
-        if command in ("M", "L"):
-            pen = (nums[0], nums[1])
-            push(pen)
-        else:
-            c1, c2, end = (nums[0], nums[1]), (nums[2], nums[3]), (nums[4], nums[5])
-            for point in flatten_cubic(pen, c1, c2, end, _CURVE_FLATTEN_STEPS):
-                push(point)
-            pen = end
+    for subpath in flatten_path(d_attr, _CURVE_FLATTEN_STEPS):
+        for point in subpath:
+            # Repeated waypoints are common (a zero-length corner); a duplicate
+            # would add a zero-length segment for point_at to divide by.
+            if not points or points[-1] != point:
+                points.append(point)
 
     if not points:
         points.append((0.0, 0.0))
@@ -717,13 +705,15 @@ def _motion_path(track: _Track) -> _MotionPath:
     static render draws it, and the length its travel is timed by.
 
     A rounded corner is timed as the mean of its chord and its two tangent
-    arms, measured on the unrounded geometry.
+    arms, measured on the unrounded geometry. A joined track can carry a
+    sibling's radius onto a leg a bridge or turnout shortened, so the radii are
+    clamped to the track's own legs as the renderer clamps a route's.
     """
     pts = track.points
     parts = [f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"]
     length = 0.0
     pen = pts[0]
-    for tan in curve_tangents(pts, track.radii[1:-1]):
+    for tan in curve_tangents(pts, resolve_curve_radii(pts, track.radii[1:-1])):
         if tan.curved and tan.before != tan.after:
             c1, c2 = corner_arc_controls(tan.before, tan.corner, tan.after)
             parts.append(

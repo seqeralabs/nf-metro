@@ -72,7 +72,6 @@ from nf_metro.layout.routing.normalize import (
     _materialize_trunk_slots,
     _reanchor_concentric_corner_fans,
     _reconcile_port_peeloff_risers,
-    _rederive_semantic_end_corners,
     _reseat_concentric_flanking,
     _route_endpoint_section_ids,
     _segment_claim_band,
@@ -81,6 +80,7 @@ from nf_metro.layout.routing.normalize import (
     _set_vchannel_x,
     _settle_entry_wrap_leadouts,
     _settle_same_destination_approach_bundles,
+    _size_concentric_cohorts,
     _stagger_convergent_distinct_lines,
     _unify_coincident_corner_radii,
     _VChannel,
@@ -2236,7 +2236,7 @@ def build_member_geometry_execution(
         for route, axis_id, segment_rank in deferred_exit_turn_ownership:
             route.exit_turn_axis_id = axis_id
             route.exit_turn_segment_rank = segment_rank
-        _rederive_semantic_end_corners(
+        _size_concentric_cohorts(
             normalization_population,
             ctx.curve_radius,
             ctx.station_offsets or {},
