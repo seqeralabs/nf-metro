@@ -582,6 +582,21 @@ gallery:
       "The same fork two stations down the trunk (Fetch, Samples, Reads): Genome's seat
       and the Reference line's lane do not depend on how far down the trunk the fork
       sits (#2199)."
+  - id: source_vs_fed_fork_peel_lane_compact
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The one-station-down fork with compact offsets, where each station packs its own
+      lanes: the Reference line still steps to the lane facing Genome's side at
+      Quantify, so it joins without crossing the trunk (#2199)."
+  - id: source_vs_fork_peel_lane_across_sections
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The one-station-down fork with the Reference line carried on with the trunk into
+      a Report section on the same row: the line keeps the lane facing Genome's side in
+      both sections, so it crosses the trunk neither at Quantify nor at the boundary
+      (#2199)."
   - id: root_fan_trunk_feeder_row
     source_dir: examples/topologies
     category: Fan-out and Fan-in

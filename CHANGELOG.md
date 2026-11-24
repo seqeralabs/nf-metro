@@ -69,7 +69,8 @@ history.
   through the branch when the fork has stations before it on the trunk. The
   source sits on the far side of the trunk from the branch, in the nearest row
   clear of the stations along its run, and its line takes the lane on that
-  side where it joins the trunk instead of crossing the trunk to reach it
+  side where it joins the trunk instead of crossing the trunk to reach it,
+  keeping that side when it carries on into the next section on the row
   ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
 - A source that feeds a station adding a second line stays on that station's
   row when other sources share its column. The other sources sit one row to

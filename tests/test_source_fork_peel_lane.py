@@ -52,6 +52,10 @@ FIXTURES = {
     "source_fork": _fixture("source_sibling_vs_fork_peel_lane.mmd"),
     "fed_fork": _fixture("source_vs_fed_fork_peel_lane.mmd"),
     "chain_fed_fork": _fixture("source_vs_chain_fed_fork_peel_lane.mmd"),
+    "fed_fork_compact": _fixture("source_vs_fed_fork_peel_lane_compact.mmd"),
+    "fed_fork_across_sections": _fixture(
+        "source_vs_fork_peel_lane_across_sections.mmd"
+    ),
 }
 
 _QC_DECL = "%%metro line: qc | QC | #0570b0\n"
@@ -257,6 +261,16 @@ def _framed(lines: str) -> str:
     )
 
 
+def _framed_carried(lines: str) -> str:
+    """The contender's line carried on with the trunk into a section beside it."""
+    return (
+        f"{lines}graph LR\n"
+        f"    subgraph p [P]\n{_P3_BODY}    end\n"
+        "    subgraph w [Down]\n        z[Z]\n    end\n"
+        "    m -->|main,c| z\n"
+    )
+
+
 SHAPES = {
     "centered_peel_line_first": _one_section(
         _LINES_BC, _P3_BODY, "%%metro line_spread: centered\n"
@@ -267,6 +281,8 @@ SHAPES = {
     "compact": _one_section(_LINES_BC, _P3_BODY, "%%metro compact_offsets: true\n"),
     "flat_frame_peel_line_first": _framed(_LINES_BC),
     "flat_frame_sibling_line_first": _framed(_LINES_CB),
+    "flat_frame_carried_peel_line_first": _framed_carried(_LINES_BC),
+    "flat_frame_carried_sibling_line_first": _framed_carried(_LINES_CB),
     "two_contenders": _one_section(
         _LINES_BC + _LINE_E, _P3_BODY + "        h -->|e| m\n"
     ),
