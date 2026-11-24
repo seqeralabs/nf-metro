@@ -1643,13 +1643,12 @@ def _merge_entry_route_kind(f: _InterFacts) -> _MergeEntryRoute:
     ):
         return _MergeEntryRoute.RIGHT_ENTRY_CROSS_ROW_WRAP
     if ep_port and ep_port.side == PortSide.LEFT:
-        exclude = {
+        exclude = {src.section_id} if src.section_id else set[str]()
+        exclude.update(
             box_id
             for requirement in f.merge_landing_room
             for box_id in requirement.negative_section_ids
-        }
-        if src.section_id:
-            exclude.add(src.section_id)
+        )
         if f.h_segment_crosses_other_section(f.sx, ep.x, ep.y, exclude):
             if _corridor_is_viable(ctx, src, ep):
                 return _MergeEntryRoute.CORRIDOR

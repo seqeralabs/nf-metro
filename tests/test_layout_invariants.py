@@ -2507,7 +2507,7 @@ def test_intra_section_collinear_check_detects_overlay():
 
     Locks the detector so the corpus test above is not vacuously green: two
     different-line intra-section runs sharing a horizontal channel over more
-    than ``_COLLINEAR_MIN_SPAN``, with no shared endpoint, must be flagged.
+    than :func:`_collinear_min_span`, with no shared endpoint, must be flagged.
     """
     from types import SimpleNamespace
 
@@ -2559,7 +2559,7 @@ def test_diagonal_overlay_check_detects_collapse():
     """Meaningfulness guard: the diagonal check fires on a collapsed bundle.
 
     Two different lines whose diagonals run near-parallel and closer than
-    ``_DIAGONAL_MIN_PERP_SEP`` over more than ``_COLLINEAR_MIN_SPAN``, with no
+    ``_DIAGONAL_MIN_PERP_SEP`` over more than :func:`_collinear_min_span`, with no
     crossing, must be flagged; a pair that diverges out of a shared point (wide
     at the far end) must not.
     """
