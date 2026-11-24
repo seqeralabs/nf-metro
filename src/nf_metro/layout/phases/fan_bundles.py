@@ -15,7 +15,7 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     shift_section,
 )
-from nf_metro.layout.pass_metrics import active_layout_metrics
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.phases._common import (
     _fan_offsets,
@@ -899,7 +899,7 @@ def _apply_half_grid_2branch_symfan(
     origin).
     """
     if section_y_padding is None:
-        section_y_padding = active_layout_metrics().section_y_padding
+        section_y_padding = active_metrics().section_y_padding
     if y_spacing <= 0:
         return
     for section in graph.sections.values():
@@ -1542,7 +1542,7 @@ def _carry_symmetric_branch_continuations(
     trunk and meet its exit port there.
     """
     if section_y_padding is None:
-        section_y_padding = active_layout_metrics().section_y_padding
+        section_y_padding = active_metrics().section_y_padding
     if graph.diamond_style != "symmetric":
         return
     planned_ids = planned_fan_layout_station_ids(graph)
@@ -1986,7 +1986,7 @@ def _expand_orphaned_half_grid_stations(
     the seam the centreline closed.
     """
     if section_y_padding is None:
-        section_y_padding = active_layout_metrics().section_y_padding
+        section_y_padding = active_metrics().section_y_padding
     require_phase_field(graph, "half_grid_station_ids")
     half_grid = graph.half_grid_station_ids
     if not half_grid:

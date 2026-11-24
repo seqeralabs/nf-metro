@@ -32,7 +32,7 @@ from nf_metro.layout.envelope_settlement import (
     settle_route_envelopes,
 )
 from nf_metro.layout.geometry import cotravelling_lane_clearance, shift_section
-from nf_metro.layout.pass_metrics import canvas_edge_clearance, stroke_scale_context
+from nf_metro.layout.pass_metrics import canvas_edge_clearance, metrics_context
 from nf_metro.layout.phases.bbox import measure_row_gap_clearance
 from nf_metro.layout.phases.guards import (
     LayoutInvariantError,
@@ -1696,7 +1696,7 @@ def test_a_coarsened_stroke_widens_the_canvas_margin_it_reserves() -> None:
     coarsened render short by half the extra stroke weight.
     """
     assert canvas_edge_clearance() == pytest.approx(CANVAS_EDGE_CLEARANCE)
-    with stroke_scale_context(2.0):
+    with metrics_context(stroke_scale=2.0):
         assert canvas_edge_clearance() == pytest.approx(
             DIRECTIONAL_MARKER_HALF_EXTENT + WIDEST_THEME_LINE_WIDTH
         )
@@ -2304,9 +2304,7 @@ def test_a_rail_layout_keeps_the_row_pitch_its_idiom_set(path: Path) -> None:
 def test_a_user_theme_past_every_built_in_widens_the_canvas_clearance() -> None:
     """A theme drawing wider lines or larger chevrons than any built-in is
     covered by the clearance it lays out with."""
-    from nf_metro.layout.pass_metrics import ThemeMetrics, theme_metrics_context
-
-    with theme_metrics_context(ThemeMetrics(line_width=6.0, marker_half_extent=8.0)):
+    with metrics_context(line_width=6.0, chevron_size=8.0):
         assert canvas_edge_clearance() == pytest.approx(8.0 + 6.0 / 2)
-        with stroke_scale_context(2.0):
+        with metrics_context(stroke_scale=2.0):
             assert canvas_edge_clearance() == pytest.approx(8.0 + 6.0)

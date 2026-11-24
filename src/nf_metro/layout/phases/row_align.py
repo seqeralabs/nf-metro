@@ -23,7 +23,7 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
-    active_layout_metrics,
+    active_metrics,
     station_radius_approx,
 )
 from nf_metro.layout.phases._common import (
@@ -123,7 +123,7 @@ def _row_group_grid_spacing(
     min_track_gap = (
         (max_lines - 1) * offset_step
         + 2 * station_radius_approx()
-        + active_layout_metrics().label_offset
+        + active_metrics().label_offset
         + FONT_HEIGHT * active_font_scale()
     )
     effective_y_spacing = max(y_spacing, min_track_gap)

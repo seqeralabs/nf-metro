@@ -27,7 +27,7 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.labels import label_beside_pill, label_glyph_ink_bbox
-from nf_metro.layout.pass_metrics import active_theme_metrics
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.routing.bundle import (
     build_tapered_bundle,
 )
@@ -854,7 +854,7 @@ def _passed_station_footprints(
     graph = ctx.graph
     frame = _section_lane_frame(graph, section, ctx.positive_fan)
     lo, hi = sorted((src.y, tgt.y))
-    half_stroke = active_theme_metrics().line_width / 2
+    half_stroke = active_metrics().line_width / 2
     boxes: list[_Box] = []
     for sid in section.station_ids:
         st = graph.stations[sid]

@@ -58,7 +58,7 @@ from nf_metro.layout.geometry import (
     segment_intersects_bbox,
 )
 from nf_metro.layout.pass_metrics import (
-    active_layout_metrics,
+    active_metrics,
     icon_half_height_approx,
     station_radius_approx,
 )
@@ -736,7 +736,7 @@ def _tb_top_entry_drop_overshoot(
         if not any(abs(first.x - px) <= tol for px in port_xs):
             continue
         gap = first.y - sec.bbox_y
-        if gap > active_layout_metrics().section_y_padding + tol:
+        if gap > active_metrics().section_y_padding + tol:
             offenders.append((sid, gap))
     return offenders
 
@@ -750,7 +750,7 @@ def _guard_tb_top_entry_drop_hugs_top(graph: MetroGraph, phase: str) -> None:
         raise PhaseInvariantError(
             f"{phase}: section {sid!r} first station sits {gap:.1f}px below "
             f"its box top despite a clean vertical TOP-entry drop "
-            f"(expected <= {active_layout_metrics().section_y_padding:.1f})"
+            f"(expected <= {active_metrics().section_y_padding:.1f})"
         )
 
 
@@ -2474,7 +2474,7 @@ def _guard_no_line_crosses_file_icon(
     different edge of that line is still raking the artefact.
     """
     from nf_metro.render.svg import _icon_obstacles_by_station
-    from nf_metro.themes import layout_theme
+    from nf_metro.themes import resolve_theme
 
     if offsets is None:
         offsets = routing.compute_station_offsets(graph)
@@ -2484,7 +2484,7 @@ def _guard_no_line_crosses_file_icon(
         except Exception:  # noqa: BLE001 - routing failure surfaces elsewhere
             return
 
-    icon_boxes = _icon_obstacles_by_station(graph, layout_theme(graph), offsets)
+    icon_boxes = _icon_obstacles_by_station(graph, resolve_theme(None, graph), offsets)
     if not icon_boxes:
         return
     index = BBoxXIndex(list(icon_boxes.items()))
@@ -2688,7 +2688,7 @@ def iter_line_label_strikes(
         segment_strikes_label,
     )
     from nf_metro.render.svg import _compute_icon_obstacles
-    from nf_metro.themes import layout_theme
+    from nf_metro.themes import resolve_theme
 
     if offsets is None:
         offsets = routing.compute_station_offsets(graph)
@@ -2702,7 +2702,9 @@ def iter_line_label_strikes(
         placements = place_labels(
             graph,
             station_offsets=offsets,
-            icon_obstacles=_compute_icon_obstacles(graph, layout_theme(graph), offsets),
+            icon_obstacles=_compute_icon_obstacles(
+                graph, resolve_theme(None, graph), offsets
+            ),
             routes=routes,
             label_angle=graph.label_angle or 0.0,
         )
@@ -2844,7 +2846,7 @@ def _guard_no_wrapped_label_trunk_strike(
         place_labels,
     )
     from nf_metro.render.svg import _compute_icon_obstacles
-    from nf_metro.themes import layout_theme
+    from nf_metro.themes import resolve_theme
 
     if offsets is None:
         offsets = routing.compute_station_offsets(graph)
@@ -2858,7 +2860,9 @@ def _guard_no_wrapped_label_trunk_strike(
         placements = place_labels(
             graph,
             station_offsets=offsets,
-            icon_obstacles=_compute_icon_obstacles(graph, layout_theme(graph), offsets),
+            icon_obstacles=_compute_icon_obstacles(
+                graph, resolve_theme(None, graph), offsets
+            ),
             routes=routes,
             label_angle=graph.label_angle or 0.0,
         )
@@ -4149,7 +4153,7 @@ def _guard_trunk_bands_crossing_optimal(
 
     routes = _ensure_routes(graph, routes)
     ctx = routing_context._build_routing_context(
-        graph, active_layout_metrics().diagonal_run, CURVE_RADIUS, offsets
+        graph, active_metrics().diagonal_run, CURVE_RADIUS, offsets
     )
     bad = routing_normalize._suboptimal_trunk_bands(routes, ctx)
     if bad:

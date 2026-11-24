@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
 )
-from nf_metro.layout.pass_metrics import active_layout_metrics
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.route_plan import RouteSystemId
 from nf_metro.layout.route_reservations import reservation_ids_by_claimant_member
 from nf_metro.layout.routing.common import (
@@ -307,7 +307,7 @@ def _route_edges(  # noqa: C901
 
     ctx = _build_routing_context(
         graph,
-        active_layout_metrics().diagonal_run,
+        active_metrics().diagonal_run,
         curve_radius,
         station_offsets,
         offset_step=offset_step,

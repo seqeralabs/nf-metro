@@ -11,7 +11,6 @@ __all__ = [
     "LabelPlacement",
     "active_font_scale",
     "find_label_overlaps",
-    "font_scale_context",
     "label_glyph_advance_width",
     "label_glyph_ink_bbox",
     "label_text_width",
@@ -50,9 +49,8 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
-    active_layout_metrics,
+    active_metrics,
     diagonal_label_offset,
-    font_scale_context,
     label_font_size_approx,
     station_radius_approx,
     station_stroke_approx,
@@ -1811,7 +1809,7 @@ def place_labels(
     deliberate neighbour graze never trips the label-overlap guard.
     """
     if label_offset is None:
-        label_offset = active_layout_metrics().label_offset
+        label_offset = active_metrics().label_offset
     ctx, sorted_stations = _build_label_ctx(
         graph, label_offset, station_offsets, icon_obstacles, label_angle
     )
@@ -2296,7 +2294,7 @@ def _avoid_diagonal_routes(
         if placement.above:
             gap = max(
                 (station.y + min_off) - placement.y,
-                active_layout_metrics().label_offset,
+                active_metrics().label_offset,
             )
             trial = LabelPlacement(
                 station_id=placement.station_id,
@@ -2308,7 +2306,7 @@ def _avoid_diagonal_routes(
         else:
             gap = max(
                 placement.y - (station.y + max_off),
-                active_layout_metrics().label_offset,
+                active_metrics().label_offset,
             )
             trial = LabelPlacement(
                 station_id=placement.station_id,
@@ -2389,7 +2387,7 @@ def _flip_labels_off_foreign_strikes(
         if placement.above:
             gap = max(
                 (station.y + min_off) - placement.y,
-                active_layout_metrics().label_offset,
+                active_metrics().label_offset,
             )
             trial = LabelPlacement(
                 station_id=placement.station_id,
@@ -2401,7 +2399,7 @@ def _flip_labels_off_foreign_strikes(
         else:
             gap = max(
                 placement.y - (station.y + max_off),
-                active_layout_metrics().label_offset,
+                active_metrics().label_offset,
             )
             trial = LabelPlacement(
                 station_id=placement.station_id,

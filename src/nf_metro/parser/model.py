@@ -12,6 +12,7 @@ from nf_metro.parser.provenance import LayoutProvenance
 
 if TYPE_CHECKING:
     from nf_metro.layout.fan_plans import FanPlanExecution, FanPlanQuery
+    from nf_metro.layout.pass_metrics import LayoutMetrics
     from nf_metro.layout.route_plan import FanPlan
     from nf_metro.parser.route_topology import (
         RouteResolutionTrace,
@@ -533,6 +534,11 @@ class MetroGraph:
     # The resolved theme stack layout and render use (the caller's
     # ``--theme``, else the map's style), once bound.
     resolved_theme: ResolvedTheme | None = field(
+        default=None, repr=False, compare=False
+    )
+    # The metrics compute_layout reserved against. Later measurements of the
+    # laid-out geometry bind these, whatever theme the graph is drawn in.
+    layout_metrics: LayoutMetrics | None = field(
         default=None, repr=False, compare=False
     )
     # Multi-section grid cells: a ``%%metro grid:`` directive may name several

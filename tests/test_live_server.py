@@ -22,7 +22,7 @@ from nf_metro.live.server import (
     serve,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.themes import THEMES
+from nf_metro.themes import THEMES, resolve_stack
 
 MMD = (
     "%%metro line: a | A | #ff0000 | solid\n"
@@ -420,7 +420,7 @@ def test_serve_rejects_unknown_overlay():
 def test_registry_register_and_listing():
     from nf_metro.live.server import RunRegistry
 
-    reg = RunRegistry(THEMES["nfcore"])
+    reg = RunRegistry(resolve_stack("nfcore"))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         rid = reg.register(MMD, name="run-a")
@@ -435,7 +435,7 @@ def test_registry_register_and_listing():
 def test_multi_server_http_smoke():
     from nf_metro.live.server import serve_multi
 
-    httpd = serve_multi(THEMES["nfcore"], host="127.0.0.1", port=0)
+    httpd = serve_multi(resolve_stack("nfcore"), host="127.0.0.1", port=0)
     port = httpd.server_address[1]
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()

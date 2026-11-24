@@ -11,7 +11,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import quantize_coord
 from nf_metro.layout.pass_metrics import (
-    active_layout_metrics,
+    active_metrics,
     icon_half_height_approx,
     station_radius_approx,
 )
@@ -1011,7 +1011,7 @@ def _recenter_section_loop_sides(
         ):
             continue
         is_multiline = len(graph.edges_to(sid)) > 1 or len(graph.edges_from(sid)) > 1
-        run = active_layout_metrics().diagonal_run
+        run = active_metrics().diagonal_run
         min_recenter_delta = run / 4.0 if is_multiline else run / 3.0
         if abs(midpoint - st.x) < min_recenter_delta:
             continue
@@ -1274,7 +1274,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
     necessary; phase 2 then closes the row gap that growth opened.
     """
     if section_y_padding is None:
-        section_y_padding = active_layout_metrics().section_y_padding
+        section_y_padding = active_metrics().section_y_padding
     if y_spacing <= 0:
         return
 

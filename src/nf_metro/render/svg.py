@@ -53,14 +53,7 @@ from nf_metro.layout.labels import (
     _label_ink_quad,
     place_labels,
 )
-from nf_metro.layout.pass_metrics import (
-    LayoutMetrics,
-    ThemeMetrics,
-    font_scale_context,
-    layout_metrics_context,
-    stroke_scale_context,
-    theme_metrics_context,
-)
+from nf_metro.layout.pass_metrics import graph_layout_context
 from nf_metro.layout.phases._common import _station_bundle_offset_span
 from nf_metro.layout.phases.bbox import measure_row_gap_clearance
 from nf_metro.layout.phases.canvas import translate_graph
@@ -907,13 +900,7 @@ def _build_render_plan_result(
     scaled_theme = _scale_theme_strokes(
         _scale_theme_fonts(theme, graph.font_scale), graph.stroke_scale
     )
-    with (
-        font_scale_context(graph.font_scale),
-        stroke_scale_context(graph.stroke_scale),
-        theme_metrics_context(ThemeMetrics.of(theme)),
-        layout_metrics_context(LayoutMetrics.of(graph)),
-        metrics_face_context(metrics_face),
-    ):
+    with graph_layout_context(graph), metrics_face_context(metrics_face):
         try:
             plan, route_plan = _build_render_plan_scaled(
                 graph,
@@ -1058,7 +1045,7 @@ def _scale_theme_fonts(theme: Theme, scale: float) -> Theme:
     The terminus icon's own footprint (width/height/fold/corner-radius)
     scales alongside its font: the icon-body label shrinks to fit inside
     the icon otherwise, defeating most of the intended enlargement.
-    ``layout.pass_metrics.terminus_width_approx()`` /
+    ``layout.pass_metrics.icon_width_approx()`` /
     ``icon_half_height_approx()`` track the same multiplier so the space
     reserved around a terminus station keeps pace with the bigger icon.
     """
@@ -2297,12 +2284,7 @@ def _settled_render_graph(source_graph: MetroGraph, theme: Theme) -> MetroGraph:
         if source_graph.section_y_gap is not None
         else SECTION_Y_GAP
     )
-    with (
-        font_scale_context(source_graph.font_scale),
-        stroke_scale_context(source_graph.stroke_scale),
-        theme_metrics_context(ThemeMetrics.of(theme)),
-        layout_metrics_context(LayoutMetrics.of(source_graph)),
-    ):
+    with graph_layout_context(source_graph):
         graph, _settled = _settle_clear_of_the_canvas_margins(
             source_graph,
             scaled_theme,

@@ -19,7 +19,7 @@ from nf_metro.layout.constants import (
     graph_offset_step,
     resolve_offset_step,
 )
-from nf_metro.layout.pass_metrics import station_radius_approx, stroke_scale_context
+from nf_metro.layout.pass_metrics import metrics_context, station_radius_approx
 from nf_metro.layout.route_plan import build_route_plan_query
 from nf_metro.layout.route_reservations import (
     CANVAS_EDGE_ON_NEGATIVE_SIDE,
@@ -149,7 +149,7 @@ def test_layout_reserves_against_the_drawn_pill(scale: float) -> None:
     graph = _graph(stroke_scale=scale)
     drawn = _scale_theme_strokes(resolve_theme(None, graph), scale)
 
-    with stroke_scale_context(scale):
+    with metrics_context(stroke_scale=scale):
         assert station_radius_approx() == pytest.approx(drawn.station_radius)
 
 
@@ -178,7 +178,7 @@ def test_interchange_glyph_keeps_its_proportions() -> None:
 
 def test_pass_scales_do_not_leak() -> None:
     """Each scale is scoped to its pass, so an unscaled graph is unaffected."""
-    with stroke_scale_context(2.0):
+    with metrics_context(stroke_scale=2.0):
         assert station_radius_approx() == pytest.approx(STATION_RADIUS_APPROX * 2.0)
     assert station_radius_approx() == pytest.approx(STATION_RADIUS_APPROX)
 

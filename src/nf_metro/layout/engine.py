@@ -40,7 +40,7 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
-from nf_metro.layout.pass_metrics import LayoutMetrics, active_layout_metrics
+from nf_metro.layout.pass_metrics import LayoutMetrics, active_metrics
 
 if TYPE_CHECKING:
     from nf_metro.render.style import Theme
@@ -407,7 +407,7 @@ def compute_min_y_spacing(
 
     scale = active_font_scale()
     label_extent = (
-        active_layout_metrics().label_offset + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
+        active_metrics().label_offset + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
     )
     clearance = ICON_STACK_LABEL_CLEARANCE
 
@@ -541,9 +541,11 @@ def compute_layout(
         graph.section_x_padding = section_x_padding
     if section_y_padding is not None:
         graph.section_y_padding = section_y_padding
-    layout_metrics = LayoutMetrics.of(graph)
-    section_x_padding = layout_metrics.section_x_padding
-    section_y_padding = layout_metrics.section_y_padding
+    from nf_metro.themes import resolve_theme
+
+    graph.layout_metrics = LayoutMetrics.of(graph, resolve_theme(None, graph))
+    section_x_padding = graph.layout_metrics.section_x_padding
+    section_y_padding = graph.layout_metrics.section_y_padding
 
     # Read the phase-snapshot enable flag once (issue #363) and stash it on
     # the graph so per-stage call sites can snapshot without signature churn.
@@ -605,10 +607,9 @@ def compute_layout(
             from nf_metro.layout.routing.invariants import CurveInvariantError
             from nf_metro.render.section_header import SectionHeaderClashError
             from nf_metro.render.svg import build_render_plan
-            from nf_metro.themes import layout_theme
 
             try:
-                build_render_plan(graph, validation_theme or layout_theme(graph))
+                build_render_plan(graph, validation_theme or resolve_theme(None, graph))
             except (
                 CurveInvariantError,
                 FanRouteInvariantError,
@@ -1647,9 +1648,9 @@ def _compute_section_layout(
     the canvas snap is what closes it out, so the snap has to come last.
     """
     if section_x_padding is None:
-        section_x_padding = active_layout_metrics().section_x_padding
+        section_x_padding = active_metrics().section_x_padding
     if section_y_padding is None:
-        section_y_padding = active_layout_metrics().section_y_padding
+        section_y_padding = active_metrics().section_y_padding
     from nf_metro.layout.section_placement import (
         _reflect_stacked_split_consumer_tracks,
         place_sections,

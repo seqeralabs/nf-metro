@@ -43,7 +43,7 @@ from nf_metro.layout.geometry import (
     section_row_span,
     shift_section,
 )
-from nf_metro.layout.pass_metrics import active_layout_metrics
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing.common import (
     flanked_cross_row_riser_neighbour_col,
@@ -293,7 +293,7 @@ def _effective_section_width(section: Section) -> float:
     inflating the column; Stage 1.5 of compute_layout absorbs the leftward
     overhang via a global x_offset bump.
     """
-    return section.bbox_x + section.bbox_w + active_layout_metrics().section_x_padding
+    return section.bbox_x + section.bbox_w + active_metrics().section_x_padding
 
 
 def _scoped_cell_packs(

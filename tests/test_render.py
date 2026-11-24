@@ -340,7 +340,7 @@ def test_font_scale_widens_label_driven_layout():
     reserves a wider label.
     """
     from nf_metro.layout.labels import label_text_width
-    from nf_metro.layout.pass_metrics import font_scale_context
+    from nf_metro.layout.pass_metrics import metrics_context
 
     scale = 2.0
     g1 = _load_font_scale_fixture()
@@ -351,9 +351,9 @@ def test_font_scale_widens_label_driven_layout():
     assert sec2.bbox_w > sec1.bbox_w
 
     label = "Load Samples"
-    with font_scale_context(1.0):
+    with metrics_context(font_scale=1.0):
         base_w = label_text_width(label)
-    with font_scale_context(scale):
+    with metrics_context(font_scale=scale):
         scaled_w = label_text_width(label)
     assert scaled_w == base_w * scale
 
@@ -408,7 +408,7 @@ def test_font_scale_stacked_terminus_icons_do_not_overlap():
     stacked ``files:`` back page peeking up past its front page -- so a pitch
     derived from the unscaled icon lets an enlarged pair collide.
     """
-    from nf_metro.layout.pass_metrics import font_scale_context
+    from nf_metro.layout.pass_metrics import metrics_context
     from nf_metro.layout.phases.single_section import terminus_cross_extents
 
     graph = parse_metro_mermaid(_STACKED_INPUTS_MMD)
@@ -416,7 +416,7 @@ def test_font_scale_stacked_terminus_icons_do_not_overlap():
     upper, lower = sorted(
         (graph.stations["a_in"], graph.stations["b_in"]), key=lambda s: s.y
     )
-    with font_scale_context(graph.font_scale):
+    with metrics_context(font_scale=graph.font_scale):
         _, upper_below = terminus_cross_extents(upper)
         lower_above, _ = terminus_cross_extents(lower)
     gap = lower.y - upper.y
@@ -434,14 +434,14 @@ def test_font_scale_rails_source_icon_fits_section_bbox():
     icons march *leftward* out of the first column needs that padding topped up
     to the icons' drawn reach -- which grows with ``font_scale``.
     """
-    from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
+    from nf_metro.layout.pass_metrics import metrics_context
     from nf_metro.layout.phases.single_section import terminus_icon_flow_reach
 
     graph = parse_metro_mermaid(_RAILS_SOURCE_ICON_MMD)
     compute_layout(graph, validate=True)
     st = graph.stations["src"]
     section = graph.sections[st.section_id]
-    with font_scale_context(graph.font_scale), stroke_scale_context(graph.stroke_scale):
+    with metrics_context(font_scale=graph.font_scale, stroke_scale=graph.stroke_scale):
         reach = terminus_icon_flow_reach(st)
     available = st.x - section.bbox_x
     assert available >= reach, (

@@ -39,7 +39,7 @@ from nf_metro.layout.constants import (
     Y_OFFSET,
     graph_offset_step,
 )
-from nf_metro.layout.pass_metrics import active_layout_metrics
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.parser.model import MetroGraph, PortSide, Section
 from nf_metro.text_metrics import TextRole
 
@@ -88,9 +88,9 @@ def compute_rail_layout(
     stacked set of parallel-rail panels.
     """
     if section_x_padding is None:
-        section_x_padding = active_layout_metrics().section_x_padding
+        section_x_padding = active_metrics().section_x_padding
     if section_y_padding is None:
-        section_y_padding = active_layout_metrics().section_y_padding
+        section_y_padding = active_metrics().section_y_padding
     # Sort sections into a stable top-to-bottom reading order.  When the
     # auto-layout / explicit grid set grid_row, honour it; otherwise fall
     # back to declaration order via the section number.
@@ -194,9 +194,9 @@ def retrofit_section_rails(
     the graph-wide default is some other mode (the per-section override case).
     """
     if section_x_padding is None:
-        section_x_padding = active_layout_metrics().section_x_padding
+        section_x_padding = active_metrics().section_x_padding
     if section_y_padding is None:
-        section_y_padding = active_layout_metrics().section_y_padding
+        section_y_padding = active_metrics().section_y_padding
     # ``_layout_section_rails`` anchors the box top at
     # ``section_top + SECTION_HEADER_PROTRUSION`` and positions stations from
     # ``x_offset``; feeding it the placement-chosen bbox top-left (offsetting
@@ -367,7 +367,7 @@ def _layout_section_rails(
 
     head_fan = any(_fans(sid) for sid in real_ids if layers.get(sid, 0) == 0)
     tail_fan = any(_fans(sid) for sid in real_ids if layers.get(sid, 0) == max_layer)
-    fan_room = active_layout_metrics().diagonal_run + _TERMINUS_STUBS
+    fan_room = active_metrics().diagonal_run + _TERMINUS_STUBS
     head_extra = max(0.0, fan_room - x_spacing) if head_fan else 0.0
     tail_extra = max(0.0, fan_room - x_spacing) if tail_fan else 0.0
 
@@ -582,7 +582,7 @@ def _rail_label_band(
         h = _label_text_height(st.label)
         w = label_text_width(st.label, TextRole.RAIL_LABEL)
         footprint = h * cos_a + w * sin_a if angle else h
-        band = max(band, active_layout_metrics().label_offset + footprint)
+        band = max(band, active_metrics().label_offset + footprint)
     return band
 
 

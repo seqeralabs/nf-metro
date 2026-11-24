@@ -25,7 +25,7 @@ from nf_metro.layout.geometry import (
     shift_section,
 )
 from nf_metro.layout.labels import label_text_width
-from nf_metro.layout.pass_metrics import active_layout_metrics, graph_layout_context
+from nf_metro.layout.pass_metrics import active_metrics, graph_layout_context
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _column_contiguous_row_groups,
@@ -374,7 +374,7 @@ def _loop_corner_x(
         src_min = max(src_min, label_text_width(a.label) / 2)
     if b.id in join_stations and b.label.strip():
         tgt_min = max(tgt_min, label_text_width(b.label) / 2)
-    half_diag = active_layout_metrics().diagonal_run / 2
+    half_diag = active_metrics().diagonal_run / 2
     is_fork = a.id in fork_stations
     is_join = b.id in join_stations
     if is_fork:

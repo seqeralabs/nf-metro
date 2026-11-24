@@ -2075,7 +2075,7 @@ def serve_multi_cmd(
             err=True,
         )
     httpd = serve_multi(
-        resolve_stack(theme).for_mode(DEFAULT_MODE),
+        resolve_stack(theme),
         host=host,
         port=port,
         token=token,

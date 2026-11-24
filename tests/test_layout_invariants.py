@@ -83,7 +83,7 @@ from nf_metro.layout.labels import (
     place_labels,
     segment_strikes_label,
 )
-from nf_metro.layout.pass_metrics import font_scale_context
+from nf_metro.layout.pass_metrics import metrics_context
 from nf_metro.layout.phases._common import (
     _is_side_entered_vertical_section,
     _row_contiguous_column_groups,
@@ -11750,7 +11750,7 @@ def _interior_branch_label_struck(graph: MetroGraph, branch: str) -> bool:
     is exactly those same-line diagonals, and grazing the interior label with
     them is the defect #1259 addresses.
     """
-    with font_scale_context(graph.font_scale):
+    with metrics_context(font_scale=graph.font_scale):
         offsets = compute_station_offsets(
             graph, offset_step=resolve_offset_step(graph.track_gap, 3.0)
         )

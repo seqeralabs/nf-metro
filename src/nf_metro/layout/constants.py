@@ -303,13 +303,13 @@ def graph_offset_step(
     gap up as the map is downscaled, merging a bundle into one fat stroke and
     costing exactly the line-counting legibility the scaling is meant to buy.
     """
-    from nf_metro.layout.pass_metrics import active_theme_metrics
+    from nf_metro.layout.pass_metrics import active_metrics
 
     scale = graph.stroke_scale
     if graph.track_gap is None:
         return OFFSET_STEP * scale
     width = (
-        active_theme_metrics().line_width * scale
+        active_metrics().line_width * scale
         if drawn_line_width is None
         else drawn_line_width
     )

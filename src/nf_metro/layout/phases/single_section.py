@@ -39,12 +39,11 @@ from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
-    active_layout_metrics,
-    active_theme_metrics,
+    active_metrics,
     diagonal_label_offset,
     icon_half_height_approx,
+    icon_width_approx,
     station_radius_approx,
-    terminus_width_approx,
 )
 from nf_metro.layout.phases._common import (
     _build_section_subgraph,
@@ -772,7 +771,7 @@ def _multiline_track_spacing(sub: MetroGraph, y_spacing: float) -> float:
 
     # Worst case: adjacent tracks with labels facing inward.
     # Each side needs label_offset + its text height.
-    offset = active_layout_metrics().label_offset
+    offset = active_metrics().label_offset
     min_gap = offset + max_text_h + offset + font_height + LABEL_MARGIN
     return max(y_spacing, min_gap)
 
@@ -804,7 +803,7 @@ def angled_label_reach(station: Station, label_angle: float) -> float:
         return 0.0
     sin_a = abs(math.sin(math.radians(label_angle)))
     return (
-        active_layout_metrics().label_offset
+        active_metrics().label_offset
         + diagonal_label_offset()
         + label_text_width(station.label) * sin_a
     )
@@ -1180,7 +1179,7 @@ def _terminus_icon_clearance(
     from being shrink-to-fit clamped, so the excess over that default width
     is added back in to keep the reservation matching the drawn icon.
     """
-    icon_width_growth = terminus_width_approx() - active_theme_metrics().terminus_width
+    icon_width_growth = icon_width_approx() - active_metrics().icon_width
     if n_icons <= 1:
         return TERMINUS_ICON_CLEARANCE + icon_width_growth
     extra = (n_icons - 1) * _terminus_icon_step(n_icons, names)
@@ -1205,7 +1204,7 @@ def _terminus_icon_step(n_icons: int, names: list[str] | None) -> float:
         DEFAULT_TEXT_METRICS.reserve_width(name, caption_style, TextRole.ICON_CAPTION)
         for name in safe_names
     ]
-    return caption_aware_icon_step(safe_names, name_widths, terminus_width_approx())
+    return caption_aware_icon_step(safe_names, name_widths, icon_width_approx())
 
 
 def terminus_icon_flow_reach(station: Station) -> float:
@@ -1222,7 +1221,7 @@ def terminus_icon_flow_reach(station: Station) -> float:
     from nf_metro.render.constants import FILES_ICON_OFFSET_RATIO
 
     n_icons = max(1, len(station.terminus_labels))
-    width = terminus_width_approx()
+    width = icon_width_approx()
     stacked = (
         width * FILES_ICON_OFFSET_RATIO
         if ICON_TYPE_FILES in (station.terminus_icon_types or [])
@@ -1271,7 +1270,7 @@ def _terminus_icon_clearance_vertical(
         else 0.0
     )
     icon_height_growth = 2 * (
-        icon_half_height_approx() - active_theme_metrics().icon_half_height
+        icon_half_height_approx() - active_metrics().icon_half_height
     )
     base = TERMINUS_ICON_CLEARANCE_V + extra_caption_height + icon_height_growth
     if n_icons <= 1:
@@ -1324,7 +1323,7 @@ def terminus_cross_extents(station: Station) -> tuple[float, float]:
     half = icon_half_height_approx()
     above = half
     if ICON_TYPE_FILES in (station.terminus_icon_types or []):
-        above += terminus_width_approx() * FILES_ICON_OFFSET_RATIO
+        above += icon_width_approx() * FILES_ICON_OFFSET_RATIO
     below = half
     line_count = station.terminus_caption_line_count
     if line_count:

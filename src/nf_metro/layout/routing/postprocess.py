@@ -23,7 +23,7 @@ from nf_metro.layout.geometry import (
     quantize_coord,
     segment_intersects_bbox,
 )
-from nf_metro.layout.pass_metrics import active_layout_metrics
+from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
@@ -1027,13 +1027,13 @@ def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) ->
             if opts[v_idx][0] >= box_cx:
                 v_target = bx1 + LABEL_BBOX_MARGIN
                 far_target = min(
-                    v_target + active_layout_metrics().diagonal_run, far_end_x - far_min
+                    v_target + active_metrics().diagonal_run, far_end_x - far_min
                 )
                 v_target = min(v_target, far_target - CURVE_RADIUS)
             else:
                 v_target = bx0 - LABEL_BBOX_MARGIN
                 far_target = max(
-                    v_target - active_layout_metrics().diagonal_run, far_end_x + far_min
+                    v_target - active_metrics().diagonal_run, far_end_x + far_min
                 )
                 v_target = max(v_target, far_target + CURVE_RADIUS)
             # ``apply_route_offsets`` shifts only Y, so these X targets apply
