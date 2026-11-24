@@ -484,3 +484,61 @@ def test_fan_reanchor_lowers_its_reference_to_the_shortest_leg() -> None:
     _reanchor_concentric_corner_fans([outer, inner], {}, CURVE_RADIUS)
     assert inner.curve_radii == [pytest.approx(8.0)]
     assert outer.curve_radii == [pytest.approx(11.0)]
+
+
+def test_a_route_looping_back_alongside_itself_is_not_a_cohort() -> None:
+    """Two corners of one route that happen to sit like neighbouring lanes
+    are one line passing twice, not a bundle turning together."""
+    from nf_metro.layout.routing.normalize import _concentric_corner_cohorts
+
+    first = (100.0, 0.0)
+    bisector = (math.sin(math.radians(22.5)), math.cos(math.radians(22.5)))
+    second = (first[0] + 5 * bisector[0], first[1] + 5 * bisector[1])
+    diagonal = (50 * math.cos(math.radians(45)), -50 * math.sin(math.radians(45)))
+    loop = _route(
+        "loop",
+        [
+            (0.0, 0.0),
+            first,
+            (first[0] + diagonal[0], first[1] + diagonal[1]),
+            (300.0, first[1] + diagonal[1]),
+            (300.0, 200.0),
+            (-50.0, 200.0),
+            (-50.0, second[1]),
+            second,
+            (second[0] + diagonal[0], second[1] + diagonal[1]),
+        ],
+    )
+    assert _concentric_corner_cohorts([loop], {}, True, OFFSET_STEP) == []
+
+
+def test_cohort_reference_keeps_the_largest_radius_a_lane_asks_for() -> None:
+    """An inner lane already wider than the curve radius keeps its radius and
+    the outer lane nests outside it."""
+    inner, outer = _diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)
+    inner.curve_radii = [20.0]
+    _rederive_semantic_end_corners([inner, outer], CURVE_RADIUS, {}, OFFSET_STEP)
+    shift = OFFSET_STEP * math.tan(math.radians(22.5))
+    assert inner.curve_radii == [pytest.approx(20.0)]
+    assert outer.curve_radii == [pytest.approx(20.0 + shift)]
+
+
+def test_coincident_corner_budget_counts_an_unsized_neighbour_at_the_base_radius() -> (
+    None
+):
+    """A neighbouring corner a route holds no radius for draws at the base
+    radius, so its share of the shared leg caps the coincident reference."""
+    from nf_metro.layout.routing.normalize import _unify_coincident_corner_radii
+
+    short = _route(
+        "x",
+        [(0.0, 0.0), (0.0, 100.0), (25.0, 100.0), (25.0, 200.0)],
+        [20.0],
+        target="short",
+    )
+    long = _route(
+        "x", [(0.0, -50.0), (0.0, 100.0), (200.0, 100.0)], [20.0], target="long"
+    )
+    _unify_coincident_corner_radii([short, long])
+    assert short.curve_radii == [pytest.approx(25.0 - CURVE_RADIUS)]
+    assert long.curve_radii == [pytest.approx(25.0 - CURVE_RADIUS)]
