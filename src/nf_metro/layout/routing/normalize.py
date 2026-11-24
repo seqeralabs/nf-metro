@@ -1164,7 +1164,11 @@ def _concentric_corner_cohorts(
     than two *pitches* apart. Corners join one cohort when they turn the
     same way and are wholesale translations of one another along their turn's
     bisector. A cohort holding two corners of one route, or (when
-    *respect_owned_corners*) any corner a planner owns, is left alone.
+    *respect_owned_corners*) any corner a planner owns, is left alone. When
+    sizing for the plan (*respect_owned_corners* off), so is a cohort with a
+    route its handler left unsized: the plan records that route's radii as
+    ``None``, which later passes read as not handler-sized, so only the final
+    post-emission sizing may give it radii.
     """
     cohorts: list[list[_ConcentricCorner]] = []
     for key, corners in _keyed_concentric_corners(routes, station_offsets).items():
@@ -1184,6 +1188,10 @@ def _concentric_corner_cohorts(
                             planner_owns_segment_or_boundary(m.route, m.rank)
                             for m in group
                         )
+                    )
+                    and (
+                        respect_owned_corners
+                        or all(m.route.curve_radii is not None for m in group)
                     )
                 ):
                     cohorts.append(group)

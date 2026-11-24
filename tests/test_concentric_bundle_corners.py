@@ -435,6 +435,24 @@ def test_separate_bundles_on_one_bisector_turn_apart() -> None:
     ]
 
 
+def test_plan_sizing_leaves_an_unsized_route_unsized() -> None:
+    """Plans record an unsized route's radii as ``None``, which later passes
+    read as not handler-sized; only the final sizing may give it radii."""
+    plan_routes = [_diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)]
+    plan_routes[1].curve_radii = None
+    _rederive_semantic_end_corners(
+        plan_routes, CURVE_RADIUS, {}, OFFSET_STEP, respect_owned_corners=False
+    )
+    assert plan_routes[1].curve_radii is None
+    assert plan_routes[0].curve_radii == [10.0]
+
+    final_routes = [_diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)]
+    final_routes[1].curve_radii = None
+    _rederive_semantic_end_corners(final_routes, CURVE_RADIUS, {}, OFFSET_STEP)
+    assert final_routes[1].curve_radii is not None
+    assert final_routes[1].curve_radii[0] > CURVE_RADIUS
+
+
 @pytest.mark.parametrize("radii", [[10.0, 7.0], [10.0, 3.0, 12.0], [0.0, 25.0]])
 def test_corner_budget_is_the_largest_radius_resolve_leaves_unclamped(radii) -> None:
     from nf_metro.layout.routing.corners import (
