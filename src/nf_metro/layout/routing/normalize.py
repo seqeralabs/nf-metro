@@ -1034,12 +1034,10 @@ def _right_angle_directions(
     outgoing = segment_direction(corner, nxt)
     if incoming is None or outgoing is None:
         return None
-    if (incoming in _HORIZONTAL) == (outgoing in _HORIZONTAL):
+    in_vec, out_vec = direction_vector(incoming), direction_vector(outgoing)
+    if in_vec[0] * out_vec[0] + in_vec[1] * out_vec[1] != 0:
         return None
     return incoming, outgoing
-
-
-_HORIZONTAL = frozenset({Direction.L, Direction.R})
 
 
 def _keyed_concentric_corners(
@@ -1050,15 +1048,14 @@ def _keyed_concentric_corners(
     """The corners that may turn with others, keyed so only corners turning
     the same way at the same kind of place share a key."""
     keyed: defaultdict[tuple[object, ...], list[_ConcentricCorner]] = defaultdict(list)
+
+    def owned(route: RoutedPath, rank: int) -> bool:
+        return respect_owned_corners and planner_owns_segment_or_boundary(route, rank)
+
     for route in routes:
         if len(route.points) < 3:
             continue
         points = apply_route_offsets(route, station_offsets)
-
-        def owned(rank: int, route: RoutedPath = route) -> bool:
-            return respect_owned_corners and planner_owns_segment_or_boundary(
-                route, rank
-            )
 
         right_angles: list[tuple[int, Direction, Direction]] = []
         for rank in range(1, len(points) - 1):
@@ -1078,7 +1075,9 @@ def _keyed_concentric_corners(
                 (round(u_out[0], 3), round(u_out[1], 3)),
             )
             keyed[key].append(
-                _ConcentricCorner(route, rank, points, u_in, u_out, False, owned(rank))
+                _ConcentricCorner(
+                    route, rank, points, u_in, u_out, False, owned(route, rank)
+                )
             )
         if route.curve_radii is None or not right_angles:
             continue
@@ -1099,7 +1098,7 @@ def _keyed_concentric_corners(
                     (float(in_vec[0]), float(in_vec[1])),
                     (float(out_vec[0]), float(out_vec[1])),
                     True,
-                    owned(rank),
+                    owned(route, rank),
                 )
             )
     return keyed
@@ -5837,7 +5836,7 @@ def _reanchor_concentric_corner_fans(
             ]
         ] = []
         cap = math.inf
-        floor = floor_radius
+        floor = -math.inf
         for observation, index, _resolved, _term, turn_in, turn_out in members:
             displacement = observation.points[observation.rank][0] - innermost_x
             shift = -displacement * (turn_out[0] - turn_in[0])
@@ -5848,7 +5847,7 @@ def _reanchor_concentric_corner_fans(
             floor = max(floor, COORD_TOLERANCE_FINE - shift)
             prepared.append((observation, index, displacement, turn_in, turn_out))
         reference = min(curve_radius, cap)
-        if reference < floor:
+        if reference < floor or (reference < curve_radius and reference < floor_radius):
             continue
 
         for observation, index, displacement, turn_in, turn_out in prepared:
