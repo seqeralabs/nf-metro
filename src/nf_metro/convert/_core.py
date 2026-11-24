@@ -559,7 +559,8 @@ class _LineAssignment:
     tgt_sec)`` section pair to its ``(id, name, color)``; ``spur`` (when
     present) carries dead-end branches; ``side`` lists the further lines a
     front end planned (see :data:`LinePlan`). ``edge_line`` maps every emitted
-    edge to its line id; its insertion order is the emission order.
+    edge to its line id. Intra-section edges are emitted in their section's
+    order; inter-section edges in ``edge_line``'s insertion order.
     """
 
     main: tuple[str, str, str]
@@ -843,10 +844,12 @@ def branch_line_planner(
     """Plan lines from the graph's shape rather than from its sections.
 
     The trunk, ``main``, is the longest chain into the main sink: the sink with
-    the most direct inputs, ties going to the one with more upstream nodes,
+    the most upstream nodes, ties going to the one with more direct inputs,
     then to the first by label. Each remaining chain, longest first, becomes
-    its own line, named after its first node not already on a line. Ties
-    break on node labels, then ids, so the plan does not depend on hash order.
+    its own line, named after its first node not already on a line, or after
+    its last node when every node is. Side lines cycle through the palette
+    after the trunk's colour, which they never reuse. Ties break on node
+    labels, then ids, so the plan does not depend on hash order.
     """
     if not edges:
         return []
@@ -857,7 +860,7 @@ def branch_line_planner(
     graph = directed_graph(sorted({n for edge in edges for n in edge}), edges)
     sink = min(
         (n for n in graph if graph.out_degree(n) == 0),
-        key=lambda n: (-graph.in_degree(n), -len(nx.ancestors(graph, n)), key(n)),
+        key=lambda n: (-len(nx.ancestors(graph, n)), -graph.in_degree(n), key(n)),
     )
     trunk = _longest_path(graph, key, sink)
     lines: LinePlan = [(("main", "Main", LINE_COLORS[0]), list(pairwise(trunk)))]
@@ -871,7 +874,7 @@ def branch_line_planner(
         path = _longest_path(graph, key)
         first = next((n for n in path if n not in on_line), path[-1])
         line_id = _allocate_unique_id(nodes[first].label, used_ids, "line")
-        color = LINE_COLORS[len(lines) % len(LINE_COLORS)]
+        color = LINE_COLORS[1 + (len(lines) - 1) % (len(LINE_COLORS) - 1)]
         lines.append(
             ((line_id, _display_label(nodes[first]), color), list(pairwise(path)))
         )
@@ -920,6 +923,9 @@ def dag_to_mmd(
 
     intra_edges, inter_edges = _classify_edges(edges, sections.node_section)
     plan = plan_lines(dag.nodes, edges) if plan_lines else []
+    planned = [edge for _, line_edges in plan for edge in line_edges]
+    if plan and (len(planned) != len(set(planned)) or set(planned) != set(edges)):
+        raise ValueError("plan_lines must put every edge on exactly one line")
     lines = (
         _planned_lines(plan)
         if plan

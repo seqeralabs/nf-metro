@@ -15,6 +15,7 @@ from click.testing import CliRunner
 from nf_metro.api import _resolve_input_format, render_string
 from nf_metro.cli import SNAKEMAKE_QUIPS, cli
 from nf_metro.convert import (
+    LINE_COLORS,
     ExperimentalInputWarning,
     FeedbackEdgesDroppedWarning,
     convert_dag,
@@ -167,7 +168,56 @@ def test_the_trunk_runs_into_the_final_rule_and_each_other_chain_gets_a_line():
     }
 
 
-def test_the_trunk_ends_at_the_sink_with_the_most_inputs():
+def _dot(rules: list[str], edges: list[tuple[str, str]]) -> str:
+    nodes = "".join(
+        f'\t{i}[label = "{r}", color = "0 0 0", style="rounded"];\n'
+        for i, r in enumerate(rules)
+    )
+    links = "".join(f"\t{rules.index(s)} -> {rules.index(t)}\n" for s, t in edges)
+    return "digraph snakemake_dag {\n" + nodes + links + "}\n"
+
+
+def test_the_trunk_ends_at_the_sink_with_the_most_upstream_rules():
+    rules = ["trim", "align", "dedup", "call", "filter", "annotate", "fastqc"]
+    rules += ["stats", "multiqc"]
+    edges = [("trim", "align"), ("align", "dedup"), ("dedup", "call")]
+    edges += [("call", "filter"), ("filter", "annotate")]
+    edges += [("trim", "fastqc"), ("fastqc", "multiqc")]
+    edges += [("align", "stats"), ("stats", "multiqc")]
+
+    lines = _edge_lines(_convert(_dot(rules, edges)))
+    assert lines[("filter", "annotate")] == "main"
+    assert lines[("fastqc", "multiqc")] == "fastqc"
+    assert lines[("stats", "multiqc")] == "stats"
+
+
+def test_side_lines_never_reuse_the_trunk_colour():
+    qc = [f"qc_{i}" for i in range(len(LINE_COLORS) + 2)]
+    edges = [("align", q) for q in qc] + [(q, "report") for q in qc]
+    mmd = _convert(_dot(["align", *qc, "report"], edges))
+
+    colours = re.findall(r"^%%metro line: .* \| (#\w+)$", mmd, flags=re.MULTILINE)
+    assert len(colours) == len(qc)
+    assert colours[0] == LINE_COLORS[0]
+    assert LINE_COLORS[0] not in colours[1:]
+
+
+def test_a_plan_that_misses_an_edge_is_rejected():
+    from nf_metro.convert._core import DagNode, ParsedDag, dag_to_mmd
+
+    dag = ParsedDag(
+        nodes={n: DagNode(id=n, label=n, shape="rule") for n in "abc"},
+        edges=[("a", "b"), ("b", "c")],
+    )
+    with pytest.raises(ValueError, match="every edge on exactly one line"):
+        dag_to_mmd(
+            dag,
+            {"a", "b", "c"},
+            plan_lines=lambda nodes, edges: [(("main", "Main", "#000"), edges[:1])],
+        )
+
+
+def test_the_trunk_ends_at_the_sink_with_the_most_inputs_on_a_tie():
     mmd = _convert((FIXTURES / "two_terminals.rulegraph.dot").read_text())
 
     lines = _edge_lines(mmd)

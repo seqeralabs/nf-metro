@@ -83,9 +83,9 @@ rule bcftools_stats:       # both VCFs -> stats/{sample}.txt
 Snakemake's graph output contains rules and dependencies only:
 
 - **One section.** The output has no grouping (job `group:` directives do not appear in it), so every rule goes into one section. nf-metro folds a long section onto more rows.
-- **Lines from the graph's shape.** The `main` line is the longest chain of rules into the main final rule: the one with the most direct inputs. Ties go to the rule with more rules upstream, then to the first by name. Each other chain of rules, longest first, becomes its own line, named after its first rule not already on a line. Rename lines or regroup them by hand if your workflow's routes differ.
+- **Lines from the graph's shape.** The `main` line is the longest chain of rules into the main final rule: the one with the most rules upstream. Ties go to the rule with more direct inputs, then to the first by name. Each other chain of rules, longest first, becomes its own line, named after its first rule not already on a line, or after its last rule when every rule on it already is. Line colours repeat after eight lines, but never reuse the colour of `main`. Rename lines or regroup them by hand if your workflow's routes differ.
 - **Rule names as labels.** The converter turns `bwa_mem` into Bwa Mem.
-- **No shortcut connections.** When a rule reads from both an earlier rule and a rule in between, only the path through the rule in between is drawn. The direct dependency would otherwise run on top of that path.
+- **No shortcut connections.** When a rule reads from both an earlier rule and a rule in between, only the path through the rule in between is drawn. The longer path already shows that order, so the direct dependency would only duplicate it.
 
 ## Hand-tune the output
 
