@@ -152,15 +152,14 @@ def test_unify_uses_widest_radius_all_shared_legs_can_resolve() -> None:
 
 
 def test_unify_refreshes_a_shared_route_after_changing_one_corner() -> None:
-    """Chained corners on one route settle to a fixpoint within a single call.
+    """Chained corners on one route settle within a single call.
 
     ``shared`` carries two coincident turns 30px apart, so its two corners
     compete for one segment budget: equalising the near corner against ``wide``
-    changes what the far corner can draw against ``peer``.  The far corner's
-    bucket is visited first, so reaching agreement takes more than one sweep
-    over the buckets.  A repeat call must therefore be inert -- if it still
-    moves a radius, the first call returned before the buckets stopped
-    influencing each other and the emitted arcs are a doubled corner apart.
+    changes what the far corner can draw against ``peer``.  A repeat call must
+    be inert -- if it still moves a radius, the first call left the buckets
+    disagreeing over that budget and the emitted arcs are a doubled corner
+    apart.
     """
     shared = _make_route("shared", "x", 22.0)
     shared.points = [

@@ -433,3 +433,36 @@ def test_separate_bundles_on_one_bisector_turn_apart() -> None:
         ["a1", "a2"],
         ["b1", "b2"],
     ]
+
+
+@pytest.mark.parametrize("radii", [[10.0, 7.0], [10.0, 3.0, 12.0], [0.0, 25.0]])
+def test_corner_budget_is_the_largest_radius_resolve_leaves_unclamped(radii) -> None:
+    from nf_metro.layout.routing.corners import (
+        corner_radius_budget,
+        resolve_curve_radius_at,
+    )
+
+    points = [(0.0, 0.0), (0.0, 40.0), (30.0, 40.0), (30.0, 90.0), (55.0, 90.0)]
+    desired = (radii + [10.0, 10.0, 10.0])[:3]
+    for index in range(3):
+        budget = corner_radius_budget(points, desired, index)
+        at_budget = list(desired)
+        at_budget[index] = budget
+        assert resolve_curve_radius_at(points, at_budget, index) == pytest.approx(
+            budget
+        )
+        past = list(desired)
+        past[index] = budget + 0.5
+        assert resolve_curve_radius_at(points, past, index) < budget + 0.5
+
+
+def test_fan_reanchor_lowers_its_reference_to_the_shortest_leg() -> None:
+    """A fan whose innermost lane cannot reach the curve radius seats it at
+    its leg budget instead, every lane keeping its concentric offset."""
+    from nf_metro.layout.routing.normalize import _reanchor_concentric_corner_fans
+
+    outer = _route("a", [(0.0, 0.0), (0.0, 100.0), (50.0, 100.0)], [10.0])
+    inner = _route("b", [(3.0, 0.0), (3.0, 97.0), (11.0, 97.0)], [7.0])
+    _reanchor_concentric_corner_fans([outer, inner], {}, CURVE_RADIUS)
+    assert inner.curve_radii == [pytest.approx(8.0)]
+    assert outer.curve_radii == [pytest.approx(11.0)]

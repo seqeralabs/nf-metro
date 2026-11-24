@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
-from nf_metro.layout.routing.corners import concentric_turn_radius
+from nf_metro.layout.routing.corners import turn_shift
 from nf_metro.render.svg import _drawn_pieces, _piece_at, build_render_plan
 from nf_metro.themes import resolve_theme
 
@@ -48,7 +48,7 @@ def _centre(points, arm):
 def _pair(turn_degrees: float):
     inner, outer = _lane(0.0, turn_degrees), _lane(_STEP, turn_degrees)
     displacement = (outer[1][0] - inner[1][0], outer[1][1] - inner[1][1])
-    return inner, outer, concentric_turn_radius(*outer, displacement, 10.0)
+    return inner, outer, 10.0 + turn_shift(*outer, displacement)
 
 
 def _gap(inner, inner_arm, outer, outer_arm) -> float:
@@ -76,8 +76,8 @@ def test_adjacent_lanes_stay_touching_through_a_diagonal_turn(turn_degrees):
 def test_right_angle_turns_keep_the_existing_concentric_rule():
     inner = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)]
     outer = [(0.0, -4.0), (104.0, -4.0), (104.0, 100.0)]
-    assert concentric_turn_radius(*outer, (4.0, -4.0), 10.0) == pytest.approx(14.0)
-    assert concentric_turn_radius(*inner, (0.0, 0.0), 10.0) == pytest.approx(10.0)
+    assert 10.0 + turn_shift(*outer, (4.0, -4.0)) == pytest.approx(14.0)
+    assert 10.0 + turn_shift(*inner, (0.0, 0.0)) == pytest.approx(10.0)
 
 
 def test_touching_fan_corners_leave_no_seam():
@@ -127,7 +127,7 @@ def test_touching_fan_corners_leave_no_seam():
 )
 def test_a_drawn_corner_is_a_circular_arc(turn_degrees, bound):
     """Every point of a drawn corner sits on the circle tangent to both legs."""
-    from nf_metro.layout.routing.corners import corner_arc_at
+    from nf_metro.layout.routing.corners import corner_arc_controls, cubic_point
 
     phi = math.radians(turn_degrees)
     arm = 10.0
@@ -136,10 +136,9 @@ def test_a_drawn_corner_is_a_circular_arc(turn_degrees, bound):
     after = (corner[0] + arm * math.cos(phi), corner[1] - arm * math.sin(phi))
     radius = arm / math.tan(phi / 2)
     centre = (before[0], before[1] - radius)
+    handles = corner_arc_controls(before, corner, after)
     worst = max(
-        abs(
-            math.dist(corner_arc_at(before, corner, after, k / 200)[0], centre) - radius
-        )
+        abs(math.dist(cubic_point(before, *handles, after, k / 200), centre) - radius)
         for k in range(201)
     )
     assert worst <= bound * radius
