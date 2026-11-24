@@ -303,7 +303,7 @@ def _layout_single_section(
         priority_lane_sign=priority_lane_sign,
     )
     section.lane_ends, section.lane_end_exempt = peel_lane_ends(
-        sub, layers, tracks, priority_lane_sign
+        sub, layers, tracks, _lane_sign(section, graph)
     )
     seated_helpers = seated_contender_helpers(sub, layers, tracks)
 

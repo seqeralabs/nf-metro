@@ -297,7 +297,7 @@ def peel_lane_ends(
     graph: MetroGraph,
     layers: dict[str, int],
     tracks: dict[str, float],
-    priority_lane_sign: float | None,
+    lane_sign: float,
 ) -> tuple[dict[str, float], dict[str, frozenset[str]]]:
     """Lines a section pins to an end of its lane order, and where they are exempt.
 
@@ -308,16 +308,13 @@ def peel_lane_ends(
     (negative) or the last (positive) (``Section.lane_ends``).  The pin holds
     only along the contender's own run of the line; stations the line reaches
     by its other runs are exempt (``Section.lane_end_exempt``).
-    *priority_lane_sign* names which end faces which side, so without it (a
-    seam may impose the order) nothing is pinned.  A contender not seated on
-    the far side of the peels it passes, or whose joins do not all lie on one
-    side of it, pins nothing, and a line two contenders would pin to opposite ends is
-    left on its priority lane.
+    *lane_sign* is the track direction the section's lane order runs in, first
+    lane to last, whether line priority or an entering seam set that order.  A
+    contender not seated on the far side of the peels it passes, or whose joins
+    do not all lie on one side of it, pins nothing, and a line two contenders
+    would pin to opposite ends keeps its place in the lane order.
     """
-    if priority_lane_sign is None:
-        return {}, {}
     G = build_station_digraph(graph)
-    lane_sign = 1.0 if priority_lane_sign > 0 else -1.0
     pins: dict[str, list[float]] = defaultdict(list)
     runs: dict[str, set[str]] = defaultdict(set)
     for node, passed in _peel_contenders(G, graph, layers).items():
@@ -744,7 +741,9 @@ def _contender_seat_layer(
     Normally the one before its first join, so every station along its run up
     to the join is placed and the seat can see each of them.  A peel it passes
     in the first join's own layer is placed only with that layer, so the seat
-    then waits for it.
+    then waits for it, and the join is placed before the seat: a join that
+    takes the median of its feeders' rows (``diamond_style: symmetric``)
+    counts the contender at the row it was first placed in.
     """
     first = _first_join_layer(node, G, layers)
     return (

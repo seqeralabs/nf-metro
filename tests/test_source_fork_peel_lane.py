@@ -78,15 +78,26 @@ DECLARATION_ORDERS = {
 _TB, _BT = ("m270", "r90"), ("m90", "r270")
 _CORRIDOR = (
     "with its neighbour stacked along the flow, the bundle carried across "
-    "leaves outside the inter-row corridor its reservation realises; main "
-    "draws the same shape the same way or aborts"
+    "leaves outside the inter-row corridor its reservation realises"
 )
+_CORRIDOR_NOT_ON_MAIN = f"{_CORRIDOR}, a downgrade main does not raise here"
+_CORRIDOR_SEATED_ON_MAIN = (
+    f"{_CORRIDOR_NOT_ON_MAIN}, though it does once the contender's line is "
+    "declared first and seats the contender on this side too"
+)
+_STACKED_FEED = "lines fed from the stacked frame cross the trunk, on main too"
+_FED_SHAPES = [
+    "fed_bundle_with_the_peel_line",
+    "fed_bundle_with_the_peel_line_sibling_line_first",
+    "fed_bundle_without_the_peel_line",
+]
 _KNOWN_DEFECTS = {
     "test_no_guard_downgrade": {
-        ("fed_fork_across_sections", o): _CORRIDOR for o in _TB + _BT
+        **{("fed_fork_across_sections", o): f"{_CORRIDOR}, on main too" for o in _TB},
+        **{("fed_fork_across_sections", o): f"{_CORRIDOR}; main aborts" for o in _BT},
     },
     "test_no_line_crosses_another": {
-        ("fed_fork_across_sections", o): _CORRIDOR for o in _TB
+        ("fed_fork_across_sections", o): f"{_CORRIDOR}, on main too" for o in _TB
     },
     "test_contender_shapes_stay_clear": {
         **{
@@ -95,24 +106,41 @@ _KNOWN_DEFECTS = {
             for o in _TB
         },
         **{
-            (f"flat_frame_{order}", o): (
-                "the peel line crosses the trunk fed from the stacked frame, "
-                "on main too"
-            )
+            (shape, o): _STACKED_FEED
+            for shape in [
+                *(f"flat_frame_{order}" for order in DECLARATION_ORDERS),
+                *_FED_SHAPES,
+                "fed_bundle_with_the_peel_line_auto_grid",
+            ]
+            for o in _TB
+        },
+        **{
+            (f"flat_frame_carried_{order}", o): f"{_CORRIDOR}, on main too"
             for order in DECLARATION_ORDERS
             for o in _TB
         },
         **{
-            (f"flat_frame_carried_{order}", o): _CORRIDOR
-            for order in DECLARATION_ORDERS
-            for o in _TB + _BT
-        },
-        **{
-            ("flat_frame_carried_peel_line_first", o): (
-                "the carried bundle leaves outside the inter-row corridor its "
-                "reservation realises, a downgrade main does not raise here"
+            ("flat_frame_carried_sibling_line_first", o): (
+                f"{_CORRIDOR}; main instead runs the contender's line through "
+                "the peel's marker, a downgrade of its own"
             )
             for o in _BT
+        },
+        **{
+            ("flat_frame_carried_peel_line_first", o): _CORRIDOR_NOT_ON_MAIN
+            for o in _BT
+        },
+        **{(shape, o): _CORRIDOR_SEATED_ON_MAIN for shape in _FED_SHAPES for o in _BT},
+        **{
+            ("fed_bundle_with_the_peel_line_auto_grid", o): (
+                "the bundle carried over the top keeps less canvas margin than "
+                "it reserved, on main too"
+            )
+            for o in _BT
+        },
+        **{
+            ("fed_bundle_with_the_peel_line_auto_grid", o): "aborts on main too"
+            for o in ("m0", "r180")
         },
     },
 }
@@ -367,6 +395,20 @@ def _framed_carried(lines: str) -> str:
     )
 
 
+def _fed(lines: str, carried: str = "main,b", *, gridded: bool = True) -> str:
+    """The fork's trunk fed from a neighbouring section carrying *carried*."""
+    body = _P3_BODY.replace("        a -->|main| s\n", "")
+    if carried != "main,b":
+        body = "        r -->|b| s\n" + body.replace("|main|", f"|{carried}|")
+    grid = "%%metro grid: u | 0,0\n%%metro grid: p | 1,0\n" if gridded else ""
+    return (
+        f"{lines}{grid}graph LR\n"
+        f"    subgraph u [Up]\n        x -->|{carried}| a\n    end\n"
+        f"    subgraph p [P]\n{body}    end\n"
+        f"    a -->|{carried}| s\n"
+    )
+
+
 SHAPES = {
     "centered_peel_line_first": _one_section(
         _LINES_BC, _P3_BODY, "%%metro line_spread: centered\n"
@@ -401,6 +443,10 @@ SHAPES = {
     "two_bypassed_runs_to_successive_joins": _one_section(
         _LINES_BC, _P3_BODY + "        m -->|main| n\n        f -->|c| n\n"
     ),
+    "fed_bundle_with_the_peel_line": _fed(_LINES_BC),
+    "fed_bundle_with_the_peel_line_sibling_line_first": _fed(_LINES_CB),
+    "fed_bundle_with_the_peel_line_auto_grid": _fed(_LINES_BC, gridded=False),
+    "fed_bundle_without_the_peel_line": _fed(_LINES_BC + _LINE_E, "main,e"),
     "contender_starts_the_peel_line": _one_section(
         _LINES_BC.replace(_LINES_BC.splitlines(True)[2], ""),
         _P3_BODY.replace("f -->|c| m", "f -->|b| m"),
