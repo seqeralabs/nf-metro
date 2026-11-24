@@ -113,6 +113,7 @@ from nf_metro.layout.routing.convergences import ConvergenceInvariantError
 from nf_metro.layout.routing.corners import (
     corner_arc_at,
     corner_arc_controls,
+    cubic_point,
     curve_tangents,
     resolve_curve_radii,
 )
@@ -4293,11 +4294,12 @@ def _arc_profile(piece: _DrawnPiece) -> list[tuple[float, float]]:
     """``(arc length, curve parameter)`` stations from a piece's start to end."""
     if piece.control is None:
         return [(0.0, 0.0), (math.dist(piece.start, piece.end), 1.0)]
+    c1, c2 = corner_arc_controls(piece.start, piece.control, piece.end)
     profile = [(0.0, 0.0)]
     prev = piece.start
     for k in range(1, _CORNER_ARC_CHORDS + 1):
         t = k / _CORNER_ARC_CHORDS
-        point, _ = _piece_at(piece, t)
+        point = cubic_point(piece.start, c1, c2, piece.end, t)
         profile.append((profile[-1][0] + math.dist(prev, point), t))
         prev = point
     return profile

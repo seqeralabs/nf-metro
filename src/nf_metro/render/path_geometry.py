@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from nf_metro.layout.phases.guards import SettledRouteValidationError
 from nf_metro.layout.routing.common import (
@@ -15,6 +16,16 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.corners import desired_curve_radii
 
 Point = tuple[float, float]
+
+_PATH_COMMAND = re.compile(r"([MLC])([^MLC]*)")
+_PATH_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def iter_path_commands(d: str) -> Iterator[tuple[str, list[float]]]:
+    """``(command, numbers)`` for each ``M``/``L``/``C`` in a path's ``d``."""
+    for command, body in _PATH_COMMAND.findall(d):
+        yield command, [float(n) for n in _PATH_NUMBER.findall(body)]
+
 
 _INCOMING_X_SIGNS: dict[Direction, float] = {Direction.R: 1.0, Direction.L: -1.0}
 

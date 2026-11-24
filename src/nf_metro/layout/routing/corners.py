@@ -278,6 +278,36 @@ def corner_arc_controls(
     )
 
 
+def cubic_point(
+    a: tuple[float, float],
+    c1: tuple[float, float],
+    c2: tuple[float, float],
+    b: tuple[float, float],
+    t: float,
+) -> tuple[float, float]:
+    """The point at *t* on the cubic Bezier from *a* to *b* with handles *c1*, *c2*."""
+    s = 1.0 - t
+    return (
+        s**3 * a[0] + 3 * s * s * t * c1[0] + 3 * s * t * t * c2[0] + t**3 * b[0],
+        s**3 * a[1] + 3 * s * s * t * c1[1] + 3 * s * t * t * c2[1] + t**3 * b[1],
+    )
+
+
+def cubic_tangent(
+    a: tuple[float, float],
+    c1: tuple[float, float],
+    c2: tuple[float, float],
+    b: tuple[float, float],
+    t: float,
+) -> tuple[float, float]:
+    """The (unnormalised) forward tangent at *t* of :func:`cubic_point`'s cubic."""
+    s = 1.0 - t
+    return (
+        s * s * (c1[0] - a[0]) + 2 * s * t * (c2[0] - c1[0]) + t * t * (b[0] - c2[0]),
+        s * s * (c1[1] - a[1]) + 2 * s * t * (c2[1] - c1[1]) + t * t * (b[1] - c2[1]),
+    )
+
+
 def corner_arc_at(
     before: tuple[float, float],
     corner: tuple[float, float],
@@ -286,26 +316,9 @@ def corner_arc_at(
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     """Point and (unnormalised) forward tangent of the drawn corner arc at *t*."""
     c1, c2 = corner_arc_controls(before, corner, after)
-    s = 1.0 - t
-    point = (
-        s**3 * before[0]
-        + 3 * s * s * t * c1[0]
-        + 3 * s * t * t * c2[0]
-        + t**3 * after[0],
-        s**3 * before[1]
-        + 3 * s * s * t * c1[1]
-        + 3 * s * t * t * c2[1]
-        + t**3 * after[1],
+    return cubic_point(before, c1, c2, after, t), cubic_tangent(
+        before, c1, c2, after, t
     )
-    tangent = (
-        s * s * (c1[0] - before[0])
-        + 2 * s * t * (c2[0] - c1[0])
-        + t * t * (after[0] - c2[0]),
-        s * s * (c1[1] - before[1])
-        + 2 * s * t * (c2[1] - c1[1])
-        + t * t * (after[1] - c2[1]),
-    )
-    return point, tangent
 
 
 def corner_from_arc(
