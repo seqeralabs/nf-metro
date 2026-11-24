@@ -216,17 +216,22 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Canvas and text
 
-| Field               | Value  | Default       | Effect                                                                                                                                                    |
-| ------------------- | ------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `background_color`  | colour | from `nfcore` | Canvas fill. `none` leaves the canvas transparent.                                                                                                        |
-| `title_color`       | colour | from `nfcore` | Map title text.                                                                                                                                           |
-| `title_font_size`   | number | from `nfcore` | Map title size, px.                                                                                                                                       |
-| `label_color`       | colour | from `nfcore` | Station label text.                                                                                                                                       |
-| `label_font_family` | text   | from `nfcore` | CSS font stack for station labels, and for every other text element.                                                                                      |
-| `label_font_size`   | number | from `nfcore` | Station label size, px. Layout reserves label room from the map's own settings, so keep this near 13 and use the `font_scale` layout option to grow text. |
-| `label_font_weight` | text   | from `nfcore` | Station label weight (`bold`, `normal`, `600`, ...).                                                                                                      |
-| `label_halo_width`  | number | `3`           | Width of the knockout halo behind station labels, px. 0 disables it.                                                                                      |
-| `label_halo_color`  | colour | empty         | Halo colour. Empty takes the background, or white on a transparent canvas.                                                                                |
+| Field               | Value        | Default                    | Effect                                                                                                                                                    |
+| ------------------- | ------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `background_color`  | colour       | from `nfcore`              | Canvas fill. `none` leaves the canvas transparent.                                                                                                        |
+| `title_color`       | colour       | from `nfcore`              | Map title text.                                                                                                                                           |
+| `title_font_size`   | number       | from `nfcore`              | Map title size, px.                                                                                                                                       |
+| `title_font_weight` | text         | `bold`                     | Map title weight.                                                                                                                                         |
+| `label_color`       | colour       | from `nfcore`              | Station label text.                                                                                                                                       |
+| `label_font_family` | text         | from `nfcore`              | CSS font stack for station labels, and for every other text element.                                                                                      |
+| `label_font_size`   | number       | from `nfcore`              | Station label size, px. Layout reserves label room from the map's own settings, so keep this near 13 and use the `font_scale` layout option to grow text. |
+| `label_font_weight` | text         | from `nfcore`              | Station label weight (`bold`, `normal`, `600`, ...).                                                                                                      |
+| `label_halo_width`  | number       | `3`                        | Width of the knockout halo behind station labels, px. 0 disables it.                                                                                      |
+| `label_halo_color`  | colour       | empty                      | Halo colour. Empty takes the background, or white on a transparent canvas.                                                                                |
+| `caption_color`     | colour       | empty                      | `%%metro caption:` text, in colours that follow the viewer's light or dark mode. Empty draws a fixed light grey.                                          |
+| `caption_font_size` | whole number | `11`                       | Caption size, px.                                                                                                                                         |
+| `watermark_color`   | colour       | `rgba(150, 150, 150, 0.6)` | The attribution line.                                                                                                                                     |
+| `canvas_padding`    | number       | `60`                       | Margin around the map on every side, px.                                                                                                                  |
 
 ### Sections
 
@@ -243,6 +248,11 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | `section_stroke_dasharray`     | text              | empty         | SVG dash pattern for the section outline (`2 4`). Empty is solid.                               |
 | `section_corner_radius`        | number            | `8`           | Section box corner radius, px.                                                                  |
 | `section_badges`               | `true` \| `false` | `true`        | Draw the numbered circle beside each section title. Off, titles start where the badge would be. |
+| `section_badge_fill`           | colour            | empty         | Number badge fill. Empty takes `station_stroke`.                                                |
+| `section_badge_text_color`     | colour            | empty         | Number badge digit. Empty takes `station_fill`.                                                 |
+| `section_badge_font_size`      | whole number      | `12`          | Number badge digit size, px.                                                                    |
+| `group_rule_width`             | number            | `1.5`         | Width of the rule under a station group's caption, px.                                          |
+| `group_rule_opacity`           | number            | `0.45`        | Opacity of the rule under a station group's caption, 0 to 1.                                    |
 
 ### Legend
 
@@ -254,6 +264,9 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | `legend_font_size`     | number | from `nfcore` | Legend text size, px.                   |
 | `legend_stroke_width`  | number | `0`           | Legend outline width, px. 0 draws none. |
 | `legend_corner_radius` | number | `6`           | Legend box corner radius, px.           |
+| `legend_padding`       | number | `12`          | Space inside the legend box, px.        |
+| `legend_line_height`   | number | `24`          | Height of each legend row, px.          |
+| `legend_swatch_width`  | number | `24`          | Length of each line swatch, px.         |
 
 ### Stations
 
@@ -284,6 +297,10 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | Field                        | Value             | Default       | Effect                                                                                                                            |
 | ---------------------------- | ----------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `line_width`                 | number            | from `nfcore` | Route stroke width, px.                                                                                                           |
+| `line_cap`                   | `round` \| `butt` | `round`       | End caps of route strokes: `round` or `butt`.                                                                                     |
+| `dashed_dasharray`           | text              | `8,4`         | SVG dash pattern of a `dashed` line.                                                                                              |
+| `dotted_dasharray`           | text              | `2,4`         | SVG dash pattern of a `dotted` line.                                                                                              |
+| `bridge_gap`                 | number            | `12`          | Gap a line leaves either side of a line it hops over, px.                                                                         |
 | `muted_line_color`           | colour            | `#888888`     | Grey for inactive lines and the stations, labels and icons only they touch. A two-palette SVG switches it with the viewer's mode. |
 | `bridge_glyph`               | `true` \| `false` | `true`        | Break the lower line where two unrelated lines cross.                                                                             |
 | `directional_marker_size`    | number            | `4`           | Half-size of `--directional` chevrons, px.                                                                                        |
@@ -293,17 +310,19 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### File icons
 
-| Field                    | Value  | Default | Effect                                                  |
-| ------------------------ | ------ | ------- | ------------------------------------------------------- |
-| `terminus_width`         | number | `28`    | File icon width, px.                                    |
-| `terminus_height`        | number | `32`    | File icon height, px.                                   |
-| `terminus_fold_size`     | number | `8`     | Size of the folded corner, px.                          |
-| `terminus_fill`          | colour | empty   | Icon fill. Empty takes `station_fill`.                  |
-| `terminus_stroke`        | colour | empty   | Icon outline. Empty takes `station_stroke`.             |
-| `terminus_stroke_width`  | number | `1.5`   | Icon outline width, px.                                 |
-| `terminus_corner_radius` | number | `2`     | Icon corner radius, px.                                 |
-| `terminus_font_size`     | number | `7.5`   | Size of the format label inside the icon, px.           |
-| `terminus_font_color`    | colour | empty   | Format label colour. Empty takes the built-in dark ink. |
+| Field                    | Value  | Default   | Effect                                                  |
+| ------------------------ | ------ | --------- | ------------------------------------------------------- |
+| `terminus_width`         | number | `28`      | File icon width, px.                                    |
+| `terminus_height`        | number | `32`      | File icon height, px.                                   |
+| `terminus_fold_size`     | number | `8`       | Size of the folded corner, px.                          |
+| `terminus_fill`          | colour | empty     | Icon fill. Empty takes `station_fill`.                  |
+| `terminus_stroke`        | colour | empty     | Icon outline. Empty takes `station_stroke`.             |
+| `terminus_stroke_width`  | number | `1.5`     | Icon outline width, px.                                 |
+| `icon_banner_fill`       | colour | `#222222` | Fill of the band across a file icon.                    |
+| `icon_banner_text_color` | colour | `#ffffff` | File type text on the icon band.                        |
+| `terminus_corner_radius` | number | `2`       | Icon corner radius, px.                                 |
+| `terminus_font_size`     | number | `7.5`     | Size of the format label inside the icon, px.           |
+| `terminus_font_color`    | colour | empty     | Format label colour. Empty takes the built-in dark ink. |
 
 ### Animation
 
@@ -311,6 +330,7 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 | ----------------------------- | ------------ | --------- | ---------------------------------- |
 | `animation_ball_radius`       | number       | `3`       | Radius of `--animate` balls, px.   |
 | `animation_ball_color`        | colour       | `#ffffff` | Ball fill.                         |
+| `animation_ball_opacity`      | number       | `0.9`     | Ball opacity, 0 to 1.              |
 | `animation_ball_stroke`       | colour       | empty     | Ball outline. Empty draws none.    |
 | `animation_ball_stroke_width` | number       | `1`       | Ball outline width, px.            |
 | `animation_balls_per_line`    | whole number | `1`       | Balls travelling along each route. |
@@ -325,6 +345,7 @@ These colors also emit a CSS custom property, so a page that inlines the SVG can
 | `background_color`    | `--nfm-map-bg`                  |
 | `title_color`         | `--nfm-map-title-color`         |
 | `label_color`         | `--nfm-map-label-color`         |
+| `caption_color`       | `--nfm-map-caption-color`       |
 | `section_fill`        | `--nfm-map-section-fill`        |
 | `section_stroke`      | `--nfm-map-section-stroke`      |
 | `section_label_color` | `--nfm-map-section-label-color` |

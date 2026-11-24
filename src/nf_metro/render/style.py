@@ -53,10 +53,24 @@ from nf_metro.layout.constants import (
     TERMINUS_WIDTH,
 )
 from nf_metro.render.constants import (
+    ANIMATION_BALL_OPACITY,
+    BRIDGE_GAP_HALF,
+    CANVAS_PADDING,
+    CAPTION_FONT_SIZE,
     FALLBACK_LINE_COLOR,
+    GROUP_LABEL_UNDERLINE_OPACITY,
+    GROUP_LABEL_UNDERLINE_WIDTH,
+    ICON_BANNER_FILL,
+    ICON_BANNER_TEXT_COLOR,
     LEGEND_BORDER_RADIUS,
+    LEGEND_LINE_HEIGHT,
+    LEGEND_PADDING,
+    LEGEND_SWATCH_WIDTH,
     SECTION_BOX_RADIUS,
+    SECTION_NUM_FONT_SIZE,
     SECTION_STROKE_WIDTH,
+    STROKE_DASHARRAY,
+    WATERMARK_FILL,
 )
 from nf_metro.render.ns import ns as _ns
 
@@ -96,6 +110,7 @@ def _field(
     css_var: str = "",
     fallback: str = "",
     opaque: bool = False,
+    maximum: float | None = None,
 ) -> Any:  # noqa: ANN401
     return dataclasses.field(
         default=default,
@@ -108,6 +123,7 @@ def _field(
             "css_var": css_var,
             "fallback": fallback,
             "opaque": opaque,
+            "maximum": maximum,
         },
     )
 
@@ -146,6 +162,9 @@ class Theme:
         css_var="--nfm-map-title-color",
     )
     title_font_size: float = _field(doc="Map title size, px.", group="Canvas and text")
+    title_font_weight: str = _field(
+        "bold", doc="Map title weight.", group="Canvas and text"
+    )
     label_color: str = _field(
         doc="Station label text.",
         group="Canvas and text",
@@ -180,6 +199,29 @@ class Theme:
         color=True,
     )
 
+    caption_color: str = _field(
+        "",
+        doc="`%%metro caption:` text, in colours that follow the viewer's light "
+        "or dark mode. Empty draws a fixed light grey.",
+        group="Canvas and text",
+        color=True,
+        chrome=(ChromeTarget("nf-metro-caption", "fill", "set"),),
+        css_var="--nfm-map-caption-color",
+    )
+    caption_font_size: int = _field(
+        CAPTION_FONT_SIZE, doc="Caption size, px.", group="Canvas and text"
+    )
+    watermark_color: str = _field(
+        WATERMARK_FILL,
+        doc="The attribution line.",
+        group="Canvas and text",
+        color=True,
+    )
+    canvas_padding: float = _field(
+        CANVAS_PADDING,
+        doc="Margin around the map on every side, px.",
+        group="Canvas and text",
+    )
     section_fill: str = _field(
         doc="Section box fill. `transparent` draws an outline only.",
         group="Sections",
@@ -235,6 +277,34 @@ class Theme:
         group="Sections",
     )
 
+    section_badge_fill: str = _field(
+        "",
+        doc="Number badge fill. Empty takes `station_stroke`.",
+        group="Sections",
+        color=True,
+        fallback="station_stroke",
+    )
+    section_badge_text_color: str = _field(
+        "",
+        doc="Number badge digit. Empty takes `station_fill`.",
+        group="Sections",
+        color=True,
+        fallback="station_fill",
+    )
+    section_badge_font_size: int = _field(
+        SECTION_NUM_FONT_SIZE, doc="Number badge digit size, px.", group="Sections"
+    )
+    group_rule_width: float = _field(
+        GROUP_LABEL_UNDERLINE_WIDTH,
+        doc="Width of the rule under a station group's caption, px.",
+        group="Sections",
+    )
+    group_rule_opacity: float = _field(
+        GROUP_LABEL_UNDERLINE_OPACITY,
+        doc="Opacity of the rule under a station group's caption, 0 to 1.",
+        group="Sections",
+        maximum=1,
+    )
     legend_background: str = _field(
         doc="Legend box fill.",
         group="Legend",
@@ -265,6 +335,15 @@ class Theme:
         LEGEND_BORDER_RADIUS, doc="Legend box corner radius, px.", group="Legend"
     )
 
+    legend_padding: float = _field(
+        LEGEND_PADDING, doc="Space inside the legend box, px.", group="Legend"
+    )
+    legend_line_height: float = _field(
+        LEGEND_LINE_HEIGHT, doc="Height of each legend row, px.", group="Legend"
+    )
+    legend_swatch_width: float = _field(
+        LEGEND_SWATCH_WIDTH, doc="Length of each line swatch, px.", group="Legend"
+    )
     marker_stroke: str = _field(
         "",
         doc="Outline of `%%metro marker:` glyphs and their legend swatches. "
@@ -413,6 +492,27 @@ class Theme:
     )
 
     line_width: float = _field(doc="Route stroke width, px.", group="Lines")
+    line_cap: str = _field(
+        "round",
+        doc="End caps of route strokes: `round` or `butt`.",
+        group="Lines",
+        choices=("round", "butt"),
+    )
+    dashed_dasharray: str = _field(
+        STROKE_DASHARRAY["dashed"],
+        doc="SVG dash pattern of a `dashed` line.",
+        group="Lines",
+    )
+    dotted_dasharray: str = _field(
+        STROKE_DASHARRAY["dotted"],
+        doc="SVG dash pattern of a `dotted` line.",
+        group="Lines",
+    )
+    bridge_gap: float = _field(
+        2 * BRIDGE_GAP_HALF,
+        doc="Gap a line leaves either side of a line it hops over, px.",
+        group="Lines",
+    )
     muted_line_color: str = _field(
         FALLBACK_LINE_COLOR,
         doc="Grey for inactive lines and the stations, labels and icons only "
@@ -467,6 +567,18 @@ class Theme:
     terminus_stroke_width: float = _field(
         1.5, doc="Icon outline width, px.", group="File icons"
     )
+    icon_banner_fill: str = _field(
+        ICON_BANNER_FILL,
+        doc="Fill of the band across a file icon.",
+        group="File icons",
+        color=True,
+    )
+    icon_banner_text_color: str = _field(
+        ICON_BANNER_TEXT_COLOR,
+        doc="File type text on the icon band.",
+        group="File icons",
+        color=True,
+    )
     terminus_corner_radius: float = _field(
         2.0, doc="Icon corner radius, px.", group="File icons"
     )
@@ -485,6 +597,12 @@ class Theme:
     )
     animation_ball_color: str = _field(
         "#ffffff", doc="Ball fill.", group="Animation", color=True
+    )
+    animation_ball_opacity: float = _field(
+        ANIMATION_BALL_OPACITY,
+        doc="Ball opacity, 0 to 1.",
+        group="Animation",
+        maximum=1,
     )
     animation_ball_stroke: str = _field(
         "", doc="Ball outline. Empty draws none.", group="Animation", color=True

@@ -212,6 +212,7 @@ def compute_bridges(
     *,
     curve_radius: float,
     curve_radii: Sequence[Sequence[float] | None] | None = None,
+    gap_half: float = BRIDGE_GAP_HALF,
 ) -> dict[int, list[BridgeBreak]]:
     """Find non-merging crossings and report per-under-route gap spans.
 
@@ -271,6 +272,7 @@ def compute_bridges(
             drawable_radii,
             line_priority,
             curve_radius,
+            gap_half,
         ):
             # Break every collinear route of this line through the span, not
             # just the one that crossed - sibling routes (same line, same
@@ -470,6 +472,7 @@ def _cluster_gaps(
     curve_radii: Sequence[Sequence[float] | None],
     line_priority: dict[str, int],
     curve_radius: float,
+    gap_half: float,
 ) -> list[tuple[int, int, Gap]]:
     """For one cluster, return (route_index, seg_index, gap) for every line of
     the under bundle.  The gap is the same span (in the shared crossing
@@ -521,6 +524,7 @@ def _cluster_gaps(
         curve_radii,
         cross_pts,
         curve_radius,
+        gap_half,
     )
 
 
@@ -531,6 +535,7 @@ def _uniform_gaps(
     curve_radii: Sequence[Sequence[float] | None],
     cross_pts: list[Point],
     curve_radius: float,
+    gap_half: float,
 ) -> list[tuple[int, int, Gap]]:
     """Break every under-line at the same gap, centred on the over bundle.
 
@@ -547,7 +552,7 @@ def _uniform_gaps(
     over_half = (cmax - cmin) / 2.0
 
     geom = []
-    sym_half = over_half + BRIDGE_GAP_HALF
+    sym_half = over_half + gap_half
     for ri in under:
         seg = seg_of[ri]
         poly = polylines[ri]
@@ -587,8 +592,8 @@ def _uniform_gaps(
             lo_s = centre - sym_half - a_u
             hi_s = centre + sym_half - a_u
         else:
-            lo_s = max(run_lo - a_u, cmin - a_u - BRIDGE_GAP_HALF)
-            hi_s = min(run_hi - a_u, cmax - a_u + BRIDGE_GAP_HALF)
+            lo_s = max(run_lo - a_u, cmin - a_u - gap_half)
+            hi_s = min(run_hi - a_u, cmax - a_u + gap_half)
             if lo_s >= hi_s:
                 continue
         span = (

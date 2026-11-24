@@ -941,3 +941,84 @@ def test_ring_line_ends_follow_the_mode_under_pill_interchanges(tmp_path):
         assert ".nf-metro-ring-hole { fill: var(--nfm-map-ring-fill," in css
         assert ".nf-metro-ring.nf-metro-muted { stroke:" in css
         assert ".nf-metro-ring-link.nf-metro-muted { fill:" in css
+
+
+def test_visual_fields_reach_the_drawing(tmp_path):
+    theme = _write(
+        tmp_path,
+        "visual.yaml",
+        "name: visual\n"
+        "title_font_weight: normal\n"
+        "watermark_color: '#123456'\n"
+        "section_badge_fill: '#aa0000'\n"
+        "section_badge_text_color: '#00aa00'\n"
+        "section_badge_font_size: 9\n"
+        "dashed_dasharray: '3,3'\n"
+        "line_cap: butt\n"
+        "canvas_padding: 90\n",
+    )
+    text = "%%metro title: T\n" + _RNASEQ.read_text()
+    default = render_string(text, source_dir=str(_RNASEQ.parent))
+    svg = render_string(text, theme=str(theme), source_dir=str(_RNASEQ.parent))
+    root = ET.fromstring(svg)
+    title = next(
+        e
+        for e in root.iter(f"{_SVG_NS}text")
+        if "nf-metro-title" in (e.get("class") or "")
+    )
+    assert title.get("font-weight") == "normal"
+    assert 'fill="#123456"' in svg
+    badge = next(
+        e
+        for e in root.iter(f"{_SVG_NS}circle")
+        if "nf-metro-section-num-circle" in (e.get("class") or "")
+    )
+    assert badge.get("fill") == "#aa0000"
+    assert 'font-size="9"' in svg and 'fill="#00aa00"' in svg
+    assert 'stroke-linecap="butt"' in svg and 'stroke-linecap="round"' in default
+    width = float(root.get("width"))
+    assert width > float(ET.fromstring(default).get("width"))
+
+
+def test_dash_patterns_come_from_the_theme(tmp_path):
+    theme = _write(tmp_path, "dash.yaml", "name: dash\ndashed_dasharray: '3,3'\n")
+    text = (
+        "%%metro line: a | A | #ff0000 | dashed\n"
+        "graph LR\n    x -->|a| y\n    y -->|a| z\n"
+    )
+    assert 'stroke-dasharray="3,3"' in render_string(text, theme=str(theme))
+    assert 'stroke-dasharray="8,4"' in render_string(text)
+
+
+def test_a_set_caption_colour_follows_the_mode(tmp_path):
+    theme = _write(
+        tmp_path,
+        "cap.yaml",
+        "name: cap\n"
+        "light:\n  caption_color: '#111111'\n"
+        "dark:\n  caption_color: '#eeeeee'\n",
+    )
+    text = "%%metro caption: hello\n" + _MMD
+    svg = render_string(text, theme=str(theme))
+    assert "fill: var(--nfm-map-caption-color, light-dark(#111111, #eeeeee))" in svg
+    assert "nf-metro-caption" not in render_string(text)
+
+
+def test_animation_balls_take_the_theme_opacity(tmp_path):
+    theme = _write(tmp_path, "ball.yaml", "name: ball\nanimation_ball_opacity: 0.5\n")
+    text = "%%metro animate: true\n" + _MMD
+    svg = render_string(text, theme=str(theme))
+    assert 'opacity="0.5"' in svg and 'opacity="0.9"' not in svg
+
+
+def test_file_icon_banners_take_the_theme_colours(tmp_path):
+    theme = _write(
+        tmp_path,
+        "banner.yaml",
+        "name: banner\n"
+        "icon_banner_fill: '#0000aa'\n"
+        "icon_banner_text_color: '#ffff00'\n",
+    )
+    path = _ROOT / "examples" / "file_icons.mmd"
+    svg = render_string(path.read_text(), theme=str(theme), source_dir=str(path.parent))
+    assert 'fill="#0000aa"' in svg and 'fill="#ffff00"' in svg

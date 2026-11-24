@@ -50,6 +50,9 @@
         "title_font_size": {
           "$ref": "#/$defs/fields/title_font_size"
         },
+        "title_font_weight": {
+          "$ref": "#/$defs/fields/title_font_weight"
+        },
         "label_color": {
           "$ref": "#/$defs/fields/label_color"
         },
@@ -67,6 +70,18 @@
         },
         "label_halo_color": {
           "$ref": "#/$defs/fields/label_halo_color"
+        },
+        "caption_color": {
+          "$ref": "#/$defs/fields/caption_color"
+        },
+        "caption_font_size": {
+          "$ref": "#/$defs/fields/caption_font_size"
+        },
+        "watermark_color": {
+          "$ref": "#/$defs/fields/watermark_color"
+        },
+        "canvas_padding": {
+          "$ref": "#/$defs/fields/canvas_padding"
         },
         "section_fill": {
           "$ref": "#/$defs/fields/section_fill"
@@ -101,6 +116,21 @@
         "section_badges": {
           "$ref": "#/$defs/fields/section_badges"
         },
+        "section_badge_fill": {
+          "$ref": "#/$defs/fields/section_badge_fill"
+        },
+        "section_badge_text_color": {
+          "$ref": "#/$defs/fields/section_badge_text_color"
+        },
+        "section_badge_font_size": {
+          "$ref": "#/$defs/fields/section_badge_font_size"
+        },
+        "group_rule_width": {
+          "$ref": "#/$defs/fields/group_rule_width"
+        },
+        "group_rule_opacity": {
+          "$ref": "#/$defs/fields/group_rule_opacity"
+        },
         "legend_background": {
           "$ref": "#/$defs/fields/legend_background"
         },
@@ -118,6 +148,15 @@
         },
         "legend_corner_radius": {
           "$ref": "#/$defs/fields/legend_corner_radius"
+        },
+        "legend_padding": {
+          "$ref": "#/$defs/fields/legend_padding"
+        },
+        "legend_line_height": {
+          "$ref": "#/$defs/fields/legend_line_height"
+        },
+        "legend_swatch_width": {
+          "$ref": "#/$defs/fields/legend_swatch_width"
         },
         "marker_stroke": {
           "$ref": "#/$defs/fields/marker_stroke"
@@ -179,6 +218,18 @@
         "line_width": {
           "$ref": "#/$defs/fields/line_width"
         },
+        "line_cap": {
+          "$ref": "#/$defs/fields/line_cap"
+        },
+        "dashed_dasharray": {
+          "$ref": "#/$defs/fields/dashed_dasharray"
+        },
+        "dotted_dasharray": {
+          "$ref": "#/$defs/fields/dotted_dasharray"
+        },
+        "bridge_gap": {
+          "$ref": "#/$defs/fields/bridge_gap"
+        },
         "muted_line_color": {
           "$ref": "#/$defs/fields/muted_line_color"
         },
@@ -215,6 +266,12 @@
         "terminus_stroke_width": {
           "$ref": "#/$defs/fields/terminus_stroke_width"
         },
+        "icon_banner_fill": {
+          "$ref": "#/$defs/fields/icon_banner_fill"
+        },
+        "icon_banner_text_color": {
+          "$ref": "#/$defs/fields/icon_banner_text_color"
+        },
         "terminus_corner_radius": {
           "$ref": "#/$defs/fields/terminus_corner_radius"
         },
@@ -229,6 +286,9 @@
         },
         "animation_ball_color": {
           "$ref": "#/$defs/fields/animation_ball_color"
+        },
+        "animation_ball_opacity": {
+          "$ref": "#/$defs/fields/animation_ball_opacity"
         },
         "animation_ball_stroke": {
           "$ref": "#/$defs/fields/animation_ball_stroke"
@@ -258,6 +318,9 @@
         "title_font_size": {
           "$ref": "#/$defs/fields/title_font_size"
         },
+        "title_font_weight": {
+          "$ref": "#/$defs/fields/title_font_weight"
+        },
         "label_color": {
           "$ref": "#/$defs/fields/label_color"
         },
@@ -275,6 +338,18 @@
         },
         "label_halo_color": {
           "$ref": "#/$defs/fields/label_halo_color"
+        },
+        "caption_color": {
+          "$ref": "#/$defs/fields/caption_color"
+        },
+        "caption_font_size": {
+          "$ref": "#/$defs/fields/caption_font_size"
+        },
+        "watermark_color": {
+          "$ref": "#/$defs/fields/watermark_color"
+        },
+        "canvas_padding": {
+          "$ref": "#/$defs/fields/canvas_padding"
         },
         "section_fill": {
           "$ref": "#/$defs/fields/section_fill"
@@ -309,6 +384,21 @@
         "section_badges": {
           "$ref": "#/$defs/fields/section_badges"
         },
+        "section_badge_fill": {
+          "$ref": "#/$defs/fields/section_badge_fill"
+        },
+        "section_badge_text_color": {
+          "$ref": "#/$defs/fields/section_badge_text_color"
+        },
+        "section_badge_font_size": {
+          "$ref": "#/$defs/fields/section_badge_font_size"
+        },
+        "group_rule_width": {
+          "$ref": "#/$defs/fields/group_rule_width"
+        },
+        "group_rule_opacity": {
+          "$ref": "#/$defs/fields/group_rule_opacity"
+        },
         "legend_background": {
           "$ref": "#/$defs/fields/legend_background"
         },
@@ -326,6 +416,15 @@
         },
         "legend_corner_radius": {
           "$ref": "#/$defs/fields/legend_corner_radius"
+        },
+        "legend_padding": {
+          "$ref": "#/$defs/fields/legend_padding"
+        },
+        "legend_line_height": {
+          "$ref": "#/$defs/fields/legend_line_height"
+        },
+        "legend_swatch_width": {
+          "$ref": "#/$defs/fields/legend_swatch_width"
         },
         "marker_stroke": {
           "$ref": "#/$defs/fields/marker_stroke"
@@ -387,6 +486,18 @@
         "line_width": {
           "$ref": "#/$defs/fields/line_width"
         },
+        "line_cap": {
+          "$ref": "#/$defs/fields/line_cap"
+        },
+        "dashed_dasharray": {
+          "$ref": "#/$defs/fields/dashed_dasharray"
+        },
+        "dotted_dasharray": {
+          "$ref": "#/$defs/fields/dotted_dasharray"
+        },
+        "bridge_gap": {
+          "$ref": "#/$defs/fields/bridge_gap"
+        },
         "muted_line_color": {
           "$ref": "#/$defs/fields/muted_line_color"
         },
@@ -423,6 +534,12 @@
         "terminus_stroke_width": {
           "$ref": "#/$defs/fields/terminus_stroke_width"
         },
+        "icon_banner_fill": {
+          "$ref": "#/$defs/fields/icon_banner_fill"
+        },
+        "icon_banner_text_color": {
+          "$ref": "#/$defs/fields/icon_banner_text_color"
+        },
         "terminus_corner_radius": {
           "$ref": "#/$defs/fields/terminus_corner_radius"
         },
@@ -437,6 +554,9 @@
         },
         "animation_ball_color": {
           "$ref": "#/$defs/fields/animation_ball_color"
+        },
+        "animation_ball_opacity": {
+          "$ref": "#/$defs/fields/animation_ball_opacity"
         },
         "animation_ball_stroke": {
           "$ref": "#/$defs/fields/animation_ball_stroke"
@@ -558,6 +678,9 @@
     "title_font_size": {
       "$ref": "#/$defs/fields/title_font_size"
     },
+    "title_font_weight": {
+      "$ref": "#/$defs/fields/title_font_weight"
+    },
     "label_color": {
       "$ref": "#/$defs/fields/label_color"
     },
@@ -575,6 +698,18 @@
     },
     "label_halo_color": {
       "$ref": "#/$defs/fields/label_halo_color"
+    },
+    "caption_color": {
+      "$ref": "#/$defs/fields/caption_color"
+    },
+    "caption_font_size": {
+      "$ref": "#/$defs/fields/caption_font_size"
+    },
+    "watermark_color": {
+      "$ref": "#/$defs/fields/watermark_color"
+    },
+    "canvas_padding": {
+      "$ref": "#/$defs/fields/canvas_padding"
     },
     "section_fill": {
       "$ref": "#/$defs/fields/section_fill"
@@ -609,6 +744,21 @@
     "section_badges": {
       "$ref": "#/$defs/fields/section_badges"
     },
+    "section_badge_fill": {
+      "$ref": "#/$defs/fields/section_badge_fill"
+    },
+    "section_badge_text_color": {
+      "$ref": "#/$defs/fields/section_badge_text_color"
+    },
+    "section_badge_font_size": {
+      "$ref": "#/$defs/fields/section_badge_font_size"
+    },
+    "group_rule_width": {
+      "$ref": "#/$defs/fields/group_rule_width"
+    },
+    "group_rule_opacity": {
+      "$ref": "#/$defs/fields/group_rule_opacity"
+    },
     "legend_background": {
       "$ref": "#/$defs/fields/legend_background"
     },
@@ -626,6 +776,15 @@
     },
     "legend_corner_radius": {
       "$ref": "#/$defs/fields/legend_corner_radius"
+    },
+    "legend_padding": {
+      "$ref": "#/$defs/fields/legend_padding"
+    },
+    "legend_line_height": {
+      "$ref": "#/$defs/fields/legend_line_height"
+    },
+    "legend_swatch_width": {
+      "$ref": "#/$defs/fields/legend_swatch_width"
     },
     "marker_stroke": {
       "$ref": "#/$defs/fields/marker_stroke"
@@ -687,6 +846,18 @@
     "line_width": {
       "$ref": "#/$defs/fields/line_width"
     },
+    "line_cap": {
+      "$ref": "#/$defs/fields/line_cap"
+    },
+    "dashed_dasharray": {
+      "$ref": "#/$defs/fields/dashed_dasharray"
+    },
+    "dotted_dasharray": {
+      "$ref": "#/$defs/fields/dotted_dasharray"
+    },
+    "bridge_gap": {
+      "$ref": "#/$defs/fields/bridge_gap"
+    },
     "muted_line_color": {
       "$ref": "#/$defs/fields/muted_line_color"
     },
@@ -723,6 +894,12 @@
     "terminus_stroke_width": {
       "$ref": "#/$defs/fields/terminus_stroke_width"
     },
+    "icon_banner_fill": {
+      "$ref": "#/$defs/fields/icon_banner_fill"
+    },
+    "icon_banner_text_color": {
+      "$ref": "#/$defs/fields/icon_banner_text_color"
+    },
     "terminus_corner_radius": {
       "$ref": "#/$defs/fields/terminus_corner_radius"
     },
@@ -737,6 +914,9 @@
     },
     "animation_ball_color": {
       "$ref": "#/$defs/fields/animation_ball_color"
+    },
+    "animation_ball_opacity": {
+      "$ref": "#/$defs/fields/animation_ball_opacity"
     },
     "animation_ball_stroke": {
       "$ref": "#/$defs/fields/animation_ball_stroke"
@@ -773,6 +953,12 @@
         "x-group": "Canvas and text",
         "type": "number",
         "minimum": 0
+      },
+      "title_font_weight": {
+        "description": "Map title weight.",
+        "x-group": "Canvas and text",
+        "type": "string",
+        "default": "bold"
       },
       "label_color": {
         "description": "Station label text.",
@@ -811,6 +997,36 @@
         "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
         "x-colour": true,
         "default": ""
+      },
+      "caption_color": {
+        "description": "`%%metro caption:` text, in colours that follow the viewer's light or dark mode. Empty draws a fixed light grey.",
+        "x-group": "Canvas and text",
+        "type": "string",
+        "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+        "x-colour": true,
+        "default": ""
+      },
+      "caption_font_size": {
+        "description": "Caption size, px.",
+        "x-group": "Canvas and text",
+        "type": "integer",
+        "minimum": 0,
+        "default": 11
+      },
+      "watermark_color": {
+        "description": "The attribution line.",
+        "x-group": "Canvas and text",
+        "type": "string",
+        "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+        "x-colour": true,
+        "default": "rgba(150, 150, 150, 0.6)"
+      },
+      "canvas_padding": {
+        "description": "Margin around the map on every side, px.",
+        "x-group": "Canvas and text",
+        "type": "number",
+        "minimum": 0,
+        "default": 60.0
       },
       "section_fill": {
         "description": "Section box fill. `transparent` draws an outline only.",
@@ -884,6 +1100,44 @@
         "type": "boolean",
         "default": true
       },
+      "section_badge_fill": {
+        "description": "Number badge fill. Empty takes `station_stroke`.",
+        "x-group": "Sections",
+        "type": "string",
+        "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+        "x-colour": true,
+        "default": ""
+      },
+      "section_badge_text_color": {
+        "description": "Number badge digit. Empty takes `station_fill`.",
+        "x-group": "Sections",
+        "type": "string",
+        "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+        "x-colour": true,
+        "default": ""
+      },
+      "section_badge_font_size": {
+        "description": "Number badge digit size, px.",
+        "x-group": "Sections",
+        "type": "integer",
+        "minimum": 0,
+        "default": 12
+      },
+      "group_rule_width": {
+        "description": "Width of the rule under a station group's caption, px.",
+        "x-group": "Sections",
+        "type": "number",
+        "minimum": 0,
+        "default": 1.5
+      },
+      "group_rule_opacity": {
+        "description": "Opacity of the rule under a station group's caption, 0 to 1.",
+        "x-group": "Sections",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.45
+      },
       "legend_background": {
         "description": "Legend box fill.",
         "x-group": "Legend",
@@ -925,6 +1179,27 @@
         "type": "number",
         "minimum": 0,
         "default": 6
+      },
+      "legend_padding": {
+        "description": "Space inside the legend box, px.",
+        "x-group": "Legend",
+        "type": "number",
+        "minimum": 0,
+        "default": 12.0
+      },
+      "legend_line_height": {
+        "description": "Height of each legend row, px.",
+        "x-group": "Legend",
+        "type": "number",
+        "minimum": 0,
+        "default": 24.0
+      },
+      "legend_swatch_width": {
+        "description": "Length of each line swatch, px.",
+        "x-group": "Legend",
+        "type": "number",
+        "minimum": 0,
+        "default": 24.0
       },
       "marker_stroke": {
         "description": "Outline of `%%metro marker:` glyphs and their legend swatches. Empty takes `station_stroke`.",
@@ -1078,6 +1353,34 @@
         "type": "number",
         "minimum": 0
       },
+      "line_cap": {
+        "description": "End caps of route strokes: `round` or `butt`.",
+        "x-group": "Lines",
+        "enum": [
+          "round",
+          "butt"
+        ],
+        "default": "round"
+      },
+      "dashed_dasharray": {
+        "description": "SVG dash pattern of a `dashed` line.",
+        "x-group": "Lines",
+        "type": "string",
+        "default": "8,4"
+      },
+      "dotted_dasharray": {
+        "description": "SVG dash pattern of a `dotted` line.",
+        "x-group": "Lines",
+        "type": "string",
+        "default": "2,4"
+      },
+      "bridge_gap": {
+        "description": "Gap a line leaves either side of a line it hops over, px.",
+        "x-group": "Lines",
+        "type": "number",
+        "minimum": 0,
+        "default": 12.0
+      },
       "muted_line_color": {
         "description": "Grey for inactive lines and the stations, labels and icons only they touch. A two-palette SVG switches it with the viewer's mode.",
         "x-group": "Lines",
@@ -1165,6 +1468,22 @@
         "minimum": 0,
         "default": 1.5
       },
+      "icon_banner_fill": {
+        "description": "Fill of the band across a file icon.",
+        "x-group": "File icons",
+        "type": "string",
+        "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+        "x-colour": true,
+        "default": "#222222"
+      },
+      "icon_banner_text_color": {
+        "description": "File type text on the icon band.",
+        "x-group": "File icons",
+        "type": "string",
+        "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+        "x-colour": true,
+        "default": "#ffffff"
+      },
       "terminus_corner_radius": {
         "description": "Icon corner radius, px.",
         "x-group": "File icons",
@@ -1201,6 +1520,14 @@
         "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
         "x-colour": true,
         "default": "#ffffff"
+      },
+      "animation_ball_opacity": {
+        "description": "Ball opacity, 0 to 1.",
+        "x-group": "Animation",
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.9
       },
       "animation_ball_stroke": {
         "description": "Ball outline. Empty draws none.",

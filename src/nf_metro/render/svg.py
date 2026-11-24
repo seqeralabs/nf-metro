@@ -155,9 +155,7 @@ from nf_metro.parser.model import (
 from nf_metro.render.bridges import BridgeBreak, compute_bridges
 from nf_metro.render.constants import (
     CANVAS_ORIGIN_MARGIN,
-    CANVAS_PADDING,
     CAPTION_FILL,
-    CAPTION_FONT_SIZE,
     DEBUG_DIAMOND_RADIUS,
     DEBUG_ENTRY_PORT_COLOR,
     DEBUG_EXIT_PORT_COLOR,
@@ -180,10 +178,7 @@ from nf_metro.render.constants import (
     GROUP_LABEL_LABEL_CLEARANCE,
     GROUP_LABEL_TICK_LENGTH,
     GROUP_LABEL_UNDERLINE_GAP,
-    GROUP_LABEL_UNDERLINE_OPACITY,
     GROUP_LABEL_UNDERLINE_WIDTH,
-    ICON_BANNER_FILL,
-    ICON_BANNER_TEXT_COLOR,
     ICON_BANNER_TEXT_COLOR_MUTED,
     ICON_BBOX_MARGIN,
     ICON_CLEARANCE_MARGIN,
@@ -199,7 +194,6 @@ from nf_metro.render.constants import (
     RAIL_LINK_HALF_WIDTH_RATIO,
     SECTION_HEADER_ROUTE_PAD,
     SECTION_NUM_CIRCLE_R_LARGE,
-    SECTION_NUM_FONT_SIZE,
     SVG_CURVE_RADIUS,
     TERMINUS_FONT_COLOR,
     TEXT_VCENTER_DY,
@@ -208,7 +202,6 @@ from nf_metro.render.constants import (
     TITLE_CANVAS_SAFETY_MARGIN,
     TITLE_LOGO_GAP,
     WATERMARK_BARE_X_INSET,
-    WATERMARK_FILL,
     WATERMARK_FONT_SIZE,
     WATERMARK_PADDING_RATIO,
     WATERMARK_Y_INSET,
@@ -685,7 +678,7 @@ def render_svg(
     theme: Theme,
     width: int | None = None,
     height: int | None = None,
-    padding: float = CANVAS_PADDING,
+    padding: float | None = None,
     animate: bool | None = None,
     debug: bool = False,
     legend_position: str | None = None,
@@ -897,7 +890,7 @@ def _build_render_plan_result(
     theme: Theme,
     width: int | None = None,
     height: int | None = None,
-    padding: float = CANVAS_PADDING,
+    padding: float | None = None,
     *,
     debug: bool = False,
     legend_position: str | None = None,
@@ -907,6 +900,8 @@ def _build_render_plan_result(
     inactive_line_ids: frozenset[str] = frozenset(),
 ) -> tuple[RenderPlan, RoutePlan]:
     """Build a render plan alongside the routing observation that settled it."""
+    if padding is None:
+        padding = theme.canvas_padding
     scaled_theme = _scale_theme_strokes(
         _scale_theme_fonts(theme, graph.font_scale), graph.stroke_scale
     )
@@ -954,7 +949,7 @@ def build_render_plan(
     theme: Theme,
     width: int | None = None,
     height: int | None = None,
-    padding: float = CANVAS_PADDING,
+    padding: float | None = None,
     *,
     debug: bool = False,
     legend_position: str | None = None,
@@ -985,7 +980,7 @@ def build_observed_render_plan(
     theme: Theme,
     width: int | None = None,
     height: int | None = None,
-    padding: float = CANVAS_PADDING,
+    padding: float | None = None,
     *,
     debug: bool = False,
     legend_position: str | None = None,
@@ -2388,6 +2383,7 @@ def _build_render_plan_scaled(
             edge_polylines,
             curve_radius=SVG_CURVE_RADIUS,
             curve_radii=edge_radii,
+            gap_half=theme.bridge_gap / 2,
         )
         if theme.bridge_glyph
         else {}
@@ -2845,7 +2841,7 @@ def _emit_render_plan(
                     plan.title_y,
                     fill=theme.title_color,
                     font_family=theme.label_font_family,
-                    font_weight="bold",
+                    font_weight=theme.title_font_weight,
                     **{"class": _ns("nf-metro-title")},
                 )
             )
@@ -2940,7 +2936,7 @@ def _emit_render_plan(
             WATERMARK_FONT_SIZE,
             svg_width - watermark_x_inset,
             svg_height - WATERMARK_Y_INSET,
-            fill=WATERMARK_FILL,
+            fill=theme.watermark_color,
             font_family=theme.label_font_family,
             text_anchor="end",
         )
@@ -2950,12 +2946,13 @@ def _emit_render_plan(
         d.append(
             draw.Text(
                 graph.caption,
-                CAPTION_FONT_SIZE,
+                theme.caption_font_size,
                 watermark_x_inset,
                 svg_height - WATERMARK_Y_INSET,
-                fill=CAPTION_FILL,
+                fill=theme.caption_color or CAPTION_FILL,
                 font_family=theme.label_font_family,
                 text_anchor="start",
+                **({"class": _ns("nf-metro-caption")} if theme.caption_color else {}),
             )
         )
 
@@ -3451,10 +3448,11 @@ def _inject_dark_mode_style(
     ti = _ns("nf-metro-title")
     if follow_color_scheme:
         label = theme.section_label_color
+        badge = theme_color(theme, "section_badge_fill")
         css = (
             f".{sl} {{ fill: var(--nfm-map-section-label-color,"
             f" light-dark({label}, #d0d0d0)); }}\n"
-            f".{sc} {{ fill: light-dark({theme.station_stroke}, #777777); }}\n"
+            f".{sc} {{ fill: light-dark({badge}, #777777); }}\n"
             f".{ti} {{ fill: var(--nfm-map-title-color,"
             f" light-dark({theme.title_color}, #ffffff)); }}\n"
         )
@@ -3523,7 +3521,7 @@ def _draw_section_badge(
             placement.badge_cx,
             placement.badge_cy,
             SECTION_NUM_CIRCLE_R_LARGE,
-            fill=theme.station_stroke,
+            fill=theme_color(theme, "section_badge_fill"),
             **{
                 "class": _ns("nf-metro-section-num-circle"),
                 "data-section-id": section.id,
@@ -3533,10 +3531,10 @@ def _draw_section_badge(
     d.append(
         draw.Text(
             str(section.number),
-            SECTION_NUM_FONT_SIZE,
+            theme.section_badge_font_size,
             placement.badge_cx,
             placement.badge_cy,
-            fill=theme.station_fill,
+            fill=theme_color(theme, "section_badge_text_color"),
             font_family=theme.label_font_family,
             font_weight="bold",
             text_anchor="middle",
@@ -3712,7 +3710,7 @@ def _render_edges(
         route_radii = None if route_radii is None else list(route_radii)
         line = graph.lines.get(route.line_id)
         color = effective_line_color(line, theme, inactive_line_ids)
-        style_kw = line_style_kwargs(line.style) if line else {}
+        style_kw = line_style_kwargs(line.style, theme) if line else {}
         class_name = _ns(f"metro-line-{route.line_id}")
         paint = muted_paint_class(theme, route.line_id in inactive_line_ids, "stroke")
         if paint:
@@ -3740,7 +3738,7 @@ def _render_edges(
                     pts[1][1],
                     stroke=color,
                     stroke_width=theme.line_width,
-                    stroke_linecap="round",
+                    stroke_linecap=theme.line_cap,
                     class_=class_name,
                     **{"data-line-id": route.line_id},
                     **style_kw,
@@ -3751,7 +3749,7 @@ def _render_edges(
                 stroke=color,
                 stroke_width=theme.line_width,
                 fill="none",
-                stroke_linecap="round",
+                stroke_linecap=theme.line_cap,
                 stroke_linejoin="round",
                 class_=class_name,
                 **{"data-line-id": route.line_id},
@@ -4467,7 +4465,7 @@ def _render_bridged_edge(
         stroke=color,
         stroke_width=theme.line_width,
         fill="none",
-        stroke_linecap="round",
+        stroke_linecap=theme.line_cap,
         stroke_linejoin="round",
         class_=class_name,
         **{"data-line-id": route.line_id},
@@ -5765,9 +5763,9 @@ def _render_terminus_icons(
             font_family=theme.label_font_family,
         )
 
-        banner_fill = theme.muted_line_color if muted else ICON_BANNER_FILL
+        banner_fill = theme.muted_line_color if muted else theme.icon_banner_fill
         banner_text_color = (
-            ICON_BANNER_TEXT_COLOR_MUTED if muted else ICON_BANNER_TEXT_COLOR
+            ICON_BANNER_TEXT_COLOR_MUTED if muted else theme.icon_banner_text_color
         )
 
         if icon_type == ICON_TYPE_DIR:
@@ -6314,8 +6312,8 @@ def _render_station_groups(
         # pointing back towards the stations.
         bracket = draw.Path(
             stroke=theme.section_label_color,
-            stroke_width=GROUP_LABEL_UNDERLINE_WIDTH,
-            stroke_opacity=GROUP_LABEL_UNDERLINE_OPACITY,
+            stroke_width=theme.group_rule_width,
+            stroke_opacity=theme.group_rule_opacity,
             fill="none",
             stroke_linecap="round",
             stroke_linejoin="round",

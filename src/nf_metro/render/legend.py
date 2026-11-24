@@ -37,12 +37,9 @@ from nf_metro.parser.model import (
     MetroLine,
 )
 from nf_metro.render.constants import (
-    LEGEND_LINE_HEIGHT,
     LEGEND_MARKER_GAP,
     LEGEND_MARKER_PILL_RATIO,
     LEGEND_MARKER_RADIUS,
-    LEGEND_PADDING,
-    LEGEND_SWATCH_WIDTH,
     LEGEND_TEXT_GAP,
     LOGO_GAP,
     LOGO_SCALE_FACTOR,
@@ -251,6 +248,7 @@ def _scale_logo_to_content(
 
 def _legend_metrics(
     graph: MetroGraph,
+    theme: Theme,
     rows: list[_LegendRow],
     logo_size: tuple[float, float] | None,
 ) -> tuple[float, float, float, float]:
@@ -259,7 +257,7 @@ def _legend_metrics(
     ``content_h`` is the inner height of the legend box: the taller of the
     text block and a (possibly enlarged) logo.
     """
-    line_height = LEGEND_LINE_HEIGHT
+    line_height = theme.legend_line_height
     line_block_h = len(rows) * line_height
     marker_block_h = (
         LEGEND_MARKER_GAP + len(graph.marker_legend) * line_height
@@ -297,8 +295,8 @@ def compute_legend_dimensions(
     if not rows:
         return (0.0, 0.0)
 
-    padding = LEGEND_PADDING
-    swatch_width = LEGEND_SWATCH_WIDTH
+    padding = theme.legend_padding
+    swatch_width = theme.legend_swatch_width
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
     labels = [row.label for row in rows]
@@ -309,7 +307,9 @@ def compute_legend_dimensions(
         for label in labels
     )
 
-    _text_h, content_height, logo_w, _logo_h = _legend_metrics(graph, rows, logo_size)
+    _text_h, content_height, logo_w, _logo_h = _legend_metrics(
+        graph, theme, rows, logo_size
+    )
     logo_gap = _logo_gap(graph) if logo_size else 0.0
 
     width = padding * 2 + logo_w + logo_gap + text_offset + max_text_width
@@ -336,11 +336,11 @@ def _render_swatch(
     if n == 1:
         offsets = [0.0]
     else:
-        spacing = min(theme.line_width, LEGEND_LINE_HEIGHT / (n + 1))
+        spacing = min(theme.line_width, theme.legend_line_height / (n + 1))
         offsets = [(i - (n - 1) / 2.0) * spacing for i in range(n)]
 
     for ml, dy in zip(row.lines, offsets):
-        dash_kw = line_style_kwargs(ml.style)
+        dash_kw = line_style_kwargs(ml.style, theme)
         d.append(
             draw.Line(
                 x0,
@@ -349,7 +349,7 @@ def _render_swatch(
                 entry_y + dy,
                 stroke=effective_line_color(ml, theme, inactive_line_ids),
                 stroke_width=theme.line_width,
-                stroke_linecap="round",
+                stroke_linecap=theme.line_cap,
                 **dash_kw,
                 **_muted_swatch_class(theme, ml, inactive_line_ids),
             )
@@ -394,13 +394,13 @@ def render_legend(
     if not rows:
         return
 
-    line_height = LEGEND_LINE_HEIGHT
-    padding = LEGEND_PADDING
-    swatch_width = LEGEND_SWATCH_WIDTH
+    line_height = theme.legend_line_height
+    padding = theme.legend_padding
+    swatch_width = theme.legend_swatch_width
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
     text_block_h, content_height, scaled_w, scaled_h = _legend_metrics(
-        graph, rows, logo_size
+        graph, theme, rows, logo_size
     )
 
     legend_width, legend_height = compute_legend_dimensions(
@@ -536,7 +536,7 @@ def _render_marker_key(
     line_height: float,
 ) -> None:
     """Render the marker shape/fill key rows below the line legend."""
-    swatch_cx = left_x + LEGEND_SWATCH_WIDTH / 2
+    swatch_cx = left_x + theme.legend_swatch_width / 2
     r = LEGEND_MARKER_RADIUS
     stroke = marker_stroke_color(theme)
     stroke_cls = _ns("nf-metro-marker-stroke")
