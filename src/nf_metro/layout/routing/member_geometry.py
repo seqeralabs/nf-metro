@@ -2240,6 +2240,7 @@ def build_member_geometry_execution(
             normalization_population,
             ctx.curve_radius,
             ctx.station_offsets or {},
+            ctx.offset_step,
             respect_owned_corners=False,
         )
         _plan_source_turnouts(normalization_population, graph, ctx.curve_radius)

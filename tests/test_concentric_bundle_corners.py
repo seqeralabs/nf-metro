@@ -14,11 +14,12 @@ The correctness check here is the one the corner-radius *source* ratchet
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import CURVE_RADIUS
+from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import (
     OffsetRegime,
@@ -219,7 +220,7 @@ def test_short_planned_source_leads_share_a_clamp_safe_reference_radius() -> Non
     assert check_fanout_lane_continuity(observation.routes, graph)
 
 
-def test_unowned_short_leads_share_a_bisected_clamp_safe_radius() -> None:
+def test_unowned_short_leads_share_a_clamp_safe_radius() -> None:
     routes = [
         _route(
             "main",
@@ -237,11 +238,11 @@ def test_unowned_short_leads_share_a_bisected_clamp_safe_radius() -> None:
         ),
     ]
 
-    _rederive_semantic_end_corners(routes, CURVE_RADIUS, {})
+    _rederive_semantic_end_corners(routes, CURVE_RADIUS, {}, OFFSET_STEP)
 
     assert [route.curve_radii[0] for route in routes if route.curve_radii] == [
-        pytest.approx(6.01),
-        pytest.approx(10.01),
+        pytest.approx(6.0),
+        pytest.approx(10.0),
     ]
     assert check_concentric_bundle_corners(None, routes, {}) == []
 
@@ -406,3 +407,29 @@ def test_diagonal_leg_is_not_a_corner() -> None:
 def test_single_line_bundle_is_skipped() -> None:
     """One line has no bundle-mate to be concentric with."""
     assert check_concentric_bundle_corners(None, [_CONCENTRIC_A], {}) == []
+
+
+def _diagonal_lane(line_id: str, offset: float) -> RoutedPath:
+    """A lane turning 45 degrees up, shifted *offset* outward of the turn."""
+    corner = (100.0 + math.tan(math.radians(22.5)) * offset, 100.0 + offset)
+    end = (
+        corner[0] + 100 * math.cos(math.radians(45)),
+        corner[1] - 100 * math.sin(math.radians(45)),
+    )
+    return _route(line_id, [(0.0, 100.0 + offset), corner, end], [10.0], source=line_id)
+
+
+def test_separate_bundles_on_one_bisector_turn_apart() -> None:
+    from nf_metro.layout.routing.normalize import _concentric_corner_cohorts
+
+    routes = [
+        _diagonal_lane("a1", 0.0),
+        _diagonal_lane("a2", OFFSET_STEP),
+        _diagonal_lane("b1", 10 * OFFSET_STEP),
+        _diagonal_lane("b2", 11 * OFFSET_STEP),
+    ]
+    cohorts = _concentric_corner_cohorts(routes, {}, True, OFFSET_STEP)
+    assert sorted(sorted(m.route.line_id for m in c) for c in cohorts) == [
+        ["a1", "a2"],
+        ["b1", "b2"],
+    ]

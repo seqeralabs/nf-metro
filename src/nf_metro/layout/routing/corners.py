@@ -113,6 +113,21 @@ def resolve_curve_radius_at(
     return min(desired_r, max_len1, max_len2)
 
 
+def corner_radius_budget(
+    points: list[tuple[float, float]], desired_radii: list[float], corner_idx: int
+) -> float:
+    """The largest radius corner *corner_idx* can take that
+    :func:`resolve_curve_radius_at` leaves unclamped, its neighbours keeping
+    their *desired_radii*: each leg's length less the neighbouring corner's
+    share of it, or the whole leg at either end of the route."""
+    i = corner_idx + 1
+    len_in = math.dist(points[i - 1], points[i])
+    len_out = math.dist(points[i], points[i + 1])
+    prev_r = desired_radii[corner_idx - 1] if corner_idx > 0 else 0.0
+    next_r = desired_radii[corner_idx + 1] if i < len(points) - 2 else 0.0
+    return min(len_in - prev_r, len_out - next_r)
+
+
 def resolve_curve_radii(
     points: list[tuple[float, float]],
     desired_radii: list[float] | None,
@@ -515,14 +530,26 @@ def concentric_turn_radius(
     outside of the turn. At 90 degrees this is the ``-dx * ux`` rule
     :func:`concentric_corner_radius` applies.
     """
+    return reference_radius + turn_shift(prev, corner, nxt, displacement)
+
+
+def turn_shift(
+    prev: tuple[float, float],
+    corner: tuple[float, float],
+    nxt: tuple[float, float],
+    displacement: tuple[float, float],
+) -> float:
+    """How much longer a line's tangent arm is than the reference line's when
+    its vertex sits *displacement* from the reference vertex, for the lines to
+    turn about one centre: ``displacement . (u_in - u_out) / 2`` (see
+    :func:`concentric_turn_radius`)."""
     in_len = math.dist(prev, corner)
     out_len = math.dist(corner, nxt)
     u_in = ((corner[0] - prev[0]) / in_len, (corner[1] - prev[1]) / in_len)
     u_out = ((nxt[0] - corner[0]) / out_len, (nxt[1] - corner[1]) / out_len)
-    shift = (
+    return (
         displacement[0] * (u_in[0] - u_out[0]) + displacement[1] * (u_in[1] - u_out[1])
     ) / 2
-    return reference_radius + shift
 
 
 def concentric_reference_radius_at(
