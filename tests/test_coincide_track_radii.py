@@ -282,7 +282,11 @@ def test_set_vchannel_x_rederives_flanking_corners_from_waypoints() -> None:
     assert route.points[2] == (55.0, 100.0)
     expected = [
         concentric_corner_radius_at(
-            route.points[i], route.points[i + 1], route.points[i + 2], 0.0
+            route.points[i],
+            route.points[i + 1],
+            route.points[i + 2],
+            0.0,
+            base_radius=CURVE_RADIUS,
         )
         for i in (0, 1)
     ]

@@ -372,8 +372,9 @@ These go at the top of the file, before `graph LR`.
 | `%%metro label_angle: <degrees>`                                           | Station-label angle (0 = horizontal). Overrides the theme default                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `%%metro label_offset: <pixels>`                                           | Gap between a station marker and its label (default: 11); an angled label's extra drop scales with it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `%%metro diagonal_run: <pixels>`                                           | Length of the 45-degree transition between two tracks (default: 30)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `%%metro curve_radius_ratio: <factor>`                                     | Corner radius at the line centre, in multiples of the line width. Unset, corners bend at 10 px. `stroke_scale` scales either                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `%%metro font_scale: <factor>`                                             | Scale every text size and the label-width metrics that drive layout spacing (`1.0` = default)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `%%metro stroke_scale: <factor>`                                           | Scale track widths and station pills. Bundle spacing, marker clearance, and rail pitch scale with them (`1.0` = default)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `%%metro stroke_scale: <factor>`                                           | Scale track widths and station pills. Bundle spacing, marker clearance, corner radius, and rail pitch scale with them (`1.0` = default)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `%%metro row_align: content\|top`                                          | Section box vertical sizing within a shared grid row: `content` hugs each section's own content, `top` grows shorter row-mates upward so their box tops and header badges sit flush with the tallest section in the row (`content` = default)                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `%%metro legend_logo_gap: <pixels>`                                        | Horizontal gap between the logo and the legend entries                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `%%metro width: <pixels>`                                                  | Output width in pixels (default: auto from content)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -586,45 +587,46 @@ The following table is the authority on the exceptions.
 A pair takes the same values, though a flag takes them exactly as documented.
 An unknown or wrong-case value exits with an error, where the directive warns and keeps the default.
 
-| Directive            | CLI flag                                     | Default           |
-| -------------------- | -------------------------------------------- | ----------------- |
-| `title:`             | `--title`                                    | (none)            |
-| `caption:`           | `--caption`                                  | (none)            |
-| `style:`             | `--theme`                                    | `default`         |
-| `mode:`              | `--mode`                                     | `dark`            |
-| `logo:`              | `--logo`                                     | (none)            |
-| `track_gap:`         | `--track-gap`                                | 1 (4 px c-to-c)   |
-| `x_spacing:`         | `--x-spacing`                                | auto              |
-| `y_spacing:`         | `--y-spacing`                                | auto              |
-| `section_x_gap:`     | `--section-x-gap`                            | 50                |
-| `section_y_gap:`     | `--section-y-gap`                            | 50                |
-| `section_x_padding:` | `--section-x-padding`                        | 50                |
-| `section_y_padding:` | `--section-y-padding`                        | 50                |
-| `fold_threshold:`    | `--fold-threshold`                           | auto (15)         |
-| `diamond_style:`     | `--diamond-style`                            | `straight`        |
-| `line_order:`        | `--line-order`                               | `definition`      |
-| `center_ports:`      | `--center-ports` / `--no-center-ports`       | false             |
-| `compact_offsets:`   | `--compact-offsets` / `--no-compact-offsets` | false             |
-| `line_spread:`       | `--line-spread`                              | `bundle`          |
-| `label_angle:`       | `--label-angle`                              | theme default (0) |
-| `label_offset:`      | `--label-offset`                             | 11                |
-| `diagonal_run:`      | `--diagonal-run`                             | 30                |
-| `font_scale:`        | `--font-scale`                               | 1.0               |
-| `stroke_scale:`      | `--stroke-scale`                             | 1.0               |
-| `row_align:`         | `--row-align`                                | `content`         |
-| `logo_scale:`        | `--logo-scale`                               | 1.0               |
-| `legend:`            | `--legend`                                   | auto              |
-| `legend_min_height:` | `--legend-min-height`                        | 0                 |
-| `legend_logo_gap:`   | `--legend-logo-gap`                          | auto              |
-| `width:`             | `--width`                                    | auto              |
-| `height:`            | `--height`                                   | auto              |
-| `animate:`           | `--animate` / `--no-animate`                 | off               |
-| `directional:`       | `--directional` / `--no-directional`         | off               |
-| `strict:`            | `--strict` / `--no-strict`                   | off               |
-| `permissive:`        | `--permissive` / `--no-permissive`           | off               |
-| `auto_process:`      | `--auto-process` / `--no-auto-process`       | off               |
-| `process_scope:`     | `--process-scope`                            | (none)            |
-| `manifest:`          | (internal escape hatch, not in `--help`)     | on                |
+| Directive             | CLI flag                                     | Default            |
+| --------------------- | -------------------------------------------- | ------------------ |
+| `title:`              | `--title`                                    | (none)             |
+| `caption:`            | `--caption`                                  | (none)             |
+| `style:`              | `--theme`                                    | `default`          |
+| `mode:`               | `--mode`                                     | `dark`             |
+| `logo:`               | `--logo`                                     | (none)             |
+| `track_gap:`          | `--track-gap`                                | 1 (4 px c-to-c)    |
+| `x_spacing:`          | `--x-spacing`                                | auto               |
+| `y_spacing:`          | `--y-spacing`                                | auto               |
+| `section_x_gap:`      | `--section-x-gap`                            | 50                 |
+| `section_y_gap:`      | `--section-y-gap`                            | 50                 |
+| `section_x_padding:`  | `--section-x-padding`                        | 50                 |
+| `section_y_padding:`  | `--section-y-padding`                        | 50                 |
+| `fold_threshold:`     | `--fold-threshold`                           | auto (15)          |
+| `diamond_style:`      | `--diamond-style`                            | `straight`         |
+| `line_order:`         | `--line-order`                               | `definition`       |
+| `center_ports:`       | `--center-ports` / `--no-center-ports`       | false              |
+| `compact_offsets:`    | `--compact-offsets` / `--no-compact-offsets` | false              |
+| `line_spread:`        | `--line-spread`                              | `bundle`           |
+| `label_angle:`        | `--label-angle`                              | theme default (0)  |
+| `label_offset:`       | `--label-offset`                             | 11                 |
+| `diagonal_run:`       | `--diagonal-run`                             | 30                 |
+| `curve_radius_ratio:` | `--curve-radius-ratio`                       | from theme (10 px) |
+| `font_scale:`         | `--font-scale`                               | 1.0                |
+| `stroke_scale:`       | `--stroke-scale`                             | 1.0                |
+| `row_align:`          | `--row-align`                                | `content`          |
+| `logo_scale:`         | `--logo-scale`                               | 1.0                |
+| `legend:`             | `--legend`                                   | auto               |
+| `legend_min_height:`  | `--legend-min-height`                        | 0                  |
+| `legend_logo_gap:`    | `--legend-logo-gap`                          | auto               |
+| `width:`              | `--width`                                    | auto               |
+| `height:`             | `--height`                                   | auto               |
+| `animate:`            | `--animate` / `--no-animate`                 | off                |
+| `directional:`        | `--directional` / `--no-directional`         | off                |
+| `strict:`             | `--strict` / `--no-strict`                   | off                |
+| `permissive:`         | `--permissive` / `--no-permissive`           | off                |
+| `auto_process:`       | `--auto-process` / `--no-auto-process`       | off                |
+| `process_scope:`      | `--process-scope`                            | (none)             |
+| `manifest:`           | (internal escape hatch, not in `--help`)     | on                 |
 
 Three groups fall outside that pairing:
 

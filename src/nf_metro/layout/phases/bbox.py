@@ -7,13 +7,8 @@ from collections.abc import Callable
 from functools import partial
 
 from nf_metro.layout.constants import (
-    BYPASS_CLEARANCE,
     COORD_TOLERANCE,
-    CURVE_RADIUS,
     MIN_BUNDLE_EDGE_CLEARANCE,
-    MIN_INTER_SECTION_GAP,
-    MIN_STATION_FLAT_LENGTH,
-    MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
@@ -25,7 +20,15 @@ from nf_metro.layout.geometry import (
     shift_section,
 )
 from nf_metro.layout.labels import label_text_width
-from nf_metro.layout.pass_metrics import active_metrics, graph_layout_context
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    active_metrics,
+    bypass_clearance,
+    graph_layout_context,
+    min_inter_section_gap,
+    min_station_flat_length,
+    min_straight_edge,
+)
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _column_contiguous_row_groups,
@@ -63,7 +66,7 @@ def _predicted_bypass_bottom_in_row(
     """Predict bypass U-route bottom Ys for edges anchored in *row*.
 
     Mirrors ``layout.routing.common.bypass_bottom_y`` for layout-time
-    prediction: returns ``{(lo, hi): max(intervening_bottoms) + BYPASS_CLEARANCE}``
+    prediction: returns ``{(lo, hi): max(intervening_bottoms) + bypass_clearance()}``
     for each edge whose endpoints (after walking junctions) resolve to
     same-row sections spanning more than one column with at least one
     intervening section.  Empty when *row* has no bypass-eligible edges.
@@ -119,7 +122,7 @@ def _predicted_bypass_bottom_in_row(
         intervening = [s for s in sections_in_row if lo < s.grid_col < hi]
         if not intervening:
             continue
-        bot = max(s.bbox_y + s.bbox_h for s in intervening) + BYPASS_CLEARANCE
+        bot = max(s.bbox_y + s.bbox_h for s in intervening) + bypass_clearance()
         if bot > per_span.get((lo, hi), 0.0):
             per_span[(lo, hi)] = bot
     return per_span
@@ -367,8 +370,12 @@ def _loop_corner_x(
     if abs(tx - sx) < 1e-6:
         return None
     sign = 1.0 if tx > sx else -1.0
-    src_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
-    tgt_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
+    src_min = (
+        active_curve_radius() + MIN_STRAIGHT_PORT if a.is_port else min_straight_edge()
+    )
+    tgt_min = (
+        active_curve_radius() + MIN_STRAIGHT_PORT if b.is_port else min_straight_edge()
+    )
     # Label clearance at fork/join stations (per _route_diagonal).
     if a.id in fork_stations and a.label.strip():
         src_min = max(src_min, label_text_width(a.label) / 2)
@@ -627,7 +634,7 @@ def _predict_section_content_bottom(
         for sid in section.station_ids
         if sid in graph.stations and graph.stations[sid].is_port
     ]
-    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    v_curve_clearance = active_curve_radius() + min_station_flat_length() / 2
     if bypass_max_ys:
         content_bot = max(content_bot, max(bypass_max_ys) + v_curve_clearance)
     if port_max_ys:
@@ -860,7 +867,7 @@ def _section_content_hug_top(
         for sid in section.station_ids
         if sid in graph.stations and graph.stations[sid].is_port
     ]
-    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    v_curve_clearance = active_curve_radius() + min_station_flat_length() / 2
     target = min(content_min_ys)
     if bypass_min_ys:
         target = min(target, min(bypass_min_ys) - v_curve_clearance)
@@ -946,7 +953,7 @@ def _column_neighbour_anchor_limit(
 
     A section already clear on that side of ``section`` and sharing vertical
     extent with it (headers included, since a badge protrudes above its box top)
-    keeps ``MIN_INTER_SECTION_GAP`` of routing corridor.  Inter-column gaps are
+    keeps ``min_inter_section_gap()`` of routing corridor.  Inter-column gaps are
     enforced per overlapping row band rather than per column, so the column's
     outermost box being clear says nothing about a row-mate further down.
     Infinite in the growth direction when that side is empty.
@@ -966,7 +973,7 @@ def _column_neighbour_anchor_limit(
             or top >= other.bbox_y + other.bbox_h
         ):
             continue
-        corridor = facing + MIN_INTER_SECTION_GAP * sign
+        corridor = facing + min_inter_section_gap() * sign
         limit = max(limit, corridor) if sign > 0 else min(limit, corridor)
     return limit
 

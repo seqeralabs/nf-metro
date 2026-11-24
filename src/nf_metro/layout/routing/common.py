@@ -11,16 +11,11 @@ from typing import AbstractSet, NamedTuple
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
-    BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     DEFAULT_LINE_PRIORITY,
     EDGE_TO_BUNDLE_CLEARANCE,
     HEADER_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
-    INTER_ROW_HEADER_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SECTION_HEADER_PROTRUSION,
     graph_offset_step,
@@ -32,6 +27,13 @@ from nf_metro.layout.geometry import (
     lanes_run_along_x,
     lanes_run_along_y,
     spans_share_corridor,
+)
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    bypass_clearance,
+    inter_row_edge_clearance,
+    inter_row_header_clearance,
+    min_corridor_y_overlap,
 )
 from nf_metro.layout.route_topology import (
     convergence_junction_ids,
@@ -453,7 +455,7 @@ def header_corridor_y(
 
     Above the row (``below=False``) the channel sits a header band above the
     top edge; below it sits a route's clearance under the bottom edge.  The
-    full :data:`INTER_ROW_HEADER_CLEARANCE` applies only when a section
+    full ``inter_row_header_clearance()`` applies only when a section
     occupies the gap above the row (contributing a header badge); the topmost
     row has only the canvas-top title band, so the smaller
     :data:`EDGE_TO_BUNDLE_CLEARANCE` keeps the channel from overshooting it.
@@ -469,7 +471,7 @@ def header_corridor_y(
             + base_radius
         )
     clearance = (
-        INTER_ROW_HEADER_CLEARANCE
+        inter_row_header_clearance()
         if section_exists_above_row(graph, row)
         else EDGE_TO_BUNDLE_CLEARANCE
     )
@@ -1356,10 +1358,13 @@ def iter_same_destination_approach_bundles(
     graph: MetroGraph,
     step: float,
     *,
-    min_common_run: float = 2 * CURVE_RADIUS,
+    min_common_run: float | None = None,
     max_separation: float = EDGE_TO_BUNDLE_CLEARANCE,
 ) -> Iterator[SameDestinationVerticalBundle]:
     """Yield complete same-direction H-V-H groups eligible for tight bundling."""
+    min_common_run = (
+        2 * active_curve_radius() if min_common_run is None else min_common_run
+    )
 
     def admit(route: RoutedPath, tail: PeeloffTail, port: Port) -> bool:
         return (
@@ -1830,14 +1835,14 @@ def feasible_same_destination_approach_proposals(
                 other_lo, other_hi = sorted((other_start[1], other_end[1]))
                 if (
                     min(candidate_hi, other_hi) - max(candidate_lo, other_lo)
-                    <= MIN_CORRIDOR_Y_OVERLAP
+                    <= min_corridor_y_overlap()
                 ):
                     continue
                 required = cotravelling_lane_clearance(
                     same_line=route.line_id == other.line_id,
                     counter_running=candidate_down
                     is not (other_end[1] > other_start[1]),
-                    curve_radius=CURVE_RADIUS,
+                    curve_radius=active_curve_radius(),
                     offset_step=offset_step,
                 )
                 if (
@@ -1860,7 +1865,7 @@ def iter_opposing_entry_confluences(
     graph: MetroGraph,
     step: float,
     *,
-    min_common_approach: float = 2 * CURVE_RADIUS,
+    min_common_approach: float | None = None,
 ) -> Iterator[OpposingEntryConfluence]:
     """Yield complete entry groups that bundle after approaching from both sides.
 
@@ -1868,6 +1873,11 @@ def iter_opposing_entry_confluences(
     occupy one contiguous channel band, and share a substantial vertical run.
     Requiring the complete port line set keeps route-system ownership atomic.
     """
+    min_common_approach = (
+        2 * active_curve_radius()
+        if min_common_approach is None
+        else min_common_approach
+    )
     by_shape: dict[
         tuple[str, int, int],
         list[tuple[RoutedPath, PeeloffTail]],
@@ -1993,7 +2003,7 @@ def iter_port_peeloff_bundles(
     step: float,
     *,
     require_contiguous: bool = True,
-    min_common_suffix: float = 2 * CURVE_RADIUS,
+    min_common_suffix: float | None = None,
 ) -> Iterator[PortPeeloffBundle]:
     """Yield each destination-facing peel-off bundle into a side entry port.
 
@@ -2003,6 +2013,9 @@ def iter_port_peeloff_bundles(
     track-step band; the runtime guard disables that filter so a missing eager
     bundling pass cannot make the check vacuous.
     """
+    min_common_suffix = (
+        2 * active_curve_radius() if min_common_suffix is None else min_common_suffix
+    )
     by_shape: dict[
         tuple[str, int, int, int],
         list[tuple[RoutedPath, PeeloffTail]],
@@ -2771,7 +2784,7 @@ def bypass_bottom_y(
     graph: MetroGraph,
     src_col: int,
     tgt_col: int,
-    clearance: float = BYPASS_CLEARANCE,
+    clearance: float | None = None,
     src_row: int | None = None,
     cross_row: bool = False,
     tgt_row: int | None = None,
@@ -2805,6 +2818,8 @@ def bypass_bottom_y(
     in no inter-row gap at all -- the allocation wins.
     """
 
+    if clearance is None:
+        clearance = bypass_clearance()
     lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
 
     if cross_row:
@@ -2931,7 +2946,7 @@ def merge_trunk_force_cross_row(
         graph,
         src_col,
         tgt_col,
-        BYPASS_CLEARANCE,
+        bypass_clearance(),
         src_row=src_row,
         cross_row=False,
         tgt_row=tgt_row,
@@ -3116,8 +3131,8 @@ def resolve_section_colrow(
 def inter_row_wrap_band(n_lines: int, offset_step: float = OFFSET_STEP) -> float:
     """Bbox-to-bbox row gap a wrap bundle of *n_lines* needs.
 
-    A horizontal inter-row run keeps :data:`INTER_ROW_EDGE_CLEARANCE` below
-    the upper box edge and :data:`INTER_ROW_HEADER_CLEARANCE` above the next
+    A horizontal inter-row run keeps ``inter_row_edge_clearance()`` below
+    the upper box edge and ``inter_row_header_clearance()`` above the next
     row's header badge, with the bundle's ``(n_lines - 1) * offset_step``
     stagger between.  Section placement reserves this band
     (:func:`~nf_metro.layout.section_placement._wrap_bundle_row_minimums`)
@@ -3125,7 +3140,7 @@ def inter_row_wrap_band(n_lines: int, offset_step: float = OFFSET_STEP) -> float
     definition keeps the two in lockstep.
     """
     span = max(n_lines - 1, 0) * offset_step
-    return INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE
+    return inter_row_edge_clearance() + span + inter_row_header_clearance()
 
 
 def reserved_row_band_between(
@@ -3211,15 +3226,15 @@ def inter_row_channel_y(
 def _inter_row_band_fits(upper_bottom: float, lower_top: float) -> bool:
     """Whether a horizontal run fits between two stacked rows with clearance.
 
-    True when the band keeps :data:`INTER_ROW_EDGE_CLEARANCE` below the upper
-    row's bottom edge and :data:`INTER_ROW_HEADER_CLEARANCE` above the lower
+    True when the band keeps ``inter_row_edge_clearance()`` below the upper
+    row's bottom edge and ``inter_row_header_clearance()`` above the lower
     row's header badge.  When it does not, a centred run grazes one edge, so a
     route prefers a different channel (the around-below loop / canvas-bottom
     dive) over this band.
     """
     return (
-        upper_bottom + INTER_ROW_EDGE_CLEARANCE
-        <= lower_top - INTER_ROW_HEADER_CLEARANCE
+        upper_bottom + inter_row_edge_clearance()
+        <= lower_top - inter_row_header_clearance()
     )
 
 
@@ -3228,16 +3243,16 @@ def fan_corridor_band(
 ) -> float | None:
     """Centre Y of the routing band between two stacked rows, or ``None``.
 
-    The band keeps :data:`INTER_ROW_EDGE_CLEARANCE` below the upper row's bottom
-    and :data:`INTER_ROW_HEADER_CLEARANCE` above the lower row's header badge.  A
+    The band keeps ``inter_row_edge_clearance()`` below the upper row's bottom
+    and ``inter_row_header_clearance()`` above the lower row's header badge.  A
     :class:`FanCorridor` shares one inter-row traverse band across a junction
     fan's branches, so the band must hold the whole nested bundle: returns the centre
     only when the clearance band is at least *span* wide (the bundle's full
     lateral extent), else ``None`` so those branches keep their own per-line
     clamped runs rather than nest past a box edge in a too-narrow gap.
     """
-    lo = upper_bottom + INTER_ROW_EDGE_CLEARANCE
-    hi = lower_top - INTER_ROW_HEADER_CLEARANCE
+    lo = upper_bottom + inter_row_edge_clearance()
+    hi = lower_top - inter_row_header_clearance()
     if hi - lo < span:
         return None
     return (lo + hi) / 2
@@ -3296,8 +3311,8 @@ def _center_inter_row_channel(
     which the closing guard reports.
 
     Without a reservation the channel is centred in the band that keeps
-    :data:`INTER_ROW_EDGE_CLEARANCE` above the bbox bottom of the row
-    above and :data:`INTER_ROW_HEADER_CLEARANCE` above the row below --
+    ``inter_row_edge_clearance()`` above the bbox bottom of the row
+    above and ``inter_row_header_clearance()`` above the row below --
     the latter clears the *header badge* (numbered circle + label) rather
     than just the bbox edge, so the run doesn't graze the next-row label.
     When the gap is too narrow to satisfy both margins the channel biases
@@ -3312,8 +3327,8 @@ def _center_inter_row_channel(
     """
     if reserved is not None:
         return reserved.place(offset)
-    lo = upper_bottom + INTER_ROW_EDGE_CLEARANCE
-    hi = lower_top - INTER_ROW_HEADER_CLEARANCE
+    lo = upper_bottom + inter_row_edge_clearance()
+    hi = lower_top - inter_row_header_clearance()
     if _inter_row_band_fits(upper_bottom, lower_top):
         return min(max((lo + hi) / 2 + offset, lo), hi)
     # Gap too narrow for both margins (typically a heterogeneous-row case
@@ -3447,7 +3462,7 @@ class CorridorRun:
         """The run's incoming and outgoing flanking corner radii."""
         stored = self.route.curve_radii or []
         return tuple(
-            stored[i] if 0 <= i < len(stored) else CURVE_RADIUS
+            stored[i] if 0 <= i < len(stored) else active_curve_radius()
             for i in (self.idx - 1, self.idx)
         )  # type: ignore[return-value]
 

@@ -20,6 +20,7 @@ from typing import NamedTuple
 
 import drawsvg as draw
 
+from nf_metro.layout.pass_metrics import active_curve_radius
 from nf_metro.layout.routing import RoutedPath
 from nf_metro.layout.routing.common import apply_route_offsets, point_on_polyline
 from nf_metro.layout.routing.corners import (
@@ -30,7 +31,6 @@ from nf_metro.layout.routing.corners import (
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.animation_waves import LineWaves, Route, plan_line_waves
 from nf_metro.render.constants import (
-    ANIMATION_CURVE_RADIUS,
     EDGE_CONNECT_TOLERANCE,
     MIN_ANIMATION_DURATION,
 )
@@ -190,7 +190,7 @@ def render_animation(
     routes: list[RoutedPath],
     station_offsets: dict[tuple[str, str], float],
     theme: Theme,
-    curve_radius: float = ANIMATION_CURVE_RADIUS,
+    curve_radius: float | None = None,
     *,
     frame_slot: bool = False,
     route_polylines: Sequence[Sequence[tuple[float, float]]] | None = None,
@@ -216,6 +216,8 @@ def render_animation(
     animated balls would, so a frame keeps the same stacking: behind the
     station markers, in front of the lines.
     """
+    if curve_radius is None:
+        curve_radius = active_curve_radius()
     if frame_slot:
         # The caller fills this per frame; building the timeline is its job.
         d.append(draw.Raw(FRAME_SLOT))
@@ -319,7 +321,7 @@ def build_animation_timeline(
     routes: list[RoutedPath],
     station_offsets: dict[tuple[str, str], float],
     theme: Theme,
-    curve_radius: float = ANIMATION_CURVE_RADIUS,
+    curve_radius: float | None = None,
     *,
     route_polylines: Sequence[Sequence[tuple[float, float]]] | None = None,
     route_curve_radii: Sequence[Sequence[float] | None] | None = None,
@@ -338,6 +340,8 @@ def build_animation_timeline(
     whole rounds of waves, departures spread evenly over the loop, so the loop
     seam is exact.
     """
+    if curve_radius is None:
+        curve_radius = active_curve_radius()
     if route_polylines is None or route_curve_radii is None:
         route_polylines, route_curve_radii, _ = materialize_source_turnout_paths(
             routes,

@@ -11,7 +11,6 @@ from typing import NamedTuple
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     TB_PILL_EDGE_OFFSET,
 )
@@ -27,7 +26,10 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.labels import label_beside_pill, label_glyph_ink_bbox
-from nf_metro.layout.pass_metrics import active_metrics
+from nf_metro.layout.pass_metrics import (
+    active_metrics,
+    min_straight_edge,
+)
 from nf_metro.layout.routing.bundle import (
     build_tapered_bundle,
 )
@@ -164,8 +166,8 @@ def _route_tb_diagonal(
         sy,
         ty,
         ctx.diagonal_run,
-        MIN_STRAIGHT_EDGE,
-        MIN_STRAIGHT_EDGE,
+        min_straight_edge(),
+        min_straight_edge(),
         bias_to_source or edge.source in ctx.fork_stations,
         edge.target in ctx.join_stations and not bias_to_source,
     )
@@ -550,7 +552,7 @@ def _route_flow_side_lane_change(
     if lateral < COORD_TOLERANCE:
         return None
     spread = _diagonal_spread(len(line_ids), ctx.offset_step, ctx.diagonal_run, lateral)
-    end_straights = 2 * MIN_STRAIGHT_EDGE
+    end_straights = 2 * min_straight_edge()
     slack = abs(tp - sp) - ctx.diagonal_run - end_straights
     if slack < spread:
         return None
@@ -561,8 +563,8 @@ def _route_flow_side_lane_change(
         sp,
         tp,
         ctx.diagonal_run,
-        MIN_STRAIGHT_EDGE,
-        MIN_STRAIGHT_EDGE,
+        min_straight_edge(),
+        min_straight_edge(),
         is_fork=True,
         is_join=False,
     )

@@ -420,7 +420,7 @@
   "status": "needs-review"
  },
  "convergences.py::if forked:::#2": {
-  "note": "_landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below MERGE_GAP_MIN carrying a chained convergence.",
+  "note": "_landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below merge_gap_min() carrying a chained convergence.",
   "status": "needs-review"
  },
  "convergences.py::if lane is None:::#1": {
@@ -992,7 +992,7 @@
   "status": "defensive"
  },
  "normalize.py::if abs(delta) <= COORD_TOLERANCE:::#2": {
-  "note": "_snap_merge_feeder_group skips a merge feeder whose opening descent already sits on the trunk's shared column (no shift needed). The corpus's merge feeders all reach the trunk from a distinct column, so the already-coincident skip arm stays un-exercised. Defensive and idempotent across the routing replays a render performs.",
+  "note": "_seat_merge_feeder_opening skips a merge feeder whose opening descent already sits on the trunk's shared column (no shift needed). The corpus's merge feeders all reach the trunk from a distinct column, so the already-coincident skip arm stays un-exercised. Defensive and idempotent across the routing replays a render performs.",
   "status": "defensive"
  },
  "normalize.py::if abs(ly - pts[1][1]) < COORD_TOLERANCE:::#1": {
@@ -1754,5 +1754,37 @@
  "normalize.py::or current_base != reference::#1": {
   "note": "A coincident-turn member is recorded when its radius, its offset or its stored reference differs from the bucket's. In the corpus a member whose radius and zero offset already match always carries that reference too, since the reference is the radius it was last unified to, so the base-only arm has no fixture; it re-records a member whose stored reference was written by another pass.",
   "status": "defensive"
+ },
+ "exit_turns.py::and requirement.run_direction is not source_run_direction::#1": {
+  "note": "A merge branch leaves its feeder junction toward its lead channel, which _merge_branch_lead_x places past the junction on the side its source exit runs: the trunk's own descent in the same source column, or the gap beside the feeder's section on the side the junction sits. A source-turn requirement running against the source run would need a lead channel behind the junction, which neither placement produces; the arm keeps the opposed-source-run legacy reason for one that did.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::if trunk_source is None:::#1": {
+  "note": "_merge_trunk_descent_x is reached only through _merge_branch_lead_x, whose callers are the MERGE_BRANCH family, and _classify_merge_edges creates branch edges only for a merge that has a trunk source. A branch's merge therefore always names a trunk source.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::if trunk_edge is None:::#1": {
+  "note": "The trunk source is chosen from the merge's own incoming edges, so an edge from it into the merge exists on at least one line and the search over the merge's lines always finds it.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::if shape.around_below:::#1": {
+  "note": "A merge feeder sharing its source column with a trunk that loops around below the target descends in the loop's descent column. Reachable in principle (an around-below merge trunk with a same-column junction feeder on the same line), but no swept fixture combines the two: the around-below trunks in the corpus have no same-column branch.",
+  "status": "needs-review"
+ },
+ "inter_section_handlers.py::if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):::#1": {
+  "note": "_merge_landing_room is read only by the LEFT-entry crossing test in _merge_entry_route_kind and by the L_SHAPE merge-entry leaf, and _merge_entry_route_kind sends a TOP or BOTTOM entry to PERPENDICULAR_ENTRY before either, so the entry port is always a side port.",
+  "status": "defensive"
+ },
+ "inter_section_handlers.py::if markers and max(markers) < ep.y:::#1": {
+  "note": "The decline arm skips an earlier-row box over a merge landing run that has a marker or side port at or below the run, so the run would cross it rather than pass beneath it; _merge_entry_route_kind then routes the feeder by CORRIDOR or AROUND_BELOW. Reachable, but the only swept landing run short of clearance under an earlier-row box is genomeassembly_staggered's, which passes beneath scaffolding.",
+  "status": "needs-review"
+ },
+ "inter_section_handlers.py::if exit_port is not None and _port_run_direction(exit_port) is run_direction:::#1": {
+  "note": "An L-shape junction fan hangs off a LEFT or RIGHT exit port and runs on in the exit's own direction toward targets beyond the junction, so its source always resolves to an exit port facing the run. The fall-through, for a junction fed by a TOP/BOTTOM exit or a fan running back against its exit, is a guard no swept topology builds this L-shape for.",
+  "status": "needs-review"
+ },
+ "normalize.py::if new is None or new == old:::#1": {
+  "note": "The slot retarget runs when a coincidence fusion snaps a leg onto an X in another inter-column gap. With merge feeders seated on the trunk descent at plan time, every swept fusion lands in the gap its leg declared, so only the no-op arm runs; a fusion that does cross gaps still needs its declaration moved.",
+  "status": "needs-review"
  }
 }

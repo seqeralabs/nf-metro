@@ -34,6 +34,9 @@ uppercase_section_labels: true
 section_label_letter_spacing: 2
 legend_stroke_width: 1.5
 legend_corner_radius: 0
+# Corners bend at three line widths, measured at the line centre.
+layout:
+  curve_radius_ratio: 3.0
 
 light:
   background_fill: "#ffffff"

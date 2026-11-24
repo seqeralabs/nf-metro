@@ -10,7 +10,6 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, NamedTuple
 
 from nf_metro.layout.constants import (
-    BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     JUNCTION_MARGIN,
     SAME_Y_TOLERANCE,
@@ -23,6 +22,7 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     station_lane_coord,
 )
+from nf_metro.layout.pass_metrics import bypass_clearance
 from nf_metro.layout.route_topology import (
     convergence_junction_entry_ports,
     divergence_junction_exit_ports,
@@ -54,6 +54,7 @@ from nf_metro.layout.routing.reversal import (
     detect_reversed_sections,
     tb_positive_fan_sections,
 )
+from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
@@ -265,6 +266,10 @@ class _RoutingCtx:
     route_systems: RouteSystemEmissionExecution | None = None
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
+    boundary_clearance_requirements: list[BoundaryClearanceRequirement] = field(
+        default_factory=list
+    )
+    """Room handlers asked settlement for, published with the route plan."""
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
     perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
@@ -338,7 +343,7 @@ def _classify_merge_edges(
                     graph,
                     pred_col,
                     tgt_col,
-                    BYPASS_CLEARANCE,
+                    bypass_clearance(),
                     src_row=pred_row,
                     cross_row=cross_row,
                     tgt_row=tgt_row,
@@ -650,7 +655,13 @@ def _section_lane_frame(
     frame = AxisFrame.for_direction(
         section.direction, graph.x_spacing or 1.0, graph.y_spacing or 1.0
     )
-    fan = positive_fan if positive_fan is not None else tb_positive_fan_sections(graph)
+    if positive_fan is not None:
+        fan: set[str] = positive_fan
+    elif frame.secondary.name == "x":
+        fan = tb_positive_fan_sections(graph)
+    else:
+        # Only a vertical-flow section can be in the set.
+        fan = set()
     lane_sign = section_lane_sign(section, fan)
     if lane_sign != frame.secondary_sign:
         frame = replace(frame, secondary_sign=lane_sign)
@@ -1499,7 +1510,7 @@ def _fan_bypass_band(
             graph,
             src_col,
             tgt_col,
-            BYPASS_CLEARANCE,
+            bypass_clearance(),
             src_row=src_row,
             cross_row=tgt_row is not None and tgt_row != src_row,
             tgt_row=tgt_row,

@@ -44,7 +44,6 @@ from nf_metro.layout.constants import (
     JUNCTION_MARGIN,
     LABEL_OFFSET,
     MIN_STATION_FLAT_LENGTH,
-    ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
@@ -82,7 +81,11 @@ from nf_metro.layout.labels import (
     place_labels,
     segment_strikes_label,
 )
-from nf_metro.layout.pass_metrics import metrics_context
+from nf_metro.layout.pass_metrics import (
+    inter_row_header_clearance,
+    metrics_context,
+    row_band_slack,
+)
 from nf_metro.layout.phases._common import (
     _is_side_entered_vertical_section,
     _row_contiguous_column_groups,
@@ -2221,10 +2224,10 @@ def test_merge_fanout_pivots_share_first_corner(fixture):
 def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
     """Merge fan-outs share their corner without the divergent-descent passes.
 
-    With ``_divergent_source_groups`` and ``_merge_feeder_groups`` stubbed to
-    no-ops, a merge fan-out's same-direction branches share their first corner
-    purely through ``_coincide_merge_fanout_pivots`` -- which recognises the fan
-    and runs at gap-materialisation time.  This pins the sharing to construction
+    With ``_divergent_source_groups`` stubbed to a no-op, a merge fan-out's
+    same-direction branches share their first corner purely through
+    ``_coincide_merge_fanout_pivots`` -- which recognises the fan and runs at
+    gap-materialisation time.  This pins the sharing to construction
     rather than to the later reconciliation passes.  Removing
     ``_coincide_merge_fanout_pivots`` makes this assertion fail, so it genuinely
     exercises that pass.
@@ -2232,7 +2235,6 @@ def test_merge_fanout_shares_corner_by_construction(fixture, monkeypatch):
     import nf_metro.layout.routing.normalize as normalize_mod
 
     monkeypatch.setattr(normalize_mod, "_divergent_source_groups", lambda routes: [])
-    monkeypatch.setattr(normalize_mod, "_merge_feeder_groups", lambda routes, ctx: [])
     graph = _layout(fixture, _cache=False)
     routes = route_edges(graph)
     offsets = compute_station_offsets(graph)
@@ -2505,7 +2507,7 @@ def test_intra_section_collinear_check_detects_overlay():
 
     Locks the detector so the corpus test above is not vacuously green: two
     different-line intra-section runs sharing a horizontal channel over more
-    than ``_COLLINEAR_MIN_SPAN``, with no shared endpoint, must be flagged.
+    than :func:`_collinear_min_span`, with no shared endpoint, must be flagged.
     """
     from types import SimpleNamespace
 
@@ -2557,7 +2559,7 @@ def test_diagonal_overlay_check_detects_collapse():
     """Meaningfulness guard: the diagonal check fires on a collapsed bundle.
 
     Two different lines whose diagonals run near-parallel and closer than
-    ``_DIAGONAL_MIN_PERP_SEP`` over more than ``_COLLINEAR_MIN_SPAN``, with no
+    ``_DIAGONAL_MIN_PERP_SEP`` over more than :func:`_collinear_min_span`, with no
     crossing, must be flagged; a pair that diverges out of a shared point (wide
     at the far end) must not.
     """
@@ -6396,10 +6398,10 @@ def test_corridor_viability_requires_full_clearance_band():
     """The inter-row-gap corridor is chosen only when the gap fits its band.
 
     The corridor's leftward traverse runs in a clamp band
-    ``[gap_top + INTER_ROW_EDGE_CLEARANCE, gap_bottom - INTER_ROW_HEADER_CLEARANCE]``;
+    ``[gap_top + INTER_ROW_EDGE_CLEARANCE, gap_bottom - inter_row_header_clearance()]``;
     a bundle of ``n`` lines needs ``(n - 1) * OFFSET_STEP`` of room inside
     it.  When the gap is narrower than
-    ``INTER_ROW_EDGE_CLEARANCE + span + INTER_ROW_HEADER_CLEARANCE`` the band
+    ``INTER_ROW_EDGE_CLEARANCE + span + inter_row_header_clearance()`` the band
     inverts and every line collapses onto one Y, producing a collinear
     overlay and a route through the source section's bottom edge (#722).
     Below that threshold the feeder must fall back to the around-below
@@ -6409,7 +6411,6 @@ def test_corridor_viability_requires_full_clearance_band():
         CURVE_RADIUS,
         DIAGONAL_RUN,
         INTER_ROW_EDGE_CLEARANCE,
-        INTER_ROW_HEADER_CLEARANCE,
     )
     from nf_metro.layout.routing.common import row_bottom_edge, row_top_edge
     from nf_metro.layout.routing.context import _resolve_section_colrow
@@ -6427,7 +6428,7 @@ def test_corridor_viability_requires_full_clearance_band():
     gap_top = row_bottom_edge(graph, src_row, col=src_col)
     gap_bottom = row_top_edge(graph, src_row + 1, col=src_col, default=gap_top)
     gap = gap_bottom - gap_top
-    floor = INTER_ROW_EDGE_CLEARANCE + INTER_ROW_HEADER_CLEARANCE
+    floor = INTER_ROW_EDGE_CLEARANCE + inter_row_header_clearance()
     assert gap < floor, (
         f"fixture precondition: gap below source row is {gap:.1f}px, "
         f"expected narrower than the {floor:.0f}px floor"
@@ -9548,7 +9549,7 @@ def test_inter_section_route_y_stays_within_row_band(fixture):
 
     # Slack: a clean below-row wrap channel (bypass clearance + bundle
     # nest + diagonal corner approach), shared with the runtime band guard.
-    SLACK = ROW_BAND_SLACK
+    SLACK = row_band_slack()
 
     offenders: list[str] = []
     for r in routes:

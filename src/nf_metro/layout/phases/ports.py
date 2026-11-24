@@ -6,19 +6,21 @@ from collections.abc import Iterator
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
-    CURVE_RADIUS,
     ENTRY_SHIFT_TB,
-    EXIT_CORRIDOR_ICON_CLEARANCE,
     GUARD_TOLERANCE,
     MAX_PORT_ALIGN_BBOX_EXPANSION_FRAC,
     MIN_PORT_STATION_GAP,
-    MIN_STATION_FLAT_LENGTH,
     SAME_COORD_TOLERANCE,
     STATION_ELBOW_TOLERANCE,
 )
 from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x, lanes_run_along_y
 from nf_metro.layout.layers import build_station_digraph
 from nf_metro.layout.ordering import split_output_spur_fan
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    exit_corridor_icon_clearance,
+    min_station_flat_length,
+)
 from nf_metro.layout.phases._common import (
     _exit_reaching_nodes,
     _expand_bbox_for_y,
@@ -1375,14 +1377,16 @@ def _align_perpendicular_exit_port(
     if not internal_xs:
         return
 
-    clearance = STATION_ELBOW_TOLERANCE + CURVE_RADIUS
+    clearance = STATION_ELBOW_TOLERANCE + active_curve_radius()
     if exit_section.direction == "RL":
         # Flow runs right-to-left, so the trailing station is the leftmost.
         exit_x = min(internal_xs) - clearance
-        exit_x = max(exit_x, exit_section.bbox_x + CURVE_RADIUS)
+        exit_x = max(exit_x, exit_section.bbox_x + active_curve_radius())
     else:
         exit_x = max(internal_xs) + clearance
-        exit_x = min(exit_x, exit_section.bbox_x + exit_section.bbox_w - CURVE_RADIUS)
+        exit_x = min(
+            exit_x, exit_section.bbox_x + exit_section.bbox_w - active_curve_radius()
+        )
 
     if port.side == PortSide.TOP:
         exit_y = exit_section.bbox_y
@@ -1467,7 +1471,7 @@ def _shift_section_trunk(
             st.x += delta
         if port:
             port.x += delta
-    overrun = (exit_x + CURVE_RADIUS) - bbox_right
+    overrun = (exit_x + active_curve_radius()) - bbox_right
     if overrun > 0:
         section.bbox_w += overrun
 
@@ -1618,9 +1622,9 @@ def _resolve_tb_exit_y(
             break
 
     # Ensure the gap beyond the trailing station is large enough for the exit
-    # corner curve (CURVE_RADIUS) plus a straight run so the curve doesn't
+    # corner curve (the corner radius) plus a straight run so the curve doesn't
     # crowd the station pill.
-    min_exit_gap = max(entry_gap, CURVE_RADIUS + MIN_PORT_STATION_GAP)
+    min_exit_gap = max(entry_gap, active_curve_radius() + MIN_PORT_STATION_GAP)
 
     # A terminus file icon hangs forward along the flow (below for TB, above
     # for BT), past its marker by more than one row.  When such an icon sits
@@ -1629,7 +1633,7 @@ def _resolve_tb_exit_y(
     # not graze the artefact.
     icon_reach = _exit_row_icon_reach(graph, exit_section, trailing_y)
     if icon_reach > 0:
-        min_exit_gap = max(min_exit_gap, icon_reach + EXIT_CORRIDOR_ICON_CLEARANCE)
+        min_exit_gap = max(min_exit_gap, icon_reach + exit_corridor_icon_clearance())
 
     bound_exit_y = trailing_y + flow * min_exit_gap
     if flow * (tgt.y - bound_exit_y) >= 0:
@@ -1906,7 +1910,11 @@ def _seat_perp_entry_port_before_stations(
     if not internal_ys:
         return
     base_y = graph._base_y_spacing
-    gap = base_y * ENTRY_SHIFT_TB if base_y else CURVE_RADIUS + MIN_STATION_FLAT_LENGTH
+    gap = (
+        base_y * ENTRY_SHIFT_TB
+        if base_y
+        else active_curve_radius() + min_station_flat_length()
+    )
     # Seat the port clear of the flow-START end of the row: the top of a downward
     # (TB) flow, the bottom of an upward (BT) one.  Seating it past the opposite
     # end instead leaves the entry doubling back through the section's own

@@ -60,7 +60,12 @@ class BoundaryClearanceDemand:
 
 @dataclass(frozen=True, slots=True)
 class BoundaryClearanceRequirement:
-    """Stable clearance target measured between two section sets."""
+    """Stable clearance target measured between two section sets.
+
+    The positive side is measured at its sections' near edge, or at
+    ``positive_anchor_id`` when set: a station those sections own, for a run
+    that travels along the station's coordinate rather than the box edge.
+    """
 
     axis: SettlementAxis
     boundary: int
@@ -69,6 +74,7 @@ class BoundaryClearanceRequirement:
     negative_section_ids: tuple[str, ...]
     positive_section_ids: tuple[str, ...]
     description: str
+    positive_anchor_id: str = ""
 
     def __post_init__(self) -> None:
         if self.boundary < 1:

@@ -10,7 +10,6 @@ import html
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
-    CURVE_RADIUS,
     ICON_CAPTION_GAP,
     SECTION_HEADER_ROUTE_CLEARANCE,
 )
@@ -77,11 +76,6 @@ RAIL_LINK_HALF_WIDTH_RATIO: float = 0.7
 # ---------------------------------------------------------------------------
 # SVG drawing
 # ---------------------------------------------------------------------------
-SVG_CURVE_RADIUS: float = CURVE_RADIUS
-"""Default corner radius for edge path smoothing.
-
-Derived from the layout CURVE_RADIUS so routing and rendering agree."""
-
 SECTION_NUM_CIRCLE_R_LARGE: int = 11
 """Radius of the section number circle background."""
 
@@ -144,11 +138,6 @@ ICON_NAME_FONT_SCALE: float = 0.6
 # ---------------------------------------------------------------------------
 # Animation
 # ---------------------------------------------------------------------------
-ANIMATION_CURVE_RADIUS: float = CURVE_RADIUS
-"""Default curve radius for animation motion paths.
-
-Derived from the layout CURVE_RADIUS for consistency."""
-
 MIN_ANIMATION_DURATION: float = 2.0
 """Minimum duration in seconds for ball animation."""
 

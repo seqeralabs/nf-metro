@@ -7,12 +7,15 @@ The per-handler families and post-routing passes live in sibling modules
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING
 
-from nf_metro.layout.constants import (
-    CURVE_RADIUS,
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    active_metrics,
+    curve_radius_context,
+    graph_radius_context,
 )
-from nf_metro.layout.pass_metrics import active_metrics
 from nf_metro.layout.route_plan import RouteSystemId
 from nf_metro.layout.route_reservations import reservation_ids_by_claimant_member
 from nf_metro.layout.routing.common import (
@@ -119,9 +122,9 @@ def _route_classified_edge(
     return None
 
 
-def _route_edges(  # noqa: C901
+def _route_edges(
     graph: MetroGraph,
-    curve_radius: float,
+    curve_radius: float | None,
     station_offsets: dict[tuple[str, str], float] | None,
     *,
     observe_plan: bool,
@@ -137,7 +140,39 @@ def _route_edges(  # noqa: C901
     :func:`route_edges_centred` (applies the moves).  The ``moves`` are the
     per-station X-targets the bubble-centring pass produced as ``{station_id:
     x}`` requests; the route points are adjusted in place either way.
+
+    Routes at the radius *graph* was laid out with unless *curve_radius* says
+    otherwise; either way the radius is the one every clearance helper reads.
     """
+    with (
+        graph_radius_context(graph),
+        nullcontext() if curve_radius is None else curve_radius_context(curve_radius),
+    ):
+        return _route_edges_in_context(
+            graph,
+            station_offsets,
+            observe_plan=observe_plan,
+            offset_step=offset_step,
+            reservations=reservations,
+            reservation_translations=reservation_translations,
+            validate_final_route_frames=validate_final_route_frames,
+            allow_convergence_clearance_requirements=(
+                allow_convergence_clearance_requirements
+            ),
+        )
+
+
+def _route_edges_in_context(  # noqa: C901
+    graph: MetroGraph,
+    station_offsets: dict[tuple[str, str], float] | None,
+    *,
+    observe_plan: bool,
+    offset_step: float | None,
+    reservations: RoutePlan | None,
+    reservation_translations: tuple[ReservationCoordinateTranslation, ...],
+    validate_final_route_frames: bool,
+    allow_convergence_clearance_requirements: bool,
+) -> tuple[list[RoutedPath], dict[str, float], RoutePlan | None]:
     observer: RoutePlanObserver | None
     if graph.line_spread is LineSpread.RAILS:
         from nf_metro.layout.route_plan import (
@@ -230,7 +265,7 @@ def _route_edges(  # noqa: C901
     ctx = _build_routing_context(
         graph,
         active_metrics().diagonal_run,
-        curve_radius,
+        active_curve_radius(),
         station_offsets,
         offset_step=offset_step,
         validate_final_route_frames=validate_final_route_frames,
@@ -587,6 +622,10 @@ def _route_edges(  # noqa: C901
         validate_convergence_plans(routes, convergence_execution)
     validate_member_geometry_emission(routes, member_geometry)
 
+    if observer is not None:
+        observer.boundary_clearance_requirements += tuple(
+            ctx.boundary_clearance_requirements
+        )
     plan = observer.finish(routes) if observer is not None else None
     if plan is not None:
         from nf_metro.layout.routing.system_emission import (
@@ -599,7 +638,7 @@ def _route_edges(  # noqa: C901
 
 def route_edges(
     graph: MetroGraph,
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
     offset_step: float | None = None,
@@ -638,7 +677,7 @@ def route_edges_for_placement_guards(
     """
     routes, _moves, _plan = _route_edges(
         graph,
-        CURVE_RADIUS,
+        None,
         station_offsets,
         observe_plan=False,
         validate_final_route_frames=False,
@@ -648,7 +687,7 @@ def route_edges_for_placement_guards(
 
 def observe_route_edges(
     graph: MetroGraph,
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
     offset_step: float | None = None,
@@ -678,7 +717,7 @@ def _settle_station_moves(graph: MetroGraph, moves: dict[str, float]) -> None:
 
 def route_edges_centred(
     graph: MetroGraph,
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
     offset_step: float | None = None,
@@ -713,7 +752,7 @@ def route_edges_centred(
 
 def observe_route_edges_centred(
     graph: MetroGraph,
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
     station_offsets: dict[tuple[str, str], float] | None = None,
     *,
     offset_step: float | None = None,

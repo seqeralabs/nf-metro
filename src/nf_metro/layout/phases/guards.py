@@ -29,14 +29,10 @@ from nf_metro.layout.constants import (
     COMPONENT_BAND_OVERLAP_TOLERANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     FLOW_ALIGNED_PORT_ADVICE,
     GUARD_TOLERANCE,
-    INTER_ROW_EDGE_CLEARANCE,
     OFFSET_STEP,
-    PERP_PORT_EDGE_CLEARANCE,
-    ROW_BAND_SLACK,
     SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
@@ -58,8 +54,12 @@ from nf_metro.layout.geometry import (
     segment_intersects_bbox,
 )
 from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
     active_metrics,
     icon_half_height_approx,
+    inter_row_edge_clearance,
+    perp_port_edge_clearance,
+    row_band_slack,
     station_radius_approx,
 )
 from nf_metro.layout.phase_state import GuardSpec
@@ -634,7 +634,7 @@ def _guard_ports_clear_unanchored_box_edges(
     as one stroke; it also blocks the section header's above-left position, so
     the placement chain falls through to ``nudge`` and the number badge slides
     away from the corner it labels.  The free axis therefore owes
-    ``PERP_PORT_EDGE_CLEARANCE``.
+    ``perp_port_edge_clearance()``.
 
     Measured from the port's outermost *drawn* lane rather than from the port
     station: the bundle crossing a port is staggered off it along exactly this
@@ -660,7 +660,7 @@ def _guard_ports_clear_unanchored_box_edges(
         else:
             coord, box_low, box_high = st.x, sec.bbox_x, sec.bbox_x + sec.bbox_w
         clearance = min(coord - low_reach - box_low, box_high - coord - high_reach)
-        if clearance < PERP_PORT_EDGE_CLEARANCE - SAME_COORD_TOLERANCE:
+        if clearance < perp_port_edge_clearance() - SAME_COORD_TOLERANCE:
             bundle = (
                 ""
                 if not (low_reach or high_reach)
@@ -672,7 +672,7 @@ def _guard_ports_clear_unanchored_box_edges(
                 f"{axis}-clearance to the nearest unanchored edge of section "
                 f"{st.section_id!r} bbox ({sec.bbox_x:.1f}, {sec.bbox_y:.1f}, "
                 f"w={sec.bbox_w:.1f}, h={sec.bbox_h:.1f}); expected >= "
-                f"{PERP_PORT_EDGE_CLEARANCE:.1f}"
+                f"{perp_port_edge_clearance():.1f}"
             )
 
 
@@ -2322,7 +2322,7 @@ def _guard_no_stacked_elbow_graze(
 
     When two different lines descend the same inter-section gap as risers
     that merely meet at one elbow band (their Y spans overlap by less than
-    ``MIN_CORRIDOR_Y_OVERLAP``, rather than running parallel), they are two
+    ``min_corridor_y_overlap()``, rather than running parallel), they are two
     separate corridors and must be distributed across the gap width.  Packed
     within ``BUNDLE_TO_BUNDLE_CLEARANCE`` of each other their opposing elbows
     overlap and the lines graze instead of reading as distinct streams.
@@ -3081,7 +3081,7 @@ def _guard_inter_section_routes_in_row_band(
 ) -> None:
     """After routing: inter-section routes whose endpoints both sit in
     grid row R must keep all waypoint Ys within a one-row band centered
-    on R, plus ``ROW_BAND_SLACK`` for a clean below-row wrap channel
+    on R, plus ``row_band_slack()`` for a clean below-row wrap channel
     (bypass clearance + bundle nest + diagonal corner approach).
     """
     if offsets is None or routes is None:
@@ -3102,7 +3102,7 @@ def _guard_inter_section_routes_in_row_band(
         else:
             row_band[sec.grid_row] = (min(cur[0], top), max(cur[1], bot))
 
-    slack = ROW_BAND_SLACK
+    slack = row_band_slack()
     for r in routes:
         src = graph.stations.get(r.edge.source)
         tgt = graph.stations.get(r.edge.target)
@@ -3180,7 +3180,11 @@ def _guard_topmost_row_top_entry_hugs_section(
         band_top = routing_common.row_top_edge(
             graph, sec_b.grid_row, default=sec_b.bbox_y
         )
-        limit = band_top - (INTER_ROW_EDGE_CLEARANCE + CURVE_RADIUS) - GUARD_TOLERANCE
+        limit = (
+            band_top
+            - (inter_row_edge_clearance() + active_curve_radius())
+            - GUARD_TOLERANCE
+        )
         min_y = min(y for _x, y in r.points)
         if min_y < limit:
             raise PhaseInvariantError(
@@ -4080,7 +4084,7 @@ def _guard_inter_row_run_clearance(
     routes: list[RoutedPath] | None = None,
 ) -> None:
     """After routing: a horizontal leg of an inter-*row* route must keep
-    ``INTER_ROW_EDGE_CLEARANCE`` from its source section's near bbox edge.
+    ``inter_row_edge_clearance()`` from its source section's near bbox edge.
 
     An inter-section bundle that crosses grid rows (e.g. a right-exit
     wrapping down to a left-entry below) lands its horizontal run in the
@@ -4117,19 +4121,19 @@ def _guard_inter_row_run_clearance(
             if xhi <= left + tol or xlo >= right - tol:
                 continue  # run doesn't overlap the source section in X
             y = y0
-            if bottom + tol < y < bottom + INTER_ROW_EDGE_CLEARANCE - tol:
+            if bottom + tol < y < bottom + inter_row_edge_clearance() - tol:
                 raise PhaseInvariantError(
                     f"{phase}: inter-row run of {rp.edge.source!r}->"
                     f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
                     f"{y - bottom:.1f}px below source section {src_sec.id!r} "
-                    f"bottom={bottom:.1f} (< {INTER_ROW_EDGE_CLEARANCE})"
+                    f"bottom={bottom:.1f} (< {inter_row_edge_clearance()})"
                 )
-            if top - INTER_ROW_EDGE_CLEARANCE + tol < y < top - tol:
+            if top - inter_row_edge_clearance() + tol < y < top - tol:
                 raise PhaseInvariantError(
                     f"{phase}: inter-row run of {rp.edge.source!r}->"
                     f"{rp.edge.target!r} line {rp.line_id!r} at y={y:.1f} sits "
                     f"{top - y:.1f}px above source section {src_sec.id!r} "
-                    f"top={top:.1f} (< {INTER_ROW_EDGE_CLEARANCE})"
+                    f"top={top:.1f} (< {inter_row_edge_clearance()})"
                 )
 
 
@@ -4149,11 +4153,9 @@ def _guard_trunk_bands_crossing_optimal(
     strictly reduce crossings.  This guard fails loudly if a future change ever
     leaves a band in such an avoidable-crossing order.
     """
-    from nf_metro.layout.constants import CURVE_RADIUS
-
     routes = _ensure_routes(graph, routes)
     ctx = routing_context._build_routing_context(
-        graph, active_metrics().diagonal_run, CURVE_RADIUS, offsets
+        graph, active_metrics().diagonal_run, active_curve_radius(), offsets
     )
     bad = routing_normalize._suboptimal_trunk_bands(routes, ctx)
     if bad:
