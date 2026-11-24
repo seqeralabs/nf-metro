@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -33,17 +32,19 @@ from types import MappingProxyType
 from typing import Any
 
 import yaml
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
 
 from nf_metro.errors import NfMetroError
-from nf_metro.options import INVALID, LAYOUT_OPTIONS, LayoutOption, coerce
+from nf_metro.options import coerce
 from nf_metro.render.style import Theme, authored_fields
+from nf_metro.themes.schema import THEMEABLE_LAYOUT_OPTIONS, theme_schema
 
 __all__ = [
     "DARK",
     "LIGHT",
     "MODES",
     "UNSET",
-    "field_kind",
     "THEMEABLE_LAYOUT_OPTIONS",
     "ResolvedTheme",
     "ThemeError",
@@ -64,47 +65,6 @@ MODES = (LIGHT, DARK)
 #: to ``None`` for an explicit ``fixed_mode: none``.
 UNSET = "unset"
 _THEME_FILE_SUFFIXES = (".yaml", ".yml")
-
-# Layout options that shape a map's look. Options that change what is drawn
-# or how a render behaves (size pinning, animation, guards, folding) stay with
-# the map and the caller.
-THEMEABLE_LAYOUT_OPTIONS: dict[str, LayoutOption] = {
-    opt.name: opt
-    for opt in LAYOUT_OPTIONS
-    if opt.name
-    in {
-        "x_spacing",
-        "y_spacing",
-        "section_x_gap",
-        "section_y_gap",
-        "track_gap",
-        "diamond_style",
-        "line_order",
-        "row_align",
-        "center_ports",
-        "compact_offsets",
-        "label_angle",
-        "font_scale",
-        "stroke_scale",
-        "logo_scale",
-        "legend_min_height",
-        "legend_logo_gap",
-    }
-}
-
-_COLOR = re.compile(
-    r"""^(
-        |none|transparent|currentColor
-        |\#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})
-        |(?:rgb|rgba|hsl|hsla)\(\s*[-0-9.%,\s/]+\)
-        |[a-zA-Z]+
-    )$""",
-    re.VERBOSE,
-)
-
-_TOP_LEVEL_KEYS = frozenset(
-    {"name", "extends", "fixed_mode", "light", "dark", "layout"}
-)
 
 
 class ThemeError(NfMetroError, ValueError):
@@ -166,102 +126,57 @@ def is_theme_file_entry(entry: str) -> bool:
     return entry.lower().endswith(_THEME_FILE_SUFFIXES)
 
 
-def field_kind(field: dataclasses.Field[Any]) -> str:
-    """A schema field's type name: ``str``, ``float``, ``int`` or ``bool``."""
-    return field.type if isinstance(field.type, str) else field.type.__name__
+_VALIDATOR = Draft202012Validator(theme_schema())
+_TOP_LEVEL_KEYS = frozenset(
+    {"name", "extends", "fixed_mode", "light", "dark", "layout"}
+)
+_NUMBER_TYPES = {"float": float, "int": int}
 
 
-def _check_field(key: str, value: object, where: str) -> object:
-    field = authored_fields().get(key)
-    if field is None:
-        raise ThemeError(
-            f"{where}: unknown theme field {key!r}; valid fields are "
-            + ", ".join(sorted(authored_fields()))
-        )
-    kind = field_kind(field)
-    if kind == "bool":
-        if not isinstance(value, bool):
-            raise ThemeError(f"{where}: {key} must be true or false, got {value!r}")
-        return value
-    if kind in ("float", "int"):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ThemeError(f"{where}: {key} must be a number, got {value!r}")
-        if value < 0:
-            raise ThemeError(f"{where}: {key} must not be negative, got {value!r}")
-        return int(value) if kind == "int" else float(value)
-    if not isinstance(value, str):
-        raise ThemeError(f"{where}: {key} must be a string, got {value!r}")
-    choices = field.metadata["choices"]
-    if choices and value not in choices:
-        raise ThemeError(
-            f"{where}: {key} must be one of {', '.join(choices)}, got {value!r}"
-        )
-    if field.metadata["color"] and not _COLOR.match(value.strip()):
-        raise ThemeError(f"{where}: {key} is not a colour: {value!r}")
-    return value
-
-
-def _check_fields(data: object, where: str) -> dict[str, Any]:
-    if data is None:
-        return {}
-    if not isinstance(data, Mapping):
-        raise ThemeError(f"{where}: expected a mapping of theme fields")
-    return {str(k): _check_field(str(k), v, where) for k, v in data.items()}
-
-
-def _check_layout(data: object, where: str) -> dict[str, Any]:
-    if data is None:
-        return {}
-    if not isinstance(data, Mapping):
-        raise ThemeError(f"{where}: layout must be a mapping of layout options")
-    checked: dict[str, Any] = {}
-    for key, raw in data.items():
-        opt = THEMEABLE_LAYOUT_OPTIONS.get(str(key))
-        if opt is None:
-            raise ThemeError(
-                f"{where}: {key!r} is not a layout option a theme can set; "
-                "valid options are " + ", ".join(sorted(THEMEABLE_LAYOUT_OPTIONS))
-            )
-        text = str(raw).lower() if isinstance(raw, bool) else str(raw)
-        value, expected = coerce(opt, text)
-        if value is INVALID:
-            raise ThemeError(f"{where}: layout {key} expects {expected}, got {raw!r}")
-        checked[opt.name] = value
-    return checked
+def _typed(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """*fields* with each number made the type its theme field declares."""
+    kinds = {name: str(f.type) for name, f in authored_fields().items()}
+    return {
+        key: _NUMBER_TYPES[kinds[key]](value) if kinds[key] in _NUMBER_TYPES else value
+        for key, value in fields.items()
+    }
 
 
 def layer_from_mapping(data: object, where: str) -> tuple[ThemeLayer, list[str]]:
-    """Validate a parsed theme file; return its layer and ``extends`` entries."""
-    if not isinstance(data, Mapping):
-        raise ThemeError(f"{where}: a theme file must be a YAML mapping")
-    name = data.get("name")
-    if not isinstance(name, str) or not name.strip():
-        raise ThemeError(f"{where}: a theme file needs a non-empty 'name'")
+    """Validate a parsed theme file; return its layer and ``extends`` entries.
+
+    The file is checked against the theme schema; an error names *where* and
+    the JSON path of the offending value.
+    """
+    error = best_match(_VALIDATOR.iter_errors(data))
+    if error is not None:
+        message = (
+            f"{error.instance!r} is not a colour"
+            if error.validator == "pattern" and error.schema.get("x-colour")
+            else error.message
+        )
+        raise ThemeError(f"{where}: {error.json_path}: {message}")
+    assert isinstance(data, Mapping)
     extends_raw = data.get("extends") or []
-    if isinstance(extends_raw, str):
-        extends = split_stack(extends_raw)
-    elif isinstance(extends_raw, Sequence) and all(
-        isinstance(e, str) for e in extends_raw
-    ):
-        extends = [e.strip() for e in extends_raw if e.strip()]
-    else:
-        raise ThemeError(f"{where}: 'extends' must be a name or a list of names")
+    extends = (
+        split_stack(extends_raw)
+        if isinstance(extends_raw, str)
+        else [e.strip() for e in extends_raw if e.strip()]
+    )
     fixed_mode: str | None = UNSET
     if "fixed_mode" in data:
-        raw_mode = data["fixed_mode"]
-        fixed_mode = None if raw_mode in (None, "none") else raw_mode
-        if fixed_mode is not None and fixed_mode not in MODES:
-            raise ThemeError(
-                f"{where}: fixed_mode must be light, dark or none, got {raw_mode!r}"
-            )
-    shared = _check_fields(
-        {k: v for k, v in data.items() if k not in _TOP_LEVEL_KEYS}, where
-    )
-    light = {**shared, **_check_fields(data.get("light"), f"{where} (light)")}
-    dark = {**shared, **_check_fields(data.get("dark"), f"{where} (dark)")}
-    layout = _check_layout(data.get("layout"), f"{where} (layout)")
+        fixed_mode = (
+            None if data["fixed_mode"] in (None, "none") else data["fixed_mode"]
+        )
+    shared = _typed({k: v for k, v in data.items() if k not in _TOP_LEVEL_KEYS})
+    light = {**shared, **_typed(data.get("light") or {})}
+    dark = {**shared, **_typed(data.get("dark") or {})}
+    layout = {
+        key: coerce(THEMEABLE_LAYOUT_OPTIONS[key], str(value))[0]
+        for key, value in (data.get("layout") or {}).items()
+    }
     layer = ThemeLayer(
-        name.strip(),
+        str(data["name"]).strip(),
         MappingProxyType(light),
         MappingProxyType(dark),
         MappingProxyType(layout),

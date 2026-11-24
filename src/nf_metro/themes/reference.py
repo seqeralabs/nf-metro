@@ -1,4 +1,4 @@
-"""The theme field reference, generated from the :class:`Theme` schema.
+"""The theme field reference, generated from the theme file's JSON Schema.
 
 ``docs/theming.mdx`` embeds this reference between the
 ``theme-field-reference`` markers, and a test fails when the two differ.
@@ -7,34 +7,37 @@ Rewrite it in place with ``python -m nf_metro.themes.reference --write``.
 
 from __future__ import annotations
 
-import dataclasses
 import sys
 from pathlib import Path
 from typing import Any
 
-from nf_metro.render.style import authored_fields, chrome_bindings
+from nf_metro.render.style import chrome_bindings
 from nf_metro.themes import BASE_THEME
-from nf_metro.themes.stack import THEMEABLE_LAYOUT_OPTIONS
+from nf_metro.themes.schema import THEMEABLE_LAYOUT_OPTIONS, theme_schema
 
 START = "{/* theme-field-reference:start */}"
 END = "{/* theme-field-reference:end */}"
 
+_KINDS = {
+    "boolean": "`true` \\| `false`",
+    "number": "number",
+    "integer": "whole number",
+    "string": "text",
+}
 
-def _kind(field: dataclasses.Field[Any]) -> str:
-    if field.metadata["choices"]:
-        return " \\| ".join(f"`{c}`" for c in field.metadata["choices"])
-    if field.metadata["color"]:
+
+def _kind(schema: dict[str, Any]) -> str:
+    if "enum" in schema:
+        return " \\| ".join(f"`{c}`" for c in schema["enum"])
+    if schema.get("x-colour"):
         return "colour"
-    kind = field.type if isinstance(field.type, str) else field.type.__name__
-    return {"bool": "`true` \\| `false`", "float": "number", "int": "whole number"}.get(
-        kind, "text"
-    )
+    return _KINDS[schema["type"]]
 
 
-def _default(field: dataclasses.Field[Any]) -> str:
-    if field.default is dataclasses.MISSING:
+def _default(schema: dict[str, Any]) -> str:
+    if "default" not in schema:
         return f"from `{BASE_THEME}`"
-    value = field.default
+    value = schema["default"]
     if isinstance(value, bool):
         return f"`{str(value).lower()}`"
     if isinstance(value, float) and value.is_integer():
@@ -45,12 +48,14 @@ def _default(field: dataclasses.Field[Any]) -> str:
 
 
 def field_reference() -> str:
-    """Markdown tables of every authorable theme field, grouped as in the schema."""
+    """Markdown tables of every theme field, grouped as in the schema."""
     groups: dict[str, list[str]] = {}
-    for name, field in authored_fields().items():
-        doc = field.metadata["doc"]
-        row = f"| `{name}` | {_kind(field)} | {_default(field)} | {doc} |"
-        groups.setdefault(field.metadata["group"], []).append(row)
+    for name, schema in theme_schema()["$defs"]["fields"].items():
+        row = (
+            f"| `{name}` | {_kind(schema)} | {_default(schema)} | "
+            f"{schema['description']} |"
+        )
+        groups.setdefault(schema["x-group"], []).append(row)
     parts = []
     for group, rows in groups.items():
         parts.append(

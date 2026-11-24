@@ -76,6 +76,7 @@ A built-in theme sets only the fields its file lists.
    In `%%metro style:` the path is relative to the `.mmd` file; on the command line it is relative to the working directory.
 
 ```yaml title="house_style.yaml"
+# yaml-language-server: $schema=https://raw.githubusercontent.com/seqeralabs/nf-metro/main/src/nf_metro/themes/theme.schema.json
 name: house-style
 extends: london-tube # optional: a name, a file, or a list
 
@@ -104,8 +105,12 @@ It then renders that palette whatever mode is asked for, and its SVG does not ad
 In a stack, `fixed_mode` behaves like any field: a later theme that sets it, to a mode or to `none`, replaces an earlier one.
 The built-in `nfcore`, `seqera` and `london-tube` set `fixed_mode: none`, so `transparent, seqera` adapts to the viewer's mode.
 
-nf-metro checks the whole file before it renders anything.
-An unknown field, a value of the wrong type, a color it cannot read, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the problem.
+nf-metro checks the whole file against the theme's JSON Schema before it renders anything.
+An unknown field, a value of the wrong type, a color it cannot read, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the file and the path to the bad value, such as `$.light.label_color`.
+
+The schema ships with nf-metro as `nf_metro/themes/theme.schema.json` and is generated from the same definitions as the field reference below.
+The first line of the example above points editors that use the YAML language server (VS Code's YAML extension, for one) at it, so they complete field names and flag mistakes as you type.
+Any other JSON Schema tool can validate a theme file against it too.
 
 <Aside type="caution" title="Label size">
 
@@ -333,7 +338,7 @@ These colors also emit a CSS custom property, so a page that inlines the SVG can
 
 ### Layout options
 
-A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`. A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
+A `layout:` block takes these options, with the same values as their `%%metro` directives: `x_spacing`, `y_spacing`, `section_x_gap`, `section_y_gap`, `track_gap`, `diamond_style`, `line_order`, `row_align`, `center_ports`, `compact_offsets`, `label_angle`, `font_scale`, `stroke_scale`, `logo_scale`, `legend_min_height`, `legend_logo_gap`, `directional`. A theme's value applies only where the map has no directive for that option, and a command-line flag beats both.
 
 {/* theme-field-reference:end */}
 

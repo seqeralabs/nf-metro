@@ -183,21 +183,38 @@ def test_missing_theme_file_is_rejected(tmp_path):
 @pytest.mark.parametrize(
     "body,message",
     [
-        ("name: x\nstation_colour: red\n", "unknown theme field 'station_colour'"),
-        ("name: x\nlabel_color: '#12345'\n", "label_color is not a colour"),
-        ("name: x\nline_width: thick\n", "line_width must be a number"),
-        ("name: x\nsection_badges: 1\n", "section_badges must be true or false"),
-        ("name: x\nstation_glyph: dot\n", "station_glyph must be one of"),
-        ("name: x\nlayout:\n  fold_threshold: 3\n", "not a layout option"),
-        ("name: x\nlayout:\n  track_gap: wide\n", "layout track_gap expects"),
-        ("station_glyph: tick\n", "needs a non-empty 'name'"),
-        ("- name\n", "must be a YAML mapping"),
+        (
+            "name: x\nstation_colour: red\n",
+            "$: Additional properties are not allowed ('station_colour'",
+        ),
+        ("name: x\nlabel_color: '#12345'\n", "$.label_color: '#12345' is not a colour"),
+        (
+            "name: x\nline_width: thick\n",
+            "$.line_width: 'thick' is not of type 'number'",
+        ),
+        (
+            "name: x\nsection_badges: 1\n",
+            "$.section_badges: 1 is not of type 'boolean'",
+        ),
+        ("name: x\nstation_glyph: dot\n", "$.station_glyph: 'dot' is not one of"),
+        ("name: x\nlight:\n  line_width: -1\n", "$.light.line_width: -1 is less than"),
+        (
+            "name: x\nlayout:\n  fold_threshold: 3\n",
+            "$.layout: Additional properties are not allowed ('fold_threshold'",
+        ),
+        (
+            "name: x\nlayout:\n  track_gap: wide\n",
+            "$.layout.track_gap: 'wide' is not of type",
+        ),
+        ("station_glyph: tick\n", "$: 'name' is a required property"),
+        ("- name\n", "is not of type 'object'"),
     ],
 )
 def test_invalid_theme_files_name_the_problem(tmp_path, body, message):
     path = _write(tmp_path, "bad.yaml", body)
-    with pytest.raises(ThemeError, match=re.escape(message)):
+    with pytest.raises(ThemeError, match=re.escape(f"theme file {path}")) as raised:
         resolve_stack(str(path))
+    assert message in str(raised.value)
 
 
 def test_extends_cycle_is_rejected(tmp_path):

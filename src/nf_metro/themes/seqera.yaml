@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=theme.schema.json
 # Seqera brand: Inter type and the Platform palette, stepping down from the
 # brand navy (#160F26) into deep purple-greys for dark mode.
 name: seqera

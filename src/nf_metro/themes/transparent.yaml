@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=theme.schema.json
 # One palette on a transparent canvas, for embedding in a page that supplies
 # its own background. It renders the same whatever mode is asked for.
 name: transparent

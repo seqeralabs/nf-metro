@@ -2188,14 +2188,9 @@ def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
     With [code]--geometry[/] it also runs the render-geometry guards on the drawn
     ink.
     """
-    from nf_metro.render import manifest_schema, read_manifest
+    import jsonschema
 
-    try:
-        import jsonschema
-    except ImportError:
-        raise click.ClickException(
-            'validate-svg needs jsonschema: pip install "nf-metro[validate]"'
-        )
+    from nf_metro.render import manifest_schema, read_manifest
 
     svg = svg_file.read_text()
     manifest = read_manifest(svg)

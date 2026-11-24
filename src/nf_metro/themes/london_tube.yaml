@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=theme.schema.json
 # A schematic-transit look after the geometry of TfL's Line Diagram Standard:
 # tabs for stations on one line, a bar across a line's end, bold capsules at
 # interchanges, bundled lines edge to edge, unboxed sections and a humanist

@@ -51,6 +51,9 @@ dependencies = [
     # `info`/`render`'s YAML output is emitted through a real dumper; see
     # nf_metro.introspect.to_yaml.
     "pyyaml>=6",
+    # Theme files and embedded manifests are checked against Draft 2020-12
+    # schemas, which jsonschema implements from 4.0.
+    "jsonschema>=4.0",
 ]
 
 [project.urls]
@@ -73,7 +76,6 @@ dev = [
     "types-networkx",
     "types-PyYAML",
     "numpy<2.5",
-    "nf-metro[validate]",
     # Pinned so the frozen PNG hash in tests/test_hash_seed_determinism.py has
     # one rasteriser build to lock against; runtime accepts any >=0.5.
     "resvg-py==0.5.0",
@@ -90,11 +92,6 @@ docs = [
 ]
 font = [
     "fonttools[woff]>=4.0",
-]
-# `nf-metro validate-svg` validates an SVG's embedded manifest against a Draft
-# 2020-12 schema, which jsonschema only implements from 4.0.
-validate = [
-    "jsonschema>=4.0",
 ]
 
 # The skill self-check needs pyyaml for the gallery corpus map, and a tokenizer to
@@ -175,12 +172,10 @@ ignore_missing_imports = false
 strict_optional = true
 disallow_any_generics = true
 
-# drawsvg and av ship no type information; jsonschema is an optional dependency
-# (the `validate` extra) imported lazily by `nf-metro validate-svg`. Everything
-# else (click, Pillow, networkx via types-networkx) is typed once the package
-# is installed.
+# drawsvg, av and jsonschema ship no type information. Everything else (click,
+# Pillow, networkx via types-networkx) is typed once the package is installed.
 [[tool.mypy.overrides]]
-module = ["av", "drawsvg", "jsonschema"]
+module = ["av", "drawsvg", "jsonschema", "jsonschema.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

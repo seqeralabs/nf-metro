@@ -508,13 +508,6 @@ Validate a rendered SVG's embedded manifest against the [manifest JSON Schema](/
 nf-metro validate-svg [OPTIONS] SVG_FILE
 ```
 
-Schema validation needs `jsonschema`, which is not a runtime dependency.
-It ships in the `validate` extra:
-
-```bash frame="terminal"
-pip install "nf-metro[validate]"
-```
-
 | Option       | Default | Description                                                                                                                                                                                                                                                                            |
 | ------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--geometry` | off     | Also run the artifact-only render-geometry guards on the drawn ink (label strikes, non-consumer marker crossings and off-stroke direction chevrons), not only the manifest schema. The offset-collapse check needs the engine's assigned offsets and runs only via `render --validate` |

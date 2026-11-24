@@ -46,10 +46,9 @@ docker pull community.wave.seqera.io/library/pip_nf-metro:611b1ba39c6007f1
 
 ### Extras
 
-Two features need a dependency the base install leaves out:
+One feature needs a dependency the base install leaves out:
 
 ```bash
-pip install "nf-metro[validate]"   # nf-metro validate-svg (jsonschema)
 pip install "nf-metro[font]"       # render --text-to-paths (fonttools)
 ```
 
