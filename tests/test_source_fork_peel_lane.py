@@ -312,6 +312,9 @@ SHAPES = {
     "two_joins_with_bypassed_run": _one_section(
         _LINES_BC, _P3_BODY + "        f -->|c| j\n"
     ),
+    "two_bypassed_runs_to_successive_joins": _one_section(
+        _LINES_BC, _P3_BODY + "        m -->|main| n\n        f -->|c| n\n"
+    ),
     "contender_starts_the_peel_line": _one_section(
         _LINES_BC.replace(_LINES_BC.splitlines(True)[2], ""),
         _P3_BODY.replace("f -->|c| m", "f -->|b| m"),

@@ -249,8 +249,16 @@ def assign_tracks(
             )
             if seat is not None:
                 tracks[node] = column[node] = seat
-            for helper in run_helpers[node]:
-                place_single(helper)
+            outward = {sign for _, sign in far_sides}
+            if seat is not None and len(outward) == 1:
+                _stack_contender_runs(
+                    node, outward.pop(), line_gap, G, graph, layers, tracks
+                )
+                for helper in run_helpers[node]:
+                    layer_occupancy[layers.get(helper, 0)][helper] = tracks[helper]
+            else:
+                for helper in run_helpers[node]:
+                    place_single(helper)
 
     return tracks
 
@@ -820,6 +828,42 @@ def _seat_contender(
     if not seats:
         return None
     return min(seats, key=lambda row: (row[0], abs(row[1] - base), row[1]))[1]
+
+
+def _stack_contender_runs(
+    node: str,
+    outward: float,
+    line_gap: float,
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+    layers: dict[str, int],
+    tracks: dict[str, float],
+) -> None:
+    """Lay the bypass helpers of seated contender *node*'s runs as a stack.
+
+    The run reaching its join first keeps the contender's row and each later
+    run takes the next row toward *outward* clear of every station it passes,
+    so a run never steps across the trunk or across a run that leaves it
+    later.
+    """
+    runs: list[tuple[int, list[str]]] = []
+    for lead in G.successors(node):
+        if not is_bypass_v(lead):
+            continue
+        joins, rest = _run_joins(lead, G)
+        join = min(layers.get(c, 0) for c in joins)
+        runs.append((join, [lead, *rest]))
+    row = tracks[node]
+    for i, (join, helpers) in enumerate(sorted(runs, key=lambda run: run[0])):
+        if i:
+            span = _span_tracks(node, join, graph, layers, tracks)
+            row = next(
+                t
+                for k in range(1, len(span) + 2)
+                if _clear_of(t := row + k * outward * line_gap, span, line_gap / 2)
+            )
+        for helper in helpers:
+            tracks[helper] = row
 
 
 def _on_far_sides(track: float, far_sides: list[tuple[float, float]]) -> bool:
