@@ -73,15 +73,23 @@ def _dir_title(value: str, graph: MetroGraph) -> None:
 def _dir_style(value: str, graph: MetroGraph) -> None:
     # Imported here because the theme registry reaches the render package,
     # which imports the parser back.
-    from nf_metro.themes import STYLE_NAMES, ThemeError, check_stack
+    from nf_metro.themes import (
+        STYLE_NAMES,
+        ThemeError,
+        check_stack,
+        renamed_style_hint,
+    )
 
     try:
         check_stack(value)
     except ThemeError:
+        hint = renamed_style_hint(value)
         _warn_malformed(
             "style",
             value,
-            "/".join(sorted(STYLE_NAMES)) + ", .yaml theme files, or a comma list",
+            "/".join(sorted(STYLE_NAMES))
+            + ", .yaml theme files, or a comma list"
+            + (f" ({hint})" if hint else ""),
         )
         return
     graph.style = value

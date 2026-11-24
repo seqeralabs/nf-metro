@@ -52,6 +52,36 @@ def test_modes_are_not_theme_names(name):
         check_stack(name)
 
 
+@pytest.mark.parametrize(
+    ("name", "replacement"),
+    [
+        ("nfcore", "use 'default'"),
+        ("nfcore-dark", "'%%metro mode: dark'"),
+        ("seqera-light", "use 'seqera'"),
+        ("dark", "it is a mode"),
+        ("light", "use 'transparent'"),
+    ],
+)
+def test_a_retired_theme_name_says_what_replaces_it(name, replacement):
+    with pytest.raises(ThemeError, match="no longer a theme name") as excinfo:
+        check_stack(name)
+    assert replacement in str(excinfo.value)
+
+
+def test_a_retired_style_directive_warns_with_its_replacement():
+    with pytest.warns(UserWarning, match="no longer a theme name: use 'default'"):
+        parse_metro_mermaid(
+            "%%metro style: nfcore\n%%metro line: m | M | #f00\n"
+            "graph LR\n    a -->|m| b\n"
+        )
+
+
+def test_an_unknown_theme_name_has_no_rename_hint():
+    with pytest.raises(ThemeError) as excinfo:
+        check_stack("bogus")
+    assert "no longer" not in str(excinfo.value)
+
+
 def test_default_themes_set_no_layout_options():
     for name in STYLE_NAMES:
         assert resolve_stack(name).layout == {}
