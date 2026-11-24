@@ -137,7 +137,7 @@ $ nf-metro validate-svg pipeline.svg
 `validate-svg` needs the same package, and `pip install "nf-metro[validate]"` covers it too.
 
 Add `--geometry` to check the _drawn_ picture as well as the schema.
-It flags a route drawn through a station's label or marker, with rail interchanges excepted.
+It flags a route drawn through a station's label or marker, with rail interchanges excepted, and a direction chevron off its own line's drawn stroke.
 The offset-collapse check, which catches distinct lines merging into one stroke, needs the engine's assigned offsets.
 It therefore runs only via [`render --validate`](/nf-metro/cli/#validate-the-rendered-geometry).
 

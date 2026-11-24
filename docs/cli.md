@@ -174,7 +174,7 @@ A flag given an out-of-range value exits with an error, while the equivalent `%%
 | `--inactive-lines TEXT`            | from `line:` directives | Comma-separated line IDs to render inactive: their strokes, chevrons, and legend swatches gray out, as do the stations, labels, and terminus icons touched only by inactive lines. Unknown IDs error. Fully replaces the map's `inactive`-marked lines. An empty value forces every line active. Does not edit the `.mmd` |
 | `--animate / --no-animate`         | off                     | Add animated balls traveling along the metro lines. A video output turns this on for you                                                                                                                                                                                                                                  |
 | `--fps FLOAT`                      | `12`                    | Video formats only: frames per second of the exported loop                                                                                                                                                                                                                                                                |
-| `--duration FLOAT`                 | the map's cycle         | Video formats only: length of one loop in seconds, compressing (or stretching) the map's own animation cycle into it                                                                                                                                                                                                      |
+| `--duration FLOAT`                 | the map's loop          | Video formats only: length of one loop in seconds, compressing (or stretching) the map's own animation loop into it                                                                                                                                                                                                       |
 | `--directional / --no-directional` | off                     | Draw static chevrons along each route pointing in the flow direction (source to target)                                                                                                                                                                                                                                   |
 
 ### Live-progress metadata
@@ -256,10 +256,10 @@ A `.gif`, `.webp`, `.mp4`, or `.webm` output path does exactly that, and turns t
 nf-metro render pipeline.mmd -o pipeline.gif --duration 12 --fps 20
 ```
 
-The loop runs one full animation cycle and stops a frame short of repeating it, so it wraps with no stutter.
-Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the cycle that frame represents, and drawn behind the station markers as it is there.
+The loop runs one full animation loop and stops a frame short of repeating it, so it wraps with no stutter.
+Each ball is sampled from the same motion path the animated SVG drives it along, at the moment of the loop that frame represents, and drawn behind the station markers as it is there.
 
-`--duration` compresses (or stretches) the map's own cycle into a set number of seconds; leaving it off keeps the balls at exactly the speed the SVG moves them, which for a large pipeline can be a 40-second loop.
+`--duration` compresses (or stretches) the map's own loop into a set number of seconds; leaving it off keeps the balls at exactly the speed the SVG moves them, which makes the loop up to 60 seconds, or longer when one cycle alone exceeds that.
 `--fps` sets the frame rate.
 `--scale` and `--raster-width` size the frames as they size a PNG, except that a video defaults to natural size where a still doubles.
 
@@ -273,7 +273,7 @@ All four are muxed in-process by [PyAV](https://github.com/PyAV-Org/PyAV), which
 ### Validate the rendered geometry
 
 Pass `--validate` to check the _drawn_ SVG after rendering.
-It exits non-zero if a route is drawn through a station's label or marker, or if two distinct lines collapse into one stroke where they should run parallel.
+It exits non-zero if a route is drawn through a station's label or marker, if two distinct lines collapse into one stroke where they should run parallel, or if a `--directional` chevron sits off its own line's drawn stroke or in a bridge gap.
 It reads the geometry as it ends up on the page, after the per-line offsets and label shifts the layout applies.
 It therefore catches defects the pre-render checks cannot see:
 
@@ -514,9 +514,9 @@ It ships in the `validate` extra:
 pip install "nf-metro[validate]"
 ```
 
-| Option       | Default | Description                                                                                                                                                                                                                                             |
-| ------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--geometry` | off     | Also run the artifact-only render-geometry guards on the drawn ink (label strikes and non-consumer marker crossings), not only the manifest schema. The offset-collapse check needs the engine's assigned offsets and runs only via `render --validate` |
+| Option       | Default | Description                                                                                                                                                                                                                                                                            |
+| ------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--geometry` | off     | Also run the artifact-only render-geometry guards on the drawn ink (label strikes, non-consumer marker crossings and off-stroke direction chevrons), not only the manifest schema. The offset-collapse check needs the engine's assigned offsets and runs only via `render --validate` |
 
 ## `nf-metro embed-script`
 

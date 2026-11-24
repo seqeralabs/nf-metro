@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
 
 from nf_metro.layout.phases.guards import SettledRouteValidationError
 from nf_metro.layout.routing.common import (
@@ -12,9 +13,44 @@ from nf_metro.layout.routing.common import (
     SourceTurnout,
     segment_direction,
 )
-from nf_metro.layout.routing.corners import desired_curve_radii
+from nf_metro.layout.routing.corners import desired_curve_radii, flatten_cubic
 
 Point = tuple[float, float]
+
+_PATH_COMMAND = re.compile(r"([MLC])([^MLC]*)")
+_PATH_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def iter_path_commands(d: str) -> Iterator[tuple[str, list[float]]]:
+    """``(command, numbers)`` for each ``M``/``L``/``C`` in a path's ``d``."""
+    for command, body in _PATH_COMMAND.findall(d):
+        yield command, [float(n) for n in _PATH_NUMBER.findall(body)]
+
+
+def flatten_commands(
+    commands: Iterable[tuple[str, list[float]]], steps: int
+) -> list[list[Point]]:
+    """One polyline per subpath of ``M``/``L``/``C`` *commands*, each cubic
+    walked in *steps* chords."""
+    subpaths: list[list[Point]] = []
+    for command, nums in commands:
+        if command == "M":
+            subpaths.append([(nums[0], nums[1])])
+        elif not subpaths:
+            continue
+        elif command == "L":
+            subpaths[-1].append((nums[0], nums[1]))
+        else:
+            pen = subpaths[-1][-1]
+            c1, c2, end = (nums[0], nums[1]), (nums[2], nums[3]), (nums[4], nums[5])
+            subpaths[-1].extend(flatten_cubic(pen, c1, c2, end, steps))
+    return subpaths
+
+
+def flatten_path(d: str, steps: int) -> list[list[Point]]:
+    """:func:`flatten_commands` over a path's ``d``."""
+    return flatten_commands(iter_path_commands(d), steps)
+
 
 _INCOMING_X_SIGNS: dict[Direction, float] = {Direction.R: 1.0, Direction.L: -1.0}
 
@@ -99,7 +135,6 @@ def materialize_source_turnout_paths(
             materialized[index],
             route.curve_radii,
             route.source_turnout,
-            corner_index=0,
             default_radius=default_radius,
         )
         materialized[index] = points
@@ -113,40 +148,34 @@ def materialize_source_turnout(
     curve_radii: Sequence[float] | None,
     turnout: SourceTurnout | None,
     *,
-    corner_index: int,
     default_radius: float,
 ) -> tuple[list[Point], list[float] | None, int]:
-    """Apply one frozen cross-member source curve to drawable geometry.
+    """Apply one frozen cross-member source curve to a separately rendered
+    member's drawable geometry.
 
-    ``corner_index`` is zero for a separately rendered member, where the
-    incoming tangent is synthetic, and an interior index for an animation
-    chain that already contains the preceding member. The returned integer is
-    the segment-rank shift introduced by the synthetic prefix.
+    The member starts at the turnout's corner, so a synthetic incoming tangent
+    is prefixed; the returned integer is the segment-rank shift it introduces.
     """
     materialized = list(points)
     if turnout is None:
         return materialized, None if curve_radii is None else list(curve_radii), 0
-    if not materialized or corner_index < 0 or corner_index >= len(materialized):
+    if not materialized:
         raise SettledRouteValidationError(
             "source turnout corner is outside its drawable path"
         )
 
-    segment_shift = 0
-    if corner_index == 0:
-        corner = materialized[0]
-        dx = _incoming_x_sign(turnout.incoming_direction)
-        materialized.insert(0, (corner[0] - dx * turnout.radius, corner[1]))
-        corner_index = 1
-        segment_shift = 1
+    corner = materialized[0]
+    dx = _incoming_x_sign(turnout.incoming_direction)
+    materialized.insert(0, (corner[0] - dx * turnout.radius, corner[1]))
 
-    if corner_index <= 0 or corner_index >= len(materialized) - 1:
+    if len(materialized) < 3:
         raise SettledRouteValidationError(
             "source turnout requires incoming and outgoing legs"
         )
     if (
-        segment_direction(materialized[corner_index - 1], materialized[corner_index])
+        segment_direction(materialized[0], materialized[1])
         is not turnout.incoming_direction
-        or segment_direction(materialized[corner_index], materialized[corner_index + 1])
+        or segment_direction(materialized[1], materialized[2])
         is not turnout.outgoing_direction
     ):
         raise SettledRouteValidationError(
@@ -155,11 +184,10 @@ def materialize_source_turnout(
 
     desired = desired_curve_radii(materialized, default_radius=default_radius)
     if curve_radii is not None:
-        start = segment_shift
-        if start + len(curve_radii) > len(desired):
+        if 1 + len(curve_radii) > len(desired):
             raise SettledRouteValidationError(
                 "source turnout leaves fewer corners than the route declares radii"
             )
-        desired[start : start + len(curve_radii)] = curve_radii
-    desired[corner_index - 1] = turnout.radius
-    return materialized, desired, segment_shift
+        desired[1 : 1 + len(curve_radii)] = curve_radii
+    desired[0] = turnout.radius
+    return materialized, desired, 1

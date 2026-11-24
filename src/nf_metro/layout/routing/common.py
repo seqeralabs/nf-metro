@@ -165,6 +165,17 @@ def segment_direction(
     return None
 
 
+def unit_vector(
+    start: tuple[float, float], end: tuple[float, float]
+) -> tuple[float, float] | None:
+    """The unit vector from *start* to *end*, or ``None`` for a leg no longer
+    than :data:`COORD_TOLERANCE`."""
+    length = math.dist(start, end)
+    if length <= COORD_TOLERANCE:
+        return None
+    return ((end[0] - start[0]) / length, (end[1] - start[1]) / length)
+
+
 def is_orthogonal_turn(
     p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float]
 ) -> bool:

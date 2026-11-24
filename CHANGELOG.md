@@ -40,6 +40,15 @@ history.
 
 ### Changed
 
+- Parallel lines turning together through any angle, not only 90 degrees,
+  now turn about one shared centre, and rounded corners draw as circular arcs
+  (cubic Bézier circle approximations) where they were quadratic curves. A
+  bundle keeps its lines touching through the whole turn instead of opening a
+  thin seam between them. Every rounded corner redraws very slightly fuller,
+  and outer lines of diagonal bundle turns take wider curves.
+- Animated dots ride the drawn strokes: each dot turns about a corner with its
+  lane's own radius, so dots keep to their lines through concentric turns and
+  source turnouts. Animation timing is measured on the unrounded geometry.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,
   embed dialog) and the copyable inline-HTML snippet now follow the map's mode
   instead of always being dark. `--mode` or `%%metro mode:` fixes both light
@@ -71,6 +80,47 @@ history.
 
 ### Fixed
 
+- A source whose line runs past a branch station on its way to a later station
+  of the same trunk keeps that line clear of the branch when the fork has
+  stations before it on the trunk, and so does a source whose line joins the
+  trunk beside the station a branch ends at. The source sits on the far side
+  of the trunk from the branch, in the nearest row clear of the stations in
+  its column and along its run, and its line joins the bundle on the outer
+  lane of that side instead of crossing the trunk to reach it, keeping that
+  side when it carries on into a section beside it. This holds in a section
+  that several lines enter too, whose entering lines keep their order, unless
+  the pass that re-slots perpendicular lines at a multi-feeder merge port moves
+  a line of the entering bundle outside the pinned line, which the contender
+  then crosses. The
+  line takes that lane only along the source's own run, so another run of the
+  same line, including one entering the section, keeps its place. A source with
+  runs to several stations of the trunk keeps the run that joins first on its
+  own row and lays each later one a clear row further out, so its runs neither
+  cross the trunk nor each other, while its lines bound for the same station
+  stay together in one bundle. A helper bowing the line around a
+  station it skips leaves the source where it was, and on a top-to-bottom or
+  bottom-to-top section stays on the source's side of the station it skips.
+  Where no row lies beyond every branch it passes, the source sits where any
+  other source would
+  ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
+- An off-track input steps further out until it clears an on-track station in
+  its own column, as it does for stations downstream of it
+  ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
+- A source that feeds a station adding a second line stays on that station's
+  row when other sources share its column. The other sources sit one row to
+  either side and the added line's branch one row off, whichever source is
+  declared first, instead of the trunk's first station dropping a row and the
+  branch landing two rows down
+  ([#2193](https://github.com/seqeralabs/nf-metro/issues/2193)).
+- Two source stations in one column no longer put an unrelated line through a
+  branch station. When one source sends a line off onto its own branch, the
+  other source sits clear of the lane that branch takes, whichever line is
+  declared first, instead of running its line flat through the branch's marker
+  ([#2192](https://github.com/seqeralabs/nf-metro/issues/2192)).
+- Animated dots share each fork fairly: branches that split and rejoin take
+  turns, so a branch that forks internally no longer shows more dots than a
+  one-hop alternative. Every start node of a line now animates, and the
+  animation loops within 60 seconds (or one cycle, if longer) (#2009).
 - Nextflow conversion preserves spur dependencies between subworkflows instead
   of silently omitting those edges from the emitted map.
 - Nextflow conversion splits a section that runs both before and after another
@@ -111,6 +161,21 @@ history.
   Under `diamond_style: symmetric`, a fan whose branches nest (one branch
   carries every line the others do) also seats each branch on its lines' lane
   side, in sections where at most one line enters (#2170).
+- `--directional` chevrons sit on their line's drawn stroke and point along it
+  through rounded corners; a chevron that would land in a bridge gap is
+  omitted. `--validate` and `validate-svg --geometry` report a chevron that
+  leaves its stroke (#2177).
+- `--directional` draws one evenly spaced set of chevrons per line where several
+  of its routes overlap, and continues that set through an invisible port or
+  junction where the strokes meet at one point and heading. A stretch of at
+  least half a spacing that the set skips gets a chevron at its middle,
+  provided that stays half a spacing from the set's neighbours and clear of
+  other chevrons of the line.
+- When two stations feed the same exit and one of them also fans into
+  dead-end branches, a branch no longer sits on the other feeder's row.
+  That feeder's exit run was drawn straight through the branch's marker
+  (and any file icon after it); the branch now peels below the exit rows
+  (#2175).
 
 ## [2.1.0] — 2026-09-15
 

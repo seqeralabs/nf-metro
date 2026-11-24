@@ -98,6 +98,12 @@ _CONDITIONAL_STAGES: dict[str, Callable[[MetroGraph], bool]] = {
 # them back up to ``mid``'s.  ``test_section_bbox_top_hugs_content`` covers the
 # requirement, and ``_align_row_trunk_ys`` (which runs after 4.7) is itself a
 # no-op on the settled graph, so the row's final trunk stays level.
+#
+# ``topologies/source_vs_fork_peel_lane_across_sections`` carries a "4.7" gap of
+# the same content-hug kind: its peel contender seats above the trunk, so the
+# ``analysis`` box top clears that row while its ``report`` row-mate's top,
+# hugged by Stage 6.15a, sits lower; replaying 4.7's row flush pulls the
+# ``report`` top, and its content with it, back up to ``analysis``'s.
 _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
     "examples/differentialabundance": frozenset({"4.7"}),
     "examples/differentialabundance_default": frozenset({"4.7"}),
@@ -124,6 +130,7 @@ _KNOWN_END_OF_LAYOUT_GAPS: dict[str, frozenset[str]] = {
     "topologies/rl_entry_right_exit_left": frozenset({"4.7"}),
     "topologies/rowmate_tb_side_entry_top_align_grow": frozenset({"4.7"}),
     "topologies/side_branch_ascent_label_strike": frozenset({"4.7"}),
+    "topologies/source_vs_fork_peel_lane_across_sections": frozenset({"4.7"}),
     "topologies/symmetric_deadend_fanout": frozenset({"4.7"}),
     "topologies/symmetric_deadend_fanout_deep": frozenset({"4.7"}),
     "topologies/symmetric_deadend_fanout_exit": frozenset({"4.7"}),

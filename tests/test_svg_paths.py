@@ -27,8 +27,8 @@ from nf_metro.layout.routing.invariants import (
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import build_render_plan, emit_render_plan
-from nf_metro.render.animate import _points_to_svg_path
-from nf_metro.render.svg import _curve_tangents, apply_route_offsets, render_svg
+from nf_metro.render.animate import _motion_path, _Track
+from nf_metro.render.svg import _drawn_pieces, apply_route_offsets, render_svg
 from nf_metro.themes import NFCORE_DARK_THEME
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -64,7 +64,7 @@ def _parse_svg_edge_paths(svg_str: str) -> list[str]:
 
 def _parse_path_commands(d: str) -> list[tuple[str, list[float]]]:
     """Parse an SVG path 'd' attribute into (command, args) tuples."""
-    tokens = re.findall(r"[MLQZmlqz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?", d)
+    tokens = re.findall(r"[MLCZmlcz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?", d)
     commands = []
     current_cmd = None
     args: list[float] = []
@@ -214,12 +214,12 @@ class TestCurveRadiiLength:
 
 
 # ---------------------------------------------------------------------------
-# 2. SVG path command structure: M then (L Q)* then L
+# 2. SVG path command structure: M then (L C)* then L
 # ---------------------------------------------------------------------------
 
 
 class TestSvgPathStructure:
-    """Every edge path must start with M and end with L, with Q at each corner."""
+    """Every edge path must start with M and end with L, with C at each corner."""
 
     def _check_svg(self, svg_str: str):
         paths = _parse_svg_edge_paths(svg_str)
@@ -234,11 +234,10 @@ class TestSvgPathStructure:
             non_z = [c for c in cmds if c[0] != "Z"]
             if len(non_z) > 1:
                 assert non_z[-1][0] == "L", f"Path doesn't end with L: {d[:80]}"
-            # Every Q must be preceded by L (approach segment)
             for i, (cmd, _) in enumerate(cmds):
-                if cmd == "Q" and i > 0:
+                if cmd == "C" and i > 0:
                     assert cmds[i - 1][0] in ("L", "M"), (
-                        f"Q at index {i} not preceded by L or M: {d[:120]}"
+                        f"C at index {i} not preceded by L or M: {d[:120]}"
                     )
 
     def test_simple_diagonal(self):
@@ -269,12 +268,12 @@ class TestSvgPathStructure:
 
 
 # ---------------------------------------------------------------------------
-# 3. Curve continuity: Q endpoint is the L startpoint of the next segment
+# 3. Curve continuity: C endpoint is the L startpoint of the next segment
 # ---------------------------------------------------------------------------
 
 
 class TestCurveContinuity:
-    """The endpoint of each Q curve must match the start of the next L segment."""
+    """The endpoint of each C curve must match the start of the next L segment."""
 
     def _check_svg(self, svg_str: str):
         for d in _parse_svg_edge_paths(svg_str):
@@ -288,11 +287,10 @@ class TestCurveContinuity:
                     assert not (v != v), f"NaN in path: {d[:80]}"  # NaN != NaN
                     assert abs(v) < 1e6, f"Extreme coordinate in path: {d[:80]}"
 
-            # Verify Q commands have exactly 4 args (cx, cy, ex, ey)
             for cmd, args in cmds:
-                if cmd == "Q":
-                    assert len(args) == 4, (
-                        f"Q command has {len(args)} args (expected 4): {d[:80]}"
+                if cmd == "C":
+                    assert len(args) == 6, (
+                        f"C command has {len(args)} args (expected 6): {d[:80]}"
                     )
 
     def test_simple(self):
@@ -434,15 +432,15 @@ class TestConcentricBundles:
 
 
 # ---------------------------------------------------------------------------
-# 6. Q corner count matches route corner count
+# 6. Rounded corner count matches route corner count
 # ---------------------------------------------------------------------------
 
 
-class TestQCountMatchesCorners:
-    """Number of Q commands in SVG path should equal number of corners in route."""
+class TestCornerCountMatchesCorners:
+    """Number of C commands in SVG path should equal number of corners in route."""
 
     def _check(self, mmd_text):
-        """Verify Q count in SVG matches the corners the renderer was handed.
+        """Verify C count in SVG matches the corners the renderer was handed.
 
         The count comes from the plan's drawable polylines rather than the
         routed ones: a source turnout is a corner shared with the incoming
@@ -466,16 +464,15 @@ class TestQCountMatchesCorners:
             f"({routed_corners}) plus one per turnout ({turnouts})"
         )
 
-        # Count actual Q commands in SVG paths
-        actual_q = 0
+        actual_c = 0
         for d in _parse_svg_edge_paths(emit_render_plan(plan)):
             cmds = _parse_path_commands(d)
-            actual_q += sum(1 for cmd, _ in cmds if cmd == "Q")
+            actual_c += sum(1 for cmd, _ in cmds if cmd == "C")
 
         # Allow some tolerance: some corners may degenerate to L if
         # segment lengths are zero
-        assert actual_q <= expected_corners, (
-            f"More Q commands ({actual_q}) than route corners ({expected_corners})"
+        assert actual_c <= expected_corners, (
+            f"More C commands ({actual_c}) than route corners ({expected_corners})"
         )
 
     def test_simple(self):
@@ -722,36 +719,75 @@ class TestConcentricArcCenters:
 # ---------------------------------------------------------------------------
 
 
-def _q_corner_triples(d: str) -> list[tuple[tuple, tuple, tuple]]:
-    """Extract ``(before, corner, after)`` triples from a path's Q commands.
+def _corner_arcs(d: str) -> list[tuple[tuple, ...]]:
+    """Extract ``(before, c1, c2, after)`` from a path's C commands.
 
-    Both renderers draw a rounded corner as ``L before  Q corner after``,
-    so the corner's tangent points are the preceding L endpoint, the Q
-    control point, and the Q endpoint.
+    Both renderers draw a rounded corner as ``L before  C c1 c2 after``.
     """
     cmds = _parse_path_commands(d)
-    triples = []
+    arcs = []
     for idx, (cmd, args) in enumerate(cmds):
-        if cmd == "Q":
+        if cmd == "C":
             prev_args = cmds[idx - 1][1]
-            before = (prev_args[-2], prev_args[-1])
-            corner = (args[0], args[1])
-            after = (args[2], args[3])
-            triples.append((before, corner, after))
-    return triples
+            arcs.append(
+                (
+                    (prev_args[-2], prev_args[-1]),
+                    (args[0], args[1]),
+                    (args[2], args[3]),
+                    (args[4], args[5]),
+                )
+            )
+    return arcs
 
 
-def _expected_q_triples(tangents) -> list[tuple[tuple, tuple, tuple]]:
-    """Curved tangents rounded to the 2dp that a path 'd' string emits."""
+def _circle_handles(before, corner, after):
+    """Handles of the cubic circle approximation, from the textbook form:
+    each sits ``4/3 * tan(phi / 4)`` radii along its tangent."""
+    arm = math.dist(before, corner)
+    u = ((corner[0] - before[0]) / arm, (corner[1] - before[1]) / arm)
+    out = math.dist(corner, after)
+    v = ((after[0] - corner[0]) / out, (after[1] - corner[1]) / out)
+    phi = math.acos(max(-1.0, min(1.0, u[0] * v[0] + u[1] * v[1])))
+    handle = (
+        4 / 3 * math.tan(phi / 4) * arm / math.tan(phi / 2)
+        if phi > 1e-9
+        else 2 / 3 * arm
+    )
+    return (
+        (before[0] + u[0] * handle, before[1] + u[1] * handle),
+        (after[0] - v[0] * handle, after[1] - v[1] * handle),
+    )
+
+
+def _expected_corner_arcs(tangents) -> list[tuple[tuple, ...]]:
+    """The circular arc of every rounded corner with non-zero arms."""
     return [
-        (
-            (round(t.before[0], 2), round(t.before[1], 2)),
-            (round(t.corner[0], 2), round(t.corner[1], 2)),
-            (round(t.after[0], 2), round(t.after[1], 2)),
-        )
+        (t.before, *_circle_handles(t.before, t.corner, t.after), t.after)
         for t in tangents
-        if t.curved
+        if t.curved and t.before != t.after
     ]
+
+
+def _same_arcs(drawn, expected) -> bool:
+    """Whether *drawn* (as a path ``d`` writes them, to 2dp) are *expected*."""
+    return len(drawn) == len(expected) and all(
+        math.dist(p, q) <= 0.01
+        for d_arc, e_arc in zip(drawn, expected)
+        for p, q in zip(d_arc, e_arc)
+    )
+
+
+def _svg_corners(pts, radii):
+    """``(curved, before, corner, after)`` of each corner the static SVG draws."""
+    return [
+        (piece.curved, piece.start, piece.control, piece.end)
+        for piece in _drawn_pieces(pts, radii, CURVE_RADIUS)
+        if piece.control is not None
+    ]
+
+
+def _tangent_corners(tangents):
+    return [(t.curved, t.before, t.corner, t.after) for t in tangents]
 
 
 class TestSharedCornerTangents:
@@ -782,19 +818,15 @@ class TestSharedCornerTangents:
         pts = self.POLYLINES[name]
         resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
         shared = curve_tangents(pts, resolved)
-        before, after, curved = _curve_tangents(pts, resolved)
-        for i, tan in enumerate(shared, start=1):
-            assert curved[i] == tan.curved
-            assert before[i] == tan.before
-            assert after[i] == tan.after
+        assert _svg_corners(pts, None) == _tangent_corners(shared)
 
     @pytest.mark.parametrize("name", sorted(POLYLINES))
     def test_animation_corners_match_shared_helper(self, name):
         pts = self.POLYLINES[name]
         resolved = resolve_curve_radii(pts, None, default_radius=CURVE_RADIUS)
         shared = curve_tangents(pts, resolved)
-        d = _points_to_svg_path(pts, curve_radius=CURVE_RADIUS)
-        assert _q_corner_triples(d) == _expected_q_triples(shared)
+        d = _motion_path(_Track(list(pts), [0.0, *resolved, 0.0])).d_attr
+        assert _same_arcs(_corner_arcs(d), _expected_corner_arcs(shared))
 
     @pytest.mark.parametrize(
         "fixture",
@@ -812,15 +844,9 @@ class TestSharedCornerTangents:
                 pts, route.curve_radii, default_radius=CURVE_RADIUS
             )
             shared = curve_tangents(pts, resolved)
-            before, after, curved = _curve_tangents(pts, resolved)
-            for i, tan in enumerate(shared, start=1):
-                assert curved[i] == tan.curved
-                assert before[i] == tan.before
-                assert after[i] == tan.after
-            d = _points_to_svg_path(
-                pts, curve_radius=CURVE_RADIUS, route_curve_radii=route.curve_radii
-            )
-            assert _q_corner_triples(d) == _expected_q_triples(shared)
+            assert _svg_corners(pts, route.curve_radii) == _tangent_corners(shared)
+            d = _motion_path(_Track(list(pts), [0.0, *resolved, 0.0])).d_attr
+            assert _same_arcs(_corner_arcs(d), _expected_corner_arcs(shared))
             checked += 1
         if checked == 0:
             pytest.skip(f"no multi-corner routes in {fixture.stem}")

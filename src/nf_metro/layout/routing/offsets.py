@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import ChainMap, Counter, deque
+from collections import ChainMap, Counter, defaultdict, deque
 from collections.abc import (
     Callable,
     Container,
@@ -78,6 +78,7 @@ from nf_metro.parser.model import (
     PortSide,
     Section,
     Station,
+    agreed_lane_end,
 )
 from nf_metro.parser.provenance import DecisionReason
 from nf_metro.parser.route_topology import (
@@ -1281,6 +1282,146 @@ def _reindex_section_local(ctx: _OffsetCtx) -> None:
         return
     section_local = _reindex_local_priority_gaps(ctx)
     _reorder_reconvergence(ctx, section_local)
+
+
+def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
+    """Move each line a section pins (``Section.lane_ends``) to that lane end.
+
+    At every station a pinned line stops at it steps just past the station's
+    other lanes on its end (:func:`_stepped_pinned_lanes`), the furthest-out
+    pin landing outermost.  A non-compact section, whose lines each hold one
+    lane order, first moves its pinned lines to that end of the order, the
+    other lines keeping theirs, so a station without a pinned line holds its
+    lanes unbroken.  A pin holds along the run that set it, into every
+    flat-frame member the run carries the line on, so the line keeps its side
+    of the bundle across the frame's boundaries; a line pinned toward opposite
+    ends stays where it is.  A pin does not hold at a station of the frame the
+    line does not reach from the contenders that set it
+    (``Section.lane_end_seeds``), and a line with such a station keeps its
+    place in the lane order.
+    """
+    graph = ctx.graph
+    frames: dict[str, list[str]] = defaultdict(list)
+    for sec_id in graph.sections:
+        frames[ctx.frame_roots.get(sec_id, sec_id)].append(sec_id)
+    for members in frames.values():
+        pins: dict[str, list[float]] = defaultdict(list)
+        seeds: dict[str, set[str]] = defaultdict(set)
+        for sec_id in members:
+            section = graph.sections[sec_id]
+            for lid, pin in section.lane_ends.items():
+                pins[lid].append(pin)
+                seeds[lid] |= section.lane_end_seeds.get(lid, frozenset())
+        agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
+        ends = {lid: pin for lid, pin in agreed.items() if pin is not None}
+        if not ends:
+            continue
+        exempt = {
+            lid: {
+                sid
+                for m in members
+                for sid in graph.sections[m].station_ids
+                if lid in graph.station_lines(sid)
+            }
+            - graph.line_reach(lid, seeds[lid])
+            for lid in ends
+        }
+        ordered = {lid: pin for lid, pin in ends.items() if not exempt[lid]}
+        present = {sid: _section_present_line_set(ctx, sid) for sid in members}
+        for sec_id in (m for m in members if present[m] & ends.keys()):
+            if not ctx.compact and present[sec_id] & ordered.keys():
+                mates = set().union(*(present[m] for m in members if m != sec_id))
+                target = _section_order_offsets(
+                    ctx,
+                    sec_id,
+                    sorted(
+                        _section_lane_order(ctx, sec_id),
+                        key=lambda lid: ordered.get(lid, 0.0),
+                    ),
+                )
+                shift = _frame_shift(
+                    ctx, target, mates & (present[sec_id] - set(ordered))
+                )
+                ctx.offsets.update({key: off + shift for key, off in target.items()})
+            for sid in graph.sections[sec_id].station_ids:
+                held = {lid: pin for lid, pin in ends.items() if sid not in exempt[lid]}
+                ctx.offsets.update(_stepped_pinned_lanes(ctx, sec_id, sid, held))
+            if not ctx.compact and len(members) == 1:
+                _rebase_section_offsets(ctx, sec_id)
+
+
+def _rebase_section_offsets(ctx: _OffsetCtx, sec_id: str) -> None:
+    """Shift *sec_id*'s offsets so its first lane lies at zero.
+
+    A pinned line stepped past a station's lanes on a run the section's lane
+    order does not end with lands outside that order.
+    """
+    station_ids = set(ctx.graph.sections[sec_id].station_ids)
+    keys = [key for key in ctx.offsets if key[0] in station_ids]
+    low = min((ctx.offsets[key] for key in keys), default=0.0)
+    if low < -COORD_TOLERANCE_FINE:
+        ctx.offsets.update({key: ctx.offsets[key] - low for key in keys})
+
+
+def _section_lane_order(ctx: _OffsetCtx, sec_id: str) -> list[str]:
+    """Lines present on *sec_id*, first lane first, in their stored order.
+
+    Lines no station of the section stores an offset for follow, by priority.
+    """
+    held = _section_line_offsets(ctx, sec_id)
+    sign = -1.0 if _stores_reflected(ctx, sec_id) else 1.0
+    return sorted(
+        _section_present_line_set(ctx, sec_id),
+        key=lambda lid: (
+            lid not in held,
+            sign * held.get(lid, 0.0),
+            ctx.line_priority.get(lid, 0),
+        ),
+    )
+
+
+def _frame_shift(
+    ctx: _OffsetCtx, target: dict[tuple[str, str], float], held: set[str]
+) -> float:
+    """Shift of *target* that keeps the most *held* lines on their offsets.
+
+    Ties go to the smallest shift; with nothing held the target stands as is.
+    """
+    votes = Counter(
+        round(ctx.offsets.get(key, 0.0) - off, 1)
+        for key, off in target.items()
+        if key[1] in held
+    )
+    return min(votes, key=lambda d: (-votes[d], abs(d), d), default=0.0)
+
+
+def _stepped_pinned_lanes(
+    ctx: _OffsetCtx, sec_id: str, sid: str, ends: dict[str, float]
+) -> dict[tuple[str, str], float]:
+    """Offsets that step station *sid*'s pinned lines past its other lines' lanes.
+
+    Lines pinned toward the first lane stack beyond the first held lane, those
+    toward the last beyond the last, each pinned further out landing further
+    out.
+    """
+    lines = ctx.graph.station_lines(sid)
+    lane = {lid: ctx.offsets.get((sid, lid), 0.0) for lid in lines}
+    held = [off for lid, off in lane.items() if lid not in ends]
+    if not held:
+        return {}
+    toward_first = 1.0 if _stores_reflected(ctx, sec_id) else -1.0
+    first_edge = max(held) if toward_first > 0 else min(held)
+    last_edge = min(held) if toward_first > 0 else max(held)
+    pinned = sorted((ends[lid], lid) for lid in lane if lid in ends)
+    firsts = [lid for pin, lid in reversed(pinned) if pin < 0]
+    lasts = [lid for pin, lid in pinned if pin > 0]
+    for edge, outward, stack in (
+        (first_edge, toward_first, firsts),
+        (last_edge, -toward_first, lasts),
+    ):
+        for k, lid in enumerate(stack, start=1):
+            lane[lid] = edge + outward * k * ctx.offset_step
+    return {(sid, lid): lane[lid] for lid in lines if lid in ends}
 
 
 def _entry_fed_in_section(graph: MetroGraph, sid: str, lid: str, sec_id: str) -> bool:
@@ -5418,6 +5559,10 @@ def compute_station_offsets(
     1. **Base offsets** - global priority (or compact-mode) assignment.
     2. **Section-local re-indexing** - closes priority gaps within
        sections and applies reconvergence ordering (non-compact only).
+    2a. **Lane ends** - moves each line track assignment pinned to an end of
+       its section's lane order (``Section.lane_ends``) to that end of the
+       order, the section's other lines keeping theirs (non-compact only),
+       then steps it just past the other lanes of each station it stops at.
     2b. **Exit-only line reordering** - a line that originates at a
        multi-line station and exits to a port above takes the top slot,
        so it crosses nothing on the way out (non-compact LR/RL).
@@ -5530,6 +5675,7 @@ def compute_station_offsets(
     sec_layer_stations = _build_sec_layer_stations(graph)
     _compute_base_offsets(ctx)
     _reindex_section_local(ctx)
+    _seat_section_lane_ends(ctx)
     _assert_sections_anchored_on_trunk(ctx)
     _reorder_exit_only_lines(ctx)
     _reorder_fanout_divergence(ctx)
