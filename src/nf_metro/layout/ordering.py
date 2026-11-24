@@ -504,6 +504,110 @@ def _peel_leads(fork: str, G: nx.DiGraph[str], graph: MetroGraph) -> dict[str, s
     return dict(sorted(leads.items(), key=lambda item: rank[item[1]]))
 
 
+def _source_peel_lanes(
+    fork: str,
+    track: float,
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+    line_base: dict[str, float],
+    line_gap: float,
+) -> dict[str, float]:
+    """Lanes a predecessor-less *fork* seated on *track* claims for its peels.
+
+    Each peel (:func:`_peel_leads`) opens toward the base lane of the line it
+    leads with; peels opening to the same side take successive lanes outward
+    in line order.  Returns peel successor -> claimed lane.
+    """
+    if G.in_degree(fork):
+        return {}
+    depth = {1.0: 0, -1.0: 0}
+    lanes: dict[str, float] = {}
+    for succ, lead in _peel_leads(fork, G, graph).items():
+        side = 1.0 if line_base[lead] >= track else -1.0
+        depth[side] += 1
+        lanes[succ] = track + side * depth[side] * line_gap
+    return lanes
+
+
+def _foreign_claim_side(
+    node: str,
+    track: float,
+    neighbours: dict[str, float],
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+    line_base: dict[str, float],
+    line_gap: float,
+) -> float | None:
+    """Side (+1/-1) of the peel claim covering *track* that bars *node*.
+
+    *neighbours* maps the stations already seated in *node*'s column to their
+    tracks.  A neighbour fork's peel lane bars *node* unless *node* feeds one of
+    the fork's successors, in which case it joins the fork's fan anyway.
+    Returns the side the claimed lane lies on relative to its fork, or ``None``
+    when *track* is free of foreign claims.
+    """
+    for fork, fork_track in neighbours.items():
+        if fork == node or not set(G.successors(node)).isdisjoint(G.successors(fork)):
+            continue
+        for lane in _source_peel_lanes(
+            fork, fork_track, G, graph, line_base, line_gap
+        ).values():
+            if abs(lane - track) < SAME_COORD_TOLERANCE:
+                return 1.0 if lane > fork_track else -1.0
+    return None
+
+
+def _seat_source(
+    node: str,
+    base: float,
+    layer: int,
+    line_gap: float,
+    G: nx.DiGraph[str],
+    tracks: dict[str, float],
+    graph: MetroGraph | None,
+    layer_occupancy: dict[int, dict[str, float]] | None,
+    line_base: dict[str, float] | None,
+) -> float:
+    """Track for predecessor-less *node*: its *base*, off any foreign peel lane.
+
+    The seat steps away from the claiming fork and holds that direction, so
+    opposing claims cannot bounce it back.
+    """
+    if graph is None or line_base is None or layer_occupancy is None:
+        return base
+    column = {
+        sid: tracks[sid] for sid in layer_occupancy.get(layer, {}) if sid in tracks
+    }
+    seat, side = base, None
+    while (
+        hit := _foreign_claim_side(node, seat, column, G, graph, line_base, line_gap)
+    ) is not None:
+        side = side or hit
+        seat += side * line_gap
+    return seat
+
+
+def _claimed_peel_lane(
+    node: str,
+    line_gap: float,
+    G: nx.DiGraph[str],
+    tracks: dict[str, float],
+    graph: MetroGraph | None,
+    line_base: dict[str, float] | None,
+) -> float | None:
+    """Lane a placed source-fork predecessor claimed for peel branch *node*."""
+    if graph is None or line_base is None:
+        return None
+    for pred in G.predecessors(node):
+        if pred in tracks:
+            lane = _source_peel_lanes(
+                pred, tracks[pred], G, graph, line_base, line_gap
+            ).get(node)
+            if lane is not None:
+                return lane
+    return None
+
+
 def _lone_line_stations(graph: MetroGraph, layers: dict[str, int]) -> list[str]:
     """On-track stations no other station shares a ``(layer, primary line)`` with.
 
@@ -724,16 +828,34 @@ def _place_single_node(
 
     Otherwise, if predecessors are close, snap to base. If far (a
     side-branch deep in the graph), stay near predecessors.
+
+    A source (no predecessors) sits on its base unless that is a lane a sibling
+    source fork claims for a peel branch (:func:`_source_peel_lanes`); a peel
+    branch of a source fork takes the lane its fork claimed for it.
     """
     node_layer = layers.get(node, 0) if layers else 0
     pred_avg = _predecessor_avg(node, G, tracks)
     if pred_avg is None:
-        return base
+        return _seat_source(
+            node,
+            base,
+            node_layer,
+            line_gap,
+            G,
+            tracks,
+            graph,
+            layer_occupancy,
+            line_base,
+        )
 
     def _track_is_inheritable(track: float) -> bool:
         return layer_occupancy is None or not _is_track_occupied_at_layer(
             track, node_layer, layer_occupancy, node
         )
+
+    peel_lane = _claimed_peel_lane(node, line_gap, G, tracks, graph, line_base)
+    if peel_lane is not None and _track_is_inheritable(peel_lane):
+        return peel_lane
 
     inherited_predecessor = (continuation_predecessors or {}).get(node)
     if inherited_predecessor in tracks and _track_is_inheritable(
@@ -1675,9 +1797,52 @@ def _equalize_fork_groups(
         else:
             anchor_track = tracks[group[0]]
             anchor_slot = slot_of[0]
+            if not any(G.in_degree(sid) for sid in group):
+                slot_of = _source_slots_clear_of_peel_lanes(
+                    group, slot_of, anchor_track, G, graph, line_base, line_gap
+                )
 
         for i, sid in enumerate(group):
             tracks[sid] = anchor_track + (slot_of[i] - anchor_slot) * line_gap
+
+
+def _source_slots_clear_of_peel_lanes(
+    group: list[str],
+    slot_of: list[int],
+    anchor_track: float,
+    G: nx.DiGraph[str],
+    graph: MetroGraph,
+    line_base: dict[str, float],
+    line_gap: float,
+) -> list[int]:
+    """Push each source in a packed source column past claimed peel lanes.
+
+    *group* packs top-down from *anchor_track* (slot 0).  A member whose slot
+    lands on a lane claimed by a fork packed above it, and which does not feed
+    that fork's fan, moves down a slot, carrying every later member with it.
+    """
+    packed: dict[str, float] = {}
+    slots: list[int] = []
+    shift = 0
+    for sid, slot in zip(group, slot_of):
+        slot += shift
+        while (
+            _foreign_claim_side(
+                sid,
+                anchor_track + slot * line_gap,
+                packed,
+                G,
+                graph,
+                line_base,
+                line_gap,
+            )
+            is not None
+        ):
+            slot += 1
+            shift += 1
+        packed[sid] = anchor_track + slot * line_gap
+        slots.append(slot)
+    return slots
 
 
 def _reorder_by_span(graph: MetroGraph, line_order: list[str]) -> list[str]:
