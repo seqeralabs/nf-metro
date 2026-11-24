@@ -128,6 +128,9 @@ if (inputFormat && debug) {
     `<Metro src="${src}">: \`debug\` cannot be combined with \`fromNextflow\` or \`fromSnakemake\`.`,
   );
 }
+if (lines && lines !== "graph" && lines !== "sections") {
+  throw new Error(`<Metro src="${src}">: \`lines\` must be "graph" or "sections", not "${lines}".`);
+}
 if (lines && (!inputFormat || isBinary)) {
   throw new Error(
     `<Metro src="${src}">: \`lines\` needs \`fromNextflow\` or \`fromSnakemake\` and format="svg".`,

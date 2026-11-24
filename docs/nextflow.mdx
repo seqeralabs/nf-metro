@@ -85,7 +85,7 @@ The converter picks the lines from the shape of the graph:
 - **Colours** follow the default palette. Side lines never reuse the colour of `main`.
 
 `--lines graph` applies to single-section maps only.
-For a pipeline with subworkflows, the converter keeps the section lines described below and prints a warning.
+For a map of several sections, such as a pipeline whose processes sit in more than one subworkflow, the converter keeps the section lines described below and prints a warning.
 
 ### Pipeline with subworkflows
 
@@ -357,6 +357,7 @@ The converter:
 
 5. **Assigns metro lines.** The longest path gets the `main` line.
    Edges that skip sections get their own bypass lines, and dead-end processes get spur lines.
+   A single-section map can instead get a line per route with `--lines graph` (see [Separate lines for separate routes](#separate-lines-for-separate-routes)).
 
 6. **Cleans up labels.** `SCREAMING_SNAKE_CASE` becomes `Title Case`, and the converter abbreviates long names.
 

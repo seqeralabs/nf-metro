@@ -33,7 +33,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -147,7 +147,8 @@ export const INPUT_FORMATS = {
  * Compute the cache key for a given (mode, source) pair.
  * Must stay in sync with the hash in renderMetroFile.
  * @param {string} source  Raw .mmd source text.
- * @param {string} mode    Render mode string: "", "d", "n", "c" (chrome-less), combinations thereof.
+ * @param {string} mode    Render mode string: "", "d" (debug), "n"/"s" (Nextflow/Snakemake
+ *   input), "G"/"S" (graph/section lines), "c" (chrome-less), "a" (animate), combinations thereof.
  * @returns {string} 16-character hex hash.
  */
 function cacheHash(source, mode) {
@@ -315,7 +316,8 @@ export function renderMetroFile(
 ) {
   const source = readFileSync(file, "utf-8");
   const converter = inputFormat ? INPUT_FORMATS[inputFormat] : null;
-  const mode = `${debug ? "d" : ""}${converter?.letter ?? ""}${lines ? `l${lines}` : ""}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
+  const linesLetter = { graph: "G", sections: "S" }[lines] ?? "";
+  const mode = `${debug ? "d" : ""}${converter?.letter ?? ""}${linesLetter}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
   const hash = cacheHash(source, mode);
   const cacheFile = join(CACHE_DIR, `${hash}.svg`);
 
@@ -330,7 +332,19 @@ export function renderMetroFile(
   let svg;
   try {
     if (converted) {
-      runNfMetro(["convert", file, "--from", inputFormat, "--lines", lines, "-o", converted], file);
+      const stderr = runNfMetro(
+        ["convert", file, "--from", inputFormat, "--lines", lines, "-o", converted],
+        file,
+      );
+      // Matches the warning nf-metro convert prints when a map of several
+      // sections keeps its section lines, which would render the same picture
+      // as the format's default embed.
+      if (stderr.includes("only in a one-section map")) {
+        throw Object.assign(
+          new Error(`<Metro lines="${lines}">: ${file} has several sections:\n${stderr}`),
+          { onImport: true },
+        );
+      }
     }
     // Render the real file rather than a temp copy: the CLI resolves a map's
     // asset paths against the directory the file itself sits in. A converted
@@ -361,20 +375,21 @@ export function renderMetroFile(
  * that names the source and quotes nf-metro's stderr.
  * @param {string[]} args
  * @param {string} file  The source the run is for, as named in the error.
+ * @returns {string} what nf-metro wrote to stderr (warnings) on success
  */
 function runNfMetro(args, file) {
-  try {
-    execFileSync("nf-metro", args, {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (err) {
-    const stderr = err.stderr?.toString().trim() || "";
+  const { status, stderr, error } = spawnSync("nf-metro", args, {
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (error || status !== 0) {
     throw new Error(
-      `nf-metro ${args[0]} failed for ${file}:\n${stderr}\n\n` +
+      `nf-metro ${args[0]} failed for ${file}:\n${(stderr ?? "").trim()}\n\n` +
         `Make sure 'nf-metro' is on PATH (activate the nf-core micromamba env).`,
     );
   }
+  return stderr ?? "";
 }
 
 /** Output formats `renderMetroBinary` can produce. */
@@ -470,12 +485,20 @@ export function metroVitePlugin() {
       if (!params.has("metro")) return;
       const inputFormat = Object.keys(INPUT_FORMATS).find((f) => params.has(f)) ?? null;
       if (!file.endsWith(inputFormat ? INPUT_FORMATS[inputFormat].ext : ".mmd")) return;
-      const svg = renderMetroFile(file, {
-        debug: params.has("debug"),
-        animate: params.has("animate"),
-        inputFormat,
-        lines: params.get("lines"),
-      });
+      let svg;
+      try {
+        svg = renderMetroFile(file, {
+          debug: params.has("debug"),
+          animate: params.has("animate"),
+          inputFormat,
+          lines: params.get("lines"),
+        });
+      } catch (err) {
+        // The build loads every file a glob matches, embedded or not, so a
+        // map that cannot take its lines mode fails only when a page imports it.
+        if (!err.onImport) throw err;
+        return { code: `throw new Error(${JSON.stringify(err.message)});`, map: null };
+      }
       return { code: `export default ${JSON.stringify(svg)};`, map: null };
     },
   };

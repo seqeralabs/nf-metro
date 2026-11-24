@@ -26,8 +26,9 @@ history.
   `prepare_graph`.
 - `nf-metro convert --lines graph|sections` chooses how a converted map's
   lines are drawn. `graph` gives each route through a single-section map its
-  own line; `sections` builds them from the sections. Nextflow keeps
-  `sections` by default and Snakemake uses `graph`.
+  own line; `sections` builds them from the sections. A map of several
+  sections keeps its section lines and warns. Nextflow keeps `sections` by
+  default and Snakemake uses `graph`.
 - `%%metro number: 0` hides a section's number badge and starts its title where
   the badge would have been. Automatic numbering skips such a section, so the
   remaining sections number from 1 as if it were absent (#2058).

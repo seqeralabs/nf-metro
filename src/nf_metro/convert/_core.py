@@ -898,7 +898,17 @@ LinePlanner = Callable[[dict[str, DagNode], list[tuple[str, str]]], LinePlan]
 
 
 def line_planner(lines: LineMode) -> LinePlanner | None:
-    """The ``plan_lines`` hook for *lines*, or ``None`` for section lines."""
+    """The ``plan_lines`` hook for *lines*, or ``None`` for section lines.
+
+    Raises
+    ------
+    ValueError
+        When *lines* is not one of :data:`LINE_MODES`.
+    """
+    if lines not in LINE_MODES:
+        raise ValueError(
+            f"unknown line mode {lines!r}; expected one of {', '.join(LINE_MODES)}"
+        )
     return branch_line_planner if lines == "graph" else None
 
 

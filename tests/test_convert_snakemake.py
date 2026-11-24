@@ -378,7 +378,31 @@ def test_graph_lines_fall_back_to_section_lines_in_a_map_of_several_sections():
     assert graph == convert_dag(text, "nextflow")
 
 
+def test_an_unknown_line_mode_is_rejected():
+    with pytest.raises(ValueError, match="unknown line mode 'Graph'"):
+        convert_dag(
+            (NEXTFLOW_FIXTURES / "flat_pipeline.mmd").read_text(),
+            "nextflow",
+            lines="Graph",  # type: ignore[arg-type]
+        )
+
+
 class TestCli:
+    def test_convert_warns_when_graph_lines_do_not_apply(self, tmp_path):
+        result = CliRunner().invoke(
+            cli,
+            [
+                "convert",
+                str(NEXTFLOW_FIXTURES / "variant_calling.mmd"),
+                "--lines",
+                "graph",
+                "-o",
+                str(tmp_path / "out.mmd"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "this map has 4 sections" in result.output
+
     def test_convert_takes_a_line_mode(self, tmp_path):
         out = tmp_path / "out.mmd"
         result = CliRunner().invoke(
