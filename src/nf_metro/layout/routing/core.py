@@ -101,7 +101,6 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _nest_bypass_above_over_top_wrap,
     _plan_trunk_band,
     _reconcile_port_peeloff_risers,
-    _rederive_semantic_end_corners,
     _restack_channel,
     _restack_htrunk,
     _restack_trunk_band,
@@ -110,6 +109,7 @@ from nf_metro.layout.routing.normalize import (  # noqa: F401
     _separate_opposing_inter_row_trunks,
     _set_vchannel_x,
     _settle_same_destination_approach_bundles,
+    _size_concentric_cohorts,
     _stagger_convergent_distinct_lines,
     _suboptimal_trunk_bands,
     _unify_coincident_corner_radii,
@@ -620,10 +620,10 @@ def _route_edges(  # noqa: C901
     )
     _unify_coincident_corner_radii(routes)
     assert_exit_turn_snapshot(routes, planned_segments, "corner-radius unification")
-    _rederive_semantic_end_corners(
+    _size_concentric_cohorts(
         routes, ctx.curve_radius, ctx.station_offsets or {}, ctx.offset_step
     )
-    assert_exit_turn_snapshot(routes, planned_segments, "semantic corner derivation")
+    assert_exit_turn_snapshot(routes, planned_segments, "concentric cohort sizing")
     covered_edges = (
         system_execution.covered_edges()
         if system_execution is not None

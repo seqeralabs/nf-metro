@@ -1736,7 +1736,7 @@
   "status": "defensive"
  },
  "normalize.py::if offset(member) - offset(prev) >= 2 * pitch - COORD_TOLERANCE_FINE:::#1": {
-  "note": "Bundle bound in _split_at_bundle_gaps: two bundles turning the same angle whose corners happen to lie on one bisector are kept as separate cohorts. Every corpus diagonal cohort is one bundle, with neighbouring lanes at most 1.3 pitches apart, so the split arm has no fixture; tests/test_concentric_bundle_corners.py::test_separate_bundles_on_one_bisector_turn_apart builds the shape.",
+  "note": "Bundle bound in _split_at_bundle_gaps: two bundles turning the same angle whose corners happen to lie on one bisector are kept as separate cohorts. Every corpus diagonal cohort is one bundle, so the split arm has no fixture; tests/test_concentric_bundle_corners.py::test_separate_bundles_on_one_bisector_turn_apart builds the shape.",
   "status": "defensive"
  },
  "normalize.py::if reference < floor:::#1": {

@@ -33,7 +33,7 @@ from nf_metro.layout.routing.invariants import (
     check_fanout_lane_continuity,
     check_standard_source_bundle_corner_inputs,
 )
-from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners
+from nf_metro.layout.routing.normalize import _size_concentric_cohorts
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge
 
@@ -238,7 +238,7 @@ def test_unowned_short_leads_share_a_clamp_safe_radius() -> None:
         ),
     ]
 
-    _rederive_semantic_end_corners(routes, CURVE_RADIUS, {}, OFFSET_STEP)
+    _size_concentric_cohorts(routes, CURVE_RADIUS, {}, OFFSET_STEP)
 
     assert [route.curve_radii[0] for route in routes if route.curve_radii] == [
         pytest.approx(6.0),
@@ -429,7 +429,7 @@ def test_separate_bundles_on_one_bisector_turn_apart() -> None:
         _diagonal_lane("b2", 11 * OFFSET_STEP),
     ]
     cohorts = _concentric_corner_cohorts(routes, {}, True, OFFSET_STEP)
-    assert sorted(sorted(m.route.line_id for m in c) for c in cohorts) == [
+    assert sorted(sorted(m.route.line_id for m in c.members) for c in cohorts) == [
         ["a1", "a2"],
         ["b1", "b2"],
     ]
@@ -440,7 +440,7 @@ def test_plan_sizing_leaves_an_unsized_route_unsized() -> None:
     read as not handler-sized; only the final sizing may give it radii."""
     plan_routes = [_diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)]
     plan_routes[1].curve_radii = None
-    _rederive_semantic_end_corners(
+    _size_concentric_cohorts(
         plan_routes, CURVE_RADIUS, {}, OFFSET_STEP, respect_owned_corners=False
     )
     assert plan_routes[1].curve_radii is None
@@ -448,7 +448,7 @@ def test_plan_sizing_leaves_an_unsized_route_unsized() -> None:
 
     final_routes = [_diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)]
     final_routes[1].curve_radii = None
-    _rederive_semantic_end_corners(final_routes, CURVE_RADIUS, {}, OFFSET_STEP)
+    _size_concentric_cohorts(final_routes, CURVE_RADIUS, {}, OFFSET_STEP)
     assert final_routes[1].curve_radii is not None
     assert final_routes[1].curve_radii[0] > CURVE_RADIUS
 
@@ -517,7 +517,7 @@ def test_cohort_reference_keeps_the_largest_radius_a_lane_asks_for() -> None:
     the outer lane nests outside it."""
     inner, outer = _diagonal_lane("a", 0.0), _diagonal_lane("b", OFFSET_STEP)
     inner.curve_radii = [20.0]
-    _rederive_semantic_end_corners([inner, outer], CURVE_RADIUS, {}, OFFSET_STEP)
+    _size_concentric_cohorts([inner, outer], CURVE_RADIUS, {}, OFFSET_STEP)
     shift = OFFSET_STEP * math.tan(math.radians(22.5))
     assert inner.curve_radii == [pytest.approx(20.0)]
     assert outer.curve_radii == [pytest.approx(20.0 + shift)]

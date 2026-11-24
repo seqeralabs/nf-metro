@@ -1021,7 +1021,11 @@ class _ConcentricCorner(NamedTuple):
     points: list[tuple[float, float]]
     incoming: tuple[float, float]
     outgoing: tuple[float, float]
-    orthogonal: bool
+
+
+class _Cohort(NamedTuple):
+    members: list[_ConcentricCorner]
+    right_angle: bool
 
 
 def _right_angle_directions(
@@ -1029,23 +1033,26 @@ def _right_angle_directions(
 ) -> tuple[Direction, Direction] | None:
     """The travel directions into and out of *corner* when its legs are one
     horizontal and one vertical."""
+    if not is_orthogonal_turn(prev, corner, nxt):
+        return None
     incoming = segment_direction(prev, corner)
     outgoing = segment_direction(corner, nxt)
-    if incoming is None or outgoing is None:
-        return None
-    in_vec, out_vec = direction_vector(incoming), direction_vector(outgoing)
-    if in_vec[0] * out_vec[0] + in_vec[1] * out_vec[1] != 0:
-        return None
+    assert incoming is not None and outgoing is not None
     return incoming, outgoing
+
+
+_CornerKeys = defaultdict[tuple[object, ...], list[_ConcentricCorner]]
 
 
 def _keyed_concentric_corners(
     routes: list[RoutedPath],
     station_offsets: Mapping[tuple[str, str], float],
-) -> dict[tuple[object, ...], list[_ConcentricCorner]]:
-    """The corners that may turn with others, keyed so only corners turning
-    the same way at the same kind of place share a key."""
-    keyed: defaultdict[tuple[object, ...], list[_ConcentricCorner]] = defaultdict(list)
+) -> tuple[_CornerKeys, _CornerKeys]:
+    """The right-angle and the diagonal corners that may turn with others,
+    each keyed so only corners turning the same way at the same kind of place
+    share a key."""
+    right_angle: _CornerKeys = defaultdict(list)
+    diagonal: _CornerKeys = defaultdict(list)
     for route in routes:
         if len(route.points) < 3:
             continue
@@ -1064,13 +1071,10 @@ def _keyed_concentric_corners(
             if abs(u_in[0] * u_out[1] - u_in[1] * u_out[0]) <= COORD_TOLERANCE_FINE:
                 continue
             key = (
-                "turn",
                 (round(u_in[0], 3), round(u_in[1], 3)),
                 (round(u_out[0], 3), round(u_out[1], 3)),
             )
-            keyed[key].append(
-                _ConcentricCorner(route, rank, points, u_in, u_out, False)
-            )
+            diagonal[key].append(_ConcentricCorner(route, rank, points, u_in, u_out))
         if route.curve_radii is None or not right_angles:
             continue
         for kind, owner, (rank, incoming, outgoing) in (
@@ -1082,17 +1086,16 @@ def _keyed_concentric_corners(
             ) or (kind == "target" and route.exit_turn_segment_rank == rank):
                 continue
             in_vec, out_vec = direction_vector(incoming), direction_vector(outgoing)
-            keyed[kind, owner, incoming, outgoing].append(
+            right_angle[kind, owner, incoming, outgoing].append(
                 _ConcentricCorner(
                     route,
                     rank,
                     points,
                     (float(in_vec[0]), float(in_vec[1])),
                     (float(out_vec[0]), float(out_vec[1])),
-                    True,
                 )
             )
-    return keyed
+    return right_angle, diagonal
 
 
 def _translation_components(
@@ -1128,7 +1131,8 @@ def _split_at_bundle_gaps(
     """Split *component* wherever neighbouring lanes sit two bundle *pitches*
     or more apart across their incoming legs, so separate bundles that happen
     to share a bisector turn on their own. Neighbouring lanes of one bundle sit
-    at most about 1.15 pitches apart across the corpus.
+    a pitch apart where they leave their stations, a little more across a
+    diagonal leg.
     """
     anchor = component[0]
     normal = (-anchor.incoming[1], anchor.incoming[0])
@@ -1153,7 +1157,7 @@ def _concentric_corner_cohorts(
     station_offsets: Mapping[tuple[str, str], float],
     respect_owned_corners: bool,
     pitch: float,
-) -> list[list[_ConcentricCorner]]:
+) -> list[_Cohort]:
     """Group the bundle corners that turn together into cohorts.
 
     Two kinds of corner take part. A right-angle turn takes part only as a
@@ -1170,35 +1174,38 @@ def _concentric_corner_cohorts(
     ``None``, which later passes read as not handler-sized, so only the final
     post-emission sizing may give it radii.
     """
-    cohorts: list[list[_ConcentricCorner]] = []
-    for key, corners in _keyed_concentric_corners(routes, station_offsets).items():
-        for component in _translation_components(corners):
-            groups = (
-                _split_at_bundle_gaps(component, pitch)
-                if key[0] == "turn"
-                else [component]
+    right_angle, diagonal = _keyed_concentric_corners(routes, station_offsets)
+    candidates = [
+        (component, True)
+        for corners in right_angle.values()
+        for component in _translation_components(corners)
+    ] + [
+        (group, False)
+        for corners in diagonal.values()
+        for component in _translation_components(corners)
+        for group in _split_at_bundle_gaps(component, pitch)
+    ]
+    cohorts: list[_Cohort] = []
+    for group, is_right_angle in candidates:
+        if (
+            len(group) >= 2
+            and len({id(m.route) for m in group}) == len(group)
+            and not (
+                respect_owned_corners
+                and any(
+                    planner_owns_segment_or_boundary(m.route, m.rank) for m in group
+                )
             )
-            for group in groups:
-                if (
-                    len(group) >= 2
-                    and len({id(m.route) for m in group}) == len(group)
-                    and not (
-                        respect_owned_corners
-                        and any(
-                            planner_owns_segment_or_boundary(m.route, m.rank)
-                            for m in group
-                        )
-                    )
-                    and (
-                        respect_owned_corners
-                        or all(m.route.curve_radii is not None for m in group)
-                    )
-                ):
-                    cohorts.append(group)
+            and (
+                respect_owned_corners
+                or all(m.route.curve_radii is not None for m in group)
+            )
+        ):
+            cohorts.append(_Cohort(group, is_right_angle))
     return cohorts
 
 
-def _rederive_semantic_end_corners(
+def _size_concentric_cohorts(
     routes: list[RoutedPath],
     curve_radius: float,
     station_offsets: Mapping[tuple[str, str], float],
@@ -1213,7 +1220,7 @@ def _rederive_semantic_end_corners(
     :func:`corner_radius_budget` allows. Right-angle corners also publish their
     X offset and reference for the channel passes that read them.
     """
-    for members in _concentric_corner_cohorts(
+    for members, right_angle in _concentric_corner_cohorts(
         routes, station_offsets, respect_owned_corners, pitch
     ):
         turn_in, turn_out = members[0].incoming, members[0].outgoing
@@ -1253,7 +1260,7 @@ def _rederive_semantic_end_corners(
         for member, radius_index, shift, radii in prepared:
             radii[radius_index] = reference_anchored_radius(shift, reference)
             member.route.curve_radii = radii
-            if member.orthogonal:
+            if right_angle:
                 member.route.record_concentric_corner(
                     radius_index,
                     member.points[member.rank][0] - inner_vertex[0],
@@ -5732,7 +5739,7 @@ def _reanchor_concentric_corner_fans(
     short for it would draw a hard corner where a curve was asked for.  When
     *curve_radius* does not fit, the reference is the largest every lane's leg
     budget (:func:`corner_radius_budget`) allows once its offset is taken off,
-    as :func:`_rederive_semantic_end_corners` sizes it.  A fan whose budget
+    as :func:`_size_concentric_cohorts` sizes it.  A fan whose budget
     cannot even reach its own floor is left unraised, which
     :func:`check_orthogonal_turns_form_curves` reads as a deliberately tight
     inner arc.
