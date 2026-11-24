@@ -893,7 +893,11 @@ def branch_line_planner(
         on_line.update(path)
 
 
-def line_planner(lines: LineMode) -> Callable[..., LinePlan] | None:
+LinePlanner = Callable[[dict[str, DagNode], list[tuple[str, str]]], LinePlan]
+"""A ``plan_lines`` hook for :func:`dag_to_mmd`: the nodes and edges to a plan."""
+
+
+def line_planner(lines: LineMode) -> LinePlanner | None:
     """The ``plan_lines`` hook for *lines*, or ``None`` for section lines."""
     return branch_line_planner if lines == "graph" else None
 
@@ -902,8 +906,7 @@ def dag_to_mmd(
     dag: ParsedDag,
     kept_ids: set[str],
     title: str = "",
-    plan_lines: Callable[[dict[str, DagNode], list[tuple[str, str]]], LinePlan]
-    | None = None,
+    plan_lines: LinePlanner | None = None,
 ) -> str:
     """Convert a parsed DAG to nf-metro ``.mmd`` text, keeping only *kept_ids*.
 
@@ -943,8 +946,8 @@ def dag_to_mmd(
 
     intra_edges, inter_edges = _classify_edges(edges, sections.node_section)
     if plan_lines and len(sections.names) > 1:
-        # The layout engine cannot yet place planned lines across sections
-        # without crossings or aborts.
+        # Planned lines across several sections cross or abort in the layout
+        # engine.
         warnings.warn(
             "Lines are planned from the graph's shape only in a one-section "
             f"map; this map has {len(sections.names)} sections, so its lines "

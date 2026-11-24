@@ -115,11 +115,13 @@ def is_snakemake_dag(text: str) -> bool:
     return _dialect(text) is not None
 
 
-def convert_snakemake_dag(text: str, title: str = "", lines: LineMode = "graph") -> str:
+def convert_snakemake_dag(
+    text: str, title: str = "", lines: LineMode | None = None
+) -> str:
     """Convert Snakemake ``--rulegraph`` or ``--dag`` output to nf-metro ``.mmd``.
 
     Accepts the DOT and ``mermaid-js`` forms of either export. *lines* chooses
-    how lines are drawn (see :data:`LineMode`).
+    how lines are drawn (see :data:`LineMode`); ``None`` means ``graph``.
 
     Warns
     -----
@@ -154,4 +156,4 @@ def convert_snakemake_dag(text: str, title: str = "", lines: LineMode = "graph")
         for nid, node in dag.nodes.items()
         if not (node.label == _TARGET_RULE and nid not in has_outgoing)
     }
-    return dag_to_mmd(dag, kept_ids, title, line_planner(lines))
+    return dag_to_mmd(dag, kept_ids, title, line_planner(lines or "graph"))

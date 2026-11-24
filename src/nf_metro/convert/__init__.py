@@ -32,7 +32,7 @@ InputFormat = Literal["nextflow", "snakemake"]
 
 INPUT_FORMATS: tuple[InputFormat, ...] = get_args(InputFormat)
 
-_CONVERTERS: dict[InputFormat, Callable[..., str]] = {
+_CONVERTERS: dict[InputFormat, Callable[[str, str, LineMode | None], str]] = {
     "nextflow": convert_nextflow_dag,
     "snakemake": convert_snakemake_dag,
 }
@@ -69,7 +69,7 @@ def convert_dag(
             f"unknown input format {input_format!r}; "
             f"expected one of {', '.join(INPUT_FORMATS)}"
         )
-    return converter(text, title) if lines is None else converter(text, title, lines)
+    return converter(text, title, lines)
 
 
 __all__ = [

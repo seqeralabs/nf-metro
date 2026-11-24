@@ -41,6 +41,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -326,33 +327,30 @@ export function renderMetroFile(
 
   const tmpOutput = join(tmpdir(), `metro-${hash}.svg`);
   const converted = lines ? join(tmpdir(), `metro-${hash}.mmd`) : null;
-  if (converted) {
-    runNfMetro(["convert", file, "--from", inputFormat, "--lines", lines, "-o", converted], file);
-  }
-  // Render the real file rather than a temp copy: the CLI resolves a map's
-  // asset paths against the directory the file itself sits in. A converted
-  // DAG has no assets, so its temp copy is safe to render.
-  const args = [
-    "render",
-    converted ?? file,
-    "-o",
-    tmpOutput,
-    "--no-self-color-scheme",
-    "--no-manifest",
-  ];
-  if (debug) args.push("--debug");
-  if (converter && !converted) args.push(converter.flag);
-  if (!chromeCss) args.push("--no-chrome-css");
-  if (animate) args.push("--animate");
-  runNfMetro(args, file);
-
-  const svg = readFileSync(tmpOutput, "utf-8").replace(XML_PROLOG_RE, "");
-  for (const tmp of [tmpOutput, converted]) {
-    try {
-      if (tmp) unlinkSync(tmp);
-    } catch {
-      /* best-effort cleanup */
+  let svg;
+  try {
+    if (converted) {
+      runNfMetro(["convert", file, "--from", inputFormat, "--lines", lines, "-o", converted], file);
     }
+    // Render the real file rather than a temp copy: the CLI resolves a map's
+    // asset paths against the directory the file itself sits in. A converted
+    // DAG has no assets, so its temp copy is safe to render.
+    const args = [
+      "render",
+      converted ?? file,
+      "-o",
+      tmpOutput,
+      "--no-self-color-scheme",
+      "--no-manifest",
+    ];
+    if (debug) args.push("--debug");
+    if (converter && !converted) args.push(converter.flag);
+    if (!chromeCss) args.push("--no-chrome-css");
+    if (animate) args.push("--animate");
+    runNfMetro(args, file);
+    svg = readFileSync(tmpOutput, "utf-8").replace(XML_PROLOG_RE, "");
+  } finally {
+    for (const tmp of [tmpOutput, converted]) if (tmp) rmSync(tmp, { force: true });
   }
   writeFileSync(cacheFile, svg, "utf-8");
   return svg;
@@ -360,9 +358,9 @@ export function renderMetroFile(
 
 /**
  * Run the nf-metro CLI from the repo root, turning a failure into an error
- * that names the source file and quotes nf-metro's stderr.
+ * that names the source and quotes nf-metro's stderr.
  * @param {string[]} args
- * @param {string} file  The source the run is for.
+ * @param {string} file  The source the run is for, as named in the error.
  */
 function runNfMetro(args, file) {
   try {
@@ -453,18 +451,7 @@ export function renderMetroBinary(file, opts) {
     if (scale != null) args.push("--scale", String(scale));
     if (rasterWidth != null) args.push("--raster-width", String(rasterWidth));
 
-    try {
-      execFileSync("nf-metro", args, {
-        cwd: REPO_ROOT,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (err) {
-      const stderr = err.stderr?.toString().trim() || "";
-      throw new Error(
-        `nf-metro render failed for ${file} (format=${format}):\n${stderr}\n\n` +
-          `Make sure 'nf-metro' is on PATH (activate the nf-core micromamba env).`,
-      );
-    }
+    runNfMetro(args, `${file} (format=${format})`);
   }
 
   return { path: `_generated/metro/${fileName}`, bytes: statSync(outPath).size };

@@ -151,7 +151,7 @@ def process_node_labels(text: str) -> list[str]:
 
 
 def convert_nextflow_dag(
-    text: str, title: str = "", lines: LineMode = "sections"
+    text: str, title: str = "", lines: LineMode | None = None
 ) -> str:
     """Convert a Nextflow ``-with-dag`` mermaid file to nf-metro ``.mmd`` format.
 
@@ -162,7 +162,7 @@ def convert_nextflow_dag(
     title:
         Optional pipeline title. If empty, inferred from subgraph names.
     lines:
-        How to draw lines (see :data:`LineMode`).
+        How to draw lines (see :data:`LineMode`); ``None`` means ``sections``.
 
     Returns
     -------
@@ -176,7 +176,7 @@ def convert_nextflow_dag(
     """
     dag = _parse_nextflow_mermaid(text)
     kept_ids = {nid for nid, node in dag.nodes.items() if node.shape == "stadium"}
-    return dag_to_mmd(dag, kept_ids, title, line_planner(lines))
+    return dag_to_mmd(dag, kept_ids, title, line_planner(lines or "sections"))
 
 
 def is_nextflow_dag(text: str) -> bool:
