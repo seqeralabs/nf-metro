@@ -31,7 +31,7 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     station_lane_coord,
 )
-from nf_metro.layout.ordering import line_reach
+from nf_metro.layout.ordering import bundle_reach
 from nf_metro.layout.phases._common import (
     iter_corridor_fed_solo_entries,
     iter_flat_seam_solo_entries,
@@ -1331,7 +1331,7 @@ def _seat_section_lane_ends(ctx: _OffsetCtx) -> None:
                 for sid in graph.sections[m].station_ids
                 if lid in graph.station_lines(sid)
             }
-            - line_reach(graph, lid, runs[lid])
+            - bundle_reach(graph, lid, runs[lid])
             for lid in ends
         }
         ordered = {lid: pin for lid, pin in ends.items() if not exempt[lid]}
