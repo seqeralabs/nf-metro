@@ -1477,8 +1477,9 @@ in pipeline order.
   centreline. Under `diamond_style='symmetric'`, a planned two-way fan keeps
   mirrored half-pitch lanes around that centreline even when topology identifies
   one branch as the unique continuation. For unsupported legacy fans, compact
-  each clean 2-way fork-join diamond (`_iter_symmetric_diamonds`) onto half-pitch
-  offsets `trunk_y +/- 0.5 * y_spacing`, so the diamond reads as a tight
+  each clean 2-way fork-join diamond (`_iter_symmetric_diamonds`) onto
+  half-pitch offsets, half the section's row pitch (`_section_row_pitch`)
+  either side of the trunk, so the diamond reads as a tight
   one-grid-unit bubble rather than straddling the trunk at full pitch
   (as tall as a 3-way fan with an empty trunk row between its branches).
   Per-diamond, so a diamond compacts even when it shares a section with a

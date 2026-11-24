@@ -877,9 +877,9 @@ def _apply_half_grid_2branch_symfan(
 
     For every section that satisfies ``_section_symfan_uses_half_grid``
     (exactly two on-track non-terminus branch stations sharing a column,
-    no off-track inputs), this places the two branches at
-    ``trunk_y +/- 0.5 * y_spacing`` regardless of what the per-column
-    redistribute passes did.
+    no off-track inputs), this places the two branches half a row pitch
+    (:func:`_section_row_pitch`) either side of the trunk, regardless of what
+    the per-column redistribute passes did.
 
     Why a dedicated phase: ``_redistribute_full_bundle_columns`` and
     ``_recenter_full_bundle_columns`` gate on ``_grid_group_section_ids``
@@ -937,8 +937,9 @@ def _apply_half_grid_2branch_symfan(
             trunk_y = (branches[0].y + branches[1].y) / 2.0
 
         branches.sort(key=lambda s: s.y)
-        branches[0].y = trunk_y - 0.5 * y_spacing
-        branches[1].y = trunk_y + 0.5 * y_spacing
+        half = 0.5 * _section_row_pitch(graph, section.id, y_spacing)
+        branches[0].y = trunk_y - half
+        branches[1].y = trunk_y + half
         graph.half_grid_station_ids.update(b.id for b in branches)
 
         # The fan's source hub (the station feeding both branches) sits on this
@@ -982,11 +983,10 @@ def _section_symfan_uses_half_grid(graph: MetroGraph, section: Section) -> bool:
     """Return True when a section's symfan should use half-pitch offsets.
 
     True when :func:`_symfan_branches_hub` classifies the section as a 2-branch
-    symmetric fan.  The two branch stations are then placed at
-    ``trunk_y +/- 0.5 * y_spacing`` instead of the default
-    ``trunk_y +/- 1 * y_spacing``, so the section needs only one vertical grid
-    unit instead of two.  The branches sit at half-pitch relative to the row
-    grid; ``_snap_all_y_to_grid`` skips them via
+    symmetric fan.  The two branch stations are then placed half a row pitch
+    either side of the trunk instead of a whole one, so the section needs only
+    one vertical grid unit instead of two.  The branches sit at half-pitch
+    relative to the row grid; ``_snap_all_y_to_grid`` skips them via
     ``graph.half_grid_station_ids``.
     """
     return _symfan_branches_hub(graph, section) is not None
@@ -1184,10 +1184,10 @@ def _apply_half_grid_symmetric_diamonds(graph: MetroGraph, y_spacing: float) -> 
 
     Under ``diamond_style='symmetric'`` a clean horizontal 2-way diamond
     (see :func:`_iter_symmetric_diamonds`) otherwise straddles the trunk
-    at full pitch (``trunk_y +/- y_spacing``), making the diamond's bubble
-    as tall as a 3-way fan with an empty trunk row between its branches.
-    This places the two branches at ``trunk_y +/- 0.5 * y_spacing`` so the
-    diamond reads as a tight bubble.
+    at full pitch, making the diamond's bubble as tall as a 3-way fan with an
+    empty trunk row between its branches.  This places the two branches half
+    the section's row pitch (:func:`_section_row_pitch`) either side of the
+    trunk, so the diamond reads as a tight bubble on the grid its row uses.
 
     Unlike ``_apply_half_grid_2branch_symfan`` (which fires only when the
     diamond is the section's sole fan and ``center_ports`` is on), the
@@ -1207,8 +1207,9 @@ def _apply_half_grid_symmetric_diamonds(graph: MetroGraph, y_spacing: float) -> 
         return
     for fork_st, lo, hi, _join in _iter_symmetric_diamonds(graph):
         trunk_y = fork_st.y
-        lo.y = trunk_y - 0.5 * y_spacing
-        hi.y = trunk_y + 0.5 * y_spacing
+        half = 0.5 * _section_row_pitch(graph, fork_st.section_id or "", y_spacing)
+        lo.y = trunk_y - half
+        hi.y = trunk_y + half
         graph.half_grid_station_ids.update((lo.id, hi.id))
 
 

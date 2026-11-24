@@ -194,6 +194,10 @@ light.png | dark.png`) in a PNG.
 
 ### Fixed
 
+- Under `diamond_style: symmetric`, a two-way diamond or two-branch fan in a
+  row whose bundles widen the row pitch sits half that pitch either side of
+  its trunk, on the grid the rest of the row uses, instead of half the base
+  `y_spacing`, which pinched its branches together.
 - A source whose line runs past a branch station on its way to a later station
   of the same trunk keeps that line clear of the branch when the fork has
   stations before it on the trunk, and so does a source whose line joins the
