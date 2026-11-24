@@ -230,7 +230,7 @@ That tick time base has to be set on the stream's codec context: set on the stre
 
 `Theme` in `style.py` is the theme schema: one keyword-only dataclass whose fields are every visual setting a theme can carry.
 Each field's metadata records its description and reference group, whether it is a color, and its allowed values.
-`themes/schema.py` generates the JSON Schema theme files are validated against from it, and `scripts/theme_docs.py` writes that schema to `themes/theme.schema.json` and the field reference into `docs/theming.mdx` (both checked by `tests/test_theme_schema.py`).
+`themes/schema.py` generates the JSON Schema theme files are validated against from it, and `scripts/theme_docs.py` writes that schema to `themes/theme.schema.json` and the field reference into `docs/themes.mdx` (both checked by `tests/test_theme_schema.py`).
 `CHROME` beside the dataclass maps each chrome color to its `--nfm-map-*` custom property and the classes and properties it paints, for `_inject_chrome_css`.
 
 Built-in themes are YAML files in `src/nf_metro/themes/` (`nfcore.yaml`, `seqera.yaml`, `london_tube.yaml`, `transparent.yaml`), loaded by the same loader as user theme files (`themes/stack.py`), without re-validation (the test suite validates them).

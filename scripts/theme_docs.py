@@ -1,7 +1,7 @@
 """Generated theme documents: the shipped JSON Schema and the field reference.
 
 ``src/nf_metro/themes/theme.schema.json`` is :func:`theme_schema` as shipped,
-for editors and other tools, and ``docs/theming.mdx`` embeds the field
+for editors and other tools, and ``docs/themes.mdx`` embeds the field
 reference between the ``theme-field-reference`` markers. Tests fail when
 either drifts; rewrite both with ``python scripts/theme_docs.py --write``.
 """
@@ -19,7 +19,7 @@ from nf_metro.themes.schema import SCHEMA_FILE, THEMEABLE_LAYOUT_OPTIONS, theme_
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "src" / "nf_metro" / "themes" / SCHEMA_FILE
-DOC_PATH = ROOT / "docs" / "theming.mdx"
+DOC_PATH = ROOT / "docs" / "themes.mdx"
 
 START = "{/* theme-field-reference:start */}"
 END = "{/* theme-field-reference:end */}"
@@ -73,8 +73,9 @@ def field_reference() -> str:
         "### Chrome colors and host overrides\n\n"
         "These colors also emit a CSS custom property, so a page that inlines "
         "the SVG can recolor them (see [`var()` for host overrides]"
-        "(#var-for-host-overrides-optional)). An empty value emits none, and "
-        "a station color emits one only when its light and dark values differ.\n\n"
+        "(/nf-metro/light-dark/#var-for-host-overrides-optional)). An empty "
+        "value emits none, and a station color emits one only when its light "
+        "and dark values differ.\n\n"
         "| Field | Custom property |\n| --- | --- |\n" + chrome
     )
     options = ", ".join(f"`{name}`" for name in THEMEABLE_LAYOUT_OPTIONS)

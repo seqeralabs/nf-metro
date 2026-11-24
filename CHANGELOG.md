@@ -67,7 +67,7 @@ history.
   any field of the theme schema for both palettes and colors per light/dark
   palette, extends other themes, and sets look-related layout options in a
   `layout:` block, which sits below `%%metro` directives and CLI flags. Every
-  built-in theme is itself such a file. See the Theming page.
+  built-in theme is itself such a file. See the Themes page.
 - Themes can set station and section shapes: tab-and-ring station glyphs in
   multiples of the line width, section outline width, dash and corners,
   number badges, title case and tracking, and a legend frame.
@@ -169,6 +169,9 @@ light.png | dark.png`) in a PNG.
   in that map into a warning, so some maps that used to draw with a warning
   now abort and name the defect
   ([#2123](https://github.com/seqeralabs/nf-metro/issues/2123)).
+- The Theming docs page is split in two: Themes (built-in themes, stacks,
+  theme files and the field reference) and Light and dark mode (how one SVG
+  adapts to the viewer). `/theming` redirects to Themes.
 
 ### Fixed
 

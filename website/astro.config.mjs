@@ -109,12 +109,11 @@ function buildReleasesSidebar() {
 export default defineConfig({
   site,
   base,
-  // theming.mdx moved from docs/dev/ (Internals) to docs/ (Embedding & data):
-  // its content is embedder-facing guidance, not an internals deep dive.
   // Astro's `redirects` keys are base-relative like sidebar `slug`s, but the
   // destination needs `base` prepended explicitly - it isn't applied for us.
   redirects: {
-    "/dev/theming": `${base}theming`,
+    "/dev/theming": `${base}light-dark`,
+    "/theming": `${base}themes`,
   },
   markdown: {
     remarkPlugins: [[remarkRebaseLinks, { base }]],
@@ -261,6 +260,7 @@ export default defineConfig({
             // base-relative ("/" -> "/nf-metro/"); passing `base` here doubled it.
             { label: "Home", link: "/" },
             { label: "Guide", slug: "guide" },
+            { label: "Themes", slug: "themes" },
             { label: "Output formats", slug: "formats" },
             { label: "CLI reference", slug: "cli" },
             { label: "Gallery", link: "/gallery/" },
@@ -281,7 +281,7 @@ export default defineConfig({
           items: [
             { label: "Embedding", slug: "embedding" },
             { label: "Embed contract", slug: "embed" },
-            { label: "Theming", slug: "theming" },
+            { label: "Light and dark mode", slug: "light-dark" },
             { label: "Data manifest", slug: "manifest" },
             { label: "Live progress", slug: "live" },
             { label: "Nextflow import", slug: "nextflow" },

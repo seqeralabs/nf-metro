@@ -36,7 +36,7 @@ def test_shipped_schema_matches_the_dataclass():
 
 def test_field_reference_matches_the_schema():
     """Regenerate with ``python scripts/theme_docs.py --write`` when this fails."""
-    text = (ROOT / "docs" / "theming.mdx").read_text()
+    text = (ROOT / "docs" / "themes.mdx").read_text()
     documented = text[text.index(START) + len(START) : text.index(END)]
     assert _normalise(documented) == _normalise(field_reference())
 

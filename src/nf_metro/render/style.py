@@ -4,7 +4,7 @@
 metadata records what it means (``doc``), which reference group it belongs to
 (``group``), whether its value is a colour (``color``), and its allowed values
 (``choices``, ``pattern``, ``maximum``). Theme files are validated against the
-JSON Schema generated from it, and the field reference in ``docs/theming.mdx``
+JSON Schema generated from it, and the field reference in ``docs/themes.mdx``
 is generated from that schema. :data:`CHROME` says which colours reach the
 stylesheet, where a host page may recolour them.
 """
