@@ -41,7 +41,6 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
     SECTION_Y_GAP,
-    SECTION_Y_PADDING,
     X_SPACING,
     graph_offset_step,
 )
@@ -58,7 +57,11 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     segment_intersects_bbox,
 )
-from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
+from nf_metro.layout.pass_metrics import (
+    active_layout_metrics,
+    icon_half_height_approx,
+    station_radius_approx,
+)
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
@@ -733,7 +736,7 @@ def _tb_top_entry_drop_overshoot(
         if not any(abs(first.x - px) <= tol for px in port_xs):
             continue
         gap = first.y - sec.bbox_y
-        if gap > SECTION_Y_PADDING + tol:
+        if gap > active_layout_metrics().section_y_padding + tol:
             offenders.append((sid, gap))
     return offenders
 
@@ -747,7 +750,7 @@ def _guard_tb_top_entry_drop_hugs_top(graph: MetroGraph, phase: str) -> None:
         raise PhaseInvariantError(
             f"{phase}: section {sid!r} first station sits {gap:.1f}px below "
             f"its box top despite a clean vertical TOP-entry drop "
-            f"(expected <= {SECTION_Y_PADDING:.1f})"
+            f"(expected <= {active_layout_metrics().section_y_padding:.1f})"
         )
 
 
@@ -4142,11 +4145,11 @@ def _guard_trunk_bands_crossing_optimal(
     strictly reduce crossings.  This guard fails loudly if a future change ever
     leaves a band in such an avoidable-crossing order.
     """
-    from nf_metro.layout.constants import CURVE_RADIUS, DIAGONAL_RUN
+    from nf_metro.layout.constants import CURVE_RADIUS
 
     routes = _ensure_routes(graph, routes)
     ctx = routing_context._build_routing_context(
-        graph, DIAGONAL_RUN, CURVE_RADIUS, offsets
+        graph, active_layout_metrics().diagonal_run, CURVE_RADIUS, offsets
     )
     bad = routing_normalize._suboptimal_trunk_bands(routes, ctx)
     if bad:

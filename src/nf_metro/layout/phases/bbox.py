@@ -10,7 +10,6 @@ from nf_metro.layout.constants import (
     BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     CURVE_RADIUS,
-    DIAGONAL_RUN,
     MIN_BUNDLE_EDGE_CLEARANCE,
     MIN_INTER_SECTION_GAP,
     MIN_STATION_FLAT_LENGTH,
@@ -27,8 +26,11 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.labels import label_text_width
 from nf_metro.layout.pass_metrics import (
+    LayoutMetrics,
     ThemeMetrics,
+    active_layout_metrics,
     font_scale_context,
+    layout_metrics_context,
     stroke_scale_context,
     theme_metrics_context,
 )
@@ -380,7 +382,7 @@ def _loop_corner_x(
         src_min = max(src_min, label_text_width(a.label) / 2)
     if b.id in join_stations and b.label.strip():
         tgt_min = max(tgt_min, label_text_width(b.label) / 2)
-    half_diag = DIAGONAL_RUN / 2
+    half_diag = active_layout_metrics().diagonal_run / 2
     is_fork = a.id in fork_stations
     is_join = b.id in join_stations
     if is_fork:
@@ -597,6 +599,7 @@ def _predict_section_content_bottom(
         font_scale_context(graph.font_scale),
         stroke_scale_context(graph.stroke_scale),
         theme_metrics_context(ThemeMetrics.of(layout_theme(graph))),
+        layout_metrics_context(LayoutMetrics.of(graph)),
     ):
         content_bots = [
             graph.stations[sid].y

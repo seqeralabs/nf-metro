@@ -550,6 +550,12 @@ class MetroGraph:
     y_spacing: float | None = None
     section_x_gap: float | None = None
     section_y_gap: float | None = None
+    section_x_padding: float | None = None
+    section_y_padding: float | None = None
+    # None = the engine's default; layout passes read these through
+    # nf_metro.layout.pass_metrics.
+    label_offset: float | None = None
+    diagonal_run: float | None = None
     # Perpendicular offset step between parallel lines in bundles (px).
     # None = use the built-in default (4 px). Set to 0 to collapse all
     # lines to a single shared track with no lateral separation.

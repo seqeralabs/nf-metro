@@ -50,9 +50,13 @@ from nf_metro.layout import (
 )
 from nf_metro.layout.constants import (
     DEFAULT_LINE_WIDTH,
+    DIAGONAL_RUN,
+    LABEL_OFFSET,
     OFFSET_STEP,
     SECTION_X_GAP,
+    SECTION_X_PADDING,
     SECTION_Y_GAP,
+    SECTION_Y_PADDING,
 )
 from nf_metro.live.server import DEFAULT_OVERLAY, OVERLAY_STYLES
 from nf_metro.options import (
@@ -460,6 +464,10 @@ _LAYOUT_DEFAULT_TEXT: dict[str, str] = {
     "y_spacing": "auto",
     "section_x_gap": _trim_number(SECTION_X_GAP),
     "section_y_gap": _trim_number(SECTION_Y_GAP),
+    "section_x_padding": _trim_number(SECTION_X_PADDING),
+    "section_y_padding": _trim_number(SECTION_Y_PADDING),
+    "label_offset": _trim_number(LABEL_OFFSET),
+    "diagonal_run": _trim_number(DIAGONAL_RUN),
     # OFFSET_STEP is the centre-to-centre pitch the None default resolves
     # to; the option itself is the visual edge-to-edge gap, offset minus
     # the assumed stroke width (resolve_offset_step's inverse).
@@ -701,6 +709,8 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
         "--y-spacing",
         "--section-x-gap",
         "--section-y-gap",
+        "--section-x-padding",
+        "--section-y-padding",
         "--track-gap",
         "--fold-threshold",
         "--diamond-style",
@@ -709,6 +719,8 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
         "--center-ports",
         "--compact-offsets",
         "--label-angle",
+        "--label-offset",
+        "--diagonal-run",
         "--font-scale",
         "--stroke-scale",
         "--width",

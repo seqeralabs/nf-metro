@@ -132,6 +132,18 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         help="Vertical gap between sections.",
     ),
     LayoutOption(
+        name="section_x_padding",
+        kind="float",
+        sign="nonneg",
+        help="Space between a section's box and its stations along x.",
+    ),
+    LayoutOption(
+        name="section_y_padding",
+        kind="float",
+        sign="nonneg",
+        help="Space between a section's box and its stations along y.",
+    ),
+    LayoutOption(
         name="track_gap",
         kind="float",
         sign="nonneg",
@@ -178,6 +190,18 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         kind="float",
         sign="any",
         help="Station label angle in degrees (0 = horizontal).",
+    ),
+    LayoutOption(
+        name="label_offset",
+        kind="float",
+        sign="nonneg",
+        help="Gap between a station marker and its label.",
+    ),
+    LayoutOption(
+        name="diagonal_run",
+        kind="float",
+        sign="positive",
+        help="Length of the 45-degree transition between two tracks.",
     ),
     LayoutOption(
         name="font_scale",

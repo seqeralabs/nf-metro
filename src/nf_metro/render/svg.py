@@ -54,8 +54,10 @@ from nf_metro.layout.labels import (
     place_labels,
 )
 from nf_metro.layout.pass_metrics import (
+    LayoutMetrics,
     ThemeMetrics,
     font_scale_context,
+    layout_metrics_context,
     stroke_scale_context,
     theme_metrics_context,
 )
@@ -909,6 +911,7 @@ def _build_render_plan_result(
         font_scale_context(graph.font_scale),
         stroke_scale_context(graph.stroke_scale),
         theme_metrics_context(ThemeMetrics.of(theme)),
+        layout_metrics_context(LayoutMetrics.of(graph)),
         metrics_face_context(metrics_face),
     ):
         try:
@@ -2298,6 +2301,7 @@ def _settled_render_graph(source_graph: MetroGraph, theme: Theme) -> MetroGraph:
         font_scale_context(source_graph.font_scale),
         stroke_scale_context(source_graph.stroke_scale),
         theme_metrics_context(ThemeMetrics.of(theme)),
+        layout_metrics_context(LayoutMetrics.of(source_graph)),
     ):
         graph, _settled = _settle_clear_of_the_canvas_margins(
             source_graph,

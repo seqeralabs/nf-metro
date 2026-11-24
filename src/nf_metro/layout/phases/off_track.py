@@ -8,7 +8,6 @@ from collections.abc import Callable, Iterator
 
 from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_COARSE,
-    DIAGONAL_RUN,
     EXIT_GAP_MULTIPLIER,
     ICON_CAPTION_FONT_HEIGHT,
     ICON_CAPTION_GAP,
@@ -18,7 +17,6 @@ from nf_metro.layout.constants import (
     OFF_TRACK_OUTPUT_TAIL,
     OFF_TRACK_TRUNK_CLEARANCE_MARGIN,
     SAME_COORD_TOLERANCE,
-    SECTION_Y_PADDING,
     X_SPACING,
     graph_offset_step,
 )
@@ -29,7 +27,11 @@ from nf_metro.layout.geometry import (
     section_bbox_span,
 )
 from nf_metro.layout.labels import _label_text_height, label_text_width
-from nf_metro.layout.pass_metrics import icon_half_height_approx, terminus_width_approx
+from nf_metro.layout.pass_metrics import (
+    active_layout_metrics,
+    icon_half_height_approx,
+    terminus_width_approx,
+)
 from nf_metro.layout.phases._common import (
     _content_station_ids,
     _exit_reaching_nodes,
@@ -375,7 +377,9 @@ def _space_off_track_outputs(
             )
             producer_extra = lead_extra.get(sid, 0.0) if lead_extra else 0.0
             lead = _off_track_output_lead(station, is_downward, producer_extra)
-            output_extra[target_id] = lead + DIAGONAL_RUN + _OUTPUT_TAIL
+            output_extra[target_id] = (
+                lead + active_layout_metrics().diagonal_run + _OUTPUT_TAIL
+            )
             producer_layer = layers[sid]
             layers[target_id] = producer_layer
             if on_track_succ <= 1:
@@ -384,7 +388,12 @@ def _space_off_track_outputs(
                 # (the next diagonal dips beneath the icon rather than clearing its
                 # full width, so this is about one glyph-width, not the icon's
                 # whole extent).
-                clearance = lead + DIAGONAL_RUN + _OUTPUT_TAIL + terminus_width_approx()
+                clearance = (
+                    lead
+                    + active_layout_metrics().diagonal_run
+                    + _OUTPUT_TAIL
+                    + terminus_width_approx()
+                )
                 layer_demand[producer_layer] = max(
                     layer_demand[producer_layer], clearance
                 )
@@ -659,7 +668,9 @@ def _loop_widening_for_label_half(label_half: float, x_spacing: float) -> float:
     transition diagonals.  A whole pitch already sits between columns, so it is
     subtracted; the residual is scaled by an empirical ``1.5`` because the
     widening is applied to both the fork- and join-side gaps."""
-    return max(0.0, (label_half * 2 + DIAGONAL_RUN - x_spacing) / 1.5)
+    return max(
+        0.0, (label_half * 2 + active_layout_metrics().diagonal_run - x_spacing) / 1.5
+    )
 
 
 def _wide_fan_bubble_extra(
@@ -1052,7 +1063,11 @@ def _layer_gap_for(
     )
 
     routing_clearance = (
-        fj_label_half + DIAGONAL_RUN + MIN_STRAIGHT_EDGE - x_spacing + 1.0
+        fj_label_half
+        + active_layout_metrics().diagonal_run
+        + MIN_STRAIGHT_EDGE
+        - x_spacing
+        + 1.0
     )
     return max(
         base_gap,
@@ -2179,7 +2194,7 @@ def _grow_flow_edges_for_off_track_icons(graph: MetroGraph, section: Section) ->
 def _reanchor_off_track_to_consumer(
     graph: MetroGraph,
     y_spacing: float,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_y_padding: float | None = None,
 ) -> None:
     """Re-place off-track inputs relative to consumer Ys after final snap.
 
@@ -2207,6 +2222,8 @@ def _reanchor_off_track_to_consumer(
     section above the canvas top margin (mirrors the same caller
     contract as ``_lift_off_track_stations``).
     """
+    if section_y_padding is None:
+        section_y_padding = active_layout_metrics().section_y_padding
     # Function-local: a module-level import would close the cycle
     # off_track -> guards -> single_section -> off_track.
     from nf_metro.layout.phases.guards import PhaseInvariantError

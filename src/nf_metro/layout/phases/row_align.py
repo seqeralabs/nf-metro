@@ -9,7 +9,6 @@ from typing import NamedTuple
 
 from nf_metro.layout.constants import (
     FONT_HEIGHT,
-    LABEL_OFFSET,
     MIN_PORT_STATION_GAP,
     PERP_PORT_EDGE_INSET,
     SAME_COORD_TOLERANCE,
@@ -22,7 +21,11 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     shift_section,
 )
-from nf_metro.layout.pass_metrics import active_font_scale, station_radius_approx
+from nf_metro.layout.pass_metrics import (
+    active_font_scale,
+    active_layout_metrics,
+    station_radius_approx,
+)
 from nf_metro.layout.phases._common import (
     _classify_multi_station_ys,
     _classify_section_station_ys,
@@ -120,7 +123,7 @@ def _row_group_grid_spacing(
     min_track_gap = (
         (max_lines - 1) * offset_step
         + 2 * station_radius_approx()
-        + LABEL_OFFSET
+        + active_layout_metrics().label_offset
         + FONT_HEIGHT * active_font_scale()
     )
     effective_y_spacing = max(y_spacing, min_track_gap)

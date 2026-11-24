@@ -18,7 +18,6 @@ from nf_metro.layout.constants import (
     PERP_PORT_EDGE_INSET,
     PORT_BOUNDARY_CROSSING_TOL,
     SAME_COORD_TOLERANCE,
-    SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
     graph_offset_step,
 )
@@ -28,6 +27,7 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     quantize_coord,
 )
+from nf_metro.layout.pass_metrics import active_layout_metrics
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.parser.model import (
@@ -1910,7 +1910,7 @@ def port_edge_inset(
 
 def _expand_bbox_for_y(section: Section, y: float) -> None:
     """Expand *section*'s bbox so *y* sits inside with padding."""
-    pad = SECTION_Y_PADDING
+    pad = active_layout_metrics().section_y_padding
     top = section.bbox_y
     bot = section.bbox_y + section.bbox_h
     if y - pad < top:

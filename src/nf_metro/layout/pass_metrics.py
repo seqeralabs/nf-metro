@@ -18,7 +18,11 @@ accessors here.
 from __future__ import annotations
 
 __all__ = [
+    "LayoutMetrics",
     "ThemeMetrics",
+    "active_layout_metrics",
+    "diagonal_label_offset",
+    "layout_metrics_context",
     "active_font_scale",
     "active_stroke_scale",
     "active_theme_metrics",
@@ -38,8 +42,13 @@ from typing import Iterator, NamedTuple
 
 from nf_metro.layout.constants import (
     DEFAULT_LINE_WIDTH,
+    DIAGONAL_LABEL_OFFSET,
+    DIAGONAL_RUN,
     DIRECTIONAL_MARKER_HALF_EXTENT,
     ICON_HALF_HEIGHT,
+    LABEL_OFFSET,
+    SECTION_X_PADDING,
+    SECTION_Y_PADDING,
     STATION_RADIUS_APPROX,
     STATION_STROKE_APPROX,
     TERMINUS_WIDTH,
@@ -165,3 +174,49 @@ def canvas_edge_clearance() -> float:
     )
     extra_stroke = line_width * (active_stroke_scale() - 1.0)
     return clearance + extra_stroke / 2
+
+
+class LayoutMetrics(NamedTuple):
+    """Spacing options a map may set, in force for the current pass.
+
+    The defaults are the engine's own, for a pass run without a graph bound.
+    """
+
+    diagonal_run: float = DIAGONAL_RUN
+    label_offset: float = LABEL_OFFSET
+    section_x_padding: float = SECTION_X_PADDING
+    section_y_padding: float = SECTION_Y_PADDING
+
+    @classmethod
+    def of(cls, graph: object) -> LayoutMetrics:
+        """The metrics *graph*'s options set, the engine's defaults elsewhere."""
+        values: list[float] = []
+        for name, default in zip(cls._fields, cls(), strict=True):
+            value = getattr(graph, name, None)
+            values.append(default if value is None else value)
+        return cls(*values)
+
+
+_ACTIVE_LAYOUT_METRICS: ContextVar[LayoutMetrics] = ContextVar(
+    "active_layout_metrics", default=LayoutMetrics()
+)
+
+
+def active_layout_metrics() -> LayoutMetrics:
+    """The spacing options in force for the current pass."""
+    return _ACTIVE_LAYOUT_METRICS.get()
+
+
+@contextmanager
+def layout_metrics_context(metrics: LayoutMetrics) -> Iterator[None]:
+    """Lay out with *metrics* for the duration of the block."""
+    token = _ACTIVE_LAYOUT_METRICS.set(metrics)
+    try:
+        yield
+    finally:
+        _ACTIVE_LAYOUT_METRICS.reset(token)
+
+
+def diagonal_label_offset() -> float:
+    """Extra drop for an angled label, kept in proportion to the label offset."""
+    return active_layout_metrics().label_offset * DIAGONAL_LABEL_OFFSET / LABEL_OFFSET

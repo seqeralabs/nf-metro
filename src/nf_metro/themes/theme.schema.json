@@ -597,6 +597,16 @@
           "type": "number",
           "minimum": 0
         },
+        "section_x_padding": {
+          "description": "Space between a section's box and its stations along x.",
+          "type": "number",
+          "minimum": 0
+        },
+        "section_y_padding": {
+          "description": "Space between a section's box and its stations along y.",
+          "type": "number",
+          "minimum": 0
+        },
         "track_gap": {
           "description": "Gap in px between adjacent strokes in a bundle.",
           "type": "number",
@@ -635,6 +645,16 @@
         "label_angle": {
           "description": "Station label angle in degrees (0 = horizontal).",
           "type": "number"
+        },
+        "label_offset": {
+          "description": "Gap between a station marker and its label.",
+          "type": "number",
+          "minimum": 0
+        },
+        "diagonal_run": {
+          "description": "Length of the 45-degree transition between two tracks.",
+          "type": "number",
+          "exclusiveMinimum": 0
         },
         "font_scale": {
           "description": "Scale text sizes and label metrics.",

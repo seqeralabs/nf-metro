@@ -27,14 +27,12 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 from nf_metro.layout.constants import (
     COLLISION_MULTIPLIER,
     DESCENDER_CLEARANCE,
-    DIAGONAL_LABEL_OFFSET,
     DIAGONAL_SLOPE_RATIO,
     FONT_HEIGHT,
     LABEL_BBOX_MARGIN,
     LABEL_FONT_SIZE,
     LABEL_MARGIN,
     LABEL_NUDGE_MAX,
-    LABEL_OFFSET,
     LABEL_OVERLAP_TOL,
     LABEL_WRAP_MIN_LINE_CHARS,
     PORT_LABEL_MAX_DX,
@@ -53,6 +51,8 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
+    active_layout_metrics,
+    diagonal_label_offset,
     font_scale_context,
     station_radius_approx,
     station_stroke_approx,
@@ -1587,7 +1587,7 @@ def _place_angled_label(
             station_id=station.id,
             text=station.label,
             x=station.x,
-            y=station.y + min_off - ctx.label_offset - DIAGONAL_LABEL_OFFSET,
+            y=station.y + min_off - ctx.label_offset - diagonal_label_offset(),
             above=True,
             angle=-label_angle,
             text_anchor="start",
@@ -1597,7 +1597,7 @@ def _place_angled_label(
             station_id=station.id,
             text=station.label,
             x=station.x,
-            y=station.y + max_off + ctx.label_offset + DIAGONAL_LABEL_OFFSET,
+            y=station.y + max_off + ctx.label_offset + diagonal_label_offset(),
             above=False,
             angle=label_angle,
             text_anchor="start",
@@ -1780,7 +1780,7 @@ def _place_alternating_label(
 
 def place_labels(
     graph: MetroGraph,
-    label_offset: float = LABEL_OFFSET,
+    label_offset: float | None = None,
     station_offsets: dict[tuple[str, str], float] | None = None,
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
     routes: list["RoutedPath"] | None = None,
@@ -1810,6 +1810,8 @@ def place_labels(
     search probe) pass False so the engine sees the pre-lift geometry and the
     deliberate neighbour graze never trips the label-overlap guard.
     """
+    if label_offset is None:
+        label_offset = active_layout_metrics().label_offset
     ctx, sorted_stations = _build_label_ctx(
         graph, label_offset, station_offsets, icon_obstacles, label_angle
     )
@@ -2292,7 +2294,10 @@ def _avoid_diagonal_routes(
         else:
             min_off = max_off = 0.0
         if placement.above:
-            gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
+            gap = max(
+                (station.y + min_off) - placement.y,
+                active_layout_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,
@@ -2301,7 +2306,10 @@ def _avoid_diagonal_routes(
                 above=False,
             )
         else:
-            gap = max(placement.y - (station.y + max_off), LABEL_OFFSET)
+            gap = max(
+                placement.y - (station.y + max_off),
+                active_layout_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,
@@ -2379,7 +2387,10 @@ def _flip_labels_off_foreign_strikes(
             continue
         min_off, max_off = _pill_offsets(graph, station, station_offsets)
         if placement.above:
-            gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
+            gap = max(
+                (station.y + min_off) - placement.y,
+                active_layout_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,
@@ -2388,7 +2399,10 @@ def _flip_labels_off_foreign_strikes(
                 above=False,
             )
         else:
-            gap = max(placement.y - (station.y + max_off), LABEL_OFFSET)
+            gap = max(
+                placement.y - (station.y + max_off),
+                active_layout_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,

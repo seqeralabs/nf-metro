@@ -8,7 +8,6 @@ from collections.abc import Iterable, Iterator
 
 from nf_metro.layout.constants import (
     SAME_COORD_TOLERANCE,
-    SECTION_Y_PADDING,
 )
 from nf_metro.layout.geometry import (
     lanes_run_along_x,
@@ -16,6 +15,7 @@ from nf_metro.layout.geometry import (
     perpendicular_port_sides,
     shift_section,
 )
+from nf_metro.layout.pass_metrics import active_layout_metrics
 from nf_metro.layout.phase_state import require_phase_field
 from nf_metro.layout.phases._common import (
     _fan_offsets,
@@ -871,7 +871,7 @@ def _symfan_branches_hub(
 
 
 def _apply_half_grid_2branch_symfan(
-    graph: MetroGraph, y_spacing: float, section_y_padding: float = SECTION_Y_PADDING
+    graph: MetroGraph, y_spacing: float, section_y_padding: float | None = None
 ) -> None:
     """Compact 2-branch symfan sections onto half-pitch offsets.
 
@@ -898,6 +898,8 @@ def _apply_half_grid_2branch_symfan(
     offsets intact (and ignores them when computing the row grid
     origin).
     """
+    if section_y_padding is None:
+        section_y_padding = active_layout_metrics().section_y_padding
     if y_spacing <= 0:
         return
     for section in graph.sections.values():
@@ -1523,7 +1525,7 @@ def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:
 
 
 def _carry_symmetric_branch_continuations(
-    graph: MetroGraph, section_y_padding: float = SECTION_Y_PADDING
+    graph: MetroGraph, section_y_padding: float | None = None
 ) -> None:
     """Draw a fanned branch's in-section continuation onto the branch's track.
 
@@ -1539,6 +1541,8 @@ def _carry_symmetric_branch_continuations(
     exit port -- so a branch that exits the section is left to fall back to the
     trunk and meet its exit port there.
     """
+    if section_y_padding is None:
+        section_y_padding = active_layout_metrics().section_y_padding
     if graph.diamond_style != "symmetric":
         return
     planned_ids = planned_fan_layout_station_ids(graph)
@@ -1953,7 +1957,7 @@ def _straddles_nothing(
 def _expand_orphaned_half_grid_stations(
     graph: MetroGraph,
     y_spacing: float,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_y_padding: float | None = None,
 ) -> None:
     """Seat on a full row any half-pitch station whose pair partner moved away.
 
@@ -1981,6 +1985,8 @@ def _expand_orphaned_half_grid_stations(
     for the same reason, and seating one of its members on a row would reopen
     the seam the centreline closed.
     """
+    if section_y_padding is None:
+        section_y_padding = active_layout_metrics().section_y_padding
     require_phase_field(graph, "half_grid_station_ids")
     half_grid = graph.half_grid_station_ids
     if not half_grid:

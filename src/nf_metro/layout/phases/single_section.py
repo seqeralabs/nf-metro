@@ -6,7 +6,6 @@ import math
 
 from nf_metro.layout.constants import (
     CURVE_RADIUS,
-    DIAGONAL_LABEL_OFFSET,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
     EXIT_GAP_MULTIPLIER,
@@ -15,7 +14,6 @@ from nf_metro.layout.constants import (
     ICON_INTER_GAP,
     LABEL_BBOX_MARGIN,
     LABEL_MARGIN,
-    LABEL_OFFSET,
     LABEL_PAD,
     LINE_GAP,
     MIN_STATION_FLAT_LENGTH,
@@ -41,7 +39,9 @@ from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
+    active_layout_metrics,
     active_theme_metrics,
+    diagonal_label_offset,
     icon_half_height_approx,
     station_radius_approx,
     terminus_width_approx,
@@ -772,7 +772,8 @@ def _multiline_track_spacing(sub: MetroGraph, y_spacing: float) -> float:
 
     # Worst case: adjacent tracks with labels facing inward.
     # Each side needs label_offset + its text height.
-    min_gap = LABEL_OFFSET + max_text_h + LABEL_OFFSET + font_height + LABEL_MARGIN
+    offset = active_layout_metrics().label_offset
+    min_gap = offset + max_text_h + offset + font_height + LABEL_MARGIN
     return max(y_spacing, min_gap)
 
 
@@ -803,7 +804,9 @@ def angled_label_reach(station: Station, label_angle: float) -> float:
         return 0.0
     sin_a = abs(math.sin(math.radians(label_angle)))
     return (
-        LABEL_OFFSET + DIAGONAL_LABEL_OFFSET + label_text_width(station.label) * sin_a
+        active_layout_metrics().label_offset
+        + diagonal_label_offset()
+        + label_text_width(station.label) * sin_a
     )
 
 

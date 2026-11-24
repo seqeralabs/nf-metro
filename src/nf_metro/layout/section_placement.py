@@ -30,7 +30,6 @@ from nf_metro.layout.constants import (
     PORT_MIN_GAP,
     SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
-    SECTION_X_PADDING,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
@@ -44,6 +43,7 @@ from nf_metro.layout.geometry import (
     section_row_span,
     shift_section,
 )
+from nf_metro.layout.pass_metrics import active_layout_metrics
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing.common import (
     flanked_cross_row_riser_neighbour_col,
@@ -293,7 +293,7 @@ def _effective_section_width(section: Section) -> float:
     inflating the column; Stage 1.5 of compute_layout absorbs the leftward
     overhang via a global x_offset bump.
     """
-    return section.bbox_x + section.bbox_w + SECTION_X_PADDING
+    return section.bbox_x + section.bbox_w + active_layout_metrics().section_x_padding
 
 
 def _scoped_cell_packs(

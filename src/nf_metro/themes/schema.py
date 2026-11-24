@@ -50,7 +50,6 @@ THEMEABLE_LAYOUT_OPTIONS: dict[str, LayoutOption] = {
         "track_gap",
         "diamond_style",
         "line_order",
-        "line_spread",
         "row_align",
         "center_ports",
         "compact_offsets",

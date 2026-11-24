@@ -28,14 +28,11 @@ from nf_metro.layout.constants import (
     FONT_HEIGHT,
     ICON_STACK_LABEL_CLEARANCE,
     INTER_ROW_EDGE_CLEARANCE,
-    LABEL_OFFSET,
     LABEL_OVERLAP_TOL,
     MIN_Y_SPACING_FLOOR,
     SAME_COORD_TOLERANCE,
     SECTION_X_GAP,
-    SECTION_X_PADDING,
     SECTION_Y_GAP,
-    SECTION_Y_PADDING,
     X_OFFSET,
     X_SPACING,
     Y_OFFSET,
@@ -43,6 +40,7 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
+from nf_metro.layout.pass_metrics import LayoutMetrics, active_layout_metrics
 
 if TYPE_CHECKING:
     from nf_metro.render.style import Theme
@@ -408,7 +406,9 @@ def compute_min_y_spacing(
     from nf_metro.layout.phases.single_section import terminus_cross_extents
 
     scale = active_font_scale()
-    label_extent = LABEL_OFFSET + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
+    label_extent = (
+        active_layout_metrics().label_offset + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
+    )
     clearance = ICON_STACK_LABEL_CLEARANCE
 
     required = floor
@@ -484,8 +484,8 @@ def compute_layout(
     y_spacing: float | None = None,
     x_offset: float = X_OFFSET,
     y_offset: float = Y_OFFSET,
-    section_x_padding: float = SECTION_X_PADDING,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_x_padding: float | None = None,
+    section_y_padding: float | None = None,
     section_x_gap: float | None = None,
     section_y_gap: float | None = None,
     validate: bool = _VALIDATE_DEFAULT,
@@ -537,6 +537,13 @@ def compute_layout(
         section_y_gap = (
             graph.section_y_gap if graph.section_y_gap is not None else SECTION_Y_GAP
         )
+    if section_x_padding is not None:
+        graph.section_x_padding = section_x_padding
+    if section_y_padding is not None:
+        graph.section_y_padding = section_y_padding
+    layout_metrics = LayoutMetrics.of(graph)
+    section_x_padding = layout_metrics.section_x_padding
+    section_y_padding = layout_metrics.section_y_padding
 
     # Read the phase-snapshot enable flag once (issue #363) and stash it on
     # the graph so per-stage call sites can snapshot without signature churn.
@@ -546,6 +553,7 @@ def compute_layout(
     from nf_metro.layout.pass_metrics import (
         ThemeMetrics,
         font_scale_context,
+        layout_metrics_context,
         stroke_scale_context,
         theme_metrics_context,
     )
@@ -569,6 +577,7 @@ def compute_layout(
         font_scale_context(graph.font_scale),
         stroke_scale_context(graph.stroke_scale),
         theme_metrics_context(ThemeMetrics.of(layout_theme(graph))),
+        layout_metrics_context(layout_metrics),
     ):
         # Topology-blind bypass insertion (parse time) can miss a line drawn
         # through a marker it doesn't consume; the geometric pass re-lays out
@@ -1599,8 +1608,8 @@ def _compute_section_layout(
     y_spacing: float = Y_SPACING,
     x_offset: float = X_OFFSET,
     y_offset: float = Y_OFFSET,
-    section_x_padding: float = SECTION_X_PADDING,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_x_padding: float | None = None,
+    section_y_padding: float | None = None,
     section_x_gap: float = SECTION_X_GAP,
     section_y_gap: float = SECTION_Y_GAP,
     validate: bool = False,
@@ -1649,6 +1658,10 @@ def _compute_section_layout(
     label order: the content-top fit leaves a non-grid shift behind, and
     the canvas snap is what closes it out, so the snap has to come last.
     """
+    if section_x_padding is None:
+        section_x_padding = active_layout_metrics().section_x_padding
+    if section_y_padding is None:
+        section_y_padding = active_layout_metrics().section_y_padding
     from nf_metro.layout.section_placement import (
         _reflect_stacked_split_consumer_tracks,
         place_sections,
