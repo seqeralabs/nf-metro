@@ -66,10 +66,12 @@ history.
   stack, layout options included; a posted map's `%%metro style:` is ignored.
   `live.server.serve_multi` and `RunRegistry` take a `ResolvedTheme`.
 - `nf-metro render` takes `--from nextflow|snakemake`, the spelling `convert`
-  already uses. `--from-nextflow` and `--from-snakemake` are gone, as are the
-  `from_nextflow` argument of `prepare_graph` and `render_string` (pass
-  `input_format="nextflow"`) and the `from_nextflow` and `from_snakemake` keys
-  of a `render-many` job (use `"from": "nextflow"`).
+  already uses. `--from-nextflow` is gone, as are the `from_nextflow` argument
+  of `prepare_graph` and `render_string` (pass `input_format="nextflow"`) and the
+  `from_nextflow` key of a `render-many` job (use `"from": "nextflow"`).
+- `nf-metro render` prints the paths it wrote as YAML on stdout (version,
+  inputs, outputs) instead of a one-line summary; summaries and warnings go to
+  stderr. A script that parsed the old line must read the YAML.
 - `render_string` takes its render options only through `config=RenderConfig(...)`.
   The flat `output_format`, `debug`, `responsive`, `embed_font`,
   `text_to_paths`, `svg_class_prefix`, `inject_dark_mode_css`, `chrome_css`,
@@ -126,7 +128,7 @@ history.
   bold capsules at interchanges, bundled lines edge to edge and a 30% grey for
   inactive lines. `interchange_glyph: ring` over it gives the standard's
   interchange rings and bridged chains instead.
-- Experimental Snakemake input: `nf-metro render --from-snakemake` and
+- Experimental Snakemake input: `nf-metro render --from snakemake` and
   `nf-metro convert` turn `snakemake --rulegraph` or `--dag` output (DOT or
   mermaid-js) into a metro map. `nf-metro convert` detects the input format,
   or takes `--from nextflow|snakemake`. Lines follow the rule graph: a
