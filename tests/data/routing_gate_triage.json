@@ -412,7 +412,7 @@
   "status": "needs-review"
  },
  "convergences.py::if forked:::#2": {
-  "note": "_landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below MERGE_GAP_MIN carrying a chained convergence.",
+  "note": "_landing_gives_way_to_flank joins the landing to the flank's column when the two are one stroke off a shared fork, and steps it one clearance off otherwise. Neither arm is reached because _flank_settled_column never declines on the corpus: all 32 crowded landing/flank pairs seat with 9px to spare. Reachable; a fixture needs an inter-column gap below merge_gap_min() carrying a chained convergence.",
   "status": "needs-review"
  },
  "convergences.py::if lane is None:::#1": {

@@ -15,9 +15,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     OFFSET_STEP,
 )
-from nf_metro.layout.pass_metrics import (
-    min_corridor_y_overlap,
-)
+from nf_metro.layout.pass_metrics import min_corridor_y_overlap
 
 if TYPE_CHECKING:
     from nf_metro.layout.routing.common import RoutedPath

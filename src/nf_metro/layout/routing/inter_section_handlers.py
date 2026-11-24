@@ -1673,7 +1673,7 @@ def _merge_landing_room(f: _InterFacts) -> tuple[BoundaryClearanceRequirement, .
     if port is None or port.side not in (PortSide.LEFT, PortSide.RIGHT):
         return ()
     target = graph.section_for_port(port)
-    required = inter_row_edge_clearance(f.ctx.curve_radius)
+    required = inter_row_edge_clearance()
     lo_x, hi_x = sorted((f.sx, ep.x))
     room: list[BoundaryClearanceRequirement] = []
     for box in graph.sections.values():

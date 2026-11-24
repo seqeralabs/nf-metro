@@ -20,9 +20,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     INTER_ROW_EDGE_CLEARANCE,
 )
-from nf_metro.layout.pass_metrics import (
-    inter_row_header_clearance,
-)
+from nf_metro.layout.pass_metrics import inter_row_header_clearance
 from nf_metro.layout.route_plan import build_route_plan_query
 from nf_metro.layout.route_reservations import (
     ColumnGapRegion,

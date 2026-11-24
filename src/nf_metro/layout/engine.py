@@ -241,11 +241,8 @@ from nf_metro.layout.phases.guards import (  # noqa: F401
     run_validate_guards,
 )
 from nf_metro.layout.phases.junctions import (  # noqa: F401
-    _junction_incoming_line_count,
-    _junction_outgoing_line_count,
     _position_junctions,
     _position_merge_junction,
-    _required_junction_margin,
     _resolve_source_section_id,
     _resolve_source_xy,
 )

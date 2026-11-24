@@ -1257,7 +1257,7 @@ def _min_gap_for_bundles(
     (:data:`BUNDLE_TO_BUNDLE_CLEARANCE`).
 
     For an empty list, returns 0 (no gap requirement from routing; the
-    caller's static ``min_inter_section_gap()`` floor still applies).
+    caller's ``min_inter_section_gap()`` floor applies on its own).
     """
     if not bundle_line_counts:
         return 0.0
@@ -1427,7 +1427,8 @@ def _column_pair_min_gap(
 
     Principled bundle width: A + Σ bundle_widths + (count-1)*B + A.  For a
     single bundle of one line this collapses to 2*A; with the default A=16 px
-    that's 32 px, smaller than the static MIN_INTER_SECTION_GAP=40 px so
+    that's 32 px, smaller than the :func:`min_inter_section_gap` floor (40 px at
+    the base radius), so
     single-line gaps are NOT widened past the standard layout column gap.
     Multi-line or multi-bundle corridors deterministically claim only the
     horizontal space their visual width actually occupies.

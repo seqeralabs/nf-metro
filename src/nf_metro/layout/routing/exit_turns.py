@@ -8,12 +8,8 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TypeVar
 
-from nf_metro.layout.constants import (
-    COORD_TOLERANCE,
-)
-from nf_metro.layout.pass_metrics import (
-    min_straight_edge,
-)
+from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.pass_metrics import min_straight_edge
 from nf_metro.layout.route_plan import (
     CoordinateRegime,
     DemandAxis,

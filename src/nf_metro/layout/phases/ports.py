@@ -1622,7 +1622,7 @@ def _resolve_tb_exit_y(
             break
 
     # Ensure the gap beyond the trailing station is large enough for the exit
-    # corner curve (CURVE_RADIUS) plus a straight run so the curve doesn't
+    # corner curve (the corner radius) plus a straight run so the curve doesn't
     # crowd the station pill.
     min_exit_gap = max(entry_gap, active_curve_radius() + MIN_PORT_STATION_GAP)
 

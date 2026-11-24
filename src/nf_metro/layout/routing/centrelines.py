@@ -17,17 +17,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from nf_metro.layout.constants import (
-    COORD_TOLERANCE,
-)
+from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.fan_geometry import symmetric_lane_offsets
 from nf_metro.layout.geometry import (
     axis_point,
     axis_split,
 )
-from nf_metro.layout.pass_metrics import (
-    min_straight_edge,
-)
+from nf_metro.layout.pass_metrics import min_straight_edge
 from nf_metro.layout.routing.bundle import (
     build_concentric_bundle,
     build_offset_bundle,

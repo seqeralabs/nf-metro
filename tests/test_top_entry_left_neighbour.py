@@ -24,13 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import (
-    CURVE_RADIUS,
-)
+from nf_metro.layout.constants import CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.pass_metrics import (
-    inter_row_header_clearance,
-)
+from nf_metro.layout.pass_metrics import inter_row_header_clearance
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.parser.mermaid import parse_metro_mermaid
 

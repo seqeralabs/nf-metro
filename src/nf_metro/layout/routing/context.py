@@ -22,9 +22,7 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     station_lane_coord,
 )
-from nf_metro.layout.pass_metrics import (
-    bypass_clearance,
-)
+from nf_metro.layout.pass_metrics import bypass_clearance
 from nf_metro.layout.route_topology import (
     convergence_junction_entry_ports,
     divergence_junction_exit_ports,

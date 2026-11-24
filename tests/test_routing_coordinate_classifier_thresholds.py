@@ -20,9 +20,7 @@ from nf_metro.layout.constants import (
     SAME_Y_TOLERANCE,
 )
 from nf_metro.layout.fan_ordering import fanout_divergence_peel_order
-from nf_metro.layout.pass_metrics import (
-    inter_row_header_clearance,
-)
+from nf_metro.layout.pass_metrics import inter_row_header_clearance
 from nf_metro.layout.routing.common import Direction
 from nf_metro.layout.routing.context import _build_routing_context, _RoutingCtx
 from nf_metro.layout.routing.corners import outer_lane_radius

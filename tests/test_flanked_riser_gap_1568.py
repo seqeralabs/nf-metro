@@ -31,9 +31,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
 )
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.pass_metrics import (
-    min_corridor_y_overlap,
-)
+from nf_metro.layout.pass_metrics import min_corridor_y_overlap
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import (
     RoutedPath,

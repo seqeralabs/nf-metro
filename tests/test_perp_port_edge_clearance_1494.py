@@ -47,9 +47,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.geometry import AxisFrame, perpendicular_port_sides
-from nf_metro.layout.pass_metrics import (
-    perp_port_edge_clearance,
-)
+from nf_metro.layout.pass_metrics import perp_port_edge_clearance
 from nf_metro.layout.phases._common import port_bundle_edge_reach
 from nf_metro.layout.phases.guards import (
     PhaseInvariantError,

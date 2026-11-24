@@ -19,13 +19,9 @@ from __future__ import annotations
 
 import pytest
 
-from nf_metro.layout.constants import (
-    SECTION_Y_GAP,
-)
+from nf_metro.layout.constants import SECTION_Y_GAP
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.pass_metrics import (
-    bypass_clearance,
-)
+from nf_metro.layout.pass_metrics import bypass_clearance
 from nf_metro.layout.phases.bbox import (
     _aggregate_bypass_spans,
     _tighten_lower_rows_after_shrink,

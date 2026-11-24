@@ -39,13 +39,9 @@ from pathlib import Path
 
 import pytest
 
-from nf_metro.layout.constants import (
-    SAME_COORD_TOLERANCE,
-)
+from nf_metro.layout.constants import SAME_COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.pass_metrics import (
-    min_inter_section_gap,
-)
+from nf_metro.layout.pass_metrics import min_inter_section_gap
 from nf_metro.layout.phases._common import (
     _column_contiguous_row_groups,
     _content_station_ids,

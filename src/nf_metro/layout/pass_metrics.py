@@ -192,9 +192,11 @@ def graph_radius_context(graph: MetroGraph) -> AbstractContextManager[None]:
 
         metrics = LayoutMetrics.of(graph, resolve_theme(graph))
     return metrics_context(
-        curve_radius_ratio=metrics.curve_radius_ratio,  # type: ignore[arg-type]
-        line_width=metrics.line_width,
-        stroke_scale=metrics.stroke_scale,
+        active_metrics()._replace(
+            curve_radius_ratio=metrics.curve_radius_ratio,
+            line_width=metrics.line_width,
+            stroke_scale=metrics.stroke_scale,
+        )
     )
 
 
@@ -311,7 +313,7 @@ def perp_port_edge_clearance() -> float:
     A port is pinned to one edge and free along its other axis.  Flush against
     a second edge, its run is drawn along the box border and the two read as
     one stroke; it also blocks the section header's above-left position.  One
-    corner radius is the shortest separation that still reads as a route
+    corner radius is the shortest separation that reads as a route
     inside the box rather than on its edge.
     """
     return active_curve_radius()

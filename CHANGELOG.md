@@ -82,8 +82,9 @@ history.
   theme's line width, measured at the line centre, as a `%%metro` directive,
   a `--curve-radius-ratio` flag or a theme's `layout:` block. The
   `london-tube` theme sets 3, so its corners bend at three line widths (12 px
-  on its 4 px lines). Every clearance that makes room for a corner grows with
-  the radius, so any positive ratio lays out cleanly.
+  on its 4 px lines). The clearances tied to a corner grow with the radius.
+  Radii far from the default can still hit layout failures on some
+  topologies.
 - `terminus_glyph` theme setting for a line end shared by several lines:
   `nub` (the default square box), `bar` (a track-weight buffer-stop bar
   across the bundle) or `ring`.

@@ -23,9 +23,7 @@ from nf_metro.layout.geometry import (
     point_to_polyline_distance,
     spans_share_corridor,
 )
-from nf_metro.layout.pass_metrics import (
-    active_curve_radius,
-)
+from nf_metro.layout.pass_metrics import active_curve_radius
 from nf_metro.layout.route_plan import (
     ConvergenceConflict,
     ConvergenceConflictKind,

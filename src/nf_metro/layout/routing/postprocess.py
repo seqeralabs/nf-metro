@@ -996,7 +996,7 @@ def _clear_bypass_v_label_strikes(routes: list[RoutedPath], ctx: _RoutingCtx) ->
 
     When the room before the leg's endpoint is too tight to fully seat the
     corner clear, the corner is pulled back only as far as a drawable
-    ``CURVE_RADIUS`` transition allows, so clearance can be partial; the wired
+    corner-radius transition allows, so clearance can be partial; the wired
     ``_guard_no_line_strikes_label`` is the backstop for that residual.
     """
     obstacles = ctx.graph.bypass_label_obstacles

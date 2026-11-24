@@ -20,12 +20,8 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph, resolve_theme
-from nf_metro.layout.constants import (
-    OFFSET_STEP,
-)
-from nf_metro.layout.pass_metrics import (
-    min_corridor_y_overlap,
-)
+from nf_metro.layout.constants import OFFSET_STEP
+from nf_metro.layout.pass_metrics import min_corridor_y_overlap
 from nf_metro.render.svg import build_observed_render_plan
 
 _FIXTURES = (

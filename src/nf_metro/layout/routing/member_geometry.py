@@ -2251,7 +2251,7 @@ def build_member_geometry_execution(
         # The freeze is the last word on an owned route's radii, and a
         # post-emission pass skips a frozen or owned route, so the concentric
         # fans a per-corner reference seated off the floor have to be
-        # re-anchored to CURVE_RADIUS here, before the plan captures them.
+        # re-anchored to the corner radius here, before the plan captures them.
         _reanchor_concentric_corner_fans(
             normalization_population,
             ctx.station_offsets or {},

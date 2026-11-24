@@ -214,8 +214,8 @@ CURVE_RADIUS: float = 10.0
 """Base corner radius for routed paths, at ``stroke_scale`` 1.
 
 Layout and rendering read the radius in effect through
-:func:`nf_metro.layout.pass_metrics.active_curve_radius`, which a theme's
-``curve_radius_ratio`` replaces this with."""
+:func:`nf_metro.layout.pass_metrics.active_curve_radius`, which takes it from a
+theme's ``curve_radius_ratio`` when one is set."""
 
 OFFSET_STEP: float = 4.0
 """Per-line offset increment for parallel lines in bundles."""

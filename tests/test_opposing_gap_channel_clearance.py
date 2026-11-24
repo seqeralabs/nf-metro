@@ -10,9 +10,7 @@ from nf_metro.layout.constants import (
     OFFSET_STEP,
 )
 from nf_metro.layout.engine import compute_layout
-from nf_metro.layout.pass_metrics import (
-    min_corridor_y_overlap,
-)
+from nf_metro.layout.pass_metrics import min_corridor_y_overlap
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import apply_route_offsets, gap_lo_for_x
 from nf_metro.layout.routing.invariants import check_opposing_gap_channel_clearance

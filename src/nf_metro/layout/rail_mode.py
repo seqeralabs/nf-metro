@@ -46,13 +46,15 @@ from nf_metro.parser.model import MetroGraph, PortSide, Section
 from nf_metro.text_metrics import TextRole
 
 
-# The straight runs a blank terminus's fan-out/fan-in needs besides its
-# 45-degree diagonal to ease between the convergence point and the rails
-# without compressing: a flat lead plus a straight stub each side.  With the
-# diagonal they are reserved as the gap between a fanning terminus and its
-# neighbour column, so the S-curves keep their shape no matter how tight the
-# shared (diagonal-label) column pitch is.
 def _terminus_stubs() -> float:
+    """Straight runs a blank terminus's fan-out/fan-in needs besides its diagonal.
+
+    The 45-degree diagonal eases between the convergence point and the rails
+    without compressing given a flat lead plus a straight stub each side.  With
+    the diagonal they are reserved as the gap between a fanning terminus and
+    its neighbour column, so the S-curves keep their shape no matter how tight
+    the shared (diagonal-label) column pitch is.
+    """
     return 3.0 * min_straight_edge()
 
 
@@ -152,7 +154,7 @@ def _connector_gap(
 
     A whole-graph rail connector from *upper* to *lower* wraps its cross leg
     through the gap between them, spread vertically over the connector's rails.
-    The band must fit that spread between ``INTER_ROW_EDGE_CLEARANCE`` below the
+    The band must fit that spread between ``inter_row_edge_clearance()`` below the
     upper box and ``inter_row_header_clearance()`` above the lower box's header
     badge.  Returns the gap that satisfies this, or ``0`` when fewer than two
     lines connect the two sections (a single track needs no extra room).

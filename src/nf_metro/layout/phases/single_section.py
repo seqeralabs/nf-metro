@@ -443,7 +443,7 @@ def _layout_single_section(
     # Bypass V helpers (``__bypass_``) have no rendered marker.  Use
     # them to extend the bbox only when V sits beyond the real-station
     # extent, and only by enough for the diversion curve to clear the
-    # section edge (~CURVE_RADIUS + half a station flat) - much less
+    # section edge (~the corner radius + half a station flat) - much less
     # than the full station_y_padding (which is reserved for label
     # clearance around real stations).
     real_for_bbox = [s for s in sub.stations.values() if not is_bypass_v(s.id)]

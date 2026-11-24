@@ -4407,7 +4407,7 @@ def concentric_corner_fans(
     edges reads as one fan at every corner it turns together, not just its first
     and last.  Each route's own exit-turn corner is excluded (anchored
     separately).  Only fans spanning two or more distinct lines -- the ones whose
-    innermost lane the ``CURVE_RADIUS`` floor governs -- are returned.
+    innermost lane the the corner radius floor governs -- are returned.
 
     This is the single definition of "one concentric fan" shared by the
     re-anchoring pass that seats each innermost lane at the floor and the oracle
@@ -4492,16 +4492,16 @@ def concentric_corner_fans(
 
 @dataclass(frozen=True)
 class SubFloorBundleCorner:
-    """A concentric bundle fan seats its innermost lane off ``CURVE_RADIUS``.
+    """A concentric bundle fan seats its innermost lane off the corner radius.
 
     A bundle of ``n`` lines nesting one lane-step apart draws one radius set at
-    every 90-degree turn it makes together -- ``CURVE_RADIUS`` for the innermost
+    every 90-degree turn it makes together -- the corner radius for the innermost
     line of that turn, one step wider for each line further out -- and only
     reassigns which line is innermost as the turn direction flips.  Anchoring the
     fan's *reference* line rather than its *tightest* line at the floor shifts the
-    whole nest uniformly, seating the innermost lane off ``CURVE_RADIUS`` -- above
+    whole nest uniformly, seating the innermost lane off the corner radius -- above
     it when the reference line is interior, below it when the anchor is an inside
-    lane.  The innermost resolved radius must equal ``CURVE_RADIUS`` exactly.
+    lane.  The innermost resolved radius must equal the corner radius exactly.
 
     Runway-clamped corners (the resolved radius falls short of the route's
     declared radius because a short leg cannot fit it) are excluded: that shrink
@@ -4528,7 +4528,7 @@ def check_bundle_corner_radius_floor(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[SubFloorBundleCorner]:
-    """Return concentric bundle fans whose innermost lane is off ``CURVE_RADIUS``.
+    """Return concentric bundle fans whose innermost lane is off the corner radius.
 
     A corpus oracle over bundle radius sizing rather than a render guard: an
     off-floor arc renders without aborting (a pinch or slack, not undrawable
@@ -4539,7 +4539,7 @@ def check_bundle_corner_radius_floor(
     an arc centre (see :func:`concentric_corner_fans`), so a bundle whose true
     innermost lane lives on a sibling edge is judged whole rather than as a
     per-edge fragment.  Every such fan must seat its innermost lane at
-    ``CURVE_RADIUS`` exactly.
+    the corner radius exactly.
     """
     violations: list[SubFloorBundleCorner] = []
     for fan in concentric_corner_fans(routes, offsets):
@@ -7440,7 +7440,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
             "whose bundle sizes tightly for a reason nothing here models would "
             "abort rather than render imperfectly. Restricted to the cross-edge "
             "fans of corners that turn together and share an arc centre -- the "
-            "sets whose innermost lane must seat at CURVE_RADIUS -- with "
+            "sets whose innermost lane must seat at the corner radius -- with "
             "runway-clamped corners excluded."
         ),
     ),

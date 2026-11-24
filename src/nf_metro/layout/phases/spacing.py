@@ -11,13 +11,9 @@ from __future__ import annotations
 import warnings
 from typing import TYPE_CHECKING
 
-from nf_metro.layout.constants import (
-    DIAGONAL_SLOPE_RATIO,
-)
+from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO
 from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
-from nf_metro.layout.pass_metrics import (
-    min_station_flat_length,
-)
+from nf_metro.layout.pass_metrics import min_station_flat_length
 from nf_metro.layout.phases._common import _restoring_layout_geometry
 from nf_metro.parser.model import LayoutGeometryWarning, MetroGraph, is_bypass_v
 
