@@ -110,7 +110,7 @@ def _directional_svg(text: str, source_dir: str) -> str:
 def test_chevrons_ride_their_drawn_stroke(case):
     """Every chevron sits on, and points along, its own line's painted stroke.
 
-    The stroke is read back from the SVG with its quadratic corners, so a
+    The stroke is read back from the SVG with its rounded corners, so a
     chevron inside a rounded corner is measured against the curve, and one
     reaching into a bridge gap is caught as well.
     """

@@ -34,6 +34,16 @@ history.
 
 ### Changed
 
+- Parallel lines turning together through any angle, not only 90 degrees,
+  now turn about one shared centre, so a bundle on a diagonal turn keeps its
+  lines touching instead of opening a thin gap between them. Maps with
+  diagonal bundle turns redraw those curves slightly.
+- Rounded corners draw as circular arcs (cubic Bézier circle
+  approximations) where they were quadratic curves, with the same tangent
+  points and radii. Parallel lines turning together stay exactly one stroke
+  apart through the whole turn at every angle, closing the thin seam that a
+  right-angle bundle turn showed between touching lines. Every rounded corner
+  on every map redraws very slightly fuller.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,
   embed dialog) and the copyable inline-HTML snippet now follow the map's mode
   instead of always being dark. `--mode` or `%%metro mode:` fixes both light
