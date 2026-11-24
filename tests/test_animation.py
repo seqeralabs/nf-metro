@@ -201,3 +201,75 @@ def test_nfcore_balls_carry_a_stroke():
     theme = THEMES["nfcore"]
     assert theme.animation_ball_stroke
     assert f'stroke="{theme.animation_ball_stroke}"' in svg
+
+
+# genomeassembly and fan_in_merge are left out: at their merge feeders the
+# straight member's stroke stops short of where the curving member joins, so
+# no drawn centreline spans that stretch for a dot to ride.
+_STROKE_RIDING_FIXTURES = [
+    p
+    for p in [*ANIMATION_FIXTURES, EXAMPLES_DIR / "differentialabundance.mmd"]
+    if p.stem not in {"genomeassembly", "fan_in_merge"}
+]
+
+
+@pytest.mark.parametrize(
+    "fixture", _STROKE_RIDING_FIXTURES, ids=[p.stem for p in _STROKE_RIDING_FIXTURES]
+)
+def test_dots_ride_their_lines_drawn_stroke(fixture: Path):
+    """Every sampled dot position lies on its own line's drawn centreline,
+    rounded corners included, so a dot keeps to its lane through a concentric
+    turn."""
+    import math
+    from collections import defaultdict
+
+    from nf_metro.api import prepare_graph
+    from nf_metro.render.svg import _drawn_pieces, _piece_at, build_render_plan
+    from nf_metro.themes import resolve_theme
+
+    graph = prepare_graph(fixture.read_text(), source_dir=str(fixture.parent))
+    plan = build_render_plan(graph, resolve_theme(None, graph))
+    timeline = build_animation_timeline(
+        plan.graph,
+        plan.routes,
+        plan.station_offsets,
+        plan.theme,
+        route_polylines=plan.route_polylines,
+        route_curve_radii=plan.route_curve_radii,
+    )
+    cell = 4.0
+    ink: dict[str, dict[tuple[int, int], list[tuple[float, float]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for route, polyline, radii in zip(
+        plan.routes, plan.route_polylines, plan.route_curve_radii
+    ):
+        for piece in _drawn_pieces(list(polyline), radii):
+            steps = (
+                200
+                if piece.control is not None
+                else max(1, math.ceil(math.dist(piece.start, piece.end) / 0.1))
+            )
+            for k in range(steps + 1):
+                x, y = _piece_at(piece, k / steps)[0]
+                ink[route.line_id][int(x // cell), int(y // cell)].append((x, y))
+
+    def off_stroke(line_id: str, point: tuple[float, float]) -> float:
+        cx, cy = int(point[0] // cell), int(point[1] // cell)
+        return min(
+            (
+                math.dist(point, q)
+                for dx in (-1, 0, 1)
+                for dy in (-1, 0, 1)
+                for q in ink[line_id].get((cx + dx, cy + dy), ())
+            ),
+            default=math.inf,
+        )
+
+    assert timeline.dots
+    worst = max(
+        (off_stroke(dot.line_id, dot.track.point_at(k / 100)), dot.line_id)
+        for dot in timeline.dots
+        for k in range(101)
+    )
+    assert worst[0] <= 0.5, worst

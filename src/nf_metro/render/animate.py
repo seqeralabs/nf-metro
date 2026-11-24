@@ -13,22 +13,18 @@ __all__ = [
 ]
 
 import math
-import re
 from bisect import bisect_left
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import drawsvg as draw
 
 from nf_metro.layout.routing import RoutedPath
-from nf_metro.layout.routing.common import (
-    SourceTurnout,
-    apply_route_offsets,
-    point_on_polyline,
-    segment_direction,
-)
+from nf_metro.layout.routing.common import apply_route_offsets, point_on_polyline
 from nf_metro.layout.routing.corners import (
     corner_arc_controls,
-    corner_from_arc,
+    cubic_point,
     curve_tangents,
     resolve_curve_radii,
 )
@@ -41,7 +37,10 @@ from nf_metro.render.constants import (
     MIN_ANIMATION_DURATION,
 )
 from nf_metro.render.ns import ns
-from nf_metro.render.path_geometry import materialize_source_turnout
+from nf_metro.render.path_geometry import (
+    iter_path_commands,
+    materialize_source_turnout_paths,
+)
 from nf_metro.render.style import Theme
 
 # A dot whose travel fraction is within this of its whole lifetime gets a plain
@@ -196,6 +195,8 @@ def render_animation(
     curve_radius: float = ANIMATION_CURVE_RADIUS,
     *,
     frame_slot: bool = False,
+    route_polylines: Sequence[Sequence[tuple[float, float]]] | None = None,
+    route_curve_radii: Sequence[Sequence[float] | None] | None = None,
 ) -> None:
     """Add animated dots traveling along each metro line.
 
@@ -223,7 +224,13 @@ def render_animation(
         return
 
     timeline = build_animation_timeline(
-        graph, routes, station_offsets, theme, curve_radius
+        graph,
+        routes,
+        station_offsets,
+        theme,
+        curve_radius,
+        route_polylines=route_polylines,
+        route_curve_radii=route_curve_radii,
     )
     ball_prefix = _ball_prefix(theme)
     keyframes: dict[str, str] = {}
@@ -287,9 +294,24 @@ class _LineRoutes:
 
     line_id: str
     plan: LineWaves
-    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]]
-    line_polylines: list[list[tuple[float, float]]]
-    line_turnouts: tuple[tuple[tuple[float, float], SourceTurnout], ...]
+    route_tracks: dict[tuple[str, str, str], _Track]
+    line_tracks: list[_Track]
+
+
+class _Track(NamedTuple):
+    """Waypoints a dot passes and the drawn corner radius at each of them.
+
+    The radius is 0 at the ends, and wherever two separately drawn routes
+    meet, since neither route's stroke rounds that vertex.
+    """
+
+    points: list[tuple[float, float]]
+    radii: list[float]
+
+
+def _join_tracks(a: _Track, b: _Track) -> _Track:
+    """*a* continued by *b*, which starts where *a* ends."""
+    return _Track(a.points + b.points[1:], a.radii[:-1] + [0.0] + b.radii[1:])
 
 
 def build_animation_timeline(
@@ -298,8 +320,16 @@ def build_animation_timeline(
     station_offsets: dict[tuple[str, str], float],
     theme: Theme,
     curve_radius: float = ANIMATION_CURVE_RADIUS,
+    *,
+    route_polylines: Sequence[Sequence[tuple[float, float]]] | None = None,
+    route_curve_radii: Sequence[Sequence[float] | None] | None = None,
 ) -> AnimationTimeline:
     """Build the dots, their departures and the shared loop for *graph*.
+
+    Dots ride the drawn strokes: *route_polylines* and *route_curve_radii* are
+    each route's drawn waypoints and corner radii, aligned with *routes*, as
+    the static render materializes them. Left out, they are materialized here
+    the same way.
 
     Every dot is visible for one cycle (the longest route's at-speed travel
     time): it travels at the theme's speed, holds at its terminus, then is
@@ -309,27 +339,26 @@ def build_animation_timeline(
     whole rounds of waves, departures spread evenly over the loop, so the loop
     seam is exact.
     """
-    lines = _plan_lines(graph, routes, station_offsets)
-    geometry: dict[tuple[str, tuple[tuple[str, str], ...]], list[str]] = {}
+    if route_polylines is None or route_curve_radii is None:
+        route_polylines, route_curve_radii, _ = materialize_source_turnout_paths(
+            routes,
+            [apply_route_offsets(route, station_offsets) for route in routes],
+            default_radius=curve_radius,
+        )
+    lines = _plan_lines(graph, routes, route_polylines, route_curve_radii, curve_radius)
+    geometry: dict[tuple[str, tuple[tuple[str, str], ...]], list[_MotionPath]] = {}
 
-    def pieces(line: _LineRoutes, route: Route) -> list[str]:
+    def pieces(line: _LineRoutes, route: Route) -> list[_MotionPath]:
         key = (line.line_id, tuple((e.source, e.target) for e in route))
         if key not in geometry:
-            geometry[key] = _route_pieces(line, route, curve_radius)
+            geometry[key] = _route_pieces(line, route)
         return geometry[key]
 
-    durations: dict[str, float] = {}
-
-    def travel_time(d_attr: str) -> float:
-        if d_attr not in durations:
-            durations[d_attr] = max(
-                _compute_path_length(d_attr) / theme.animation_speed,
-                MIN_ANIMATION_DURATION,
-            )
-        return durations[d_attr]
+    def travel_time(piece: _MotionPath) -> float:
+        return max(piece.length / theme.animation_speed, MIN_ANIMATION_DURATION)
 
     def route_time(line: _LineRoutes, route: Route) -> float:
-        return sum(travel_time(d) for d in pieces(line, route))
+        return sum(travel_time(piece) for piece in pieces(line, route))
 
     balls = max(theme.animation_balls_per_line, 0)
     longest = max(
@@ -380,7 +409,7 @@ def build_animation_timeline(
                 _route_dots(
                     dots,
                     line.line_id,
-                    [(d, travel_time(d)) for d in pieces(line, route)],
+                    [(p.d_attr, travel_time(p)) for p in pieces(line, route)],
                     departure,
                     longest,
                     loop,
@@ -429,13 +458,25 @@ def _route_dots(
 def _plan_lines(
     graph: MetroGraph,
     routes: list[RoutedPath],
-    station_offsets: dict[tuple[str, str], float],
+    route_polylines: Sequence[Sequence[tuple[float, float]]],
+    route_curve_radii: Sequence[Sequence[float] | None],
+    curve_radius: float,
 ) -> list[_LineRoutes]:
-    """Plan the waves of every animated line and gather its route geometry."""
-    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]] = {}
-    for route in routes:
-        key = (route.edge.source, route.edge.target, route.line_id)
-        route_polylines[key] = apply_route_offsets(route, station_offsets)
+    """Plan the waves of every animated line and gather its drawn route geometry."""
+    route_tracks: dict[tuple[str, str, str], _Track] = {}
+    for route, polyline, radii in zip(
+        routes, route_polylines, route_curve_radii, strict=True
+    ):
+        points = list(polyline)
+        resolved = resolve_curve_radii(
+            points,
+            None if radii is None else list(radii),
+            default_radius=curve_radius,
+        )
+        ends = [0.0] * min(len(points), 2)
+        route_tracks[route.edge.source, route.edge.target, route.line_id] = _Track(
+            points, ends[:1] + resolved + ends[1:]
+        )
 
     edges_by_line: dict[str, list[Edge]] = {}
     for edge in graph.edges:
@@ -452,59 +493,28 @@ def _plan_lines(
             _LineRoutes(
                 line_id=line_id,
                 plan=plan,
-                route_polylines=route_polylines,
-                line_polylines=[
-                    pts for key, pts in route_polylines.items() if key[2] == line_id
+                route_tracks=route_tracks,
+                line_tracks=[
+                    track for key, track in route_tracks.items() if key[2] == line_id
                 ],
-                line_turnouts=tuple(
-                    (
-                        route_polylines[
-                            (route.edge.source, route.edge.target, route.line_id)
-                        ][0],
-                        route.source_turnout,
-                    )
-                    for route in routes
-                    if route.line_id == line_id and route.source_turnout is not None
-                ),
             )
         )
     return lines
 
 
-def _route_pieces(line: _LineRoutes, route: Route, curve_radius: float) -> list[str]:
+class _MotionPath(NamedTuple):
+    """A dot's drawn path and the length its travel time is measured by."""
+
+    d_attr: str
+    length: float
+
+
+def _route_pieces(line: _LineRoutes, route: Route) -> list[_MotionPath]:
     """Return the motion paths of one route: one per contiguous chunk of it."""
-    pieces: list[str] = []
-    for chunk in _chain_edge_points(
-        list(route), line.route_polylines, line.line_polylines
-    ):
-        if len(chunk) < 2:
-            continue
-        radii = None
-        for corner, turnout in line.line_turnouts:
-            corner_index = next(
-                (
-                    index
-                    for index in range(1, len(chunk) - 1)
-                    if _points_match(chunk[index], corner)
-                    and segment_direction(chunk[index - 1], chunk[index])
-                    is turnout.incoming_direction
-                    and segment_direction(chunk[index], chunk[index + 1])
-                    is turnout.outgoing_direction
-                ),
-                None,
-            )
-            if corner_index is None:
-                continue
-            chunk, radii, _shift = materialize_source_turnout(
-                chunk,
-                radii,
-                turnout,
-                corner_index=corner_index,
-                default_radius=curve_radius,
-            )
-        d_attr = _points_to_svg_path(chunk, curve_radius, route_curve_radii=radii)
-        if d_attr:
-            pieces.append(d_attr)
+    pieces: list[_MotionPath] = []
+    for chunk in _chain_edge_tracks(list(route), line.route_tracks, line.line_tracks):
+        if len(chunk.points) >= 2:
+            pieces.append(_motion_path(chunk))
     return pieces
 
 
@@ -513,11 +523,9 @@ def _flatten_path(
 ) -> tuple[tuple[tuple[float, float], ...], tuple[float, ...]]:
     """Flatten an M/L/C path to a polyline and its cumulative arc lengths.
 
-    :func:`_compute_path_length` stays the authority on a track's *duration*
-    (changing it would retime every animated map); a sampled position needs
-    the curve walked rather than approximated by its chord.
+    A sampled position needs the curve walked rather than approximated by its
+    chord.
     """
-    tokens = re.findall(r"[MLC]|[-+]?\d*\.?\d+", d_attr)
     points: list[tuple[float, float]] = []
 
     def push(point: tuple[float, float]) -> None:
@@ -526,41 +534,16 @@ def _flatten_path(
         if not points or points[-1] != point:
             points.append(point)
 
-    cx, cy = 0.0, 0.0
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if token == "M":
-            cx, cy = float(tokens[i + 1]), float(tokens[i + 2])
-            push((cx, cy))
-            i += 3
-        elif token == "L":
-            cx, cy = float(tokens[i + 1]), float(tokens[i + 2])
-            push((cx, cy))
-            i += 3
-        elif token == "C":
-            c1 = (float(tokens[i + 1]), float(tokens[i + 2]))
-            c2 = (float(tokens[i + 3]), float(tokens[i + 4]))
-            end = (float(tokens[i + 5]), float(tokens[i + 6]))
-            for step in range(1, _CURVE_FLATTEN_STEPS + 1):
-                t = step / _CURVE_FLATTEN_STEPS
-                u = 1.0 - t
-                push(
-                    (
-                        u**3 * cx
-                        + 3 * u * u * t * c1[0]
-                        + 3 * u * t * t * c2[0]
-                        + t**3 * end[0],
-                        u**3 * cy
-                        + 3 * u * u * t * c1[1]
-                        + 3 * u * t * t * c2[1]
-                        + t**3 * end[1],
-                    )
-                )
-            cx, cy = end
-            i += 7
+    pen = (0.0, 0.0)
+    for command, nums in iter_path_commands(d_attr):
+        if command in ("M", "L"):
+            pen = (nums[0], nums[1])
+            push(pen)
         else:
-            i += 1
+            c1, c2, end = (nums[0], nums[1]), (nums[2], nums[3]), (nums[4], nums[5])
+            for step in range(1, _CURVE_FLATTEN_STEPS + 1):
+                push(cubic_point(pen, c1, c2, end, step / _CURVE_FLATTEN_STEPS))
+            pen = end
 
     if not points:
         points.append((0.0, 0.0))
@@ -618,12 +601,12 @@ def _visibility_keyframes(
     return name
 
 
-def _chain_edge_points(
+def _chain_edge_tracks(
     edges: list[Edge],
-    route_polylines: dict[tuple[str, str, str], list[tuple[float, float]]],
-    line_polylines: list[list[tuple[float, float]]],
-) -> list[list[tuple[float, float]]]:
-    """Chain edge route polylines into contiguous waypoint chunks.
+    route_tracks: dict[tuple[str, str, str], _Track],
+    line_tracks: list[_Track],
+) -> list[_Track]:
+    """Chain edge route tracks into contiguous chunks.
 
     When consecutive edges' route endpoints don't coincide -- a
     merge-junction branch route terminates on the trunk bundle rather
@@ -633,55 +616,56 @@ def _chain_edge_points(
     The bridge may consume the next edge as well, since the stub from
     merge junction to entry port is often already covered by the trunk.
     """
-    chunks: list[list[tuple[float, float]]] = []
-    current: list[tuple[float, float]] = []
+    chunks: list[_Track] = []
+    current: _Track | None = None
+
+    def follow(track: _Track) -> _Track | None:
+        """*track* appended to ``current`` directly or over a bridge."""
+        assert current is not None
+        if _points_match(current.points[-1], track.points[0]):
+            return _join_tracks(current, track)
+        if len(current.points) >= 2 and point_on_polyline(
+            track.points[0], current.points[-2:], EDGE_CONNECT_TOLERANCE
+        ):
+            # A source turnout's curve leaves the incoming route before that
+            # route's drawn end, so the dot turns off there.
+            trimmed = _Track(current.points[:-1] + [track.points[0]], current.radii)
+            return _join_tracks(trimmed, track)
+        bridge = _find_bridge(current.points[-1], track.points[0], line_tracks)
+        if bridge is None:
+            return None
+        return _join_tracks(_join_tracks(current, bridge), track)
 
     i = 0
     while i < len(edges):
         edge = edges[i]
-        pts = route_polylines.get((edge.source, edge.target, edge.line_id))
-        if not pts:
+        track = route_tracks.get((edge.source, edge.target, edge.line_id))
+        if not track or not track.points:
             i += 1
             continue
-
-        if not current:
-            current = list(pts)
+        if current is None:
+            current = track
             i += 1
             continue
-
-        if _points_match(current[-1], pts[0]):
-            current.extend(pts[1:])
+        joined = follow(track)
+        if joined is not None:
+            current = joined
             i += 1
             continue
-
-        bridge = _find_bridge(current[-1], pts[0], line_polylines)
-        if bridge is not None:
-            current.extend(bridge[1:])
-            current.extend(pts[1:])
-            i += 1
-            continue
-
         # Try skipping a stub edge whose geometry the trunk already covered.
         if i + 1 < len(edges):
             n = edges[i + 1]
-            next_pts = route_polylines.get((n.source, n.target, n.line_id))
-            if next_pts:
-                if _points_match(current[-1], next_pts[0]):
-                    current.extend(next_pts[1:])
-                    i += 2
-                    continue
-                bridge = _find_bridge(current[-1], next_pts[0], line_polylines)
-                if bridge is not None:
-                    current.extend(bridge[1:])
-                    current.extend(next_pts[1:])
-                    i += 2
-                    continue
-
+            after = route_tracks.get((n.source, n.target, n.line_id))
+            joined = follow(after) if after and after.points else None
+            if joined is not None:
+                current = joined
+                i += 2
+                continue
         chunks.append(current)
-        current = list(pts)
+        current = track
         i += 1
 
-    if current:
+    if current is not None:
         chunks.append(current)
     return chunks
 
@@ -696,11 +680,12 @@ def _points_match(a: tuple[float, float], b: tuple[float, float]) -> bool:
 def _find_bridge(
     from_pt: tuple[float, float],
     to_pt: tuple[float, float],
-    polylines: list[list[tuple[float, float]]],
+    tracks: list[_Track],
     tol: float = 2.0,
-) -> list[tuple[float, float]] | None:
-    """Return a sub-polyline from from_pt to to_pt along a sibling route."""
-    for pts in polylines:
+) -> _Track | None:
+    """Return a sub-track from from_pt to to_pt along a sibling route."""
+    for track in tracks:
+        pts = track.points
         from_loc = point_on_polyline(from_pt, pts, tol)
         if from_loc is None:
             continue
@@ -711,17 +696,51 @@ def _find_bridge(
         to_idx, to_t = to_loc
         if to_idx < from_idx or (to_idx == from_idx and to_t < from_t):
             continue
-        bridge: list[tuple[float, float]] = [from_pt]
-        for j in range(from_idx + 1, to_idx + 1):
-            bridge.append(pts[j])
-        bridge.append(to_pt)
-        cleaned: list[tuple[float, float]] = [bridge[0]]
-        for p in bridge[1:]:
-            if not _points_match(cleaned[-1], p):
-                cleaned.append(p)
+        bridge = [(from_pt, 0.0)]
+        bridge += [(pts[j], track.radii[j]) for j in range(from_idx + 1, to_idx + 1)]
+        bridge.append((to_pt, 0.0))
+        cleaned = [bridge[0]]
+        for point, radius in bridge[1:]:
+            if not _points_match(cleaned[-1][0], point):
+                cleaned.append((point, radius))
         if len(cleaned) >= 2:
-            return cleaned
+            return _Track(
+                [point for point, _ in cleaned],
+                [0.0, *(radius for _, radius in cleaned[1:-1]), 0.0],
+            )
     return None
+
+
+def _motion_path(track: _Track) -> _MotionPath:
+    """The ``d`` a dot follows along *track*, rounding each corner as the
+    static render draws it, and the length its travel is timed by.
+
+    A rounded corner is timed as the mean of its chord and its two tangent
+    arms, measured on the unrounded geometry.
+    """
+    pts = track.points
+    parts = [f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"]
+    length = 0.0
+    pen = pts[0]
+    for tan in curve_tangents(pts, track.radii[1:-1]):
+        if tan.curved and tan.before != tan.after:
+            c1, c2 = corner_arc_controls(tan.before, tan.corner, tan.after)
+            parts.append(
+                f"L {tan.before[0]:.2f} {tan.before[1]:.2f} "
+                f"C {c1[0]:.2f} {c1[1]:.2f} {c2[0]:.2f} {c2[1]:.2f} "
+                f"{tan.after[0]:.2f} {tan.after[1]:.2f}"
+            )
+            arms = math.dist(tan.before, tan.corner) + math.dist(tan.corner, tan.after)
+            length += math.dist(pen, tan.before)
+            length += (math.dist(tan.before, tan.after) + arms) / 2
+            pen = tan.after
+        else:
+            parts.append(f"L {tan.corner[0]:.2f} {tan.corner[1]:.2f}")
+            length += math.dist(pen, tan.corner)
+            pen = tan.corner
+    parts.append(f"L {pts[-1][0]:.2f} {pts[-1][1]:.2f}")
+    length += math.dist(pen, pts[-1])
+    return _MotionPath(" ".join(parts), length)
 
 
 def _points_to_svg_path(
@@ -729,76 +748,9 @@ def _points_to_svg_path(
     curve_radius: float = ANIMATION_CURVE_RADIUS,
     route_curve_radii: list[float] | None = None,
 ) -> str:
-    """Convert a list of waypoints to an SVG path 'd' attribute.
-
-    Shares ``resolve_curve_radii`` and ``curve_tangents`` with the static SVG
-    renderer so animation corners round identically to the drawn map.
-    """
+    """The motion path ``d`` along *pts*, cornered as a drawn route with the
+    given radii is."""
     if len(pts) < 2:
         return ""
-
-    if len(pts) == 2:
-        return f"M {pts[0][0]:.2f} {pts[0][1]:.2f} L {pts[1][0]:.2f} {pts[1][1]:.2f}"
-
-    parts = [f"M {pts[0][0]:.2f} {pts[0][1]:.2f}"]
     resolved = resolve_curve_radii(pts, route_curve_radii, default_radius=curve_radius)
-
-    for tan in curve_tangents(pts, resolved):
-        if tan.curved:
-            c1, c2 = corner_arc_controls(tan.before, tan.corner, tan.after)
-            parts.append(
-                f"L {tan.before[0]:.2f} {tan.before[1]:.2f} "
-                f"C {c1[0]:.2f} {c1[1]:.2f} {c2[0]:.2f} {c2[1]:.2f} "
-                f"{tan.after[0]:.2f} {tan.after[1]:.2f}"
-            )
-        else:
-            parts.append(f"L {tan.corner[0]:.2f} {tan.corner[1]:.2f}")
-
-    parts.append(f"L {pts[-1][0]:.2f} {pts[-1][1]:.2f}")
-
-    return " ".join(parts)
-
-
-def _compute_path_length(d_attr: str) -> float:
-    """Approximate the length of an SVG path from its commands.
-
-    Parses M, L, and C commands and sums segment lengths. A C corner is
-    measured as the mean of its chord and the two tangent arms through the
-    corner vertex its tangents meet at, so a track's duration depends only on
-    its waypoints and radii.
-    """
-    # Extract all numbers from the path
-    tokens = re.findall(r"[MLC]|[-+]?\d*\.?\d+", d_attr)
-
-    total = 0.0
-    cx, cy = 0.0, 0.0  # current position
-    i = 0
-
-    while i < len(tokens):
-        token = tokens[i]
-        if token == "M":
-            cx = float(tokens[i + 1])
-            cy = float(tokens[i + 2])
-            i += 3
-        elif token == "L":
-            nx = float(tokens[i + 1])
-            ny = float(tokens[i + 2])
-            total += math.hypot(nx - cx, ny - cy)
-            cx, cy = nx, ny
-            i += 3
-        elif token == "C":
-            c1 = (float(tokens[i + 1]), float(tokens[i + 2]))
-            c2 = (float(tokens[i + 3]), float(tokens[i + 4]))
-            ex = float(tokens[i + 5])
-            ey = float(tokens[i + 6])
-            qcx, qcy = corner_from_arc((cx, cy), c1, c2, (ex, ey))
-            leg1 = math.hypot(qcx - cx, qcy - cy)
-            leg2 = math.hypot(ex - qcx, ey - qcy)
-            chord = math.hypot(ex - cx, ey - cy)
-            total += (chord + leg1 + leg2) / 2
-            cx, cy = ex, ey
-            i += 7
-        else:
-            i += 1
-
-    return total
+    return _motion_path(_Track(list(pts), [0.0, *resolved, 0.0])).d_attr

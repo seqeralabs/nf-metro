@@ -2851,6 +2851,8 @@ def _emit_render_plan(
             station_offsets,
             theme,
             frame_slot=animation_frame_slot,
+            route_polylines=plan.route_polylines,
+            route_curve_radii=plan.route_curve_radii,
         )
 
     # Draw stations (all circles, skip ports)
