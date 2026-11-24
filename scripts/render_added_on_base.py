@@ -85,7 +85,7 @@ def main() -> None:
                 args.out_dir / name,
                 debug=info["debug"],
                 self_color_scheme=info["self_color_scheme"],
-                from_nextflow=info["from_nextflow"],
+                input_format=info["input_format"],
             )
             print(f"  {name}: renders on base code")
         except Exception as exc:  # noqa: BLE001 - the abort is the datum

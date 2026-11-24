@@ -33,7 +33,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -41,6 +41,7 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -92,12 +93,12 @@ try {
 const XML_PROLOG_RE = /^<\?xml.*?\?>\s*/;
 
 /**
- * Recursively collect .mmd files under `dir`.
+ * Collect files ending in `suffix` under `dir`, recursing by default.
  * @param {string} dir
  * @param {boolean} recursive  When false, only top-level files are returned.
  * @returns {string[]} Absolute paths.
  */
-function findMmdFiles(dir, recursive = true) {
+function findFiles(dir, recursive = true, suffix = ".mmd") {
   const results = [];
   let entries;
   try {
@@ -106,20 +107,48 @@ function findMmdFiles(dir, recursive = true) {
     return results;
   }
   for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith(".mmd")) {
+    if (entry.isFile() && entry.name.endsWith(suffix)) {
       results.push(join(dir, entry.name));
     } else if (recursive && entry.isDirectory()) {
-      results.push(...findMmdFiles(join(dir, entry.name), true));
+      results.push(...findFiles(join(dir, entry.name), true, suffix));
     }
   }
   return results;
 }
 
 /**
+ * DAG formats `nf-metro render` converts on the way in, keyed by the
+ * `inputFormat` the render helpers take. `letter` joins the cache mode
+ * string; `ext` is the source extension the Vite plugin loads; `lang` is the
+ * source's highlighting language; `lines` is the `nf-metro convert --lines`
+ * mode the format uses by default; `fixtures` lists the directory under
+ * tests/fixtures/ and the suffix whose files the build pre-warms.
+ */
+export const INPUT_FORMATS = {
+  nextflow: {
+    letter: "n",
+    flag: "--from-nextflow",
+    ext: ".mmd",
+    lang: "metro",
+    lines: "sections",
+    fixtures: { dir: "nextflow", suffix: ".mmd", recursive: true },
+  },
+  snakemake: {
+    letter: "s",
+    flag: "--from-snakemake",
+    ext: ".dot",
+    lang: "dot",
+    lines: "graph",
+    fixtures: { dir: "snakemake", suffix: ".rulegraph.dot", recursive: false },
+  },
+};
+
+/**
  * Compute the cache key for a given (mode, source) pair.
  * Must stay in sync with the hash in renderMetroFile.
  * @param {string} source  Raw .mmd source text.
- * @param {string} mode    Render mode string: "", "d", "n", "c" (chrome-less), combinations thereof.
+ * @param {string} mode    Render mode string: "", "d" (debug), "n"/"s" (Nextflow/Snakemake
+ *   input), "G"/"S" (graph/section lines), "c" (chrome-less), "a" (animate), combinations thereof.
  * @returns {string} 16-character hex hash.
  */
 function cacheHash(source, mode) {
@@ -189,7 +218,7 @@ function prewarmMetroCache() {
     return;
   }
 
-  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
+  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, from_snakemake:boolean, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
   const jobs = [];
 
   function addJob(file, mode) {
@@ -204,6 +233,7 @@ function prewarmMetroCache() {
         output: cacheFile,
         debug: mode.includes("d"),
         from_nextflow: mode.includes("n"),
+        from_snakemake: mode.includes("s"),
         no_self_color_scheme: true,
         no_chrome_css: mode.includes("c"),
         layout_options: layoutOptions,
@@ -214,7 +244,7 @@ function prewarmMetroCache() {
   // examples/**/*.mmd → plain; examples/ and examples/guide/ → also debug, animate
   const examplesDir = join(REPO_ROOT, "examples");
   const examplesGuideDir = join(examplesDir, "guide");
-  for (const file of findMmdFiles(examplesDir, true)) {
+  for (const file of findFiles(examplesDir, true)) {
     addJob(file, "");
     if (dirname(file) === examplesDir || dirname(file) === examplesGuideDir) {
       addJob(file, "d");
@@ -224,13 +254,15 @@ function prewarmMetroCache() {
 
   // tests/fixtures/*.mmd (top-level only) → plain
   const fixturesDir = join(REPO_ROOT, "tests", "fixtures");
-  for (const file of findMmdFiles(fixturesDir, false)) {
+  for (const file of findFiles(fixturesDir, false)) {
     addJob(file, "");
   }
 
-  // tests/fixtures/nextflow/**/*.mmd → nextflow
-  for (const file of findMmdFiles(join(fixturesDir, "nextflow"), true)) {
-    addJob(file, "n");
+  // DAG-export fixtures → converted with their format's flag
+  for (const { letter, fixtures } of Object.values(INPUT_FORMATS)) {
+    for (const file of findFiles(join(fixturesDir, fixtures.dir), fixtures.recursive, fixtures.suffix)) {
+      addJob(file, letter);
+    }
   }
 
   // OG image sources → chrome-less, for OG image rasterization
@@ -268,20 +300,24 @@ function prewarmMetroCache() {
 /**
  * Render a committed `.mmd` file to inline SVG markup.
  * @param {string} file  Absolute path to the source `.mmd`.
- * @param {{ debug?: boolean, fromNextflow?: boolean, chromeCss?: boolean, animate?: boolean }} [opts]
+ * @param {{ debug?: boolean, inputFormat?: keyof typeof INPUT_FORMATS | null, lines?: "graph" | "sections" | null, chromeCss?: boolean, animate?: boolean }} [opts]
  *   `chromeCss: false` bakes concrete colours instead of the `--nfm-*` custom
  *   properties `<Metro>` relies on for live host recoloring - use this for
  *   standalone raster export (e.g. OG images), never for inline embeds.
  *   `animate: true` adds the `--animate` balls (still plain SVG; their motion
  *   is CSS, not baked frames - see `renderMetroBinary` for a looping export).
+ *   `lines` (with `inputFormat`) converts with `nf-metro convert --lines` first,
+ *   then renders the converted map.
  * @returns {string} inline `<svg>` markup
  */
 export function renderMetroFile(
   file,
-  { debug = false, fromNextflow = false, chromeCss = true, animate = false } = {},
+  { debug = false, inputFormat = null, lines = null, chromeCss = true, animate = false } = {},
 ) {
   const source = readFileSync(file, "utf-8");
-  const mode = `${debug ? "d" : ""}${fromNextflow ? "n" : ""}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
+  const converter = inputFormat ? INPUT_FORMATS[inputFormat] : null;
+  const linesLetter = { graph: "G", sections: "S" }[lines] ?? "";
+  const mode = `${debug ? "d" : ""}${converter?.letter ?? ""}${linesLetter}${chromeCss ? "" : "c"}${animate ? "a" : ""}`;
   const hash = cacheHash(source, mode);
   const cacheFile = join(CACHE_DIR, `${hash}.svg`);
 
@@ -292,42 +328,68 @@ export function renderMetroFile(
   }
 
   const tmpOutput = join(tmpdir(), `metro-${hash}.svg`);
-  // Render the real file rather than a temp copy: the CLI resolves a map's
-  // asset paths against the directory the file itself sits in.
-  const args = [
-    "render",
-    file,
-    "-o",
-    tmpOutput,
-    "--no-self-color-scheme",
-    "--no-manifest",
-  ];
-  if (debug) args.push("--debug");
-  if (fromNextflow) args.push("--from-nextflow");
-  if (!chromeCss) args.push("--no-chrome-css");
-  if (animate) args.push("--animate");
-
+  const converted = lines ? join(tmpdir(), `metro-${hash}.mmd`) : null;
+  let svg;
   try {
-    execFileSync("nf-metro", args, {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (err) {
-    const stderr = err.stderr?.toString().trim() || "";
-    throw new Error(
-      `nf-metro render failed for ${file}:\n${stderr}\n\n` +
-        `Make sure 'nf-metro' is on PATH (activate the nf-core micromamba env).`,
-    );
-  }
-
-  const svg = readFileSync(tmpOutput, "utf-8").replace(XML_PROLOG_RE, "");
-  try {
-    unlinkSync(tmpOutput);
-  } catch {
-    /* best-effort cleanup */
+    if (converted) {
+      const stderr = runNfMetro(
+        ["convert", file, "--from", inputFormat, "--lines", lines, "-o", converted],
+        file,
+      );
+      // Matches the warning nf-metro convert prints when a map of several
+      // sections keeps its section lines, which would render the same picture
+      // as the format's default embed.
+      if (stderr.includes("only in a one-section map")) {
+        throw Object.assign(
+          new Error(`<Metro lines="${lines}">: ${file} has several sections:\n${stderr}`),
+          { onImport: true },
+        );
+      }
+    }
+    // Render the real file rather than a temp copy: the CLI resolves a map's
+    // asset paths against the directory the file itself sits in. A converted
+    // DAG has no assets, so its temp copy is safe to render.
+    const args = [
+      "render",
+      converted ?? file,
+      "-o",
+      tmpOutput,
+      "--no-self-color-scheme",
+      "--no-manifest",
+    ];
+    if (debug) args.push("--debug");
+    if (converter && !converted) args.push(converter.flag);
+    if (!chromeCss) args.push("--no-chrome-css");
+    if (animate) args.push("--animate");
+    runNfMetro(args, file);
+    svg = readFileSync(tmpOutput, "utf-8").replace(XML_PROLOG_RE, "");
+  } finally {
+    for (const tmp of [tmpOutput, converted]) if (tmp) rmSync(tmp, { force: true });
   }
   writeFileSync(cacheFile, svg, "utf-8");
   return svg;
+}
+
+/**
+ * Run the nf-metro CLI from the repo root, turning a failure into an error
+ * that names the source and quotes nf-metro's stderr.
+ * @param {string[]} args
+ * @param {string} file  The source the run is for, as named in the error.
+ * @returns {string} what nf-metro wrote to stderr (warnings) on success
+ */
+function runNfMetro(args, file) {
+  const { status, stderr, error } = spawnSync("nf-metro", args, {
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (error || status !== 0) {
+    throw new Error(
+      `nf-metro ${args[0]} failed for ${file}:\n${(stderr ?? "").trim()}\n\n` +
+        `Make sure 'nf-metro' is on PATH (activate the nf-core micromamba env).`,
+    );
+  }
+  return stderr ?? "";
 }
 
 /** Output formats `renderMetroBinary` can produce. */
@@ -344,7 +406,7 @@ export const BINARY_FORMATS = /** @type {const} */ (["png", "gif", "webp", "mp4"
  * @param {{
  *   format: "png"|"gif"|"webp"|"mp4"|"webm",
  *   debug?: boolean,
- *   fromNextflow?: boolean,
+ *   inputFormat?: keyof typeof INPUT_FORMATS | null,
  *   animate?: boolean,
  *   duration?: number,
  *   fps?: number,
@@ -358,7 +420,7 @@ export function renderMetroBinary(file, opts) {
   const {
     format,
     debug = false,
-    fromNextflow = false,
+    inputFormat = null,
     animate = false,
     duration,
     fps,
@@ -366,11 +428,12 @@ export function renderMetroBinary(file, opts) {
     rasterWidth,
   } = opts;
   const source = readFileSync(file, "utf-8");
+  const converter = inputFormat ? INPUT_FORMATS[inputFormat] : null;
   const key = [
     NF_METRO_VERSION,
     format,
     debug ? "d" : "",
-    fromNextflow ? "n" : "",
+    converter?.letter ?? "",
     animate ? "a" : "",
     duration ?? "",
     fps ?? "",
@@ -396,25 +459,14 @@ export function renderMetroBinary(file, opts) {
       "--no-manifest",
     ];
     if (debug) args.push("--debug");
-    if (fromNextflow) args.push("--from-nextflow");
+    if (converter) args.push(converter.flag);
     if (animate) args.push("--animate");
     if (duration != null) args.push("--duration", String(duration));
     if (fps != null) args.push("--fps", String(fps));
     if (scale != null) args.push("--scale", String(scale));
     if (rasterWidth != null) args.push("--raster-width", String(rasterWidth));
 
-    try {
-      execFileSync("nf-metro", args, {
-        cwd: REPO_ROOT,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (err) {
-      const stderr = err.stderr?.toString().trim() || "";
-      throw new Error(
-        `nf-metro render failed for ${file} (format=${format}):\n${stderr}\n\n` +
-          `Make sure 'nf-metro' is on PATH (activate the nf-core micromamba env).`,
-      );
-    }
+    runNfMetro(args, `${file} (format=${format})`);
   }
 
   return { path: `_generated/metro/${fileName}`, bytes: statSync(outPath).size };
@@ -429,14 +481,24 @@ export function metroVitePlugin() {
     },
     load(id) {
       const [file, query = ""] = id.split("?");
-      if (!file.endsWith(".mmd")) return;
       const params = new URLSearchParams(query);
       if (!params.has("metro")) return;
-      const svg = renderMetroFile(file, {
-        debug: params.has("debug"),
-        animate: params.has("animate"),
-        fromNextflow: params.has("nextflow"),
-      });
+      const inputFormat = Object.keys(INPUT_FORMATS).find((f) => params.has(f)) ?? null;
+      if (!file.endsWith(inputFormat ? INPUT_FORMATS[inputFormat].ext : ".mmd")) return;
+      let svg;
+      try {
+        svg = renderMetroFile(file, {
+          debug: params.has("debug"),
+          animate: params.has("animate"),
+          inputFormat,
+          lines: params.get("lines"),
+        });
+      } catch (err) {
+        // The build loads every file a glob matches, embedded or not, so a
+        // map that cannot take its lines mode fails only when a page imports it.
+        if (!err.onImport) throw err;
+        return { code: `throw new Error(${JSON.stringify(err.message)});`, map: null };
+      }
       return { code: `export default ${JSON.stringify(svg)};`, map: null };
     },
   };

@@ -7,6 +7,7 @@ import dataclasses
 import json
 import math
 import os
+import random
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
@@ -32,6 +33,7 @@ from nf_metro.console import (
     print_banner,
     progress_bar,
 )
+from nf_metro.convert import INPUT_FORMATS, LINE_MODES, InputFormat, LineMode
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import (
     build_info,
@@ -649,6 +651,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
         "--output",
         "--format",
         "--from-nextflow",
+        "--from-snakemake",
         "--debug",
         "--reject-output-outside-source",
     ],
@@ -813,6 +816,15 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     help="Convert Nextflow -with-dag mermaid input before rendering.",
 )
 @click.option(
+    "--from-snakemake",
+    is_flag=True,
+    default=False,
+    help=(
+        "[bold]Experimental.[/] Convert Snakemake [code]--rulegraph[/] or "
+        "[code]--dag[/] output (DOT or mermaid-js) before rendering."
+    ),
+)
+@click.option(
     "--title",
     type=str,
     default=None,
@@ -899,6 +911,7 @@ def render(
     line_spread: str | None,
     legend: str | None,
     from_nextflow: bool,
+    from_snakemake: bool,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -930,6 +943,11 @@ def render(
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
+    input_format = _input_format_from_flags(
+        from_nextflow=from_nextflow, from_snakemake=from_snakemake
+    )
+    if input_format == "snakemake":
+        _echo_snakemake_quip()
 
     def _job_layout_opts(overrides: Mapping[str, object]) -> dict[str, object]:
         """The run's layout options with this output's own `animate` folded in.
@@ -970,7 +988,7 @@ def render(
             logo=logo,
             line_spread=line_spread,
             legend=legend,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             responsive=responsive,
             embed_font=embed_font,
@@ -1025,7 +1043,7 @@ def render(
                 text = source.read_text()
                 return _parse_source(
                     text,
-                    from_nextflow=from_nextflow,
+                    input_format=input_format,
                     title=title,
                     line_spread=line_spread,
                     layout_options=layout_opts,
@@ -1070,7 +1088,7 @@ def render(
                         if key not in graphs:
                             graphs[key] = _prepare_graph_for_render(
                                 source,
-                                from_nextflow=from_nextflow,
+                                input_format=input_format,
                                 title=title,
                                 line_spread=line_spread,
                                 logo=logo,
@@ -1167,6 +1185,38 @@ def _print_render_result(sources: list[Path], paths: list[Path]) -> None:
     echo_yaml("\n".join(to_yaml(document)))
 
 
+# A deliberate easter egg for Snakemake runs of the CLI. The Python API
+# prints nothing.
+SNAKEMAKE_QUIPS = (
+    "Convincing user that Nextflow is better than Snakemake...",
+    "Snakes on a train...",
+    "Converting rules into processes (old habits)...",
+    "Teaching the snake to ride the metro...",
+    "Politely not mentioning channels...",
+    "Checking whether this workflow has met nf-core yet...",
+    "Reticulating splines... wrong snake, sorry.",
+)
+
+
+def _echo_snakemake_quip() -> None:
+    console.print(f"[dim italic]{random.choice(SNAKEMAKE_QUIPS)}[/]")
+
+
+def _input_format_from_flags(
+    *, from_nextflow: bool, from_snakemake: bool
+) -> InputFormat | None:
+    """Map the mutually exclusive ``--from-*`` flags to an ``input_format``."""
+    if from_nextflow and from_snakemake:
+        raise click.UsageError(
+            "--from-nextflow and --from-snakemake cannot be combined."
+        )
+    if from_nextflow:
+        return "nextflow"
+    if from_snakemake:
+        return "snakemake"
+    return None
+
+
 def _render_one(
     input_file: Path,
     output: Path,
@@ -1182,7 +1232,7 @@ def _render_one(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    from_nextflow: bool,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -1226,7 +1276,7 @@ def _render_one(
                 logo=logo,
                 line_spread=line_spread,
                 legend=legend,
-                from_nextflow=from_nextflow,
+                input_format=input_format,
                 title=title,
                 responsive=responsive,
                 embed_font=embed_font,
@@ -1258,7 +1308,7 @@ def _render_one(
 def _prepare_graph_for_render(
     input_file: Path,
     *,
-    from_nextflow: bool,
+    input_format: InputFormat | None,
     title: str | None,
     line_spread: str | None,
     logo: Path | None,
@@ -1282,7 +1332,7 @@ def _prepare_graph_for_render(
     try:
         return prepare_graph(
             source,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             line_spread=line_spread,
             logo=str(logo) if logo is not None else None,
@@ -1311,7 +1361,7 @@ def _render_one_unsafe(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    from_nextflow: bool,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -1336,7 +1386,7 @@ def _render_one_unsafe(
     if graph is None:
         graph = _prepare_graph_for_render(
             input_file,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             line_spread=line_spread,
             logo=logo,
@@ -1583,7 +1633,10 @@ def render_many(manifest_file: Path) -> None:
                 logo=Path(str(logo_raw)) if logo_raw else None,
                 line_spread=_str_or_none("line_spread"),
                 legend=_str_or_none("legend"),
-                from_nextflow=bool(job.get("from_nextflow", False)),
+                input_format=_input_format_from_flags(
+                    from_nextflow=bool(job.get("from_nextflow", False)),
+                    from_snakemake=bool(job.get("from_snakemake", False)),
+                ),
                 title=_str_or_none("title"),
                 responsive=bool(job.get("responsive", False)),
                 embed_font=bool(job.get("embed_font", False)),
@@ -1621,35 +1674,64 @@ def render_many(manifest_file: Path) -> None:
     default=None,
     help="Pipeline title for the converted output.",
 )
+@click.option(
+    "--from",
+    "input_format",
+    type=click.Choice(INPUT_FORMATS),
+    default=None,
+    cls=_DescribedDefault,
+    default_text="detected from the input",
+    help="Workflow manager that wrote INPUT_FILE. Snakemake is experimental.",
+)
+@click.option(
+    "--lines",
+    type=click.Choice(LINE_MODES),
+    default=None,
+    cls=_DescribedDefault,
+    default_text="sections for Nextflow, graph for Snakemake",
+    help="How to draw metro lines: [code]graph[/] runs [code]main[/] along the "
+    "longest chain into the final step and gives each other chain its own "
+    "line (one-section maps only); [code]sections[/] builds lines from the "
+    "pipeline's sections.",
+)
 def convert(
     input_file: Path,
     output: Path | None,
     title: str | None,
+    input_format: InputFormat | None,
+    lines: LineMode | None,
 ) -> None:
-    """Convert a Nextflow [code]-with-dag[/] mermaid file to nf-metro format.
+    """Convert a workflow manager's DAG export to nf-metro format.
 
-    Takes a [code].mmd[/] file produced by
-    [code]nextflow -with-dag file.mmd[/]. The output can be rendered as-is or
-    hand-tuned first.
+    Takes a Nextflow [code]-with-dag[/] mermaid file, or (experimental) the
+    DOT or mermaid-js output of [code]snakemake --rulegraph[/] or
+    [code]--dag[/]. The output can be rendered as-is or hand-tuned first.
     """
     from nf_metro.convert import (
         FeedbackEdgesDroppedWarning,
-        convert_nextflow_dag,
-        is_nextflow_dag,
+        convert_dag,
+        detect_input_format,
     )
 
     text = input_file.read_text()
 
-    if not is_nextflow_dag(text):
+    input_format = input_format or detect_input_format(text)
+    if input_format is None:
         click.echo(
-            "Warning: input does not look like a Nextflow DAG "
-            "(expected 'flowchart TB' header)",
+            "Warning: could not recognise the input as a Nextflow or "
+            "Snakemake DAG; converting it as Nextflow. Pass --from to choose.",
             err=True,
         )
+        input_format = "nextflow"
+    if input_format == "snakemake":
+        _echo_snakemake_quip()
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        result = convert_nextflow_dag(text, title=title or "")
+        try:
+            result = convert_dag(text, input_format, title=title or "", lines=lines)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
 
     if caught:
         _echo_block("Warnings", [str(w.message) for w in caught])
@@ -1664,10 +1746,10 @@ def convert(
         click.echo(result, nl=False)
     else:
         output.write_text(result if result.endswith("\n") else result + "\n")
-        # Count sections and processes in the output
         sections = result.count("subgraph ")
-        processes = result.count("([")
-        summary = f"Converted {processes} processes, {sections} sections"
+        stations = result.count("([")
+        noun = "rules" if input_format == "snakemake" else "processes"
+        summary = f"Converted {stations} {noun}, {sections} sections"
         if dropped:
             plural = "" if dropped == 1 else "s"
             summary += f", {dropped} feedback connection{plural} removed"

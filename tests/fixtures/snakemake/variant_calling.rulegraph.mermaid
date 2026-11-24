@@ -1,0 +1,30 @@
+---
+title: DAG
+---
+flowchart TB
+	id0[all]
+	id1[multiqc]
+	id2[fastqc]
+	id3[bcftools_stats]
+	id4[gatk_haplotypecaller]
+	id5[bwa_mem]
+	id6[samtools_index]
+	id7[deepvariant]
+	style id0 fill:#D95757,stroke-width:2px,color:#333333
+	style id1 fill:#57D9D9,stroke-width:2px,color:#333333
+	style id2 fill:#57D957,stroke-width:2px,color:#333333
+	style id3 fill:#D99857,stroke-width:2px,color:#333333
+	style id4 fill:#57D998,stroke-width:2px,color:#333333
+	style id5 fill:#D9D957,stroke-width:2px,color:#333333
+	style id6 fill:#5798D9,stroke-width:2px,color:#333333
+	style id7 fill:#98D957,stroke-width:2px,color:#333333
+	id1 --> id0
+	id3 --> id1
+	id2 --> id1
+	id4 --> id3
+	id7 --> id3
+	id6 --> id4
+	id5 --> id4
+	id5 --> id6
+	id6 --> id7
+	id5 --> id7

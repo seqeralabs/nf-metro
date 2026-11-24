@@ -10,16 +10,18 @@ import pytest
 
 from nf_metro.convert import (
     FeedbackEdgesDroppedWarning,
-    _break_cycles,
-    _humanize_label,
-    _order_section_nodes,
-    _parse_nextflow_mermaid,
-    _reconnect_edges,
-    _sanitize_id,
-    _topological_order,
     convert_nextflow_dag,
     is_nextflow_dag,
 )
+from nf_metro.convert._core import (
+    _break_cycles,
+    _humanize_label,
+    _order_section_nodes,
+    _reconnect_edges,
+    _sanitize_id,
+    _topological_order,
+)
+from nf_metro.convert.nextflow import _parse_nextflow_mermaid
 
 FIXTURES = Path(__file__).parent / "fixtures" / "nextflow"
 
