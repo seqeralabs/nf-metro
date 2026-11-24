@@ -4,4 +4,4 @@
   entry: nf-metro render
   language: python
   files: \.mmd$
-  args: [--theme, default, --embed-font]
+  args: [--embed-font]
