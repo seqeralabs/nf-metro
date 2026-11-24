@@ -10,7 +10,7 @@ from __future__ import annotations
 
 __all__ = ["assign_tracks"]
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Iterable
 from math import ceil
 from statistics import median_low
@@ -321,8 +321,9 @@ def peel_lane_ends(
         far_sides = _far_sides(passed, tracks)
         if not far_sides or not _on_far_sides(tracks[node], far_sides):
             continue
-        joins, helpers = _run_joins(node, G)
-        offsets = [tracks[node] - tracks[c] for c in joins if c in tracks]
+        offsets = [
+            tracks[node] - tracks[c] for c in _run_joins(node, G)[0] if c in tracks
+        ]
         if offsets and (
             all(o > COORD_TOLERANCE_FINE for o in offsets)
             or all(o < -COORD_TOLERANCE_FINE for o in offsets)
@@ -330,7 +331,7 @@ def peel_lane_ends(
             pin = min(offsets, key=abs) * lane_sign
             for lid in graph.station_lines(node):
                 pins[lid].append(pin)
-                runs[lid] |= {node, *helpers} | bundle_reach(graph, lid, joins)
+                runs[lid] |= line_reach(graph, lid, (node,))
     agreed = {lid: agreed_lane_end(values) for lid, values in pins.items()}
     ends = {lid: pin for lid, pin in agreed.items() if pin is not None}
     exempt = {
@@ -347,22 +348,13 @@ def peel_lane_ends(
     return ends, exempt
 
 
-def bundle_reach(graph: MetroGraph, lid: str, starts: Iterable[str]) -> set[str]:
-    """Stations line *lid* reaches from *starts* while another line rides along.
-
-    Each step follows an edge of *lid* that another line's edge shares; *starts*
-    are included.
-    """
-    shared = Counter((edge.source, edge.target) for edge in graph.edges)
+def line_reach(graph: MetroGraph, lid: str, starts: Iterable[str]) -> set[str]:
+    """Stations line *lid* reaches from *starts* along its edges, *starts* included."""
     reach = set(starts)
     stack = list(reach)
     while stack:
         for edge in graph.edges_from(stack.pop()):
-            if (
-                edge.line_id == lid
-                and shared[edge.source, edge.target] > 1
-                and edge.target not in reach
-            ):
+            if edge.line_id == lid and edge.target not in reach:
                 reach.add(edge.target)
                 stack.append(edge.target)
     return reach
