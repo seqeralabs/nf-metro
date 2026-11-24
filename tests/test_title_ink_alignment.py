@@ -80,9 +80,9 @@ def _half_stroke(el: ET.Element) -> float:
 
 
 def _path_xs(d: str) -> list[float]:
-    """X coordinates of an absolute ``M``/``L``/``Q``/``Z`` path."""
+    """X coordinates of an absolute ``M``/``L``/``Q``/``C``/``Z`` path."""
     xs: list[float] = []
-    for command in re.findall(r"[MLQZ][^MLQZ]*", d):
+    for command in re.findall(r"[MLQCZ][^MLQCZ]*", d):
         numbers = [float(n) for n in _NUMBER.findall(command[1:])]
         xs.extend(numbers[0::2])
     return xs

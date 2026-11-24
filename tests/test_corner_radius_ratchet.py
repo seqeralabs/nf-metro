@@ -51,6 +51,8 @@ APPROVED_RADIUS_HELPERS = frozenset(
         "l_shape_radii",
         "concentric_corner_radius",
         "concentric_corner_radius_at",
+        "largest_concentric_reference",
+        "padded_curve_radii",
         "reference_anchored_radius",
         "resolve_curve_radii",
         "resolve_curve_radius_at",
@@ -88,9 +90,13 @@ class _Scope:
     def __init__(self, parent: "_Scope | None") -> None:
         self.parent = parent
         self.bindings: dict[str, list[ast.expr]] = {}
+        self.element_writes: dict[str, list[ast.expr]] = {}
 
     def bind(self, name: str, value: ast.expr) -> None:
         self.bindings.setdefault(name, []).append(value)
+
+    def write_element(self, name: str, value: ast.expr) -> None:
+        self.element_writes.setdefault(name, []).append(value)
 
     def lookup(self, name: str) -> list[ast.expr] | None:
         scope: _Scope | None = self
@@ -99,6 +105,14 @@ class _Scope:
                 return scope.bindings[name]
             scope = scope.parent
         return None
+
+    def lookup_element_writes(self, name: str) -> list[ast.expr]:
+        scope: _Scope | None = self
+        while scope is not None:
+            if name in scope.bindings:
+                return scope.element_writes.get(name, [])
+            scope = scope.parent
+        return []
 
 
 def _collect_assignments(scope: _Scope, body: list[ast.stmt]) -> None:
@@ -152,6 +166,8 @@ def _record_targets(scope: _Scope, node: ast.AST) -> None:
     for target in targets:
         if isinstance(target, ast.Name):
             scope.bind(target.id, value)
+        elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+            scope.write_element(target.value.id, value)
         elif isinstance(target, (ast.Tuple, ast.List)):
             for elt in target.elts:
                 if isinstance(elt, ast.Name):
@@ -199,6 +215,50 @@ def _resolves_to_helper(
     return False
 
 
+def _copies_route_radii(node: ast.expr) -> bool:
+    """True for ``list(<...>.curve_radii)`` or ``list(<...>.curve_radii or ())``:
+    a copy of radii a route already holds, each checked where it was written."""
+    if not (
+        isinstance(node, ast.Call)
+        and _called_name(node) in {"list", "tuple"}
+        and len(node.args) == 1
+    ):
+        return False
+    arg = node.args[0]
+    if isinstance(arg, ast.BoolOp) and isinstance(arg.op, ast.Or):
+        first, *rest = arg.values
+        if not all(isinstance(v, (ast.List, ast.Tuple)) and not v.elts for v in rest):
+            return False
+        arg = first
+    return isinstance(arg, ast.Attribute) and arg.attr == "curve_radii"
+
+
+def _radius_list_resolves(
+    node: ast.expr, scope: _Scope, seen_names: frozenset[str] = frozenset()
+) -> bool:
+    """True if a whole list assigned to ``curve_radii`` holds only helper radii.
+
+    A local list may start as a helper's list or a copy of a route's radii,
+    but every element written into it must itself resolve to a helper, and
+    extending it in place (``radii += [base] * n``) is raw padding.
+    """
+    if isinstance(node, ast.Constant) and node.value is None:
+        return True
+    if _copies_route_radii(node):
+        return True
+    if isinstance(node, ast.Name):
+        if node.id in seen_names:
+            return False
+        bindings = scope.lookup(node.id)
+        if not bindings:
+            return False
+        deeper = seen_names | {node.id}
+        return all(_radius_list_resolves(b, scope, deeper) for b in bindings) and all(
+            _resolves_to_helper(w, scope) for w in scope.lookup_element_writes(node.id)
+        )
+    return _resolves_to_helper(node, scope, seen_names)
+
+
 class _RadiusSlotFinder(ast.NodeVisitor):
     """Find every value feeding a ``curve_radii`` slot, paired with its scope."""
 
@@ -206,6 +266,8 @@ class _RadiusSlotFinder(ast.NodeVisitor):
         self.scope = _Scope(None)
         # (lineno, value_node, scope) for each radius slot.
         self.slots: list[tuple[int, ast.expr, _Scope]] = []
+        # (lineno, value_node, scope) for each whole-list ``x.curve_radii = ...``.
+        self.list_slots: list[tuple[int, ast.expr, _Scope]] = []
 
     def _enter(self, node: ast.AST) -> None:
         child = _Scope(self.scope)
@@ -227,10 +289,13 @@ class _RadiusSlotFinder(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        # ``rp.curve_radii[idx] = expr`` mutations.
+        # ``rp.curve_radii[idx] = expr`` mutations and ``rp.curve_radii = expr``
+        # whole-list assignments.
         for target in node.targets:
             if _is_curve_radii_slot(target):
                 self.slots.append((node.value.lineno, node.value, self.scope))
+            elif isinstance(target, ast.Attribute) and target.attr == "curve_radii":
+                self.list_slots.append((node.value.lineno, node.value, self.scope))
         self.generic_visit(node)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
@@ -242,17 +307,18 @@ class _RadiusSlotFinder(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def _find_radius_slots(path: Path) -> list[tuple[int, ast.expr, _Scope]]:
+def _find_radius_slots(path: Path) -> _RadiusSlotFinder:
     # Module-level assignments share the root scope.
     tree = ast.parse(path.read_text(), filename=str(path))
     finder = _RadiusSlotFinder()
     _collect_assignments(finder.scope, tree.body)
     finder.visit(tree)
-    return finder.slots
+    return finder
 
 
 def test_every_curve_radius_traces_to_a_corners_helper() -> None:
-    per_file = {path: _find_radius_slots(path) for path in ROUTING_PATHS}
+    finders = {path: _find_radius_slots(path) for path in ROUTING_PATHS}
+    per_file = {path: finder.slots for path, finder in finders.items()}
     total = sum(len(slots) for slots in per_file.values())
 
     # Guard against the finder silently matching nothing (e.g. modules moved).
@@ -270,6 +336,11 @@ def test_every_curve_radius_traces_to_a_corners_helper() -> None:
         for path, slots in per_file.items()
         for lineno, value, scope in slots
         if not _resolves_to_helper(value, scope)
+    ] + [
+        f"{path.name}:{lineno}"
+        for path, finder in finders.items()
+        for lineno, value, scope in finder.list_slots
+        if not _radius_list_resolves(value, scope)
     ]
     assert not violations, (
         "curve_radii values not traceable to a corners.py helper at "
@@ -359,6 +430,60 @@ _REJECTED = {
             return P(curve_radii=[min(ctx.curve_radius, half)])
     """,
 }
+
+
+_ACCEPTED_LISTS = {
+    "padded-then-helper-write": """
+        def f():
+            radii = padded_curve_radii(points, route.curve_radii, base)
+            radii[i] = reference_anchored_radius(shift, reference)
+            route.curve_radii = radii
+    """,
+    "copy-then-helper-write": """
+        def f():
+            radii = list(route.curve_radii or ())
+            radii[i] = concentric_corner_radius(a, b, dx, reference)
+            route.curve_radii = radii
+    """,
+}
+
+_REJECTED_LISTS = {
+    "inline-arithmetic-element": """
+        def f():
+            radii = padded_curve_radii(points, route.curve_radii, base)
+            radii[i] = reference + shift
+            route.curve_radii = radii
+    """,
+    "raw-padding": """
+        def f():
+            radii = list(route.curve_radii or [])
+            radii += [curve_radius] * missing
+            route.curve_radii = radii
+    """,
+    "raw-list-literal": """
+        def f():
+            route.curve_radii = [ctx.curve_radius, ctx.curve_radius]
+    """,
+}
+
+
+def _list_slot_resolves(source: str) -> bool:
+    tree = ast.parse(textwrap.dedent(source))
+    finder = _RadiusSlotFinder()
+    finder.visit(tree)
+    assert len(finder.list_slots) == 1, f"want one list, got {len(finder.list_slots)}"
+    _, value, scope = finder.list_slots[0]
+    return _radius_list_resolves(value, scope)
+
+
+@pytest.mark.parametrize("source", _ACCEPTED_LISTS.values(), ids=_ACCEPTED_LISTS.keys())
+def test_helper_derived_radius_lists_accepted(source: str) -> None:
+    assert _list_slot_resolves(source), "helper-derived list should be accepted"
+
+
+@pytest.mark.parametrize("source", _REJECTED_LISTS.values(), ids=_REJECTED_LISTS.keys())
+def test_raw_radius_lists_rejected(source: str) -> None:
+    assert not _list_slot_resolves(source), "raw radius list should be rejected"
 
 
 def _slot_resolves(source: str) -> bool:

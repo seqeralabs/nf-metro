@@ -14,13 +14,14 @@ import bisect
 import copy
 import hashlib
 import html
+import itertools
 import math
 import pickle
 import re
 import textwrap
 import warnings
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass, replace
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import Enum
 from typing import Any, Literal, NamedTuple, cast
 
@@ -111,7 +112,11 @@ from nf_metro.layout.routing import (
 )
 from nf_metro.layout.routing.convergences import ConvergenceInvariantError
 from nf_metro.layout.routing.corners import (
+    corner_arc_controls,
+    cubic_point,
+    cubic_tangent,
     curve_tangents,
+    flatten_cubic,
     resolve_curve_radii,
 )
 from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
@@ -2848,6 +2853,8 @@ def _emit_render_plan(
             station_offsets,
             theme,
             frame_slot=animation_frame_slot,
+            route_polylines=plan.route_polylines,
+            route_curve_radii=plan.route_curve_radii,
         )
 
     # Draw stations (all circles, skip ports)
@@ -3072,8 +3079,8 @@ def _leftmost_ink(
     attribution watermark and the debug overlay: section boxes and headers,
     line strokes, station markers, station labels, group captions, the caption
     and the legend.  A stroke reaches half its width past its path, and a
-    quadratic corner stays inside the hull of its control points, so a
-    polyline's vertices bound its curves.  Terminus icons are held inside their
+    rounded corner stays inside the triangle of its tangent points and vertex,
+    so a polyline's vertices bound its curves.  Terminus icons are held inside their
     section box by a layout guard, so the box covers them.
     """
     reach: list[float] = []
@@ -3574,8 +3581,8 @@ class _DrawnPiece(NamedTuple):
     """One piece of a route's stroke, in drawing order.
 
     A straight run has ``control`` None and lies on polyline leg ``leg``; a
-    corner is the quadratic from ``start`` through ``control`` (its vertex) to
-    ``end``, has no ``leg``, and carries ``curved`` from
+    corner is the circular arc from ``start`` to ``end`` tangent to the legs
+    meeting at ``control`` (its vertex), has no ``leg``, and carries ``curved`` from
     :class:`~nf_metro.layout.routing.corners.CornerTangent`.
     """
 
@@ -3584,6 +3591,12 @@ class _DrawnPiece(NamedTuple):
     control: tuple[float, float] | None = None
     curved: bool = True
     leg: int | None = None
+
+    @property
+    def handles(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        """The cubic control points a corner's arc is drawn with."""
+        assert self.control is not None
+        return corner_arc_controls(self.start, self.control, self.end)
 
 
 def _drawn_pieces(
@@ -3692,7 +3705,8 @@ def _render_edges(
                 if piece.control is None:
                     path.L(*piece.end)
                 elif piece.curved:
-                    path.Q(*piece.control, *piece.end)
+                    c1, c2 = piece.handles
+                    path.C(*c1, *c2, *piece.end)
             d.append(path)
 
 
@@ -3731,7 +3745,7 @@ def _chevron_stroke_width(theme: Theme) -> float:
     return max(theme.line_width * 0.5, 1.0)
 
 
-# Chords per quadratic corner when measuring its arc length; the chevron is
+# Chords per rounded corner when measuring its arc length; the chevron is
 # then placed on the exact curve, so this bounds only the spacing error.
 _CORNER_ARC_CHORDS = 32
 
@@ -3760,24 +3774,35 @@ class _RouteTrack:
     starts: list[float]
     gaps: list[tuple[float, float]]
     total: float
+    arcs: list[list[float]] = field(init=False)
+    reach: list[float] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.arcs = [[a for a, _ in profile] for profile in self.profiles]
+        self.reach = [
+            start + profile[-1][0] + _ARC_EPS
+            for start, profile in zip(self.starts, self.profiles, strict=True)
+        ]
 
     def at(self, arc: float) -> tuple[tuple[float, float], tuple[float, float]] | None:
         """Point and unit heading at *arc*; None at a corner apex with no tangent."""
-        for piece, profile, start in zip(
-            self.pieces, self.profiles, self.starts, strict=True
-        ):
-            length = profile[-1][0]
-            if length <= 0 or arc > start + length + _ARC_EPS:
-                continue
-            local = max(arc - start, 0.0)
-            arcs = [a for a, _ in profile]
-            k = min(max(bisect.bisect_left(arcs, local), 1), len(profile) - 1)
-            (arc0, t0), (arc1, t1) = profile[k - 1], profile[k]
-            t = t0 + (t1 - t0) * ((local - arc0) / (arc1 - arc0) if arc1 > arc0 else 0)
-            point, (dx, dy) = _piece_at(piece, t)
-            norm = math.hypot(dx, dy)
-            return (point, (dx / norm, dy / norm)) if norm else None
-        return None
+        index = bisect.bisect_left(self.reach, arc)
+        while index < len(self.pieces) and self.profiles[index][-1][0] <= 0:
+            index += 1
+        if index == len(self.pieces):
+            return None
+        piece, profile, arcs = (
+            self.pieces[index],
+            self.profiles[index],
+            self.arcs[index],
+        )
+        local = max(arc - self.starts[index], 0.0)
+        k = min(max(bisect.bisect_left(arcs, local), 1), len(profile) - 1)
+        (arc0, t0), (arc1, t1) = profile[k - 1], profile[k]
+        t = t0 + (t1 - t0) * ((local - arc0) / (arc1 - arc0) if arc1 > arc0 else 0)
+        point, (dx, dy) = _piece_at(piece, t)
+        norm = math.hypot(dx, dy)
+        return (point, (dx / norm, dy / norm)) if norm else None
 
 
 @dataclass
@@ -4145,7 +4170,7 @@ def _route_tracks(
                 route.edge.target,
                 pieces,
                 profiles,
-                [sum(lengths[:i]) for i in range(len(lengths))],
+                list(itertools.accumulate(lengths, initial=0.0))[:-1],
                 _gap_spans(pieces, profiles, breaks_by_route.get(index, ())),
                 sum(lengths),
             )
@@ -4291,13 +4316,12 @@ def _arc_profile(piece: _DrawnPiece) -> list[tuple[float, float]]:
     """``(arc length, curve parameter)`` stations from a piece's start to end."""
     if piece.control is None:
         return [(0.0, 0.0), (math.dist(piece.start, piece.end), 1.0)]
+    points = flatten_cubic(piece.start, *piece.handles, piece.end, _CORNER_ARC_CHORDS)
     profile = [(0.0, 0.0)]
-    prev = piece.start
-    for k in range(1, _CORNER_ARC_CHORDS + 1):
-        t = k / _CORNER_ARC_CHORDS
-        point, _ = _piece_at(piece, t)
-        profile.append((profile[-1][0] + math.dist(prev, point), t))
-        prev = point
+    for k, (prev, point) in enumerate(zip([piece.start, *points], points), start=1):
+        profile.append(
+            (profile[-1][0] + math.dist(prev, point), k / _CORNER_ARC_CHORDS)
+        )
     return profile
 
 
@@ -4308,13 +4332,11 @@ def _piece_at(
     (ax, ay), (bx, by) = piece.start, piece.end
     if piece.control is None:
         return (ax + (bx - ax) * t, ay + (by - ay) * t), (bx - ax, by - ay)
-    cx, cy = piece.control
-    s = 1.0 - t
-    point = (
-        s * s * ax + 2 * s * t * cx + t * t * bx,
-        s * s * ay + 2 * s * t * cy + t * t * by,
+    c1, c2 = piece.handles
+    return (
+        cubic_point(piece.start, c1, c2, piece.end, t),
+        cubic_tangent(piece.start, c1, c2, piece.end, t),
     )
-    return point, (s * (cx - ax) + t * (bx - cx), s * (cy - ay) + t * (by - cy))
 
 
 def _chevron_vertices(
@@ -4389,7 +4411,8 @@ def _render_bridged_edge(
     path.M(*pts[0])
     for piece in _drawn_pieces(pts, curve_radii, curve_radius):
         if piece.control is not None:
-            path.Q(*piece.control, *piece.end)
+            c1, c2 = piece.handles
+            path.C(*c1, *c2, *piece.end)
             continue
         for bk in _run_breaks(piece, breaks):
             path.L(*bk.cut_a)

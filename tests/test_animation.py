@@ -50,15 +50,15 @@ def _build(fixture: Path):
 
 
 _NUMBER = r"-?\d+(?:\.\d+)?"
-_TOKEN_RE = re.compile(rf"[MLQ]|{_NUMBER}")
+_TOKEN_RE = re.compile(rf"[MLC]|{_NUMBER}")
 
 
 def _parse_motion_path(d_attr: str) -> list[tuple[str, list[tuple[float, float]]]]:
     """Parse an SVG motion path 'd' attribute into segments.
 
     Returns a list of (command, points) where command is one of 'M', 'L',
-    'Q' and points is the segment's coordinate tuples.  The 'Q' segment
-    keeps the (control, end) pair.
+    'C' and points is the segment's coordinate tuples.  The 'C' segment
+    keeps its (control1, control2, end) triple.
     """
     tokens = _TOKEN_RE.findall(d_attr)
     out: list[tuple[str, list[tuple[float, float]]]] = []
@@ -70,13 +70,12 @@ def _parse_motion_path(d_attr: str) -> list[tuple[str, list[tuple[float, float]]
             y = float(tokens[i + 2])
             out.append((tok, [(x, y)]))
             i += 3
-        elif tok == "Q":
-            cx = float(tokens[i + 1])
-            cy = float(tokens[i + 2])
-            ex = float(tokens[i + 3])
-            ey = float(tokens[i + 4])
-            out.append(("Q", [(cx, cy), (ex, ey)]))
-            i += 5
+        elif tok == "C":
+            nums = [float(t) for t in tokens[i + 1 : i + 7]]
+            out.append(
+                ("C", [(nums[0], nums[1]), (nums[2], nums[3]), (nums[4], nums[5])])
+            )
+            i += 7
         else:
             i += 1
     return out
@@ -85,14 +84,12 @@ def _parse_motion_path(d_attr: str) -> list[tuple[str, list[tuple[float, float]]
 def _end_point(segment: tuple[str, list[tuple[float, float]]]) -> tuple[float, float]:
     """Return the on-curve endpoint of a parsed segment."""
     cmd, pts = segment
-    if cmd == "Q":
-        return pts[1]
-    return pts[0]
+    return pts[-1]
 
 
 @pytest.mark.parametrize("fixture", ANIMATION_FIXTURES, ids=ANIMATION_FIXTURE_IDS)
 def test_motion_path_segments_lie_on_rendered_geometry(fixture: Path):
-    """Every L/Q segment of every motion path must coincide with a
+    """Every L/C segment of every motion path must coincide with a
     rendered metro-line segment of the same line."""
     from nf_metro.layout.routing.common import point_on_polyline
     from nf_metro.render.svg import apply_route_offsets
@@ -136,16 +133,16 @@ def test_motion_path_segments_lie_on_rendered_geometry(fixture: Path):
             if cmd == "L":
                 if not _segment_covered(prev_end, end, line_id):
                     offences.append(f"L {prev_end} -> {end} on line {line_id!r}")
-            elif cmd == "Q":
-                # Curve smoothing at a station corner: accept if either the
-                # control leg or the chord lies on the rendered polyline.
+            elif cmd == "C":
+                # A rounded corner's first control point lies on its incoming
+                # leg: accept if that leg or the chord is on the polyline.
                 control = pts[0]
                 if not (
                     _segment_covered(prev_end, control, line_id)
                     or _segment_covered(prev_end, end, line_id)
                 ):
                     offences.append(
-                        f"Q {prev_end} -> {control} -> {end} on line {line_id!r}"
+                        f"C {prev_end} -> {control} -> {end} on line {line_id!r}"
                     )
             prev_end = end
 
@@ -204,3 +201,118 @@ def test_nfcore_balls_carry_a_stroke():
     theme = THEMES["nfcore"]
     assert theme.animation_ball_stroke
     assert f'stroke="{theme.animation_ball_stroke}"' in svg
+
+
+_STROKE_RIDING_FIXTURES = [
+    *ANIMATION_FIXTURES,
+    EXAMPLES_DIR / "differentialabundance.mmd",
+]
+
+
+def _merge_feeder_windows(plan) -> dict[str, list[tuple[tuple[float, float], float]]]:
+    """Per line, ``(vertex, radius)`` around each merge feeder's notch.
+
+    Where one route of a line ends on a vertex that a sibling route of the
+    same line rounds, the ending stroke stops at the vertex while the sibling's
+    curve only rejoins a radius further on, so no drawn centreline spans that
+    stretch for a dot to ride.
+    """
+    import math
+
+    windows: dict[str, list[tuple[tuple[float, float], float]]] = {}
+    drawn = list(zip(plan.routes, plan.route_polylines, plan.route_curve_radii))
+    for route, polyline, _radii in drawn:
+        for sibling, sibling_polyline, sibling_radii in drawn:
+            if sibling is route or sibling.line_id != route.line_id:
+                continue
+            for index, vertex in enumerate(sibling_polyline[1:-1]):
+                radius = (sibling_radii or [10.0] * len(sibling_polyline))[index]
+                if radius > 0 and math.dist(polyline[-1], vertex) < 0.5:
+                    windows.setdefault(route.line_id, []).append((vertex, radius))
+    return windows
+
+
+@pytest.mark.parametrize(
+    "fixture", _STROKE_RIDING_FIXTURES, ids=[p.stem for p in _STROKE_RIDING_FIXTURES]
+)
+def test_dots_ride_their_lines_drawn_stroke(fixture: Path):
+    """Every sampled dot position lies on its own line's drawn centreline,
+    rounded corners included, so a dot keeps to its lane through a concentric
+    turn."""
+    import math
+    from collections import defaultdict
+
+    from nf_metro.api import prepare_graph
+    from nf_metro.render.svg import _drawn_pieces, _piece_at, build_render_plan
+    from nf_metro.themes import resolve_theme
+
+    graph = prepare_graph(fixture.read_text(), source_dir=str(fixture.parent))
+    plan = build_render_plan(graph, resolve_theme(None, graph))
+    timeline = build_animation_timeline(
+        plan.graph,
+        plan.routes,
+        plan.station_offsets,
+        plan.theme,
+        route_polylines=plan.route_polylines,
+        route_curve_radii=plan.route_curve_radii,
+    )
+    cell = 4.0
+    ink: dict[str, dict[tuple[int, int], list[tuple[float, float]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for route, polyline, radii in zip(
+        plan.routes, plan.route_polylines, plan.route_curve_radii
+    ):
+        for piece in _drawn_pieces(list(polyline), radii):
+            steps = (
+                200
+                if piece.control is not None
+                else max(1, math.ceil(math.dist(piece.start, piece.end) / 0.1))
+            )
+            for k in range(steps + 1):
+                x, y = _piece_at(piece, k / steps)[0]
+                ink[route.line_id][int(x // cell), int(y // cell)].append((x, y))
+
+    def off_stroke(line_id: str, point: tuple[float, float]) -> float:
+        cx, cy = int(point[0] // cell), int(point[1] // cell)
+        return min(
+            (
+                math.dist(point, q)
+                for dx in (-1, 0, 1)
+                for dy in (-1, 0, 1)
+                for q in ink[line_id].get((cx + dx, cy + dy), ())
+            ),
+            default=math.inf,
+        )
+
+    windows = _merge_feeder_windows(plan)
+
+    def in_notch(line_id: str, point: tuple[float, float]) -> bool:
+        return any(
+            math.dist(point, vertex) <= radius + 1.0
+            for vertex, radius in windows.get(line_id, ())
+        )
+
+    assert timeline.dots
+    worst = max(
+        (off_stroke(dot.line_id, point), dot.line_id, point)
+        for dot in timeline.dots
+        for point in (dot.track.point_at(k / 100) for k in range(101))
+        if not in_notch(dot.line_id, point)
+    )
+    assert worst[0] <= 0.5, worst
+
+
+def test_a_bridge_onto_a_sibling_never_runs_backwards():
+    """A bridge joined part-way along a sibling's leg keeps the sibling's
+    corner inside the leg it actually has."""
+    from nf_metro.render.animate import _find_bridge, _motion_path, _Track
+
+    sibling = _Track([(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)], [0.0, 10.0, 0.0])
+    bridge = _find_bridge((95.0, 0.0), (100.0, 50.0), [sibling])
+    assert bridge is not None
+
+    commands = re.findall(r"([MLC])\s*([-\d.\s]+)", _motion_path(bridge).d_attr)
+    xs = [float(nums.split()[-2]) for _, nums in commands]
+    assert xs == sorted(xs)
+    assert commands[0] == ("M", "95.00 0.00 ")
