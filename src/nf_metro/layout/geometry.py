@@ -568,6 +568,27 @@ def diagonal_centreline(
     ]
 
 
+def half_turn_tan(run: float, drop: float) -> float:
+    """``tan(phi / 2)`` for a diagonal deflected ``phi`` off the flow axis.
+
+    The diagonal covers *run* along the flow axis and *drop* across it.  Moving
+    a lane offset ``k`` across the flow by ``k`` times this along it keeps the
+    perpendicular separation at ``k`` and puts its corners on the turns'
+    bisectors.  Zero when *drop* is zero.
+    """
+    denom = abs(run) + math.hypot(run, drop)
+    return abs(drop) / denom if denom else 0.0
+
+
+def diagonal_stagger(lanes: int, step: float, run: float, drop: float) -> float:
+    """Flow-axis spread of *lanes* parallel diagonals *step* apart.
+
+    Each lane's diagonal sits ``step * half_turn_tan(run, drop)`` further along
+    the flow axis than its neighbour's.
+    """
+    return (lanes - 1) * step * half_turn_tan(run, drop)
+
+
 def segment_intersects_quad(
     x1: float,
     y1: float,

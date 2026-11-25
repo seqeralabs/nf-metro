@@ -1735,10 +1735,6 @@
   "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
   "status": "defensive"
  },
- "normalize.py::if offset(member) - offset(prev) >= 2 * pitch - COORD_TOLERANCE_FINE:::#1": {
-  "note": "Bundle bound in _split_at_bundle_gaps: two bundles turning the same angle whose corners happen to lie on one bisector are kept as separate cohorts. Every corpus diagonal cohort is one bundle, so the split arm has no fixture; tests/test_concentric_bundle_corners.py::test_separate_bundles_on_one_bisector_turn_apart builds the shape.",
-  "status": "defensive"
- },
  "normalize.py::if reference is None:::#1": {
   "note": "A cohort whose leg budgets would take some lane's radius to zero keeps its radii. Every corpus cohort's budget leaves each lane a positive radius, so the keep arm has no fixture; it guards cohorts squeezed onto legs shorter than their lane offsets.",
   "status": "defensive"

@@ -712,7 +712,6 @@
   "normalize.py::if not trunk_depths_contiguous(trunk_ys, n, step):::#1",
   "normalize.py::if not verticals:::#1",
   "normalize.py::if not votes:::#1",
-  "normalize.py::if offset(member) - offset(prev) >= 2 * pitch - COORD_TOLERANCE_FINE:::#1",
   "normalize.py::if opposing_bundle is not None and {::#1",
   "normalize.py::if overlap <= COORD_TOLERANCE:::#1",
   "normalize.py::if planned and max(planned) - min(planned) > COORD_TOLERANCE:::#1",

@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
-from nf_metro.layout.routing.corners import turn_shift
+from nf_metro.layout.constants import graph_offset_step
+from nf_metro.layout.routing.corners import resolve_curve_radii, turn_shift
 from nf_metro.render.svg import _drawn_pieces, _piece_at, build_render_plan
 from nf_metro.themes import resolve_theme
 
@@ -86,33 +87,206 @@ def test_right_angle_turns_keep_the_existing_concentric_rule():
 )
 def test_touching_fan_corners_leave_no_seam(name, prefix):
     path = _ROOT / "examples" / name
-    text = prefix + path.read_text()
-    graph = prepare_graph(text, source_dir=str(path.parent))
-    theme = resolve_theme(graph)
-    plan = build_render_plan(graph, theme)
-    lanes = defaultdict(list)
-    for route, points, radii in zip(
-        plan.routes, plan.route_polylines, plan.route_curve_radii
-    ):
-        if (route.edge.source, route.edge.target) == (
-            "umi_tools_extract",
-            "trimgalore",
-        ):
-            lanes[route.line_id] = (
-                list(points),
-                None if radii is None else list(radii),
-            )
+    _graph, theme, plan = _render(prefix + path.read_text(), path.parent)
+    edge = ("umi_tools_extract", "trimgalore")
+    lanes = _fan_lanes(plan, {edge})[edge]
     assert len(lanes) == 6
+    assert _worst_curve_seam(lanes, theme.line_width) <= 0.1
+
+
+def _worst_curve_seam(lanes, line_width: float) -> float:
+    """Widest gap between neighbouring touching lanes anywhere on a curve."""
     worst = 0.0
-    ordered = sorted(lanes.values(), key=lambda lane: lane[0][0][1])
+    ordered = _by_start(lanes)
     for (pa, ra), (pb, rb) in zip(ordered, ordered[1:]):
         other = [q for q, _ in _samples(pb, rb, 150)]
         for q, on_curve in _samples(pa, ra, 150):
             if on_curve:
-                worst = max(
-                    worst, min(math.dist(q, s) for s in other) - theme.line_width
-                )
-    assert worst <= 0.1
+                worst = max(worst, min(math.dist(q, s) for s in other) - line_width)
+    return worst
+
+
+_PREPROCESSING_FAN = (
+    ("umi_tools_extract", "trimgalore"),
+    ("trimgalore", "fastqc_trimmed"),
+    ("fastqc_trimmed", "sortmerna"),
+    ("fastqc_trimmed", "ribodetector"),
+    ("sortmerna", "fastqc_filtered"),
+    ("ribodetector", "fastqc_filtered"),
+)
+
+
+def _pitch_error(inner, outer, pitch: float) -> float:
+    """Largest departure from *pitch* of the distance between two lanes,
+    measured from every point of *outer*: straights, diagonals and arcs."""
+    targets = [q for q, _ in _samples(*inner, 150)]
+    return max(
+        abs(min(math.dist(q, s) for s in targets) - pitch)
+        for q, _ in _samples(*outer, 150)
+    )
+
+
+def _arc_centres(points, radii):
+    resolved = resolve_curve_radii(points, radii)
+    return [
+        _centre(points[k - 1 : k + 2], resolved[k - 1])
+        for k in range(1, len(points) - 1)
+    ]
+
+
+def _render(text: str, source_dir: Path, theme_file: Path | None = None):
+    if theme_file is not None:
+        text = f"%%metro style: {theme_file}\n" + text
+    graph = prepare_graph(text, source_dir=str(source_dir))
+    theme = resolve_theme(graph)
+    return graph, theme, build_render_plan(graph, theme)
+
+
+def _fan_lanes(plan, edges):
+    """Each of *edges*' lanes as ``(points, radii)``, keyed by edge."""
+    lanes = defaultdict(list)
+    for route, points, radii in zip(
+        plan.routes, plan.route_polylines, plan.route_curve_radii
+    ):
+        key = (route.edge.source, route.edge.target)
+        if key in edges:
+            lanes[key].append((list(points), None if radii is None else list(radii)))
+    return lanes
+
+
+def _by_start(lanes):
+    return sorted(lanes, key=lambda lane: (lane[0][0][1], lane[0][0][0]))
+
+
+def _assert_concentric(graph, theme, plan, edges) -> None:
+    """Neighbouring lanes of every bundle in *edges* keep one pitch apart along
+    the whole edge and turn each corner about one centre."""
+    bundles = _fan_lanes(plan, edges)
+    assert set(bundles) == set(edges)
+    pitch = graph_offset_step(graph, theme.line_width)
+    pitch_errors: dict[tuple[str, str], float] = {}
+    centre_errors: dict[tuple[str, str], float] = {}
+    for key, lanes in bundles.items():
+        ordered = _by_start(lanes)
+        pitch_errors[key] = round(
+            max(_pitch_error(a, b, pitch) for a, b in zip(ordered, ordered[1:])), 2
+        )
+        worst = 0.0
+        for a, b in zip(ordered, ordered[1:]):
+            assert len(a[0]) == len(b[0]), key
+            for ca, cb in zip(_arc_centres(*a), _arc_centres(*b)):
+                worst = max(worst, math.dist(ca, cb))
+        centre_errors[key] = round(worst, 2)
+    assert max(pitch_errors.values()) <= 0.1, pitch_errors
+    assert max(centre_errors.values()) <= 0.1, centre_errors
+
+
+def _theme_file(tmp_path: Path, theme_text: str) -> Path:
+    theme_file = tmp_path / "theme.yaml"
+    theme_file.write_text(theme_text)
+    return theme_file
+
+
+def _assert_rnaseq_fan_concentric(theme_text: str, prefix: str, tmp_path) -> None:
+    path = _ROOT / "examples" / "rnaseq_sections.mmd"
+    rendered = _render(
+        prefix + path.read_text(), path.parent, _theme_file(tmp_path, theme_text)
+    )
+    _assert_concentric(*rendered, _PREPROCESSING_FAN)
+
+
+@pytest.mark.parametrize("ratio", [None, 2.0, 3.0, 4.5])
+@pytest.mark.parametrize("line_width", [3, 5, 6, 9])
+def test_wide_fan_lanes_stay_concentric(tmp_path, line_width, ratio):
+    """A fan whose diagonals differ in steepness, at any line width and
+    corner radius."""
+    layout = "" if ratio is None else f"layout:\n  curve_radius_ratio: {ratio}\n"
+    _assert_rnaseq_fan_concentric(
+        f"name: wide\nline_width: {line_width}\n{layout}",
+        "%%metro track_gap: 0\n",
+        tmp_path,
+    )
+
+
+def test_gapped_wide_fan_lanes_stay_concentric(tmp_path):
+    """A wide butt-capped line with a one-pixel gap between lanes."""
+    _assert_rnaseq_fan_concentric(
+        "name: wide\nline_width: 9\nline_cap: butt\n"
+        "layout:\n  curve_radius_ratio: 2.0\n",
+        "%%metro track_gap: 1\n",
+        tmp_path,
+    )
+
+
+_HUB_FAN = (
+    _ROOT
+    / "tests"
+    / "fixtures"
+    / "curve_invariant_repros"
+    / "hub_fan_mixed_drop_bundles.mmd"
+)
+_HUB_FAN_BUNDLES = (
+    ("hub", "t2"),
+    ("hub", "t3"),
+    ("t2", "sink"),
+    ("t3", "sink"),
+)
+
+
+# Every (line width, ratio) at which each direction aborts when each of the
+# hub's bundles reserves only its own stagger.
+_HUB_FAN_ABORTS = {
+    "LR": {
+        6: (4.5,),
+        7: (3.5, 4.0, 4.5),
+        8: (3.0, 3.5, 4.0, 4.5),
+        9: (2.5, 3.0, 3.5, 4.0, 4.5),
+    },
+    "RL": {
+        6: (4.5,),
+        7: (3.5, 4.0, 4.5),
+        8: (3.0, 3.5, 4.0, 4.5),
+        9: (2.5, 3.0, 3.5, 4.0, 4.5),
+    },
+    "TB": {6: (4.0, 4.5), 7: (3.5, 4.0, 4.5), 8: (3.0, 3.5), 9: (2.5, 3.0)},
+}
+_HUB_FAN_CASES = sorted(
+    {
+        (direction, width, ratio)
+        for direction in _HUB_FAN_ABORTS
+        for width in (3, 6, 9)
+        for ratio in (2.0, 3.0, 4.5)
+    }
+    | {
+        (direction, width, ratio)
+        for direction, by_width in _HUB_FAN_ABORTS.items()
+        for width, ratios in by_width.items()
+        for ratio in ratios
+    }
+)
+
+
+@pytest.mark.parametrize(("direction", "line_width", "ratio"), _HUB_FAN_CASES)
+def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
+    tmp_path, direction, line_width, ratio
+):
+    """A hub spreads every lane it fans one way as one group, so each of its
+    bundles needs room for the whole group's stagger, not only its own.  The
+    parity check that Stage 1.2's ``_spread_groups`` matches the spread pass."""
+    text = _HUB_FAN.read_text()
+    assert "direction: LR" in text
+    theme = _theme_file(
+        tmp_path,
+        f"name: wide\nline_width: {line_width}\n"
+        f"layout:\n  curve_radius_ratio: {ratio}\n",
+    )
+    rendered = _render(
+        "%%metro track_gap: 0\n"
+        + text.replace("direction: LR", f"direction: {direction}"),
+        _HUB_FAN.parent,
+        theme,
+    )
+    _assert_concentric(*rendered, _HUB_FAN_BUNDLES)
 
 
 # One cubic per corner holds a circle to 1e-3 of its radius up to a right

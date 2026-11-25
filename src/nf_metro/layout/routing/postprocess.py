@@ -16,6 +16,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     Point,
+    half_turn_tan,
     lanes_run_along_x,
     quantize_coord,
     segment_intersects_bbox,
@@ -292,6 +293,21 @@ def _shift_diagonal(rp: RoutedPath, delta: float, ai: int) -> None:
         rp.points[idx] = (p[0] + delta, p[1]) if ai == 0 else (p[0], p[1] + delta)
 
 
+def _render_time_spread_delta(rp: RoutedPath, offset: float) -> float:
+    """X shift giving a Y-offset route's diagonal a full perpendicular *offset*.
+
+    A Y-only offset under-separates a diagonal: its perpendicular component is
+    only the offset times the sine of the diagonal's angle to the Y axis.  The
+    route's own ``half_turn_tan`` restores it, so a hub's diagonals of different
+    steepness each turn about one centre.
+    """
+    d_x = rp.points[2][0] - rp.points[1][0]
+    d_y = rp.points[2][1] - rp.points[1][1]
+    cross_sign = -1.0 if d_y > 0 else 1.0
+    run_sign = 1.0 if d_x >= 0 else -1.0
+    return cross_sign * offset * half_turn_tan(d_x, d_y) * run_sign
+
+
 def _apply_diagonal_spread(
     group: list[RoutedPath],
     station_id: str,
@@ -327,14 +343,10 @@ def _apply_diagonal_spread(
     if baked:
         deltas = _baked_spread_deltas(group, offsets, center, d_a, d_b, hypot, bi)
     else:
-        # A Y-only offset under-separates a diagonal: its perpendicular component
-        # is only OFFSET_STEP times the sine of the diagonal's angle to the Y
-        # axis.  This scale restores the full step; for a 45-degree leg it is
-        # sqrt(2) - 1 ~ 0.414.
-        abs_b = abs(d_b)
-        scale = (hypot - abs(d_a)) / abs_b if abs_b > COORD_TOLERANCE_FINE else 0.0
-        cross_sign = -1.0 if d_b > 0 else 1.0
-        deltas = [cross_sign * (off - center) * scale * sign for off in offsets]
+        deltas = [
+            _render_time_spread_delta(rp, off - center)
+            for rp, off in zip(group, offsets)
+        ]
 
     shift = _fit_spread_translation(group, deltas, sign, ai)
 

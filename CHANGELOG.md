@@ -266,6 +266,11 @@ light.png | dark.png`) in a PNG.
 
 ### Fixed
 
+- Fanned bundles stay concentric at wide lines (#2209): from a line width of
+  5, lanes leaving a hub opened gaps at their corners and outer lanes
+  distorted, and some wide-line maps aborted. Each diagonal is spread by its
+  own steepness, and the layout reserves the room a hub's fanned lanes need
+  along the flow.
 - Under `diamond_style: symmetric`, a two-way diamond or two-branch fan in a
   row whose bundles widen the row pitch sits half that pitch either side of
   its trunk, on the grid the rest of the row uses, instead of half the base
