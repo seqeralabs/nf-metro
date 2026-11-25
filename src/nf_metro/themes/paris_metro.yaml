@@ -52,6 +52,11 @@ light:
   legend_text_color: "#ffffff"
 
 dark:
+  # Lines 2, 3, 4, 11, 12 and 14 lighten to 3:1 against this background,
+  # keeping their hue; the referential is for print on white.
+  line_colors:
+    ["#FFBE00", "#0064EC", "#717100", "#CE008E", "#FF5A00", "#82DC73", "#FF82B4",
+     "#D282BE", "#D2D200", "#DC9600", "#946228", "#007E4B", "#82C8E6", "#B100E5"]
   background_fill: "#1e2329"
   title_color: "#f2f2f2"
   label_color: "#e8e8e8"

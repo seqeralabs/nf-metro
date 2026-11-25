@@ -164,3 +164,25 @@ def test_the_html_legend_and_manifest_carry_the_theme_colours():
         line_colors=tube.dark.line_colors,
     )
     assert [g["color"] for g in manifest["groups"]] == list(dark[:3])
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["london-tube", "nyc-subway", "paris-metro", "tokyo-metro", "washington-metro"],
+)
+def test_every_dark_line_colour_reads_against_its_background(name):
+    from PIL import ImageColor
+
+    def luminance(color: str) -> float:
+        channels = [c / 255 for c in ImageColor.getrgb(color)[:3]]
+        lin = [
+            c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+            for c in channels
+        ]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    dark = resolve_stack(name).dark
+    background = luminance(dark.background_fill)
+    for colour in dark.line_colors:
+        hi, lo = sorted((luminance(colour), background), reverse=True)
+        assert (hi + 0.05) / (lo + 0.05) >= 3.0, colour
