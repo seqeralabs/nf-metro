@@ -379,27 +379,30 @@ in pipeline order.
   translates them into global coordinates, it does not re-lay them out.
 
 ### Stage 1.2: align row Y grids
-- **Purpose**: Snap station Ys to a shared row-wide grid so same-row
-  same-direction sections agree on grid pitch and slot count, then give
-  every fanned bundle's diagonal the flow-axis room its lanes' stagger needs.
+- **Purpose**: Share one Y grid across same-row, same-direction sections,
+  then make room for every fanned diagonal's stagger.
 - **Helpers**: `_align_row_y_grids` (`phases/row_align.py`), then
   `reserve_fan_stagger_runway` (`phases/single_section.py`) per section.
 - **Precondition**: Stage 1.1 complete; sections still in local
   coordinates; section subgraphs available.
 - **Postcondition**: Within each `(grid_row, direction)` group, all
-  multi-station layers share one Y grid. Every in-section edge carrying
-  `n >= 2` lines between stations at different cross-axis positions spans at
-  least both endpoint straights, the diagonal run and the stagger
-  `(n - 1) * pitch * tan(phi / 2)` along the flow axis; stations at or past an
-  edge's far end moved out by its shortfall and the bbox flow-axis size grew
-  by the same amount. `graph._row_y_grid_info` stores grid metadata for the
-  debug overlay.
+  multi-station layers share one Y grid. Every in-section diagonal edge
+  spans, along the flow axis, at least both endpoint straights, the diagonal
+  run and `(N - 1) * pitch * tan(phi_max / 2)`, where `N` counts the distinct
+  lines of the group the diagonal spread pass moves it with (its hub's
+  diagonals one cross-axis heading at a time on a lanes-along-Y section,
+  otherwise its own bundle) and `phi_max` is that group's steepest
+  deflection. Each shortfall opens just before the edge's downstream
+  station, in whole `y_spacing` steps along a vertical flow, and the bbox
+  flow-axis size grows by the same amount. `graph._row_y_grid_info` stores
+  grid metadata for the debug overlay.
 - **Invariants preserved**: Isolated stations (sole layer occupants
   with off-grid Y) keep original Y - hub centering survives. Bbox
-  cross-axis size unchanged; station cross-axis positions are not touched
-  by the stagger reservation.
+  cross-axis size and station cross-axis positions unchanged by the
+  stagger reservation.
 - **Related tests**: `test_row_trunk_marker_cy_consistent`,
-  `test_all_stations_snap_to_grid`.
+  `test_all_stations_snap_to_grid`, `tests/test_fan_stagger_runway.py`,
+  `test_hub_fanning_bundles_of_mixed_drop_stay_concentric`.
 - **Lifecycle:** invariant - the shared per-row Y grid holds at the
   final boundary (re-asserted by Stage 6.4's grid snap).
 
