@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Set as AbstractSet
 from operator import itemgetter
 
 from nf_metro.layout.constants import COORD_TOLERANCE_FINE, graph_offset_step
@@ -14,45 +15,29 @@ from nf_metro.layout.pass_metrics import (
     min_station_flat_length,
     min_straight_edge,
 )
-from nf_metro.parser.model import MetroGraph, Station, is_bypass_v
+from nf_metro.layout.route_topology import fork_join_stations
+from nf_metro.parser.model import MetroGraph, Section, Station, is_bypass_v
 
 Pair = tuple[str, str]
-
-
-def hub_stations(graph: MetroGraph) -> tuple[set[str], set[str]]:
-    """Stations with two or more targets, and with two or more sources.
-
-    Counts every edge, port edges included, as routing's fork and join sets do.
-    """
-    targets: defaultdict[str, set[str]] = defaultdict(set)
-    sources: defaultdict[str, set[str]] = defaultdict(set)
-    for edge in graph.edges:
-        targets[edge.source].add(edge.target)
-        sources[edge.target].add(edge.source)
-    return (
-        {sid for sid, ends in targets.items() if len(ends) > 1},
-        {sid for sid, ends in sources.items() if len(ends) > 1},
-    )
 
 
 def spread_groups(
     line_ids: Mapping[Pair, set[str]],
     drop: Callable[[Pair], float],
-    hubs: tuple[set[str], set[str]] | None,
+    forks: AbstractSet[str],
+    joins: AbstractSet[str],
 ) -> list[list[Pair]]:
     """Diagonal bundles grouped as ``_spread_diagonal_bundles`` spreads them.
 
-    Must match that pass's grouping.  Given *hubs* (forks, joins), a fork takes
-    every diagonal lane leaving it once it has two, then a join takes every
+    Must match that pass's grouping.  A station of *forks* takes every
+    diagonal lane leaving it once it has two, then one of *joins* takes every
     remaining diagonal lane entering it once it has two, each hub one
     cross-axis heading at a time.  Every other bundle spreads alone.
     """
     diagonals = [pair for pair in line_ids if abs(drop(pair)) > COORD_TOLERANCE_FINE]
-    if hubs is None:
-        return [[pair] for pair in diagonals]
 
     def claimed(
-        pairs: list[Pair], hub: Callable[[Pair], str], members: set[str]
+        pairs: list[Pair], hub: Callable[[Pair], str], members: AbstractSet[str]
     ) -> dict[Pair, str]:
         count: Counter[str] = Counter()
         for pair in pairs:
@@ -60,11 +45,10 @@ def spread_groups(
                 count[hub(pair)] += len(line_ids[pair])
         return {pair: hub(pair) for pair in pairs if count[hub(pair)] >= 2}
 
-    forks, joins = hubs
     fork_end, join_end = itemgetter(0), itemgetter(1)
     by_fork = claimed(diagonals, fork_end, forks)
     by_join = claimed([p for p in diagonals if p not in by_fork], join_end, joins)
-    groups: defaultdict[Pair | tuple[str, str, bool], list[Pair]] = defaultdict(list)
+    groups: defaultdict[tuple[object, ...], list[Pair]] = defaultdict(list)
     for pair in diagonals:
         heading = drop(pair) > 0
         if pair in by_fork:
@@ -110,7 +94,7 @@ def fan_stagger_needs(
     *graph*'s edges because a section subgraph also carries hidden layout-only
     edges that are never routed.
     """
-    _flow, cross = AxisFrame.axes_for_direction(direction)
+    cross = AxisFrame.axes_for_direction(direction)[1]
     line_ids: defaultdict[Pair, set[str]] = defaultdict(set)
     for edge in graph.edges:
         if edge.source in stations and edge.target in stations:
@@ -124,11 +108,13 @@ def fan_stagger_needs(
         return target - source
 
     by_hub = lanes_run_along_y(direction)
+    forks: AbstractSet[str] = frozenset()
+    joins: AbstractSet[str] = frozenset()
+    if by_hub:
+        _targets, _sources, forks, joins = fork_join_stations(graph)
     groups = [
         group
-        for group in spread_groups(
-            line_ids, drop, hub_stations(graph) if by_hub else None
-        )
+        for group in spread_groups(line_ids, drop, forks, joins)
         if line_count(group) > 1
     ]
     if not groups:
@@ -152,6 +138,12 @@ def fan_stagger_needs(
     return need
 
 
+def section_fan_stagger_needs(graph: MetroGraph, section: Section) -> dict[Pair, float]:
+    """:func:`fan_stagger_needs` for *section*'s stations at their current drops."""
+    stations = {sid: graph.stations[sid] for sid in section.station_ids}
+    return fan_stagger_needs(graph, stations, section.direction or "LR")
+
+
 def graph_fan_stagger_needs(graph: MetroGraph) -> dict[Pair, float]:
     """:func:`fan_stagger_needs` for every section of *graph* at its settled drops,
     or for the whole graph when it has no sections."""
@@ -159,8 +151,7 @@ def graph_fan_stagger_needs(graph: MetroGraph) -> dict[Pair, float]:
         return fan_stagger_needs(graph, graph.stations, "LR")
     need: dict[Pair, float] = {}
     for section in graph.sections.values():
-        stations = {sid: graph.stations[sid] for sid in section.station_ids}
-        need.update(fan_stagger_needs(graph, stations, section.direction or "LR"))
+        need.update(section_fan_stagger_needs(graph, section))
     return need
 
 

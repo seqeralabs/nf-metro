@@ -28,6 +28,7 @@ from nf_metro.layout.route_topology import (
     divergence_junction_exit_ports,
     divergence_junction_sources,
     fanout_junction_ids,
+    fork_join_stations,
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
@@ -443,14 +444,7 @@ def _build_routing_context(
             bottom_exit_junction_ports[divergence_id] = exit_port_id
     bottom_exit_junctions = set(bottom_exit_junction_ports)
 
-    # Fork/join stations
-    fork_targets: dict[str, set[str]] = defaultdict(set)
-    join_sources: dict[str, set[str]] = defaultdict(set)
-    for e in graph.edges:
-        fork_targets[e.source].add(e.target)
-        join_sources[e.target].add(e.source)
-    fork_stations = {sid for sid, tgts in fork_targets.items() if len(tgts) > 1}
-    join_stations = {sid for sid, srcs in join_sources.items() if len(srcs) > 1}
+    fork_join = fork_join_stations(graph)
 
     tb_sections = vertical_flow_sections(graph)
     reversed_sections = detect_reversed_sections(graph)
@@ -504,10 +498,10 @@ def _build_routing_context(
         bottom_exit_junctions=bottom_exit_junctions,
         bottom_exit_junction_ports=bottom_exit_junction_ports,
         offset_step=resolved_offset_step,
-        fork_stations=fork_stations,
-        join_stations=join_stations,
-        fork_targets=dict(fork_targets),
-        join_sources=dict(join_sources),
+        fork_stations=fork_join.forks,
+        join_stations=fork_join.joins,
+        fork_targets=fork_join.targets,
+        join_sources=fork_join.sources,
         tb_sections=tb_sections,
         reversed_sections=reversed_sections,
         positive_fan=positive_fan,

@@ -26,6 +26,7 @@ from nf_metro.layout.phases._common import (
     continuation_track_predecessors,
     grow_section_bbox_max_edge,
     grow_section_bbox_min_edge,
+    row_slot_spacing,
 )
 from nf_metro.layout.phases.planned_fans import (
     planned_fan_layout_station_ids,
@@ -1361,11 +1362,7 @@ def _section_row_pitch(graph: MetroGraph, section_id: str, default: float) -> fl
     Falls back to ``default`` for sections not in a multi-section row.
     """
     require_phase_field(graph, "_row_y_grid_info")
-    grid_info = graph._row_y_grid_info
-    for info in grid_info.values():
-        if section_id in info["section_ids"]:
-            return info["slot_spacing"]
-    return default
+    return row_slot_spacing(graph._row_y_grid_info, section_id, default)
 
 
 def _recenter_full_bundle_columns(graph: MetroGraph, y_spacing: float) -> None:

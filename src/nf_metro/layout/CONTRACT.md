@@ -389,14 +389,14 @@ in pipeline order.
   multi-station layers share one Y grid. Every in-section diagonal edge
   spans, along the flow axis, at least both endpoint straights, the diagonal
   run and `(N - 1) * pitch * tan(phi_max / 2)`, where `N` is the number of
-  distinct lines in the spread group (see `_spread_groups`: by hub and
+  distinct lines in the spread group (see `spread_groups`: by hub and
   heading on lanes-along-Y sections, per bundle otherwise) and `phi_max` is
   that group's steepest deflection, its drop taken as the Stage 6.4 Y-lattice
   snap can at most make it (`fan_stagger_needs`, `phases/fan_stagger.py`).
-  Each shortfall opens just before the edge's downstream
-  station, in whole `y_spacing` steps along a vertical flow, and the bbox
-  flow-axis size grows by the same amount. `graph._row_y_grid_info` stores
-  grid metadata for the debug overlay.
+  Each shortfall opens just before the edge's downstream station, in whole
+  `y_spacing` steps along a vertical flow, and the bbox flow-axis size grows
+  by the same amount. `graph._row_y_grid_info` stores grid metadata for the
+  debug overlay.
 - **Invariants preserved**: Isolated stations (sole layer occupants
   with off-grid Y) keep original Y - hub centering survives. Bbox
   cross-axis size and station cross-axis positions unchanged by the

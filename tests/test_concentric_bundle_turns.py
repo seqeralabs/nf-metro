@@ -272,7 +272,7 @@ def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
 ):
     """A hub spreads every lane it fans one way as one group, so each of its
     bundles needs room for the whole group's stagger, not only its own.  The
-    parity check that Stage 1.2's ``_spread_groups`` matches the spread pass."""
+    parity check that Stage 1.2's ``spread_groups`` matches the spread pass."""
     text = _HUB_FAN.read_text()
     assert "direction: LR" in text
     theme = _theme_file(

@@ -246,7 +246,7 @@ def reserve_fan_stagger_runway(
     """
     stations = sub.stations
     direction = (section.direction if section else None) or "LR"
-    flow, _cross = AxisFrame.axes_for_direction(direction)
+    flow = AxisFrame.axes_for_direction(direction)[0]
     quantum = 0.0
     if lanes_run_along_x(direction):
         assert y_grid is not None, "a vertical flow needs the Stage 6.4 Y grid"

@@ -769,24 +769,20 @@ def _centering_candidate(
         return None
 
     if shared_source or shared_target or has_flat_side or multi_diag:
-        sign = AxisFrame.flow_sign(sec.direction if sec is not None else "LR")
+
+        def room(rp: RoutedPath, far: str) -> tuple[float, float]:
+            need = ctx.stagger_need.get((rp.edge.source, rp.edge.target), 0.0)
+            return (graph.stations[far].x, need)
+
         new_x = seat_within_fan_room(
             (in_diag_end_x + out_diag_start_x) / 2,
-            sign,
-            [
-                (graph.stations[rp.edge.source].x, ctx.stagger_need.get(key, 0.0))
-                for rp in in_routes
-                for key in [(rp.edge.source, rp.edge.target)]
-            ],
-            [
-                (graph.stations[rp.edge.target].x, ctx.stagger_need.get(key, 0.0))
-                for rp in out_routes
-                for key in [(rp.edge.source, rp.edge.target)]
-            ],
+            AxisFrame.flow_sign(sec.direction if sec is not None else "LR"),
+            [room(rp, rp.edge.source) for rp in in_routes],
+            [room(rp, rp.edge.target) for rp in out_routes],
         )
-        return (
-            None if new_x is None else (new_x, in_routes, flat_in, out_routes, flat_out)
-        )
+        if new_x is None:
+            return None
+        return (new_x, in_routes, flat_in, out_routes, flat_out)
 
     # Simple case: shift both diagonals to equalise the flats.
     shift = (in_flat - out_flat) / 2

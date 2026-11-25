@@ -27,7 +27,10 @@ from nf_metro.layout.phases.bbox import (
     _loop_corner_x,
     push_lower_rows_after_bbox_grow,
 )
-from nf_metro.layout.phases.fan_stagger import fan_stagger_needs, seat_within_fan_room
+from nf_metro.layout.phases.fan_stagger import (
+    seat_within_fan_room,
+    section_fan_stagger_needs,
+)
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import (
     MetroGraph,
@@ -990,11 +993,7 @@ def _recenter_section_loop_sides(
     avoid perturbing placements main already settled on.
     """
     port_ids = section.port_ids
-    need = fan_stagger_needs(
-        graph,
-        {sid: graph.stations[sid] for sid in section.station_ids},
-        section.direction,
-    )
+    need = section_fan_stagger_needs(graph, section)
     for sid in section.station_ids:
         if sid in port_ids:
             continue

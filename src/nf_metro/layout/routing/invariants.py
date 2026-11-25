@@ -95,6 +95,7 @@ from nf_metro.layout.routing.common import (
     iter_port_peeloff_bundles,
     iter_same_destination_approach_bundles,
     iter_vertical_segments,
+    leg_key,
     merge_fanout_pivot_reference,
     opening_horizontal_vertical,
     opposing_entry_confluence_slots,
@@ -107,7 +108,7 @@ from nf_metro.layout.routing.common import (
     segments_properly_cross,
     tail_on_slot,
     trunk_segment_crossings,
-    unit_vector,
+    turn_unit_vectors,
     vertical_direction,
     vertical_flow_sections,
 )
@@ -4811,17 +4812,13 @@ def check_coincident_corner_radii(
             if is_orthogonal_turn(prev, corner, nxt):
                 buckets[at].append((r, corner, arm, arm))
                 continue
-            u_in, u_out = unit_vector(prev, corner), unit_vector(corner, nxt)
-            if (
-                u_in is None
-                or u_out is None
-                or abs(u_in[0] * u_out[1] - u_in[1] * u_out[0]) <= COORD_TOLERANCE_FINE
-            ):
+            units = turn_unit_vectors(prev, corner, nxt)
+            if units is None:
                 continue
+            u_in, u_out = units
             for side, leg, sign in (("in", u_in, -1.0), ("out", u_out, 1.0)):
                 meets = corner[0] * leg[0] + corner[1] * leg[1] + sign * arm
-                leg_key = (round(leg[0], 3), round(leg[1], 3))
-                buckets[(*at, side, leg_key)].append((r, corner, arm, meets))
+                buckets[(*at, side, leg_key(leg))].append((r, corner, arm, meets))
 
     violations: list[CoincidentCornerRadiusViolation] = []
     for members in buckets.values():

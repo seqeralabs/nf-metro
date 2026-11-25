@@ -36,6 +36,7 @@ from nf_metro.parser.model import (
     MetroGraph,
     Port,
     PortSide,
+    RowGridInfo,
     Section,
     Station,
     is_bypass_v,
@@ -1285,6 +1286,17 @@ def is_loop_side_branch_station(graph: MetroGraph, sid: str) -> bool:
     if not ((src.x < st.x < tgt.x) or (tgt.x < st.x < src.x)):
         return False
     return True
+
+
+def row_slot_spacing(
+    grid_info: Mapping[int, RowGridInfo], section_id: str, default: float
+) -> float:
+    """The Y-grid pitch *grid_info* gives the row *section_id* belongs to, or
+    *default* for a section in no multi-section row."""
+    for info in grid_info.values():
+        if section_id in info["section_ids"]:
+            return info["slot_spacing"]
+    return default
 
 
 def _grid_group_section_ids(graph: MetroGraph) -> set[str]:
