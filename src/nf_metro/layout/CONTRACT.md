@@ -380,17 +380,24 @@ in pipeline order.
 
 ### Stage 1.2: align row Y grids
 - **Purpose**: Snap station Ys to a shared row-wide grid so same-row
-  same-direction sections agree on grid pitch and slot count.
-- **Helper**: `_align_row_y_grids` (`phases/row_align.py`).
+  same-direction sections agree on grid pitch and slot count, then give
+  every fanned bundle's diagonal the flow-axis room its lanes' stagger needs.
+- **Helpers**: `_align_row_y_grids` (`phases/row_align.py`), then
+  `reserve_fan_stagger_runway` (`phases/single_section.py`) per section.
 - **Precondition**: Stage 1.1 complete; sections still in local
   coordinates; section subgraphs available.
 - **Postcondition**: Within each `(grid_row, direction)` group, all
-  multi-station layers share one Y grid. Bbox `w/h` unchanged from
-  Stage 1.1 (only station Ys shift). `graph._row_y_grid_info` stores
-  grid metadata for the debug overlay.
+  multi-station layers share one Y grid. Every in-section edge carrying
+  `n >= 2` lines between stations at different cross-axis positions spans at
+  least both endpoint straights, the diagonal run and the stagger
+  `(n - 1) * pitch * tan(phi / 2)` along the flow axis; stations at or past an
+  edge's far end moved out by its shortfall and the bbox flow-axis size grew
+  by the same amount. `graph._row_y_grid_info` stores grid metadata for the
+  debug overlay.
 - **Invariants preserved**: Isolated stations (sole layer occupants
-  with off-grid Y) keep original Y - hub centering survives. Section
-  bbox dimensions unchanged.
+  with off-grid Y) keep original Y - hub centering survives. Bbox
+  cross-axis size unchanged; station cross-axis positions are not touched
+  by the stagger reservation.
 - **Related tests**: `test_row_trunk_marker_cy_consistent`,
   `test_all_stations_snap_to_grid`.
 - **Lifecycle:** invariant - the shared per-row Y grid holds at the

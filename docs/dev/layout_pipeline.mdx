@@ -95,7 +95,7 @@ Lay out each section's internal stations on its own private coordinate system, t
 
 - **Stage 1.1**: Lay out each section independently through layer and track assignment.
   This covers real stations only, and ports and junctions stay unpositioned.
-- **Stage 1.2**: Snap same-row, same-direction sections to a shared Y grid so they agree on pitch and slot count.
+- **Stage 1.2**: Snap same-row, same-direction sections to a shared Y grid so they agree on pitch and slot count, then lengthen any fanned bundle's diagonal that is too short for its lanes' stagger.
 - **Stage 1.3**: Place sections on the canvas grid by topological layering of the section DAG.
   When a stacked same-side half-turn feeds a split, on either side, reflect the consumer's branch tracks so its in-section order matches the reversed bundle delivered at the entry.
 - **Stage 1.4**: Renumber sections by connected route continuity.
