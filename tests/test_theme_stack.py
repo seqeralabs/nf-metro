@@ -82,10 +82,12 @@ def test_an_unknown_theme_name_has_no_rename_hint():
     assert "no longer" not in str(excinfo.value)
 
 
-def test_only_london_tube_sets_layout_options():
-    for name in STYLE_NAMES - {"london-tube"}:
+def test_only_the_transit_themes_set_layout_options():
+    for name in ("default", "seqera", "transparent"):
         assert resolve_stack(name).layout == {}
-    assert resolve_stack("london-tube").layout == {"curve_radius_ratio": 3.0}
+    assert resolve_stack("london-tube").layout == {"curve_radius_ratio": 3.5}
+    for name in ("nyc-subway", "paris-metro", "tokyo-metro", "washington-metro"):
+        assert "curve_radius_ratio" in resolve_stack(name).layout
 
 
 def test_london_tube_sets_its_look_and_inherits_the_rest_from_default():
@@ -93,10 +95,10 @@ def test_london_tube_sets_its_look_and_inherits_the_rest_from_default():
     assert light.station_glyph == "tick"
     assert light.number_sections is False
     assert light.uppercase_section_labels is True
-    assert light.label_color == "#1c3f94"
+    assert light.label_color == "#0019A8"
     assert light.title_font_size == DEFAULT_LIGHT_THEME.title_font_size
     assert light.icon_width == DEFAULT_LIGHT_THEME.icon_width
-    assert color_pair(light, "label_color") == ("#1c3f94", "#dfe6ff")
+    assert color_pair(light, "label_color") == ("#0019A8", "#dfe6ff")
 
 
 def test_a_theme_of_top_level_colours_has_one_palette():
@@ -209,7 +211,7 @@ def test_a_stacked_theme_carries_both_palettes():
         _TUBE.dark.label_color,
     )
     svg = render_string(MMD, theme="seqera, london-tube")
-    assert "light-dark(#1c3f94, #dfe6ff)" in svg
+    assert "light-dark(#0019A8, #dfe6ff)" in svg
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +273,8 @@ def test_per_output_theme_rejects_an_unknown_name():
 def test_playground_lists_the_two_palette_built_ins():
     paired = {name for name in STYLE_NAMES if is_adaptive(THEMES[name])}
     app = (ROOT / "website" / "public" / "playground" / "app.js").read_text()
-    keys = re.search(r"const THEME_KEYS = \[(.*?)\];", app).group(1)
-    assert {k.strip().strip('"') for k in keys.split(",")} == paired
+    keys = re.search(r"const THEME_KEYS = \[(.*?)\];", app, re.S).group(1)
+    assert set(re.findall(r'"([^"]+)"', keys)) == paired
     page = (ROOT / "website" / "src" / "pages" / "playground.astro").read_text()
     picker = re.search(r'<select id="opt-theme">(.*?)</select>', page, re.S).group(1)
     assert set(re.findall(r'<option value="([^"]+)"', picker)) == paired

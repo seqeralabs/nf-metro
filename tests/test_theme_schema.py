@@ -74,7 +74,7 @@ def test_built_in_themes_point_editors_at_the_schema(path):
             "name: x\nnumber_sections: 1\n",
             "$.number_sections: 1 is not of type 'boolean'",
         ),
-        ("name: x\nstation_glyph: dot\n", "$.station_glyph: 'dot' is not one of"),
+        ("name: x\nstation_glyph: square\n", "$.station_glyph: 'square' is not one of"),
         ("name: x\nline_width: -1\n", "$.line_width: -1 is less than"),
         (
             "name: x\nlight:\n  station_radius: 14\n",

@@ -1,0 +1,3 @@
+# yaml-language-server: $schema=../../src/nf_metro/themes/theme.schema.json
+name: rings
+interchange_glyph: ring

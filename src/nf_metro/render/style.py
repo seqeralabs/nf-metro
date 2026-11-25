@@ -16,9 +16,19 @@ __all__ = [
     "FONT_FAMILY_PATTERN",
     "DASHARRAY_PATTERN",
     "FONT_WEIGHTS",
+    "CODES_LETTERS",
+    "CODES_NUMBERS",
+    "GLYPH_DOT",
+    "GLYPH_DOTS",
+    "GLYPH_NUMBERED",
     "GLYPH_PILL",
     "GLYPH_RING",
     "GLYPH_TICK",
+    "PAINT_LINE",
+    "PAINT_STATION",
+    "SWATCH_BULLET",
+    "SWATCH_LINE",
+    "LINE_PAINT_CLASS",
     "MUTED_FILL_CLASS",
     "MUTED_STROKE_CLASS",
     "RING_CHAIN",
@@ -32,14 +42,17 @@ __all__ = [
     "color_pair",
     "colors_adapt",
     "is_adaptive",
+    "line_color_pair",
+    "line_paint_class",
     "muted_paint_class",
+    "ordinal_code",
 ]
 
 import dataclasses
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from nf_metro.layout.constants import (
     ICON_HALF_HEIGHT,
@@ -69,12 +82,25 @@ from nf_metro.render.constants import (
     WATERMARK_FILL,
 )
 from nf_metro.render.ns import ns as _ns
+from nf_metro.render.palette import color_pair, line_color_pair
+
+if TYPE_CHECKING:
+    from nf_metro.parser.model import MetroLine
 
 _MISSING: Any = dataclasses.MISSING
 
 GLYPH_PILL = "pill"
 GLYPH_TICK = "tick"
 GLYPH_RING = "ring"
+GLYPH_DOT = "dot"
+GLYPH_DOTS = "dots"
+GLYPH_NUMBERED = "numbered"
+PAINT_STATION = "station"
+PAINT_LINE = "line"
+CODES_NUMBERS = "numbers"
+CODES_LETTERS = "letters"
+SWATCH_LINE = "line"
+SWATCH_BULLET = "bullet"
 RING_CHAIN = "chain"
 RING_GROW = "grow"
 TERMINUS_NUB = "nub"
@@ -98,6 +124,7 @@ def _field(
     doc: str,
     group: str,
     color: bool = False,
+    palette: bool = False,
     choices: tuple[str, ...] = (),
     pattern: str = "",
     maximum: float | None = None,
@@ -108,6 +135,7 @@ def _field(
             "doc": doc,
             "group": group,
             "color": color,
+            "palette": palette,
             "choices": choices,
             "pattern": pattern,
             "maximum": maximum,
@@ -137,6 +165,8 @@ class Theme:
     mode: str = _derived("dark")
     # ``(field, light value, dark value)`` for every colour field.
     mode_colors: tuple[tuple[str, str, str], ...] = _derived(())
+    # ``line_colors`` as resolved for the light and the dark palette.
+    mode_line_colors: tuple[tuple[str, ...], tuple[str, ...]] = _derived(((), ()))
 
     background_fill: str = _field(
         doc="Canvas fill. `none` leaves the canvas transparent.",
@@ -290,6 +320,20 @@ class Theme:
     legend_swatch_width: float = _field(
         LEGEND_SWATCH_WIDTH, doc="Length of each line swatch, px.", group="Legend"
     )
+    legend_swatch: str = _field(
+        SWATCH_LINE,
+        doc="How the legend shows each line: `line`, a length of the line, or "
+        "`bullet`, a disc in the line's colour carrying the line's code.",
+        group="Legend",
+        choices=(SWATCH_LINE, SWATCH_BULLET),
+    )
+    line_codes: str = _field(
+        CODES_LETTERS,
+        doc="The code each line carries on a legend `bullet`, in declaration "
+        "order: `letters` (A, B, ...) or `numbers` (1, 2, ...).",
+        group="Legend",
+        choices=(CODES_LETTERS, CODES_NUMBERS),
+    )
 
     station_fill: str = _field(
         doc="Inside of station capsules, interchange rings and the strip "
@@ -320,26 +364,32 @@ class Theme:
         GLYPH_PILL,
         doc="How a station on one line is drawn. `pill` draws a capsule. "
         "`tick` draws a tab in the line's colour on the label's side, "
-        "and a bar across the line's end (a buffer stop) at a terminus.",
+        "and a bar across the line's end (a buffer stop) at a terminus. "
+        "`dot` draws a dot on the line. `numbered` draws a station-number "
+        "marker: a ring in the line's colour around the station's code.",
         group="Stations",
-        choices=(GLYPH_PILL, GLYPH_TICK),
+        choices=(GLYPH_PILL, GLYPH_TICK, GLYPH_DOT, GLYPH_NUMBERED),
     )
     interchange_glyph: str = _field(
         GLYPH_PILL,
         doc="How a station on several lines is drawn. `pill` draws a capsule "
         "across them. `ring` draws one ring centred on the lines, or a chain "
         "of touching rings bridged by a strip when the lines are too wide for "
-        "one.",
+        "one. `dots` draws a dot on each line. `numbered` draws a "
+        "station-number marker across the lines, ringed in `station_stroke`; "
+        "a nameless line end has no number, and takes `terminus_glyph`.",
         group="Stations",
-        choices=(GLYPH_PILL, GLYPH_RING),
+        choices=(GLYPH_PILL, GLYPH_RING, GLYPH_DOTS, GLYPH_NUMBERED),
     )
     terminus_glyph: str = _field(
         TERMINUS_NUB,
         doc="How a line end shared by several lines is drawn. `nub` is a "
         "square-cornered box across the lines in the station colours; `bar` is "
         "a buffer-stop bar across the whole bundle, as thick as a tab and "
-        "overhanging the outermost lines by a tab's length; `ring` draws the "
-        "interchange glyph. A line end with one line follows `station_glyph`.",
+        "overhanging the outermost lines by a tab's length; `ring` draws "
+        "interchange rings, or the `dots` or `numbered` interchange glyph when "
+        "the theme draws interchanges with one. A line end with one line "
+        "follows `station_glyph`.",
         group="Stations",
         choices=(TERMINUS_NUB, TERMINUS_BAR, GLYPH_RING),
     )
@@ -383,6 +433,44 @@ class Theme:
         group="Stations",
         choices=(RING_CHAIN, RING_GROW),
     )
+    dot_diameter: float = _field(
+        1.0,
+        doc="Outside diameter of a `dot` or `dots` station, × `line_width`.",
+        group="Stations",
+    )
+    dot_ring_width: float = _field(
+        0.25,
+        doc="Width of a dot's outline, × `line_width`. Half of `dot_diameter` "
+        "draws a solid dot.",
+        group="Stations",
+    )
+    dot_ring: str = _field(
+        PAINT_STATION,
+        doc="Colour of a dot's outline: `station`, the station colours "
+        "(`station_stroke` around `station_fill`), or `line`, the colour of the "
+        "line the dot sits on.",
+        group="Stations",
+        choices=(PAINT_STATION, PAINT_LINE),
+    )
+    number_marker_diameter: float = _field(
+        3.0,
+        doc="Outside diameter of a `numbered` station marker, × `line_width`; "
+        "across several lines the marker also spans them.",
+        group="Stations",
+    )
+    station_code_color: str = _field(
+        "",
+        doc="Code on a `numbered` station marker. Empty takes `station_stroke`.",
+        group="Stations",
+        color=True,
+    )
+    section_codes: str = _field(
+        CODES_NUMBERS,
+        doc="How sections are coded on their badges and in station-number "
+        "codes: `numbers` (1, 2, ...) or `letters` (A, B, ...).",
+        group="Sections",
+        choices=(CODES_NUMBERS, CODES_LETTERS),
+    )
 
     line_width: float = _field(doc="Route stroke width, px.", group="Lines")
     line_cap: str = _field(
@@ -402,6 +490,16 @@ class Theme:
         doc="SVG dash pattern of a `dotted` line, px.",
         group="Lines",
         pattern=DASHARRAY_PATTERN,
+    )
+    line_colors: tuple[str, ...] = _field(
+        (),
+        doc="Colours the map's lines take in the order they are declared. Lines "
+        "past the end of the list get generated colours, each as distinct as "
+        "possible from those in use and readable against the background. Set "
+        "it under `light:` and `dark:` to give each palette its own. Empty "
+        "keeps each line's `%%metro line:` colour.",
+        group="Lines",
+        palette=True,
     )
     muted_line_color: str = _field(
         FALLBACK_LINE_COLOR,
@@ -532,11 +630,14 @@ class Chrome(NamedTuple):
     target also gets a rule greying it when every line touching it is
     inactive. An ``adaptive_only`` colour gets its rules only when its light
     and dark values differ, and is otherwise left to the baked attribute.
+    ``drawn_by`` names glyph choices that draw its targets: when set, a theme
+    choosing none of them emits no rules for it.
     """
 
     css_var: str
     targets: tuple[tuple[str, str, bool], ...]
     adaptive_only: bool = False
+    drawn_by: tuple[str, ...] = ()
 
 
 #: Every chrome colour, in the order its CSS rules are emitted.
@@ -548,6 +649,11 @@ CHROME: MappingProxyType[str, Chrome] = MappingProxyType(
         ),
         "label_color": Chrome(
             "--nfm-map-label-color", (("nf-metro-station-label", "fill", True),)
+        ),
+        "station_code_color": Chrome(
+            "--nfm-map-station-code-color",
+            (("nf-metro-station-code", "fill", True),),
+            drawn_by=(GLYPH_NUMBERED,),
         ),
         "caption_color": Chrome(
             "--nfm-map-caption-color", (("nf-metro-caption", "fill", False),), True
@@ -612,15 +718,6 @@ def adaptive_value(light: str, dark: str) -> str:
     return f"light-dark({light}, {dark})"
 
 
-def color_pair(theme: Theme, name: str) -> tuple[str, str]:
-    """``(light, dark)`` values of colour field *name*."""
-    for field, light, dark in theme.mode_colors:
-        if field == name:
-            return light, dark
-    value: str = getattr(theme, name)
-    return value, value
-
-
 def colors_adapt(theme: Theme, *names: str) -> bool:
     """Whether any of colour fields *names* differs between the two palettes."""
     return any(len(set(color_pair(theme, name))) > 1 for name in names)
@@ -632,6 +729,7 @@ def is_adaptive(theme: Theme) -> bool:
     return any(light != dark for _, light, dark in theme.mode_colors)
 
 
+LINE_PAINT_CLASS = "nf-metro-line-paint"
 MUTED_STROKE_CLASS = "nf-metro-muted-stroke"
 MUTED_FILL_CLASS = "nf-metro-muted-fill"
 
@@ -642,3 +740,32 @@ def muted_paint_class(theme: Theme, muted: bool, prop: str) -> str:
     if not (muted and colors_adapt(theme, "muted_line_color")):
         return ""
     return _ns(MUTED_STROKE_CLASS if prop == "stroke" else MUTED_FILL_CLASS)
+
+
+def line_paint_class(
+    theme: Theme, line: MetroLine | None, muted: bool, prop: str
+) -> str:
+    """The class that lets a line's ``stroke`` or ``fill`` follow the viewer's
+    mode, or ``""`` when its colour is the same in both.
+
+    A muted line takes the inactive grey's class; an active one, the class of
+    its colour when the two palettes give it different ones.
+    """
+    if muted or line is None or not any(theme.mode_line_colors):
+        return muted_paint_class(theme, muted, prop)
+    light, dark = line_color_pair(theme, line)
+    if light == dark:
+        return ""
+    return _ns(f"{LINE_PAINT_CLASS}-{line.palette_index}-{prop}")
+
+
+def ordinal_code(index: int, style: str) -> str:
+    """The *index*-th (from 1) code in *style*: ``3`` or ``C``, and past ``Z``
+    the spreadsheet-column sequence ``AA``, ``AB``, ..."""
+    if style == CODES_NUMBERS:
+        return str(index)
+    letters = ""
+    while index > 0:
+        index, rem = divmod(index - 1, 26)
+        letters = chr(ord("A") + rem) + letters
+    return letters

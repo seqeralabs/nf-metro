@@ -83,6 +83,12 @@
         "marker_stroke": {
           "$ref": "#/$defs/fields/marker_stroke"
         },
+        "station_code_color": {
+          "$ref": "#/$defs/fields/station_code_color"
+        },
+        "line_colors": {
+          "$ref": "#/$defs/fields/line_colors"
+        },
         "muted_line_color": {
           "$ref": "#/$defs/fields/muted_line_color"
         },
@@ -167,6 +173,12 @@
         },
         "marker_stroke": {
           "$ref": "#/$defs/fields/marker_stroke"
+        },
+        "station_code_color": {
+          "$ref": "#/$defs/fields/station_code_color"
+        },
+        "line_colors": {
+          "$ref": "#/$defs/fields/line_colors"
         },
         "muted_line_color": {
           "$ref": "#/$defs/fields/muted_line_color"
@@ -436,6 +448,12 @@
     "legend_swatch_width": {
       "$ref": "#/$defs/fields/legend_swatch_width"
     },
+    "legend_swatch": {
+      "$ref": "#/$defs/fields/legend_swatch"
+    },
+    "line_codes": {
+      "$ref": "#/$defs/fields/line_codes"
+    },
     "station_fill": {
       "$ref": "#/$defs/fields/station_fill"
     },
@@ -481,6 +499,24 @@
     "ring_overflow": {
       "$ref": "#/$defs/fields/ring_overflow"
     },
+    "dot_diameter": {
+      "$ref": "#/$defs/fields/dot_diameter"
+    },
+    "dot_ring_width": {
+      "$ref": "#/$defs/fields/dot_ring_width"
+    },
+    "dot_ring": {
+      "$ref": "#/$defs/fields/dot_ring"
+    },
+    "number_marker_diameter": {
+      "$ref": "#/$defs/fields/number_marker_diameter"
+    },
+    "station_code_color": {
+      "$ref": "#/$defs/fields/station_code_color"
+    },
+    "section_codes": {
+      "$ref": "#/$defs/fields/section_codes"
+    },
     "line_width": {
       "$ref": "#/$defs/fields/line_width"
     },
@@ -492,6 +528,9 @@
     },
     "dotted_dasharray": {
       "$ref": "#/$defs/fields/dotted_dasharray"
+    },
+    "line_colors": {
+      "$ref": "#/$defs/fields/line_colors"
     },
     "muted_line_color": {
       "$ref": "#/$defs/fields/muted_line_color"
@@ -883,6 +922,24 @@
         "minimum": 0,
         "default": 24.0
       },
+      "legend_swatch": {
+        "description": "How the legend shows each line: `line`, a length of the line, or `bullet`, a disc in the line's colour carrying the line's code.",
+        "x-group": "Legend",
+        "enum": [
+          "line",
+          "bullet"
+        ],
+        "default": "line"
+      },
+      "line_codes": {
+        "description": "The code each line carries on a legend `bullet`, in declaration order: `letters` (A, B, ...) or `numbers` (1, 2, ...).",
+        "x-group": "Legend",
+        "enum": [
+          "letters",
+          "numbers"
+        ],
+        "default": "letters"
+      },
       "station_fill": {
         "description": "Inside of station capsules, interchange rings and the strip bridging a chain of them.",
         "x-group": "Stations",
@@ -919,25 +976,29 @@
         "default": ""
       },
       "station_glyph": {
-        "description": "How a station on one line is drawn. `pill` draws a capsule. `tick` draws a tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus.",
+        "description": "How a station on one line is drawn. `pill` draws a capsule. `tick` draws a tab in the line's colour on the label's side, and a bar across the line's end (a buffer stop) at a terminus. `dot` draws a dot on the line. `numbered` draws a station-number marker: a ring in the line's colour around the station's code.",
         "x-group": "Stations",
         "enum": [
           "pill",
-          "tick"
+          "tick",
+          "dot",
+          "numbered"
         ],
         "default": "pill"
       },
       "interchange_glyph": {
-        "description": "How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one.",
+        "description": "How a station on several lines is drawn. `pill` draws a capsule across them. `ring` draws one ring centred on the lines, or a chain of touching rings bridged by a strip when the lines are too wide for one. `dots` draws a dot on each line. `numbered` draws a station-number marker across the lines, ringed in `station_stroke`; a nameless line end has no number, and takes `terminus_glyph`.",
         "x-group": "Stations",
         "enum": [
           "pill",
-          "ring"
+          "ring",
+          "dots",
+          "numbered"
         ],
         "default": "pill"
       },
       "terminus_glyph": {
-        "description": "How a line end shared by several lines is drawn. `nub` is a square-cornered box across the lines in the station colours; `bar` is a buffer-stop bar across the whole bundle, as thick as a tab and overhanging the outermost lines by a tab's length; `ring` draws the interchange glyph. A line end with one line follows `station_glyph`.",
+        "description": "How a line end shared by several lines is drawn. `nub` is a square-cornered box across the lines in the station colours; `bar` is a buffer-stop bar across the whole bundle, as thick as a tab and overhanging the outermost lines by a tab's length; `ring` draws interchange rings, or the `dots` or `numbered` interchange glyph when the theme draws interchanges with one. A line end with one line follows `station_glyph`.",
         "x-group": "Stations",
         "enum": [
           "nub",
@@ -997,6 +1058,53 @@
         ],
         "default": "chain"
       },
+      "dot_diameter": {
+        "description": "Outside diameter of a `dot` or `dots` station, \u00d7 `line_width`.",
+        "x-group": "Stations",
+        "type": "number",
+        "minimum": 0,
+        "default": 1.0
+      },
+      "dot_ring_width": {
+        "description": "Width of a dot's outline, \u00d7 `line_width`. Half of `dot_diameter` draws a solid dot.",
+        "x-group": "Stations",
+        "type": "number",
+        "minimum": 0,
+        "default": 0.25
+      },
+      "dot_ring": {
+        "description": "Colour of a dot's outline: `station`, the station colours (`station_stroke` around `station_fill`), or `line`, the colour of the line the dot sits on.",
+        "x-group": "Stations",
+        "enum": [
+          "station",
+          "line"
+        ],
+        "default": "station"
+      },
+      "number_marker_diameter": {
+        "description": "Outside diameter of a `numbered` station marker, \u00d7 `line_width`; across several lines the marker also spans them.",
+        "x-group": "Stations",
+        "type": "number",
+        "minimum": 0,
+        "default": 3.0
+      },
+      "station_code_color": {
+        "description": "Code on a `numbered` station marker. Empty takes `station_stroke`.",
+        "x-group": "Stations",
+        "type": "string",
+        "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+        "x-colour": true,
+        "default": ""
+      },
+      "section_codes": {
+        "description": "How sections are coded on their badges and in station-number codes: `numbers` (1, 2, ...) or `letters` (A, B, ...).",
+        "x-group": "Sections",
+        "enum": [
+          "numbers",
+          "letters"
+        ],
+        "default": "numbers"
+      },
       "line_width": {
         "description": "Route stroke width, px.",
         "x-group": "Lines",
@@ -1025,6 +1133,17 @@
         "type": "string",
         "pattern": "^\\s*(\\d+(\\.\\d+)?([\\s,]+\\d+(\\.\\d+)?)*\\s*)?$",
         "default": "2,4"
+      },
+      "line_colors": {
+        "description": "Colours the map's lines take in the order they are declared. Lines past the end of the list get generated colours, each as distinct as possible from those in use and readable against the background. Set it under `light:` and `dark:` to give each palette its own. Empty keeps each line's `%%metro line:` colour.",
+        "x-group": "Lines",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+          "x-colour": true
+        },
+        "default": []
       },
       "muted_line_color": {
         "description": "Grey for inactive lines and the stations, labels and icons only they touch.",

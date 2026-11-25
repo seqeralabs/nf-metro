@@ -61,6 +61,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Iterator, NamedTuple
 
 from nf_metro.layout.constants import (
+    CLEARANCE_FLOOR_LINE_WIDTH,
     CURVE_RADIUS,
     DEFAULT_LINE_WIDTH,
     DIAGONAL_LABEL_OFFSET,
@@ -79,7 +80,6 @@ from nf_metro.layout.constants import (
     STATION_RADIUS_APPROX,
     STATION_STROKE_APPROX,
     TERMINUS_WIDTH,
-    WIDEST_THEME_LINE_WIDTH,
     Y_SPACING,
 )
 
@@ -281,7 +281,7 @@ def canvas_edge_clearance() -> float:
     any built-in widens the clearance to match.
     """
     metrics = active_metrics()
-    line_width = max(WIDEST_THEME_LINE_WIDTH, metrics.line_width)
+    line_width = max(CLEARANCE_FLOOR_LINE_WIDTH, metrics.line_width)
     clearance = (
         max(DIRECTIONAL_MARKER_HALF_EXTENT, metrics.chevron_size) + line_width / 2
     )

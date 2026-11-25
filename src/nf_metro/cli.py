@@ -810,8 +810,10 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     cls=_DescribedDefault,
     default_text="from %%metro style, else default",
     help=(
-        "Visual theme: default, seqera, london-tube or transparent, a .yaml "
-        "theme file, or a comma list of these stacked left to right on default."
+        "Visual theme: default, seqera, transparent, or a transit theme "
+        "(london-tube, nyc-subway, paris-metro, tokyo-metro, washington-metro), "
+        "a .yaml theme file, or a comma list of these stacked left to right on "
+        "default."
     ),
 )
 @click.option(

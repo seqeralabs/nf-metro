@@ -11,6 +11,7 @@ import pytest
 from theme_helpers import MMD, RNASEQ, SVG_NS, classed, station_glyphs, write
 
 from nf_metro.api import render_string
+from nf_metro.parser import parse_metro_mermaid
 from nf_metro.render.glyphs import (
     Bundle,
     CrossAxis,
@@ -62,7 +63,8 @@ def test_one_line_stations_are_track_weight_tabs_in_their_line_colour(tube_svg):
     rsem = station_glyphs(tube_svg)["rsem"]
     assert float(rsem.get("width")) == pytest.approx(1.0 * 4.0)
     assert float(rsem.get("height")) == pytest.approx(1.5 * 4.0)
-    assert rsem.get("fill") == "#0570b0"
+    star_rsem = parse_metro_mermaid(_MAP).lines["star_rsem"]
+    assert rsem.get("fill") == _TUBE_DARK.line_colors[star_rsem.palette_index]
 
 
 def test_interchanges_are_bold_capsules_in_the_station_colours(tube_svg):

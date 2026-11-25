@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     ICON_CAPTION_GAP,
     SECTION_HEADER_ROUTE_CLEARANCE,
 )
+from nf_metro.render.palette import contrast_ratio, line_color
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, MetroLine
@@ -245,8 +246,9 @@ def effective_line_color(
     """Stroke colour for a line, muted to grey when the line is inactive.
 
     An inactive line resolves to ``theme.muted_line_color`` at every stroke
-    site (edge, chevron, legend swatch); every other line keeps its own colour,
-    falling back to :data:`FALLBACK_LINE_COLOR` when it has none. *active_color*,
+    site (edge, chevron, legend swatch); every other line takes its pick from
+    the theme's ``line_colors``, else its own colour, falling back to
+    :data:`FALLBACK_LINE_COLOR` when there is no line. *active_color*,
     when given, is the colour for an *active* line, taking priority over the
     line's own (the chevron site passes ``theme.chevron_color`` so a
     themed marker colour wins); an inactive line mutes regardless.
@@ -259,7 +261,9 @@ def effective_line_color(
         return theme.muted_line_color
     if active_color:
         return active_color
-    return html.escape(line.color) if line is not None else FALLBACK_LINE_COLOR
+    if line is None:
+        return FALLBACK_LINE_COLOR
+    return html.escape(line_color(theme, line))
 
 
 def station_is_muted(
@@ -463,3 +467,11 @@ def line_style_kwargs(style: str, theme: Theme) -> dict[str, str]:
     if dasharray:
         return {"stroke_dasharray": dasharray}
     return {}
+
+
+def readable_text_color(*backgrounds: str) -> str:
+    """Black or white, whichever keeps the higher worst-case WCAG contrast
+    against every one of *backgrounds*."""
+    on_black = min(contrast_ratio(bg, "#000000") for bg in backgrounds)
+    on_white = min(contrast_ratio(bg, "#ffffff") for bg in backgrounds)
+    return "#000000" if on_black > on_white else "#ffffff"

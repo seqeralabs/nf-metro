@@ -37,6 +37,8 @@ def _kind(schema: dict[str, Any]) -> str:
         return " \\| ".join(f"`{c}`" for c in schema["enum"])
     if schema.get("x-colour"):
         return "colour"
+    if schema["type"] == "array":
+        return "list of colours"
     return _KINDS[schema["type"]]
 
 
@@ -48,7 +50,7 @@ def _default(schema: dict[str, Any]) -> str:
         return f"`{str(value).lower()}`"
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    if value == "":
+    if value in ("", []):
         return "empty"
     return f"`{value}`"
 

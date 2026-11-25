@@ -169,6 +169,9 @@ class MetroLine:
     # ``--inactive-lines`` flag / ``inactive_line_ids`` config) supplies its own
     # set, which replaces this default outright.
     default_inactive: bool = False
+    # Declaration order, which picks the line's colour from a theme's
+    # ``line_colors``; layout may reorder ``MetroGraph.lines``, this never.
+    palette_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -834,6 +837,8 @@ class MetroGraph:
         self._edges_to_cache = None
 
     def add_line(self, line: MetroLine) -> None:
+        known = self.lines.get(line.id)
+        line.palette_index = known.palette_index if known else len(self.lines)
         self.lines[line.id] = line
 
     def default_inactive_line_ids(self) -> frozenset[str]:

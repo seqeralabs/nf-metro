@@ -10,7 +10,7 @@ Rewrite it with ``python scripts/theme_docs.py --write``.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, cast
 
 from nf_metro.options import LAYOUT_OPTIONS, LayoutOption
 from nf_metro.render.style import authored_fields
@@ -75,6 +75,11 @@ def _field_schema(field: dataclasses.Field[Any]) -> dict[str, Any]:
     kind = field.type if isinstance(field.type, str) else field.type.__name__
     meta = field.metadata
     schema: dict[str, Any] = {"description": meta["doc"], "x-group": meta["group"]}
+    if meta["palette"]:
+        schema["type"] = "array"
+        schema["items"] = {"type": "string", "pattern": COLOR_PATTERN, "x-colour": True}
+        schema["default"] = list(cast("tuple[str, ...]", field.default))
+        return schema
     if meta["choices"]:
         schema["enum"] = list(meta["choices"])
     else:
@@ -99,7 +104,9 @@ def theme_schema() -> dict[str, Any]:
     fields = {name: _field_schema(f) for name, f in authored.items()}
     refs = {name: {"$ref": f"#/$defs/fields/{name}"} for name in fields}
     colours = {
-        name: ref for name, ref in refs.items() if authored[name].metadata["color"]
+        name: ref
+        for name, ref in refs.items()
+        if authored[name].metadata["color"] or authored[name].metadata["palette"]
     }
     palette = {"type": "object", "properties": colours, "additionalProperties": False}
     layout = {

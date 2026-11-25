@@ -116,8 +116,9 @@ history.
 - `curve_radius_ratio` (#2190) sets the corner radius as a multiple of the
   theme's line width, measured at the line centre, as a `%%metro` directive,
   a `--curve-radius-ratio` flag or a theme's `layout:` block. The
-  `london-tube` theme sets 3, so its corners bend at three line widths (12 px
-  on its 4 px lines). The clearances tied to a corner grow with the radius.
+  `london-tube` theme sets 3.5, the Line Diagram Standard's three line widths
+  to the inside edge of the line, so its corners bend at 14 px on its 4 px
+  lines. The clearances tied to a corner grow with the radius.
   Radii far from the default can still hit layout failures on some
   topologies.
 - `terminus_glyph` theme setting for a line end shared by several lines:
@@ -143,9 +144,33 @@ history.
   `directional` can be set by a theme too.
 - `london-tube` built-in theme: a schematic transit look after the geometry of
   TfL's Line Diagram Standard, with track-weight station tabs, terminus bars,
-  bold capsules at interchanges, bundled lines edge to edge and a 30% grey for
+  bold capsules at interchanges, bundled lines edge to edge, station names in
+  TfL Corporate Blue, the TfL Colour Standard's line colours and a 30% grey for
   inactive lines. `interchange_glyph: ring` over it gives the standard's
   interchange rings and bridged chains instead.
+- `nyc-subway`, `paris-metro`, `tokyo-metro` and `washington-metro` built-in
+  themes, each after its operator's published map and colour standards: the
+  Vignelli diagram's solid stop dots and route bullets with the MTA's route
+  colours; the IDFM plan's line-ringed dots, capsules and numbered line discs;
+  Tokyo Metro's station-number markers; and WMATA's ringed dots on thick lines.
+  The Themes page shows every built-in theme on one sample map.
+- `line_colors` theme setting: a list of colours the map's lines take in the
+  order they are declared, set for both palettes or per palette under
+  `light:`/`dark:`. A line whose two palette colours differ follows the
+  viewer's mode in an SVG. An empty list keeps the map's own colours. Lines
+  past the end of the list get generated colours, each as distinct as
+  possible from those in use and readable against the background.
+- Station glyphs `dot` (one line) and `dots` (one on each line of an
+  interchange), sized by `dot_diameter`, `dot_ring_width` and `dot_ring`, and
+  `numbered`, a station-number marker of the section's code and the
+  station's place along its flow, sized by `number_marker_diameter`. A `ring`
+  line end draws the `dots` or `numbered` interchange glyph when the theme uses
+  one.
+- `legend_swatch: bullet` draws each legend line as a disc in its colour
+  carrying a code (`line_codes: letters` or `numbers`), and
+  `section_codes: letters` letters the section badges.
+- A theme's or map's `label_offset` also widens the gap between a
+  vertical-flow station and the label beside it.
 - Experimental Snakemake input: `nf-metro render --from snakemake` and
   `nf-metro convert` turn `snakemake --rulegraph` or `--dag` output (DOT or
   mermaid-js) into a metro map. `nf-metro convert` detects the input format,

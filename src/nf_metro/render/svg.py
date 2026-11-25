@@ -131,7 +131,7 @@ from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
 )
-from nf_metro.layout.routing.offsets import drawn_bundle_span
+from nf_metro.layout.routing.offsets import drawn_bundle_span, drawn_line_offsets
 from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.layout.routing.system_emission import (
@@ -151,6 +151,7 @@ from nf_metro.parser.model import (
     LayoutGeometryWarning,
     MarkerStyle,
     MetroGraph,
+    MetroLine,
     Section,
     Station,
 )
@@ -215,6 +216,7 @@ from nf_metro.render.glyphs import (
     maybe_muted_class,
     ring_groups,
     station_axis,
+    uses_line_offsets,
 )
 from nf_metro.render.icons import (
     render_file_icon,
@@ -234,6 +236,7 @@ from nf_metro.render.manifest import build_manifest
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import class_prefix_context
 from nf_metro.render.ns import ns as _ns
+from nf_metro.render.palette import line_color
 from nf_metro.render.path_geometry import materialize_source_turnout_paths
 from nf_metro.render.plan import (
     _RENDER_GRAPH_EXCLUDED_FIELDS,
@@ -260,6 +263,7 @@ from nf_metro.render.section_header import (
 from nf_metro.render.style import (
     CHROME,
     GLYPH_RING,
+    LINE_PAINT_CLASS,
     MUTED_FILL_CLASS,
     MUTED_STROKE_CLASS,
     Theme,
@@ -267,7 +271,9 @@ from nf_metro.render.style import (
     color_pair,
     colors_adapt,
     is_adaptive,
-    muted_paint_class,
+    line_color_pair,
+    line_paint_class,
+    ordinal_code,
 )
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
@@ -2578,6 +2584,7 @@ def _build_render_plan_scaled(
             width=svg_width,
             height=svg_height,
             station_radius=theme.station_radius,
+            line_colors={lid: line_color(theme, ln) for lid, ln in graph.lines.items()},
             extra_node_data=boxes,
         )
 
@@ -2803,7 +2810,14 @@ def _emit_render_plan(
     # Chrome CSS: custom properties so hosts can recolor without re-rendering.
     # Injected before the background rect so browser parsing order is correct.
     if chrome_css:
-        _inject_chrome_css(d, theme, bool(inactive_line_ids))
+        _inject_chrome_css(
+            d,
+            theme,
+            bool(inactive_line_ids),
+            [ln for ln in graph.lines.values() if ln.id not in inactive_line_ids]
+            if any(theme.mode_line_colors)
+            else [],
+        )
 
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,
@@ -3354,7 +3368,12 @@ def _capsule_attrs(
     return attrs
 
 
-def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> None:
+def _inject_chrome_css(
+    d: draw.Drawing,
+    theme: Theme,
+    any_inactive: bool,
+    active_lines: Sequence[MetroLine],
+) -> None:
     """Inject CSS custom properties for chrome colors.
 
     Defines ``--nfm-map-*`` properties on the chrome element classes so a host
@@ -3383,7 +3402,23 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
         )
     if any_inactive:
         lines += _muted_chrome_rules(theme)
+    lines += _line_paint_rules(theme, active_lines)
     d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
+
+
+def _line_paint_rules(theme: Theme, lines: Sequence[MetroLine]) -> list[str]:
+    """Rules giving each line whose palettes differ its colour for the
+    viewer's mode, on its strokes and on the glyphs filled in its colour."""
+    rules: list[str] = []
+    for line in lines:
+        light, dark = line_color_pair(theme, line)
+        if light == dark:
+            continue
+        value = adaptive_value(html.escape(light), html.escape(dark))
+        for prop in ("stroke", "fill"):
+            cls = f"{LINE_PAINT_CLASS}-{line.palette_index}-{prop}"
+            rules.append(_css_rule(cls, f"{prop}: {value}"))
+    return rules
 
 
 def _css_rule(cls: str, props: str, *also: str) -> str:
@@ -3394,7 +3429,11 @@ def _css_rule(cls: str, props: str, *also: str) -> str:
 
 def _chrome_applies(theme: Theme, field: str) -> bool:
     """Whether chrome colour *field* gets stylesheet rules under *theme*."""
-    return not CHROME[field].adaptive_only or colors_adapt(theme, field)
+    chrome = CHROME[field]
+    glyphs = (theme.station_glyph, theme.interchange_glyph)
+    if chrome.drawn_by and not any(g in chrome.drawn_by for g in glyphs):
+        return False
+    return not chrome.adaptive_only or colors_adapt(theme, field)
 
 
 def _chrome_binding_rules(theme: Theme) -> list[str]:
@@ -3542,7 +3581,7 @@ def _draw_section_badge(
     )
     d.append(
         draw.Text(
-            str(section.number),
+            ordinal_code(section.number, theme.section_codes),
             theme.section_badge_font_size,
             placement.badge_cx,
             placement.badge_cy,
@@ -3726,7 +3765,9 @@ def _render_edges(
         color = effective_line_color(line, theme, inactive_line_ids)
         style_kw = line_style_kwargs(line.style, theme) if line else {}
         class_name = _ns(f"metro-line-{route.line_id}")
-        paint = muted_paint_class(theme, route.line_id in inactive_line_ids, "stroke")
+        paint = line_paint_class(
+            theme, line, route.line_id in inactive_line_ids, "stroke"
+        )
         if paint:
             class_name = f"{class_name} {paint}"
 
@@ -3798,7 +3839,12 @@ def _render_directional_markers(
             line, theme, inactive_line_ids, theme.chevron_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
-        paint = muted_paint_class(theme, route.line_id in inactive_line_ids, "stroke")
+        paint = line_paint_class(
+            theme,
+            None if theme.chevron_color else line,
+            route.line_id in inactive_line_ids,
+            "stroke",
+        )
         if paint:
             class_name = f"{class_name} {paint}"
         for vertices in chevrons:
@@ -5015,6 +5061,7 @@ def _render_stations(
             positive_fan,
             muted,
             (label_points or {}).get(station.id),
+            inactive_line_ids,
         )
         if target is not d:
             d.append(target)
@@ -5029,6 +5076,7 @@ def _render_station_into(
     positive_fan: set[str],
     muted: bool,
     label_point: tuple[float, float] | None = None,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Draw one station's glyph and terminus icons into a container.
 
@@ -5142,11 +5190,28 @@ def _render_station_into(
             _append_terminus_icons(d, station, graph, theme, min_off, max_off, muted)
         return
 
+    line_offsets = (
+        drawn_line_offsets(graph, station, station_offsets, positive_fan)
+        if station_offsets
+        and not graph.station_is_rail(station.id)
+        and uses_line_offsets(theme)
+        else {}
+    )
     _draw_bundle_station(
         d,
         graph,
         theme,
-        Bundle(station, min_off, max_off, is_tb_vert, station_data, muted, label_point),
+        Bundle(
+            station,
+            min_off,
+            max_off,
+            is_tb_vert,
+            station_data,
+            muted,
+            label_point,
+            line_offsets,
+            inactive_line_ids,
+        ),
     )
 
 

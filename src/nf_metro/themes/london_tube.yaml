@@ -2,8 +2,9 @@
 # A schematic-transit look after the geometry of TfL's Line Diagram Standard,
 # which measures everything in multiples of the line width: tabs for stations
 # on one line, a bar across a line's end, bold capsules at interchanges,
-# bundled lines edge to edge (so no track_gap), unboxed sections and a
-# humanist sans in navy. Also the worked example of the theme file format.
+# bundled lines edge to edge (so no track_gap), unboxed sections, a humanist
+# sans in Corporate Blue, and the line colours of the TfL Colour Standard
+# (Issue 11, 2026). Also the worked example of the theme file format.
 name: london-tube
 
 # Track-weight tabs rather than the standard's 0.66 square: 1 line width thick
@@ -34,13 +35,21 @@ uppercase_section_labels: true
 section_label_letter_spacing: 2
 legend_stroke_width: 1.5
 legend_corner_radius: 0
-# Corners bend at three line widths, measured at the line centre.
+# The standard's 3x radius is to the inside edge of the line: 3.5x at its centre.
 layout:
-  curve_radius_ratio: 3.0
+  curve_radius_ratio: 3.5
+
+# Central, Piccadilly, District, Circle, Metropolitan, Victoria, Bakerloo,
+# Elizabeth, Overground, Jubilee, Hammersmith & City, DLR, Trams, Waterloo &
+# City, Northern: the most distinct first, so a map with few lines gets them.
+line_colors:
+  ["#DC241F", "#0019A8", "#007D32", "#FFC80A", "#9B0058", "#039BE5", "#B26300",
+   "#60399E", "#FA7B05", "#838D93", "#F589A6", "#00AFAD", "#5FB526", "#76D0BD",
+   "#000000"]
 
 light:
   background_fill: "#ffffff"
-  label_color: "#1c3f94"
+  label_color: "#0019A8" # Corporate Blue
   title_color: "#000000"
   marker_stroke: "#000000"
   station_fill: "#ffffff"
@@ -54,6 +63,12 @@ light:
   legend_stroke: "#000000"
 
 dark:
+  # The standard is for print on white. Piccadilly, Metropolitan and Elizabeth
+  # lighten to 3:1 against this background, and Northern turns near-white.
+  line_colors:
+    ["#DC241F", "#2948FF", "#007D32", "#FFC80A", "#BF006C", "#039BE5", "#B26300",
+     "#7548BD", "#FA7B05", "#838D93", "#F589A6", "#00AFAD", "#5FB526", "#76D0BD",
+     "#F0F0F0"]
   background_fill: "#10141c"
   label_color: "#dfe6ff"
   title_color: "#ffffff"
