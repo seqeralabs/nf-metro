@@ -178,6 +178,25 @@ def unit_vector(
     return ((end[0] - start[0]) / length, (end[1] - start[1]) / length)
 
 
+def turn_unit_vectors(
+    prev: tuple[float, float], corner: tuple[float, float], nxt: tuple[float, float]
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """The unit vectors into and out of *corner*, or ``None`` where either leg is
+    degenerate or the legs run straight on."""
+    u_in, u_out = unit_vector(prev, corner), unit_vector(corner, nxt)
+    if u_in is None or u_out is None:
+        return None
+    if abs(u_in[0] * u_out[1] - u_in[1] * u_out[0]) <= COORD_TOLERANCE_FINE:
+        return None
+    return u_in, u_out
+
+
+def leg_key(unit: tuple[float, float]) -> tuple[float, float]:
+    """*unit* rounded so the concentric corner sizer and
+    :func:`check_coincident_corner_radii` agree on which legs run one way."""
+    return (round(unit[0], 3), round(unit[1], 3))
+
+
 def is_orthogonal_turn(
     p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float]
 ) -> bool:

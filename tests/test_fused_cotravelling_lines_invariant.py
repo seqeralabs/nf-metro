@@ -54,7 +54,7 @@ from nf_metro.layout.routing.invariants import (
     _routes_crossings,
     check_no_fused_cotravelling_lines,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import Edge, MetroGraph
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -123,7 +123,7 @@ EXEMPT_FUSED_PAIRS: frozenset[_ExemptPair] = frozenset()
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -329,7 +329,7 @@ def test_every_recorded_exempt_pair_names_a_corpus_fixture() -> None:
 def test_seed_41_plan_owned_trunks_keep_the_nesting_step() -> None:
     """Global convergence settlement separates independently planned trunks."""
     path = REPO_ROOT / "tests" / "fixtures" / "hash_seed_determinism" / "seed_41.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     observed = observe_route_edges(graph, station_offsets=offsets)

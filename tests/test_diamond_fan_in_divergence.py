@@ -112,8 +112,9 @@ def _gather_fixtures() -> list[Path]:
     return paths
 
 
-def _route(text: str):
+def _route(text: str, source_dir: str = ""):
     graph = parse_metro_mermaid(text)
+    graph.source_dir = source_dir
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     return graph, route_edges(graph, station_offsets=offsets), offsets
@@ -123,7 +124,7 @@ def _route(text: str):
     "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
 )
 def test_diamond_branches_diverge_together_in_gallery(path: Path) -> None:
-    graph, routes, offsets = _route(path.read_text())
+    graph, routes, offsets = _route(path.read_text(), str(path.parent))
     violations = check_diamond_fan_in_diverges_together(graph, routes, offsets)
     assert not violations, "\n".join(v.message() for v in violations)
 

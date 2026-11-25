@@ -55,7 +55,7 @@ from nf_metro.layout.phases.bbox import (
 )
 from nf_metro.layout.phases.guards import _column_run_anchor_shortfalls
 from nf_metro.layout.routing.invariants import CurveInvariantError
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import MetroGraph, Section
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -99,7 +99,7 @@ def _unexplained_short_edges(graph: MetroGraph) -> list[tuple[str, float]]:
     "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
 )
 def test_shared_runway_runs_share_an_anchored_edge(path: Path) -> None:
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     unexplained = _unexplained_short_edges(graph)
     assert not unexplained, (
@@ -138,15 +138,14 @@ def test_levelling_never_spreads_a_column_runway(
     """
     worse: list[tuple[str, tuple[int, float], float, float]] = []
     for path in _gather_fixtures():
-        text = path.read_text()
         with monkeypatch.context() as patched:
             patched.setattr(
                 "nf_metro.layout.engine._level_column_anchor_edges",
                 lambda graph: None,
             )
-            without = parse_metro_mermaid(text)
+            without = parse_metro_mermaid_file(path)
             compute_layout(without)
-        graph = parse_metro_mermaid(text)
+        graph = parse_metro_mermaid_file(path)
         compute_layout(graph)
         before = _column_runway_spreads(without)
         after = _column_runway_spreads(graph)
@@ -162,7 +161,7 @@ def test_corpus_levels_shared_runways_and_leaves_the_rest() -> None:
     declined = 0
     signs: set[float] = set()
     for path in _gather_fixtures():
-        graph = parse_metro_mermaid(path.read_text())
+        graph = parse_metro_mermaid_file(path)
         try:
             compute_layout(graph)
         except CurveInvariantError:
@@ -258,7 +257,7 @@ def test_column_mates_with_different_content_columns_keep_their_edges() -> None:
 def test_mirror_branches_share_a_left_edge_and_runway() -> None:
     """``convergence_fold_diamond``'s two branches level onto one edge."""
     path = REPO_ROOT / "examples" / "topologies" / "convergence_fold_diamond.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     left = graph.sections["branch_left"]
     right = graph.sections["branch_right"]
@@ -283,7 +282,7 @@ def test_right_anchored_column_shares_its_right_edge(
 ) -> None:
     """A column an RL member anchors on the right ends on one right edge."""
     path = REPO_ROOT / "examples" / "topologies" / f"{fixture}.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     rights = {
         round(graph.sections[sid].bbox_x + graph.sections[sid].bbox_w, 1)
@@ -295,7 +294,7 @@ def test_right_anchored_column_shares_its_right_edge(
 def test_peeloff_reporting_box_keeps_its_own_left_edge() -> None:
     """A column mate whose content starts far right keeps its unanchored edge."""
     path = REPO_ROOT / "examples" / "topologies" / "foldback_exit_peeloff.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     preprocessing = graph.sections["preprocessing"]
     reporting = graph.sections["reporting"]

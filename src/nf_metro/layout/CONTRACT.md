@@ -379,20 +379,31 @@ in pipeline order.
   translates them into global coordinates, it does not re-lay them out.
 
 ### Stage 1.2: align row Y grids
-- **Purpose**: Snap station Ys to a shared row-wide grid so same-row
-  same-direction sections agree on grid pitch and slot count.
-- **Helper**: `_align_row_y_grids` (`phases/row_align.py`).
+- **Purpose**: Share one Y grid across same-row, same-direction sections,
+  then make room for every fanned diagonal's stagger.
+- **Helpers**: `_align_row_y_grids` (`phases/row_align.py`), then
+  `reserve_fan_stagger_runway` (`phases/single_section.py`) per section.
 - **Precondition**: Stage 1.1 complete; sections still in local
   coordinates; section subgraphs available.
 - **Postcondition**: Within each `(grid_row, direction)` group, all
-  multi-station layers share one Y grid. Bbox `w/h` unchanged from
-  Stage 1.1 (only station Ys shift). `graph._row_y_grid_info` stores
-  grid metadata for the debug overlay.
+  multi-station layers share one Y grid. Every in-section diagonal edge
+  spans, along the flow axis, at least both endpoint straights, the diagonal
+  run and `(N - 1) * pitch * tan(phi_max / 2)`, where `N` is the number of
+  distinct lines in the spread group (see `spread_groups`: by hub and
+  heading on lanes-along-Y sections, per bundle otherwise) and `phi_max` is
+  that group's steepest deflection, its drop taken as the Stage 6.4 Y-lattice
+  snap can at most make it (`fan_stagger_needs`, `phases/fan_stagger.py`).
+  Each shortfall opens just before the edge's downstream station, in whole
+  `y_spacing` steps along a vertical flow, and the bbox flow-axis size grows
+  by the same amount. `graph._row_y_grid_info` stores grid metadata for the
+  debug overlay.
 - **Invariants preserved**: Isolated stations (sole layer occupants
-  with off-grid Y) keep original Y - hub centering survives. Section
-  bbox dimensions unchanged.
+  with off-grid Y) keep original Y - hub centering survives. Bbox
+  cross-axis size and station cross-axis positions unchanged by the
+  stagger reservation.
 - **Related tests**: `test_row_trunk_marker_cy_consistent`,
-  `test_all_stations_snap_to_grid`.
+  `test_all_stations_snap_to_grid`, `tests/test_fan_stagger_runway.py`,
+  `test_hub_fanning_bundles_of_mixed_drop_stay_concentric`.
 - **Lifecycle:** invariant - the shared per-row Y grid holds at the
   final boundary (re-asserted by Stage 6.4's grid snap).
 
@@ -1295,7 +1306,11 @@ in pipeline order.
 - **Helper**: `_recenter_loop_side_stations` (`phases/balancing.py`).
 - **Precondition**: All Y phases done; routing geometry derivable.
 - **Postcondition**: Loop side stations sit at the visual centre of
-  their horizontal loop run.
+  their horizontal loop run, or as near it as leaves both fanned diagonals
+  their `fan_stagger_needs` room, measured to each neighbour's settled X.
+  Routing's bubble centring keeps the same bound on every station it moves,
+  its column-alignment drag included: one pass in a fixed order, each move
+  seated against the moves before it.
 - **Invariants preserved**: Station Y. Pure-side-branch classification
   is strict (see `test_loop_recenter_only_for_pure_side_branches`).
 - **Related tests**: `test_fan_station_centered_on_loop`,

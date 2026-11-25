@@ -971,12 +971,16 @@
   "note": "The settled exit-turn radius mismatch raises only after construction or a later pass changes a recorded planned corner without updating its concentric inputs. Valid production derives both values together; test_gap_plan_validator_rejects_a_changed_corner_radius exercises both failure flanks.",
   "status": "defensive"
  },
- "normalize.py::if (::#7": {
+ "normalize.py::if (::#6": {
   "note": "Fan-descent re-seating declines when any member's channel boundary is route-system-owned and the group is not already on adjacent tracks. Reaching this gate with an owned channel means the gate above it let the group through on `settle_frozen_arcs and tight`, since a route-system boundary is one of the ways `_planner_owns_channel` answers true, so `tight` is already true here and this arm's `not tight` cannot hold. Instrumented across the whole corpus under four option settings: 122,516 evaluations of the gate, zero fires, and still zero when the condition is widened to `_planner_owns_channel` itself. No construction reaches the arm.",
   "status": "candidate-dead"
  },
- "normalize.py::if (::#8": {
+ "normalize.py::if (::#7": {
   "note": "A secondary lane declines to move when it faces no pinned obstacle but the obstacle it would step around already holds a fixed segment, so stepping cannot separate them. Every corpus crowding either pins its obstacle or leaves the obstacle's segments free, so the skip has no fixture; it needs a topology where a non-primary lane meets a fixed-segment obstacle.",
+  "status": "needs-review"
+ },
+ "normalize.py::if respect_owned_corners and planner_owns_segment_or_boundary(::#1": {
+  "note": "A diagonal cohort member leaves the corner at the far end of a shared leg alone when a planner owns that corner, budgeting against its planned radius instead of splitting the leg with it. No corpus diagonal cohort borders a planner-owned far corner, so the skip arm has no fixture. Exercised synthetically by tests/test_concentric_bundle_turns.py::test_planned_far_corner_keeps_its_radius_when_a_short_leg_is_split; needs-review because an in-corpus witness is authorable, not because the arm is unreachable.",
   "status": "needs-review"
  },
  "normalize.py::if 0 <= k - 1 < len(rp.curve_radii):::#1": {
@@ -1379,6 +1383,10 @@
   "note": "Null guard in _align_uncentered_siblings. The loop iterates visible non-port stations and original_x is built from every non-port station, so ox is always present; the guard never fires.",
   "status": "defensive"
  },
+ "postprocess.py::if new_x is None:::#1": {
+  "note": "Bubble centring declines a station when _FanRoom.seat (seat_within_fan_room) finds no flow position leaving both its fanned diagonals their stagger room. Every corpus centring candidate has room for its stagger on both sides, so the decline arm has no fixture; it wants a station whose upstream and downstream fans together need more flow length than its neighbours leave.",
+  "status": "needs-review"
+ },
  "rail.py::if conn is not None:::#1": {
   "note": "Skips the straight-rail fallback when _route_inter_section_connector handled a port-to-port bundle. The connector returns a route for every whole-graph rail inter-section edge (always a RIGHT exit feeding a LEFT entry), so the None arm (fall through to straight-rail routing) is a structural fallback no rail topology reaches.",
   "status": "defensive"
@@ -1735,10 +1743,6 @@
   "note": "A line enters a section once, through the bypass's own source port, which the previous gate already filters, and a chain link into an internal station starts inside the section; so the skip arm never fires. The pass arm is reached by `tests/test_flow_entry_bypass_crossings.py` (_SAME_LINE_CHAIN, _SINGLE_BYPASS, _TWO_COLUMN_CHAIN); the skip arm by no swept, test or generated map (0 of 8000).",
   "status": "defensive"
  },
- "normalize.py::if offset(member) - offset(prev) >= 2 * pitch - COORD_TOLERANCE_FINE:::#1": {
-  "note": "Bundle bound in _split_at_bundle_gaps: two bundles turning the same angle whose corners happen to lie on one bisector are kept as separate cohorts. Every corpus diagonal cohort is one bundle, so the split arm has no fixture; tests/test_concentric_bundle_corners.py::test_separate_bundles_on_one_bisector_turn_apart builds the shape.",
-  "status": "defensive"
- },
  "normalize.py::if reference is None:::#1": {
   "note": "A cohort whose leg budgets would take some lane's radius to zero keeps its radii. Every corpus cohort's budget leaves each lane a positive radius, so the keep arm has no fixture; it guards cohorts squeezed onto legs shorter than their lane offsets.",
   "status": "defensive"
@@ -1785,6 +1789,14 @@
  },
  "normalize.py::if new is None or new == old:::#1": {
   "note": "The slot retarget runs when a coincidence fusion snaps a leg onto an X in another inter-column gap. With merge feeders seated on the trunk descent at plan time, every swept fusion lands in the gap its leg declared, so only the no-op arm runs; a fusion that does cross gaps still needs its declaration moved.",
+  "status": "needs-review"
+ },
+ "postprocess.py::if seated is None:::#1": {
+  "note": "Station-move pass declines a candidate when _FanRoom.seat finds no position against the moves already recorded. Each earlier move was seated against this station's unmoved X, so that X leaves every fanned diagonal its room unless routing began with one already short on both sides; no corpus fixture does, so the decline arm has no fixture.",
+  "status": "needs-review"
+ },
+ "postprocess.py::if new_x is None:::#2": {
+  "note": "Sibling alignment leaves a station in place when _FanRoom.seat finds no position against the settled moves. Every settled X was seated the same way, so the station's own X leaves its fanned diagonals their room unless routing began with one already short on both sides; no corpus fixture does, so the decline arm has no fixture.",
   "status": "needs-review"
  }
 }

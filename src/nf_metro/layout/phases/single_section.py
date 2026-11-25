@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE_FINE,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
     EXIT_GAP_MULTIPLIER,
@@ -60,6 +61,7 @@ from nf_metro.layout.phases._common import (
     perp_entry_lands_left,
     section_exit_lines,
 )
+from nf_metro.layout.phases.fan_stagger import Pair, fan_stagger_needs
 from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
@@ -227,6 +229,58 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             if collision:
                 continue
             st.y = src.y
+
+
+def reserve_fan_stagger_runway(
+    graph: MetroGraph,
+    sub: MetroGraph,
+    section: Section | None,
+    *,
+    y_grid: float | None = None,
+) -> None:
+    """Lengthen *sub*'s fanned diagonals to their ``fan_stagger_needs``.
+
+    *y_grid* is the lattice Stage 6.4 snaps *sub*'s station Ys to.  Along a
+    vertical flow that snap moves stations along the flow, so an opening there
+    is whole lattice steps.
+    """
+    stations = sub.stations
+    direction = (section.direction if section else None) or "LR"
+    flow = AxisFrame.axes_for_direction(direction)[0]
+    quantum = 0.0
+    if lanes_run_along_x(direction):
+        assert y_grid is not None, "a vertical flow needs the Stage 6.4 Y grid"
+        quantum = y_grid
+    need = fan_stagger_needs(graph, stations, direction, y_grid=y_grid)
+    if not need:
+        return
+
+    sign = AxisFrame.flow_sign(direction)
+
+    def downstream(pair: Pair) -> float:
+        return max(sign * getattr(stations[sid], flow) for sid in pair)
+
+    for pair in sorted(need, key=downstream):
+        lo, hi = sorted(getattr(stations[sid], flow) for sid in pair)
+        shortfall = need[pair] - (hi - lo)
+        if shortfall <= COORD_TOLERANCE_FINE:
+            continue
+        if quantum > 0:
+            shortfall = quantum * math.ceil(
+                (shortfall - COORD_TOLERANCE_FINE) / quantum
+            )
+        # Each opening lands just before the edge's downstream station, edges
+        # taken in flow order so each is measured after every opening upstream
+        # of it.  Everything on the high-coordinate side of the gap moves, so
+        # the section box keeps its low edge on either flow sense.
+        cut = hi - COORD_TOLERANCE_FINE if sign > 0 else lo + COORD_TOLERANCE_FINE
+        for station in stations.values():
+            position = getattr(station, flow)
+            if position >= cut:
+                setattr(station, flow, position + shortfall)
+        if section is not None:
+            size = "bbox_w" if flow == "x" else "bbox_h"
+            setattr(section, size, getattr(section, size) + shortfall)
 
 
 def _has_horizontal_predecessor_section(graph: MetroGraph, section: Section) -> bool:

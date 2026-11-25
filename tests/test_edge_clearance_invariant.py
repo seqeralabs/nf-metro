@@ -21,7 +21,7 @@ import pytest
 from nf_metro.layout.constants import EDGE_TO_BUNDLE_CLEARANCE, GUARD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
@@ -45,7 +45,7 @@ def _gather_fixtures() -> list[Path]:
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -155,7 +155,7 @@ def test_inter_row_drop_balanced_between_packed_sections() -> None:
         f"{min(clr_left, clr_right):.1f} <= {GUARD_TOLERANCE}"
     )
     # The runtime guard agrees the balanced descent is acceptable.
-    compute_layout(parse_metro_mermaid(fixture.read_text()), validate=True)
+    compute_layout(parse_metro_mermaid_file(fixture), validate=True)
 
 
 def test_collector_merge_descent_clears_source_right_edge() -> None:

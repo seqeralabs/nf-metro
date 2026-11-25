@@ -95,6 +95,7 @@ from nf_metro.layout.routing.common import (
     iter_port_peeloff_bundles,
     iter_same_destination_approach_bundles,
     iter_vertical_segments,
+    leg_key,
     merge_fanout_pivot_reference,
     opening_horizontal_vertical,
     opposing_entry_confluence_slots,
@@ -107,6 +108,7 @@ from nf_metro.layout.routing.common import (
     segments_properly_cross,
     tail_on_slot,
     trunk_segment_crossings,
+    turn_unit_vectors,
     vertical_direction,
     vertical_flow_sections,
 )
@@ -4784,37 +4786,47 @@ def check_coincident_corner_radii(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[CoincidentCornerRadiusViolation]:
-    """Return same-line turns shared by two routes that resolve to unequal radii.
+    """Return same-line turns shared by two routes that draw as two corners.
 
-    Classifies every axis-aligned turn on the *final* offset-applied geometry
-    and buckets it by ``(line, vertex)``.  Concentrically nested bundle-mates sit
+    Classifies every turn on the *final* offset-applied geometry and buckets it
+    by ``(line, vertex)``.  Concentrically nested bundle-mates sit
     ``OFFSET_STEP`` apart in separate buckets; only legs sharing the vertex
-    within a pixel land together, and those are one stroke, so their resolved
-    (segment-clamped) radii must match.  A disagreement is a doubled corner.
+    within a pixel land together, and those are one stroke.  At a right-angle
+    turn their resolved (segment-clamped) radii must match.  A diagonal turn is
+    bucketed by each leg's direction too, and its legs sharing that leg must
+    meet it where their curves leave it, one radius past (or before) the
+    vertex, at one point.  A disagreement is a doubled corner.
     """
     buckets: dict[
-        tuple[str, int, int], list[tuple[RoutedPath, tuple[float, float], float]]
+        tuple[object, ...], list[tuple[RoutedPath, tuple[float, float], float, float]]
     ] = defaultdict(list)
     for r in routes:
         pts = apply_route_offsets(r, offsets)
         if len(pts) < 3:
             continue
         radii = _resolved_corner_radii(r, pts)
-        for k in range(1, len(pts) - 1):
-            if k - 1 >= len(radii) or not is_orthogonal_turn(
-                pts[k - 1], pts[k], pts[k + 1]
-            ):
+        for k in range(1, min(len(pts) - 1, len(radii) + 1)):
+            prev, corner, nxt = pts[k - 1], pts[k], pts[k + 1]
+            at = (r.line_id, round(corner[0]), round(corner[1]))
+            arm = radii[k - 1]
+            if is_orthogonal_turn(prev, corner, nxt):
+                buckets[at].append((r, corner, arm, arm))
                 continue
-            key = (r.line_id, round(pts[k][0]), round(pts[k][1]))
-            buckets[key].append((r, pts[k], radii[k - 1]))
+            units = turn_unit_vectors(prev, corner, nxt)
+            if units is None:
+                continue
+            u_in, u_out = units
+            for side, leg, sign in (("in", u_in, -1.0), ("out", u_out, 1.0)):
+                meets = corner[0] * leg[0] + corner[1] * leg[1] + sign * arm
+                buckets[(*at, side, leg_key(leg))].append((r, corner, arm, meets))
 
     violations: list[CoincidentCornerRadiusViolation] = []
     for members in buckets.values():
         if len(members) < 2:
             continue
-        lo = min(members, key=lambda m: m[2])
-        hi = max(members, key=lambda m: m[2])
-        if hi[2] - lo[2] > COORD_TOLERANCE:
+        lo = min(members, key=lambda m: m[3])
+        hi = max(members, key=lambda m: m[3])
+        if hi[3] - lo[3] > COORD_TOLERANCE:
             violations.append(
                 CoincidentCornerRadiusViolation(
                     line_id=lo[0].line_id,

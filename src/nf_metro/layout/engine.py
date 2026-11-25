@@ -54,6 +54,7 @@ from nf_metro.layout.phases._common import (
     _scoped_sections,
     _snapshot_placement_refs,
     continuation_track_predecessors,
+    row_slot_spacing,
 )
 from nf_metro.layout.phases.balancing import (
     _balance_section_content_around_trunk,
@@ -190,6 +191,7 @@ from nf_metro.layout.phases.single_section import (
     _align_terminus_to_upstream,
     _layout_single_section,
     _shift_lr_perp_entry_stations,
+    reserve_fan_stagger_runway,
 )
 from nf_metro.layout.phases.snapshots import (
     capture_phase_snapshot,
@@ -1395,6 +1397,7 @@ def _compute_flat_layout(
             x_offset + station.layer * x_spacing + layer_extra.get(station.layer, 0)
         )
         station.y = y_offset + track_rank[station.track] * y_spacing
+    reserve_fan_stagger_runway(graph, graph, None)
 
     _snap(graph, "flat")
 
@@ -1566,6 +1569,13 @@ def _compute_section_layout(
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
+    for sec_id, sub in section_subgraphs.items():
+        reserve_fan_stagger_runway(
+            graph,
+            sub,
+            graph.sections[sec_id],
+            y_grid=row_slot_spacing(graph._row_y_grid_info, sec_id, y_spacing),
+        )
     _snap(graph, "1.2")
 
     # Stage 1.3: Place sections on the canvas
