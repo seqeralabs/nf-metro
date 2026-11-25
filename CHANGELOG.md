@@ -15,6 +15,10 @@ history.
 
 ## [Unreleased]
 
+---
+
+## [3.0.0] — 2026-11-25
+
 ### Breaking changes
 
 - `rich`, `rich-click` and `pyyaml` are core dependencies, for the colourful
@@ -381,6 +385,8 @@ light.png | dark.png`) in a PNG.
   a five-line fan out of one exit), and a route starting on a one-line
   station's drawn lane is no longer reported as hanging in open space when the
   lane sits more than two corner radii off the station's centre.
+
+---
 
 ## [2.1.0] — 2026-09-15
 
