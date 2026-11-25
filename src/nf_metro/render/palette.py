@@ -128,9 +128,8 @@ _EXTRA_BLOCK = 16
 def _extras(
     palette: tuple[str, ...], background: str, avoid: tuple[str, ...], count: int
 ) -> tuple[str, ...]:
-    bg = _rgb(background)
-    if bg is None:
-        return ()
+    bg = _rgb(background) or _rgb(_LIGHT_FALLBACK)
+    assert bg is not None
     used = [_oklab(rgb) for c in (*palette, background, *avoid) if (rgb := _rgb(c))]
     pool = [c for c in _candidates() if _contrast(c, bg) >= _MIN_CONTRAST]
     labs = [_oklab(c) for c in pool]
