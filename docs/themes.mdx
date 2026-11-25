@@ -86,7 +86,8 @@ layout: { curve_radius_ratio: 3.5 }
 <Metro src="examples/themes/london_tube.mmd" mmd={false} />
 
 The standard's own interchange idiom is rings.
-Stack a file that sets `interchange_glyph: ring` (and `terminus_glyph: ring` for line ends) on top of `london-tube` to get them: one ring over two lines, and a bridged chain from three up.
+Stack a file that sets `interchange_glyph: ring` on top of `london-tube` to get them: one ring over two lines, and a bridged chain from three up.
+Line ends keep the bar, which reads better than a ring there.
 
 <Metro src="examples/themes/london_tube_rings.mmd" mmd="collapsed" />
 
@@ -99,8 +100,8 @@ In dark mode it takes the white-on-black of the 1970 Graphics Standards Manual's
 ```yaml
 station_glyph: dot
 interchange_glyph: dots
-dot_diameter: 0.45
-dot_ring_width: 0.225 # half the diameter: a solid dot
+dot_diameter: 0.65
+dot_ring_width: 0.325 # half the diameter: a solid dot
 legend_swatch: bullet
 ```
 
@@ -190,7 +191,7 @@ The last column names a theme above that draws each one.
 |                     | `numbered` | one station-number marker across the lines, ringed in `station_stroke`                     | `tokyo-metro`                                   |
 | `terminus_glyph`    | `nub`      | a square-cornered box across the lines                                                     | `default`                                       |
 | (line end)          | `bar`      | a buffer-stop bar across the bundle                                                        | `london-tube`, `tokyo-metro`                    |
-|                     | `ring`     | rings, or the `dots` or `numbered` interchange glyph when the theme uses one               | `london-tube` with rings, `nyc-subway`          |
+|                     | `ring`     | rings, or the `dots` or `numbered` interchange glyph when the theme uses one               | `nyc-subway`, `washington-metro`                |
 
 A line end with one line follows `station_glyph`, and its file icon always sits beyond the glyph.
 

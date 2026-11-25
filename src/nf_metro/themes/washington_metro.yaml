@@ -18,7 +18,7 @@ line_cap: butt
 label_font_family: "'Helvetica Neue', Helvetica, Arial, sans-serif"
 label_font_weight: "500"
 number_sections: false
-section_stroke_width: 5
+section_stroke_width: 4
 section_corner_radius: 28
 section_label_font_weight: bold
 legend_swatch: bullet
@@ -29,6 +29,8 @@ legend_stroke_width: 0
 layout:
   track_gap: 1
   curve_radius_ratio: 2.0
+  # Room inside the Beltway band for the labels hanging below the lines.
+  section_y_padding: 64
 
 # Red, Blue, Orange, Green, Yellow, Silver.
 line_colors: ["#C80F2D", "#009CDE", "#ED8B00", "#00B140", "#FFD100", "#919D9D"]

@@ -8,12 +8,13 @@
 # "MTA Colors" open dataset and subway GTFS, 2026).
 name: nyc-subway
 
-# A solid dot 0.45 line widths across: an outline half the diameter wide.
+# A solid dot (an outline half the diameter wide). The diagram's dots are
+# under half the line's width; here they are 0.65 so they read at map scale.
 station_glyph: dot
 interchange_glyph: dots
 terminus_glyph: ring
-dot_diameter: 0.45
-dot_ring_width: 0.225
+dot_diameter: 0.65
+dot_ring_width: 0.325
 line_width: 6
 line_cap: butt
 label_font_family: "'Helvetica Neue', Helvetica, Arial, sans-serif"
@@ -65,5 +66,3 @@ dark:
   section_label_color: "#ffffff"
   legend_fill: "#000000"
   legend_text_color: "#ffffff"
-  icon_fill: "#000000"
-  icon_stroke: "#ffffff"
