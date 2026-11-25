@@ -216,6 +216,7 @@ from nf_metro.render.glyphs import (
     maybe_muted_class,
     ring_groups,
     station_axis,
+    uses_line_offsets,
 )
 from nf_metro.render.icons import (
     render_file_icon,
@@ -2811,7 +2812,9 @@ def _emit_render_plan(
             d,
             theme,
             bool(inactive_line_ids),
-            [ln for ln in graph.lines.values() if ln.id not in inactive_line_ids],
+            [ln for ln in graph.lines.values() if ln.id not in inactive_line_ids]
+            if any(theme.mode_line_colors)
+            else [],
         )
 
     # Dark-mode CSS for transparent-background themes so that elements
@@ -3367,7 +3370,7 @@ def _inject_chrome_css(
     d: draw.Drawing,
     theme: Theme,
     any_inactive: bool,
-    active_lines: Sequence[MetroLine] = (),
+    active_lines: Sequence[MetroLine],
 ) -> None:
     """Inject CSS custom properties for chrome colors.
 
@@ -5181,7 +5184,9 @@ def _render_station_into(
 
     line_offsets = (
         drawn_line_offsets(graph, station, station_offsets, positive_fan)
-        if station_offsets and not graph.station_is_rail(station.id)
+        if station_offsets
+        and not graph.station_is_rail(station.id)
+        and uses_line_offsets(theme)
         else {}
     )
     _draw_bundle_station(

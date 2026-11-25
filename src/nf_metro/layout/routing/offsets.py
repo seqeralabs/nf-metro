@@ -5554,9 +5554,15 @@ def drawn_bundle_span(
     if not graph.station_lines(station.id):
         return 0.0, 0.0
     raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
-    frame = _station_lane_frame(graph, station, positive_fan)
-    sign = 1.0 if frame is None else frame.secondary_sign
+    sign = _drawn_lane_sign(graph, station, positive_fan)
     return min(sign * raw_min, sign * raw_max), max(sign * raw_min, sign * raw_max)
+
+
+def _drawn_lane_sign(
+    graph: MetroGraph, station: Station, positive_fan: set[str] | None
+) -> float:
+    frame = _station_lane_frame(graph, station, positive_fan)
+    return 1.0 if frame is None else frame.secondary_sign
 
 
 def drawn_line_offsets(
@@ -5567,8 +5573,7 @@ def drawn_line_offsets(
 ) -> dict[str, float]:
     """Each line's offset across a station *as drawn*, keyed by line id: the
     per-line counterpart of :func:`drawn_bundle_span`."""
-    frame = _station_lane_frame(graph, station, positive_fan)
-    sign = 1.0 if frame is None else frame.secondary_sign
+    sign = _drawn_lane_sign(graph, station, positive_fan)
     return {
         lid: sign * station_offsets.get((station.id, lid), 0.0)
         for lid in graph.station_lines(station.id)

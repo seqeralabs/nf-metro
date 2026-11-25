@@ -7,7 +7,6 @@
 # system map's CMYK matches.
 name: washington-metro
 
-# Dots as wide as the line: a 0.26-wide black ring round a white centre.
 station_glyph: dot
 interchange_glyph: dots
 terminus_glyph: ring
@@ -29,7 +28,6 @@ legend_stroke_width: 0
 layout:
   track_gap: 1
   curve_radius_ratio: 2.0
-  # Room inside the Beltway band for the labels hanging below the lines.
   section_y_padding: 64
 
 # Red, Blue, Orange, Green, Yellow, Silver.

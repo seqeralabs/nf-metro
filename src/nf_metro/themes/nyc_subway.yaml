@@ -8,8 +8,8 @@
 # "MTA Colors" open dataset and subway GTFS, 2026).
 name: nyc-subway
 
-# A solid dot (an outline half the diameter wide). The diagram's dots are
-# under half the line's width; here they are 0.65 so they read at map scale.
+# A solid dot (an outline half the diameter wide), a little larger than the
+# diagram's so it reads at map scale.
 station_glyph: dot
 interchange_glyph: dots
 terminus_glyph: ring

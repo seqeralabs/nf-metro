@@ -761,7 +761,7 @@ def line_paint_class(
     A muted line takes the inactive grey's class; an active one, the class of
     its colour when the two palettes give it different ones.
     """
-    if muted or line is None:
+    if muted or line is None or not any(theme.mode_line_colors):
         return muted_paint_class(theme, muted, prop)
     light, dark = line_color_pair(theme, line)
     if light == dark:

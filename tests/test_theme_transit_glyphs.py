@@ -13,7 +13,7 @@ from nf_metro.layout.constants import TB_LABEL_H_SPACING
 from nf_metro.layout.labels import tb_label_gap
 from nf_metro.layout.pass_metrics import metrics_context
 from nf_metro.parser import parse_metro_mermaid
-from nf_metro.render.legend import readable_text_color
+from nf_metro.render.constants import readable_text_color
 from nf_metro.render.style import ordinal_code
 from nf_metro.themes import resolve_stack
 

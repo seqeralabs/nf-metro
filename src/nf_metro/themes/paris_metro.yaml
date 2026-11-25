@@ -7,8 +7,8 @@
 # (Referentiel des symboles de mode et indices de ligne v1).
 name: paris-metro
 
-# The plan's stop dots are barely wider than the line; here they are as wide
-# as an interchange capsule, so the white centre reads at map scale.
+# Stop dots as wide as an interchange capsule, larger than the plan's, so the
+# white centre reads at map scale.
 station_glyph: dot
 dot_ring: line
 dot_diameter: 2.5
