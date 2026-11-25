@@ -15,6 +15,7 @@ from nf_metro.layout.constants import (
     STATION_MOVE_TOLERANCE,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
     Point,
     half_turn_tan,
     lanes_run_along_x,
@@ -26,6 +27,10 @@ from nf_metro.layout.pass_metrics import (
     active_metrics,
     min_station_flat_length,
     min_straight_edge,
+)
+from nf_metro.layout.phases.fan_stagger import (
+    graph_fan_stagger_needs,
+    seat_within_fan_room,
 )
 from nf_metro.layout.routing.common import (
     OffsetRegime,
@@ -393,6 +398,8 @@ class _BubbleCtx:
     # above and one below the station's own Y.
     divergence_anchors: set[str]
     planned_geometry_stations: set[str]
+    # Flow-axis length each fanned diagonal needs for its spread stagger.
+    stagger_need: dict[tuple[str, str], float]
 
 
 def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx:
@@ -439,6 +446,7 @@ def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx
         diag_out_targets=diag_out_targets,
         original_x=original_x,
         divergence_anchors=_divergence_target_ys(graph),
+        stagger_need=graph_fan_stagger_needs(graph),
         planned_geometry_stations={
             station_id
             for route in routes
@@ -761,8 +769,24 @@ def _centering_candidate(
         return None
 
     if shared_source or shared_target or has_flat_side or multi_diag:
-        new_x = (in_diag_end_x + out_diag_start_x) / 2
-        return (new_x, in_routes, flat_in, out_routes, flat_out)
+        sign = AxisFrame.flow_sign(sec.direction if sec is not None else "LR")
+        new_x = seat_within_fan_room(
+            (in_diag_end_x + out_diag_start_x) / 2,
+            sign,
+            [
+                (graph.stations[rp.edge.source].x, ctx.stagger_need.get(key, 0.0))
+                for rp in in_routes
+                for key in [(rp.edge.source, rp.edge.target)]
+            ],
+            [
+                (graph.stations[rp.edge.target].x, ctx.stagger_need.get(key, 0.0))
+                for rp in out_routes
+                for key in [(rp.edge.source, rp.edge.target)]
+            ],
+        )
+        return (
+            None if new_x is None else (new_x, in_routes, flat_in, out_routes, flat_out)
+        )
 
     # Simple case: shift both diagonals to equalise the flats.
     shift = (in_flat - out_flat) / 2

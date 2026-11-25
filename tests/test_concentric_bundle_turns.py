@@ -289,6 +289,48 @@ def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
     _assert_concentric(*rendered, _HUB_FAN_BUNDLES)
 
 
+@pytest.mark.parametrize(
+    ("name", "line_width", "ratio", "edges"),
+    [
+        pytest.param(
+            "rnaseq_metro.mmd",
+            lw,
+            ratio,
+            (("fastp", "fastqc_trimmed"), ("trimgalore", "fastqc_trimmed")),
+            id=f"rnaseq_metro-lw{lw}-r{ratio}",
+        )
+        for lw, ratio in ((6, 4.5), (9, 3.0))
+    ]
+    + [
+        pytest.param(
+            "genomic_pipeline.mmd",
+            9,
+            4.5,
+            (("applybqsr", "mosdepth"), ("applybqsr", "ngscheckmate")),
+            id="genomic_pipeline-applybqsr",
+        ),
+        pytest.param(
+            "genomeassembly_staggered.mmd",
+            9,
+            4.5,
+            (("scaffolding_bwamem2", "yahs"), ("scaffolding_minimap2", "yahs")),
+            id="genomeassembly_staggered-yahs",
+        ),
+    ],
+)
+def test_gallery_fans_keep_their_stagger_room(tmp_path, name, line_width, ratio, edges):
+    """Stations settled after Stage 1.2 (loop-side recentring, bubble centring)
+    and the Stage 6.4 grid snap leave each fan the room its stagger needs."""
+    path = _ROOT / "examples" / name
+    theme = _theme_file(
+        tmp_path,
+        f"name: wide\nline_width: {line_width}\n"
+        f"layout:\n  curve_radius_ratio: {ratio}\n",
+    )
+    rendered = _render("%%metro track_gap: 0\n" + path.read_text(), path.parent, theme)
+    _assert_concentric(*rendered, edges)
+
+
 # One cubic per corner holds a circle to 1e-3 of its radius up to a right
 # angle, the largest turn routing draws; past it the single cubic's own
 # approximation error grows, to about 3.1e-3 at 135 degrees.

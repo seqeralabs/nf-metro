@@ -81,3 +81,22 @@ def test_vertical_flow_requires_the_y_grid():
     sub = MetroGraph()
     with pytest.raises(AssertionError):
         reserve_fan_stagger_runway(sub, sub, Section(id="s", name="s", direction="TB"))
+
+
+@pytest.mark.parametrize("direction", ["LR", "RL"])
+def test_opening_is_exactly_the_shortfall(direction):
+    """A short bundle ends at exactly the length it needs, no further."""
+    from nf_metro.layout.phases.fan_stagger import fan_stagger_needs
+
+    flow, cross = AxisFrame.axes_for_direction(direction)
+    sub = MetroGraph()
+    for sid, (f, c) in _PASSING.items():
+        station = Station(id=sid, label=sid, section_id="s")
+        setattr(station, flow, f)
+        setattr(station, cross, c + 100.0)
+        sub.add_station(station)
+    for source, target, line in _PASSING_EDGES:
+        sub.add_edge(Edge(source=source, target=target, line_id=line))
+    need = fan_stagger_needs(sub, sub.stations, direction, y_grid=_GRID)
+    placed = _reserve(direction, _PASSING, _PASSING_EDGES)
+    assert placed["tgt"] == pytest.approx(need[("src", "tgt")])

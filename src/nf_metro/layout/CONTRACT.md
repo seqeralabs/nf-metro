@@ -391,7 +391,9 @@ in pipeline order.
   run and `(N - 1) * pitch * tan(phi_max / 2)`, where `N` is the number of
   distinct lines in the spread group (see `_spread_groups`: by hub and
   heading on lanes-along-Y sections, per bundle otherwise) and `phi_max` is
-  that group's steepest deflection. Each shortfall opens just before the edge's downstream
+  that group's steepest deflection, its drop taken as the Stage 6.4 Y-lattice
+  snap can at most make it (`fan_stagger_needs`, `phases/fan_stagger.py`).
+  Each shortfall opens just before the edge's downstream
   station, in whole `y_spacing` steps along a vertical flow, and the bbox
   flow-axis size grows by the same amount. `graph._row_y_grid_info` stores
   grid metadata for the debug overlay.
@@ -1304,7 +1306,9 @@ in pipeline order.
 - **Helper**: `_recenter_loop_side_stations` (`phases/balancing.py`).
 - **Precondition**: All Y phases done; routing geometry derivable.
 - **Postcondition**: Loop side stations sit at the visual centre of
-  their horizontal loop run.
+  their horizontal loop run, or as near it as leaves both fanned diagonals
+  their `fan_stagger_needs` room (the routing bubble-centring move keeps the
+  same bound).
 - **Invariants preserved**: Station Y. Pure-side-branch classification
   is strict (see `test_loop_recenter_only_for_pure_side_branches`).
 - **Related tests**: `test_fan_station_centered_on_loop`,

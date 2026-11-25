@@ -27,6 +27,7 @@ from nf_metro.layout.phases.bbox import (
     _loop_corner_x,
     push_lower_rows_after_bbox_grow,
 )
+from nf_metro.layout.phases.fan_stagger import fan_stagger_needs, seat_within_fan_room
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import (
     MetroGraph,
@@ -989,6 +990,11 @@ def _recenter_section_loop_sides(
     avoid perturbing placements main already settled on.
     """
     port_ids = section.port_ids
+    need = fan_stagger_needs(
+        graph,
+        {sid: graph.stations[sid] for sid in section.station_ids},
+        section.direction,
+    )
     for sid in section.station_ids:
         if sid in port_ids:
             continue
@@ -1010,6 +1016,16 @@ def _recenter_section_loop_sides(
             min(corner_left, corner_right) <= midpoint <= max(corner_left, corner_right)
         ):
             continue
+        sign = 1.0 if tgt.x > src.x else -1.0
+        seated = seat_within_fan_room(
+            midpoint,
+            sign,
+            [(src.x, need.get((src.id, st.id), 0.0))],
+            [(tgt.x, need.get((st.id, tgt.id), 0.0))],
+        )
+        if seated is None:
+            continue
+        midpoint = seated
         is_multiline = len(graph.edges_to(sid)) > 1 or len(graph.edges_from(sid)) > 1
         run = active_metrics().diagonal_run
         min_recenter_delta = run / 4.0 if is_multiline else run / 3.0

@@ -1568,8 +1568,18 @@ def _compute_section_layout(
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
+    snap_pitch = {
+        sec_id: info.get("slot_spacing", y_spacing)
+        for info in (graph._row_y_grid_info or {}).values()
+        for sec_id in info.get("section_ids", [])
+    }
     for sec_id, sub in section_subgraphs.items():
-        reserve_fan_stagger_runway(graph, sub, graph.sections[sec_id], y_grid=y_spacing)
+        reserve_fan_stagger_runway(
+            graph,
+            sub,
+            graph.sections[sec_id],
+            y_grid=snap_pitch.get(sec_id, y_spacing),
+        )
     _snap(graph, "1.2")
 
     # Stage 1.3: Place sections on the canvas
