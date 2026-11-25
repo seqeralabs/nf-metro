@@ -15,12 +15,12 @@ from nf_metro.api import prepare_graph, resolve_theme
 from nf_metro.layout import envelope_settlement, route_reservations, section_placement
 from nf_metro.layout.constants import (
     CANVAS_EDGE_CLEARANCE,
+    CLEARANCE_FLOOR_LINE_WIDTH,
     COORD_TOLERANCE,
     CURVE_RADIUS,
     DIRECTIONAL_MARKER_HALF_EXTENT,
     INTER_ROW_EDGE_CLEARANCE,
     SECTION_Y_GAP,
-    WIDEST_THEME_LINE_WIDTH,
 )
 from nf_metro.layout.envelope_settlement import (
     BoundaryClearanceDemand,
@@ -1670,18 +1670,12 @@ def test_a_canvas_corridor_narrower_than_it_claims_fails_the_strict_path() -> No
         )
 
 
-def test_the_canvas_edge_clearance_bounds_every_theme() -> None:
-    """No brand draws a stroke the canvas-margin demand fails to cover.
-
-    The clearance is resolved before a theme is chosen, so it has to hold for
-    the widest stroke any brand sets rather than the default one.
-    """
-    widest = max(theme.line_width for theme in THEMES.values())
-    assert WIDEST_THEME_LINE_WIDTH == pytest.approx(widest)
-    assert DIRECTIONAL_MARKER_HALF_EXTENT == pytest.approx(
-        max(theme.chevron_size for theme in THEMES.values())
-    )
-    assert CANVAS_EDGE_CLEARANCE >= DIRECTIONAL_MARKER_HALF_EXTENT + widest / 2
+@pytest.mark.parametrize("name", sorted(THEMES))
+def test_the_canvas_edge_clearance_bounds_every_theme(name: str) -> None:
+    """No built-in theme draws a stroke the canvas-margin demand fails to cover."""
+    theme = THEMES[name]
+    with metrics_context(line_width=theme.line_width, chevron_size=theme.chevron_size):
+        assert canvas_edge_clearance() >= theme.chevron_size + theme.line_width / 2
 
 
 def test_a_coarsened_stroke_widens_the_canvas_margin_it_reserves() -> None:
@@ -1694,10 +1688,10 @@ def test_a_coarsened_stroke_widens_the_canvas_margin_it_reserves() -> None:
     assert canvas_edge_clearance() == pytest.approx(CANVAS_EDGE_CLEARANCE)
     with metrics_context(stroke_scale=2.0):
         assert canvas_edge_clearance() == pytest.approx(
-            DIRECTIONAL_MARKER_HALF_EXTENT + WIDEST_THEME_LINE_WIDTH
+            DIRECTIONAL_MARKER_HALF_EXTENT + CLEARANCE_FLOOR_LINE_WIDTH
         )
         assert canvas_edge_clearance() - CANVAS_EDGE_CLEARANCE == pytest.approx(
-            WIDEST_THEME_LINE_WIDTH / 2
+            CLEARANCE_FLOOR_LINE_WIDTH / 2
         )
 
 

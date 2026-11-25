@@ -422,16 +422,16 @@ half-width), which the reservation ledger cannot read: a corridor's
 clearances are a property of its region, resolved before any theme is in
 hand."""
 
-WIDEST_THEME_LINE_WIDTH: float = 4.0
-"""The widest ``Theme.line_width`` any built-in theme sets.
+CLEARANCE_FLOOR_LINE_WIDTH: float = 4.0
+"""The stroke width the canvas-edge clearance covers at least.
 
-A corridor's clearances are a property of its region, resolved before a theme
-is in hand, so a demand that has to hold for every theme takes the widest
-stroke rather than the default one.  Pinned to the registry by
-``test_the_canvas_edge_clearance_bounds_every_theme``."""
+:func:`~nf_metro.layout.pass_metrics.canvas_edge_clearance` widens the
+clearance to the active theme's ``line_width`` when that is wider, so this is
+a floor, not a bound on any theme. ``test_the_canvas_edge_clearance_bounds_every_theme``
+checks every built-in theme is covered."""
 
 CANVAS_EDGE_CLEARANCE: float = (
-    DIRECTIONAL_MARKER_HALF_EXTENT + WIDEST_THEME_LINE_WIDTH / 2
+    DIRECTIONAL_MARKER_HALF_EXTENT + CLEARANCE_FLOOR_LINE_WIDTH / 2
 )
 """Minimum distance between a canvas-margin corridor and the canvas edge.
 

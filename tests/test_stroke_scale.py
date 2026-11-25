@@ -10,13 +10,13 @@ import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph, resolve_theme
 from nf_metro.layout.constants import (
+    CLEARANCE_FLOOR_LINE_WIDTH,
     DEFAULT_LINE_WIDTH,
     DIRECTIONAL_MARKER_HALF_EXTENT,
     EDGE_TO_BUNDLE_CLEARANCE,
     OFFSET_STEP,
     RAIL_KNOB_RADIUS_RATIO,
     STATION_RADIUS_APPROX,
-    WIDEST_THEME_LINE_WIDTH,
     graph_offset_step,
     resolve_offset_step,
 )
@@ -205,7 +205,7 @@ def test_a_coarsened_canvas_margin_reads_back_outside_its_pass() -> None:
         item for item in plan.reservations if isinstance(item.region, CanvasRegion)
     ]
     assert canvas
-    scaled = DIRECTIONAL_MARKER_HALF_EXTENT + WIDEST_THEME_LINE_WIDTH * 2.0 / 2
+    scaled = DIRECTIONAL_MARKER_HALF_EXTENT + CLEARANCE_FLOOR_LINE_WIDTH * 2.0 / 2
     assert {
         item.negative_side_clearance
         if item.region.side in CANVAS_EDGE_ON_NEGATIVE_SIDE
