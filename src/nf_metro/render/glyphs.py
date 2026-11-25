@@ -37,7 +37,7 @@ from nf_metro.render.style import (
     RING_GROW,
     TERMINUS_BAR,
     Theme,
-    muted_paint_class,
+    line_paint_class,
 )
 
 if TYPE_CHECKING:
@@ -292,8 +292,9 @@ def draw_line_station_glyph(
     data = bundle.station_data
     lines = graph.station_lines(station.id)
     if theme.station_glyph == GLYPH_TICK and len(lines) == 1:
+        line = graph.lines.get(lines[0])
         color = effective_line_color(
-            graph.lines.get(lines[0]),
+            line,
             theme,
             frozenset(lines) if bundle.muted else frozenset(),
         )
@@ -302,7 +303,7 @@ def draw_line_station_glyph(
             if station.is_terminus
             else station_tab_box(bundle, theme)
         )
-        paint = muted_paint_class(theme, bundle.muted, "fill")
+        paint = line_paint_class(theme, line, bundle.muted, "fill")
         extra = {"class_": f"{data['class_']} {paint}"} if paint else {}
         d.append(draw.Rectangle(*box, fill=color, **{**data, **extra}))
         return True

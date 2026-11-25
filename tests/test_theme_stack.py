@@ -85,7 +85,7 @@ def test_an_unknown_theme_name_has_no_rename_hint():
 def test_only_london_tube_sets_layout_options():
     for name in STYLE_NAMES - {"london-tube"}:
         assert resolve_stack(name).layout == {}
-    assert resolve_stack("london-tube").layout == {"curve_radius_ratio": 3.0}
+    assert resolve_stack("london-tube").layout == {"curve_radius_ratio": 3.5}
 
 
 def test_london_tube_sets_its_look_and_inherits_the_rest_from_default():
@@ -93,10 +93,10 @@ def test_london_tube_sets_its_look_and_inherits_the_rest_from_default():
     assert light.station_glyph == "tick"
     assert light.number_sections is False
     assert light.uppercase_section_labels is True
-    assert light.label_color == "#1c3f94"
+    assert light.label_color == "#0019A8"
     assert light.title_font_size == DEFAULT_LIGHT_THEME.title_font_size
     assert light.icon_width == DEFAULT_LIGHT_THEME.icon_width
-    assert color_pair(light, "label_color") == ("#1c3f94", "#dfe6ff")
+    assert color_pair(light, "label_color") == ("#0019A8", "#dfe6ff")
 
 
 def test_a_theme_of_top_level_colours_has_one_palette():
@@ -209,7 +209,7 @@ def test_a_stacked_theme_carries_both_palettes():
         _TUBE.dark.label_color,
     )
     svg = render_string(MMD, theme="seqera, london-tube")
-    assert "light-dark(#1c3f94, #dfe6ff)" in svg
+    assert "light-dark(#0019A8, #dfe6ff)" in svg
 
 
 # ---------------------------------------------------------------------------

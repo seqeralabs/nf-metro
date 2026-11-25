@@ -93,11 +93,11 @@ def _laid_out(path: Path, ratio: float | None) -> object:
     ],
     ids=lambda p: p.stem,
 )
-def test_london_tube_bends_at_three_line_widths(path: Path) -> None:
+def test_london_tube_bends_at_three_and_a_half_line_widths(path: Path) -> None:
     theme = THEMES["london-tube"]
     radii = drawn_corner_radii(_render(path, theme="london-tube"))
     assert radii
-    assert min(radii) == pytest.approx(3.0 * theme.line_width, abs=0.1)
+    assert min(radii) == pytest.approx(3.5 * theme.line_width, abs=0.1)
 
 
 def test_the_default_theme_bends_at_the_base_radius() -> None:
@@ -107,7 +107,7 @@ def test_the_default_theme_bends_at_the_base_radius() -> None:
 
 @pytest.mark.parametrize(
     ("theme", "expected"),
-    [("default", 1.6 * CURVE_RADIUS), ("london-tube", 1.6 * 3.0 * 4.0)],
+    [("default", 1.6 * CURVE_RADIUS), ("london-tube", 1.6 * 3.5 * 4.0)],
 )
 def test_stroke_scale_scales_the_drawn_radius(theme: str, expected: float) -> None:
     radii = drawn_corner_radii(
@@ -157,9 +157,9 @@ def test_a_laid_out_graph_routes_at_its_own_radius() -> None:
         source_dir=str(EXAMPLES),
     )
     routes = route_edges(graph)
-    assert graph.layout_metrics.curve_radius_ratio == 3.0
+    assert graph.layout_metrics.curve_radius_ratio == 3.5
     radii = [r for route in routes for r in (route.curve_radii or ())]
-    assert radii and min(radii) == pytest.approx(12.0)
+    assert radii and min(radii) == pytest.approx(14.0)
 
 
 def test_an_explicit_radius_is_the_radius_every_accessor_reads() -> None:

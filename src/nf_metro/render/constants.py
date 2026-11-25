@@ -245,8 +245,9 @@ def effective_line_color(
     """Stroke colour for a line, muted to grey when the line is inactive.
 
     An inactive line resolves to ``theme.muted_line_color`` at every stroke
-    site (edge, chevron, legend swatch); every other line keeps its own colour,
-    falling back to :data:`FALLBACK_LINE_COLOR` when it has none. *active_color*,
+    site (edge, chevron, legend swatch); every other line takes its pick from
+    the theme's ``line_colors``, else its own colour, falling back to
+    :data:`FALLBACK_LINE_COLOR` when there is no line. *active_color*,
     when given, is the colour for an *active* line, taking priority over the
     line's own (the chevron site passes ``theme.chevron_color`` so a
     themed marker colour wins); an inactive line mutes regardless.
@@ -259,7 +260,15 @@ def effective_line_color(
         return theme.muted_line_color
     if active_color:
         return active_color
-    return html.escape(line.color) if line is not None else FALLBACK_LINE_COLOR
+    if line is None:
+        return FALLBACK_LINE_COLOR
+    return html.escape(palette_pick(theme.line_colors, line))
+
+
+def palette_pick(palette: tuple[str, ...], line: MetroLine) -> str:
+    """*line*'s colour from *palette* by declaration order, or its own when
+    *palette* is empty."""
+    return palette[line.palette_index % len(palette)] if palette else line.color
 
 
 def station_is_muted(

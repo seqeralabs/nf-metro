@@ -48,7 +48,7 @@ from nf_metro.render.constants import (
 )
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import ns as _ns
-from nf_metro.render.style import Theme, muted_paint_class
+from nf_metro.render.style import Theme, line_paint_class
 from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
 
 
@@ -336,15 +336,15 @@ def _render_swatch(
                 stroke_width=theme.line_width,
                 stroke_linecap=theme.line_cap,
                 **dash_kw,
-                **_muted_swatch_class(theme, ml, inactive_line_ids),
+                **_swatch_paint_class(theme, ml, inactive_line_ids),
             )
         )
 
 
-def _muted_swatch_class(
+def _swatch_paint_class(
     theme: Theme, line: MetroLine, inactive_line_ids: frozenset[str]
 ) -> dict[str, str]:
-    paint = muted_paint_class(theme, line.id in inactive_line_ids, "stroke")
+    paint = line_paint_class(theme, line, line.id in inactive_line_ids, "stroke")
     return {"class_": paint} if paint else {}
 
 

@@ -19,6 +19,7 @@ __all__ = [
     "GLYPH_PILL",
     "GLYPH_RING",
     "GLYPH_TICK",
+    "LINE_PAINT_CLASS",
     "MUTED_FILL_CLASS",
     "MUTED_STROKE_CLASS",
     "RING_CHAIN",
@@ -32,6 +33,8 @@ __all__ = [
     "color_pair",
     "colors_adapt",
     "is_adaptive",
+    "line_color_pair",
+    "line_paint_class",
     "muted_paint_class",
 ]
 
@@ -39,7 +42,7 @@ import dataclasses
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from nf_metro.layout.constants import (
     ICON_HALF_HEIGHT,
@@ -67,8 +70,12 @@ from nf_metro.render.constants import (
     STROKE_DASHARRAY,
     TERMINUS_FONT_COLOR,
     WATERMARK_FILL,
+    palette_pick,
 )
 from nf_metro.render.ns import ns as _ns
+
+if TYPE_CHECKING:
+    from nf_metro.parser.model import MetroLine
 
 _MISSING: Any = dataclasses.MISSING
 
@@ -98,6 +105,7 @@ def _field(
     doc: str,
     group: str,
     color: bool = False,
+    palette: bool = False,
     choices: tuple[str, ...] = (),
     pattern: str = "",
     maximum: float | None = None,
@@ -108,6 +116,7 @@ def _field(
             "doc": doc,
             "group": group,
             "color": color,
+            "palette": palette,
             "choices": choices,
             "pattern": pattern,
             "maximum": maximum,
@@ -137,6 +146,8 @@ class Theme:
     mode: str = _derived("dark")
     # ``(field, light value, dark value)`` for every colour field.
     mode_colors: tuple[tuple[str, str, str], ...] = _derived(())
+    # ``line_colors`` as resolved for the light and the dark palette.
+    mode_line_colors: tuple[tuple[str, ...], tuple[str, ...]] = _derived(((), ()))
 
     background_fill: str = _field(
         doc="Canvas fill. `none` leaves the canvas transparent.",
@@ -403,6 +414,15 @@ class Theme:
         group="Lines",
         pattern=DASHARRAY_PATTERN,
     )
+    line_colors: tuple[str, ...] = _field(
+        (),
+        doc="Colours the map's lines take in the order they are declared, "
+        "starting again from the first when a map has more lines than the "
+        "list. Set it under `light:` and `dark:` to give each palette its own. "
+        "Empty keeps each line's `%%metro line:` colour.",
+        group="Lines",
+        palette=True,
+    )
     muted_line_color: str = _field(
         FALLBACK_LINE_COLOR,
         doc="Grey for inactive lines and the stations, labels and icons only "
@@ -632,6 +652,7 @@ def is_adaptive(theme: Theme) -> bool:
     return any(light != dark for _, light, dark in theme.mode_colors)
 
 
+LINE_PAINT_CLASS = "nf-metro-line-paint"
 MUTED_STROKE_CLASS = "nf-metro-muted-stroke"
 MUTED_FILL_CLASS = "nf-metro-muted-fill"
 
@@ -642,3 +663,26 @@ def muted_paint_class(theme: Theme, muted: bool, prop: str) -> str:
     if not (muted and colors_adapt(theme, "muted_line_color")):
         return ""
     return _ns(MUTED_STROKE_CLASS if prop == "stroke" else MUTED_FILL_CLASS)
+
+
+def line_color_pair(theme: Theme, line: MetroLine) -> tuple[str, str]:
+    """``(light, dark)`` colour of *line* under *theme*'s two palettes."""
+    light, dark = theme.mode_line_colors
+    return palette_pick(light, line), palette_pick(dark, line)
+
+
+def line_paint_class(
+    theme: Theme, line: MetroLine | None, muted: bool, prop: str
+) -> str:
+    """The class that lets a line's ``stroke`` or ``fill`` follow the viewer's
+    mode, or ``""`` when its colour is the same in both.
+
+    A muted line takes the inactive grey's class; an active one, the class of
+    its colour when the two palettes give it different ones.
+    """
+    if muted or line is None:
+        return muted_paint_class(theme, muted, prop)
+    light, dark = line_color_pair(theme, line)
+    if light == dark:
+        return ""
+    return _ns(f"{LINE_PAINT_CLASS}-{line.palette_index}-{prop}")

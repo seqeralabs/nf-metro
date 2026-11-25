@@ -151,6 +151,7 @@ from nf_metro.parser.model import (
     LayoutGeometryWarning,
     MarkerStyle,
     MetroGraph,
+    MetroLine,
     Section,
     Station,
 )
@@ -260,6 +261,7 @@ from nf_metro.render.section_header import (
 from nf_metro.render.style import (
     CHROME,
     GLYPH_RING,
+    LINE_PAINT_CLASS,
     MUTED_FILL_CLASS,
     MUTED_STROKE_CLASS,
     Theme,
@@ -267,7 +269,8 @@ from nf_metro.render.style import (
     color_pair,
     colors_adapt,
     is_adaptive,
-    muted_paint_class,
+    line_color_pair,
+    line_paint_class,
 )
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
@@ -2803,7 +2806,12 @@ def _emit_render_plan(
     # Chrome CSS: custom properties so hosts can recolor without re-rendering.
     # Injected before the background rect so browser parsing order is correct.
     if chrome_css:
-        _inject_chrome_css(d, theme, bool(inactive_line_ids))
+        _inject_chrome_css(
+            d,
+            theme,
+            bool(inactive_line_ids),
+            [ln for ln in graph.lines.values() if ln.id not in inactive_line_ids],
+        )
 
     # Dark-mode CSS for transparent-background themes so that elements
     # rendered directly on the canvas (section labels, number badges,
@@ -3354,7 +3362,12 @@ def _capsule_attrs(
     return attrs
 
 
-def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> None:
+def _inject_chrome_css(
+    d: draw.Drawing,
+    theme: Theme,
+    any_inactive: bool,
+    active_lines: Sequence[MetroLine] = (),
+) -> None:
     """Inject CSS custom properties for chrome colors.
 
     Defines ``--nfm-map-*`` properties on the chrome element classes so a host
@@ -3383,7 +3396,23 @@ def _inject_chrome_css(d: draw.Drawing, theme: Theme, any_inactive: bool) -> Non
         )
     if any_inactive:
         lines += _muted_chrome_rules(theme)
+    lines += _line_paint_rules(theme, active_lines)
     d.append(draw.Raw(f"<style>{chr(10).join(lines)}</style>"))
+
+
+def _line_paint_rules(theme: Theme, lines: Sequence[MetroLine]) -> list[str]:
+    """Rules giving each line whose palettes differ its colour for the
+    viewer's mode, on its strokes and on the glyphs filled in its colour."""
+    rules: list[str] = []
+    for line in lines:
+        light, dark = line_color_pair(theme, line)
+        if light == dark:
+            continue
+        value = adaptive_value(html.escape(light), html.escape(dark))
+        for prop in ("stroke", "fill"):
+            cls = f"{LINE_PAINT_CLASS}-{line.palette_index}-{prop}"
+            rules.append(_css_rule(cls, f"{prop}: {value}"))
+    return rules
 
 
 def _css_rule(cls: str, props: str, *also: str) -> str:
@@ -3726,7 +3755,9 @@ def _render_edges(
         color = effective_line_color(line, theme, inactive_line_ids)
         style_kw = line_style_kwargs(line.style, theme) if line else {}
         class_name = _ns(f"metro-line-{route.line_id}")
-        paint = muted_paint_class(theme, route.line_id in inactive_line_ids, "stroke")
+        paint = line_paint_class(
+            theme, line, route.line_id in inactive_line_ids, "stroke"
+        )
         if paint:
             class_name = f"{class_name} {paint}"
 
@@ -3798,7 +3829,12 @@ def _render_directional_markers(
             line, theme, inactive_line_ids, theme.chevron_color
         )
         class_name = _ns(f"metro-direction-{route.line_id}")
-        paint = muted_paint_class(theme, route.line_id in inactive_line_ids, "stroke")
+        paint = line_paint_class(
+            theme,
+            None if theme.chevron_color else line,
+            route.line_id in inactive_line_ids,
+            "stroke",
+        )
         if paint:
             class_name = f"{class_name} {paint}"
         for vertices in chevrons:

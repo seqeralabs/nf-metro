@@ -83,6 +83,9 @@
         "marker_stroke": {
           "$ref": "#/$defs/fields/marker_stroke"
         },
+        "line_colors": {
+          "$ref": "#/$defs/fields/line_colors"
+        },
         "muted_line_color": {
           "$ref": "#/$defs/fields/muted_line_color"
         },
@@ -167,6 +170,9 @@
         },
         "marker_stroke": {
           "$ref": "#/$defs/fields/marker_stroke"
+        },
+        "line_colors": {
+          "$ref": "#/$defs/fields/line_colors"
         },
         "muted_line_color": {
           "$ref": "#/$defs/fields/muted_line_color"
@@ -492,6 +498,9 @@
     },
     "dotted_dasharray": {
       "$ref": "#/$defs/fields/dotted_dasharray"
+    },
+    "line_colors": {
+      "$ref": "#/$defs/fields/line_colors"
     },
     "muted_line_color": {
       "$ref": "#/$defs/fields/muted_line_color"
@@ -1025,6 +1034,17 @@
         "type": "string",
         "pattern": "^\\s*(\\d+(\\.\\d+)?([\\s,]+\\d+(\\.\\d+)?)*\\s*)?$",
         "default": "2,4"
+      },
+      "line_colors": {
+        "description": "Colours the map's lines take in the order they are declared, starting again from the first when a map has more lines than the list. Set it under `light:` and `dark:` to give each palette its own. Empty keeps each line's `%%metro line:` colour.",
+        "x-group": "Lines",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^\\s*(|none|transparent|currentColor|#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\\(\\s*[-0-9.%,\\s/]+\\)|[a-zA-Z]+)\\s*$",
+          "x-colour": true
+        },
+        "default": []
       },
       "muted_line_color": {
         "description": "Grey for inactive lines and the stations, labels and icons only they touch.",

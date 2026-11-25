@@ -280,19 +280,20 @@ A **colour** is a hex value, an `rgb()`/`hsl()` function, a CSS color name, `tra
 
 ### Lines
 
-| Field              | Value             | Default        | Effect                                                                      |
-| ------------------ | ----------------- | -------------- | --------------------------------------------------------------------------- |
-| `line_width`       | number            | from `default` | Route stroke width, px.                                                     |
-| `line_cap`         | `round` \| `butt` | `round`        | End caps of route strokes: `round` or `butt`.                               |
-| `dashed_dasharray` | text              | `8,4`          | SVG dash pattern of a `dashed` line, px.                                    |
-| `dotted_dasharray` | text              | `2,4`          | SVG dash pattern of a `dotted` line, px.                                    |
-| `muted_line_color` | colour            | `#888888`      | Grey for inactive lines and the stations, labels and icons only they touch. |
-| `bridge_lines`     | `true` \| `false` | `true`         | Break the lower line where two unrelated lines cross.                       |
-| `bridge_gap`       | number            | `12`           | Gap a line leaves either side of a line it hops over, px.                   |
-| `chevron_size`     | number            | `4`            | Half-length and half-width of `--directional` chevrons, px.                 |
-| `chevron_spacing`  | number            | `64`           | Distance between chevrons along a route, px.                                |
-| `chevron_opacity`  | number            | `0.75`         | Chevron opacity, 0 to 1.                                                    |
-| `chevron_color`    | colour            | empty          | Chevron colour. Empty takes the line's colour.                              |
+| Field              | Value             | Default        | Effect                                                                                                                                                                                                                                              |
+| ------------------ | ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `line_width`       | number            | from `default` | Route stroke width, px.                                                                                                                                                                                                                             |
+| `line_cap`         | `round` \| `butt` | `round`        | End caps of route strokes: `round` or `butt`.                                                                                                                                                                                                       |
+| `dashed_dasharray` | text              | `8,4`          | SVG dash pattern of a `dashed` line, px.                                                                                                                                                                                                            |
+| `dotted_dasharray` | text              | `2,4`          | SVG dash pattern of a `dotted` line, px.                                                                                                                                                                                                            |
+| `line_colors`      | list of colours   | empty          | Colours the map's lines take in the order they are declared, starting again from the first when a map has more lines than the list. Set it under `light:` and `dark:` to give each palette its own. Empty keeps each line's `%%metro line:` colour. |
+| `muted_line_color` | colour            | `#888888`      | Grey for inactive lines and the stations, labels and icons only they touch.                                                                                                                                                                         |
+| `bridge_lines`     | `true` \| `false` | `true`         | Break the lower line where two unrelated lines cross.                                                                                                                                                                                               |
+| `bridge_gap`       | number            | `12`           | Gap a line leaves either side of a line it hops over, px.                                                                                                                                                                                           |
+| `chevron_size`     | number            | `4`            | Half-length and half-width of `--directional` chevrons, px.                                                                                                                                                                                         |
+| `chevron_spacing`  | number            | `64`           | Distance between chevrons along a route, px.                                                                                                                                                                                                        |
+| `chevron_opacity`  | number            | `0.75`         | Chevron opacity, 0 to 1.                                                                                                                                                                                                                            |
+| `chevron_color`    | colour            | empty          | Chevron colour. Empty takes the line's colour.                                                                                                                                                                                                      |
 
 ### File icons
 

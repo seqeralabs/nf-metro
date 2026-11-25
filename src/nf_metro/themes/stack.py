@@ -172,11 +172,19 @@ def layer_from_mapping(
     shared = _typed({k: v for k, v in data.items() if k in fields}, "", where)
     return ThemeLayer(
         str(data["name"]).strip(),
-        {**shared, **(data.get("light") or {})},
-        {**shared, **(data.get("dark") or {})},
+        _palettes_as_tuples({**shared, **(data.get("light") or {})}),
+        _palettes_as_tuples({**shared, **(data.get("dark") or {})}),
         _typed(data.get("layout") or {}, "layout.", where),
         tuple(extends),
     )
+
+
+def _palettes_as_tuples(values: dict[str, Any]) -> dict[str, Any]:
+    """*values* with every colour list a tuple, as the frozen theme holds it."""
+    for name, field in authored_fields().items():
+        if field.metadata["palette"] and name in values:
+            values[name] = tuple(str(c).strip() for c in values[name])
+    return values
 
 
 @lru_cache(maxsize=64)
@@ -229,9 +237,20 @@ def merge_layers(layers: Sequence[ThemeLayer], *, name: str) -> ResolvedTheme:
         for key, field in authored_fields().items()
         if field.metadata["color"]
     )
+    mode_line_colors = (light.get("line_colors", ()), dark.get("line_colors", ()))
     return ResolvedTheme(
         name,
-        Theme(mode=LIGHT, mode_colors=mode_colors, **light),
-        Theme(mode=DARK, mode_colors=mode_colors, **dark),
+        Theme(
+            mode=LIGHT,
+            mode_colors=mode_colors,
+            mode_line_colors=mode_line_colors,
+            **light,
+        ),
+        Theme(
+            mode=DARK,
+            mode_colors=mode_colors,
+            mode_line_colors=mode_line_colors,
+            **dark,
+        ),
         layout,
     )
