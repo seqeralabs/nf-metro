@@ -43,17 +43,165 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 ```
 
 `--theme` replaces the map's `%%metro style:` entirely, so `--theme default` renders a map in the base theme whatever its own style says.
-
-| Theme         | Look                                                                                                                                                                                  |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default`     | The base every stack starts from: bold labels, filled section boxes with number badges, white station pills.                                                                          |
-| `seqera`      | Seqera brand colors and Inter type.                                                                                                                                                   |
-| `london-tube` | A schematic transit look: track-weight tabs for one-line stations, bold capsules at interchanges, bundled lines edge to edge, corners bending at three line widths, unboxed sections. |
-| `transparent` | One palette on a transparent canvas, for embedding. Looks the same in either mode.                                                                                                    |
-
 `--mode light` or `--mode dark` picks the palette a PNG bakes.
 
-<Metro src="examples/rnaseq_london_tube.mmd" />
+## The built-in themes
+
+Every map below is the same small pipeline, with only its `%%metro style:` line changed.
+Each SVG follows this site's light or dark setting, so switch the site theme to see the other palette.
+Each theme is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/nf-metro/tree/main/src/nf_metro/themes), and the files are the best worked examples of the format.
+
+### default
+
+The base every stack starts from: filled section boxes with number badges, white capsules at stations, bold labels.
+`default.yaml` sets every field the schema leaves without a default, so it is the template for a complete theme.
+
+<Metro src="examples/themes/default.mmd" mmd={false} />
+
+### seqera
+
+Seqera brand colors and Inter type.
+`seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
+
+<Metro src="examples/themes/seqera.mmd" mmd={false} />
+
+### transparent
+
+One palette on a transparent canvas, for maps embedded on a page that supplies its own background.
+`transparent.yaml` sets every color at the top level, so both palettes match.
+
+<Metro src="examples/themes/transparent.mmd" mmd={false} />
+
+### london-tube
+
+After TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf) and [Colour Standard](https://content.tfl.gov.uk/tfl-colour-standard.pdf): tabs in the line's color at one-line stations, bold capsules at interchanges, a buffer-stop bar at line ends, bundled lines edge to edge, unboxed dashed sections, station names in TfL Corporate Blue, and the TfL line colors.
+
+```yaml
+station_glyph: tick
+interchange_glyph: pill
+terminus_glyph: bar
+layout: { curve_radius_ratio: 3.5 }
+```
+
+<Metro src="examples/themes/london_tube.mmd" mmd={false} />
+
+The standard's own interchange idiom is rings.
+Stack a file that sets `interchange_glyph: ring` (and `terminus_glyph: ring` for line ends) on top of `london-tube` to get them: one ring over two lines, and a bridged chain from three up.
+
+<Metro src="examples/themes/london_tube_rings.mmd" mmd="collapsed" />
+
+### nyc-subway
+
+After Massimo Vignelli's 1972 diagram and its 2008 revival: every line its own color with only a hairline between them, a small solid black dot wherever a line stops, no separate interchange symbol, tight corners, Helvetica in black, and the legend as round route bullets.
+The palette is the MTA's published route colors.
+In dark mode it takes the white-on-black of the 1970 Graphics Standards Manual's sign panels.
+
+```yaml
+station_glyph: dot
+interchange_glyph: dots
+dot_diameter: 0.45
+dot_ring_width: 0.225 # half the diameter: a solid dot
+legend_swatch: bullet
+```
+
+<Metro src="examples/themes/nyc_subway.mmd" mmd={false} />
+
+### paris-metro
+
+After the Île-de-France Mobilités metro plan: thin lines nearly touching, a white dot ringed in its line's color at each stop, black-outlined white capsules at interchanges, wide soft corners, sections on a light grey panel, and a slate legend of numbered line discs.
+The palette is the IDFM line referential, in line-number order, so the line carrying `1` is line 1's yellow.
+
+```yaml
+station_glyph: dot
+dot_ring: line
+interchange_glyph: pill
+legend_swatch: bullet
+line_codes: numbers
+layout: { curve_radius_ratio: 4.5 }
+```
+
+<Metro src="examples/themes/paris_metro.mmd" mmd={false} />
+
+### tokyo-metro
+
+After the Tokyo subway route map and Tokyo Metro's station numbering mark: every station is its number, a white face ringed in its line's color around a letter and two digits.
+A station on several lines is one marker across them, ringed in dark grey.
+The letter is the station's section, which the section badge also shows, and the digits count along the section's flow; a nameless line end has no number and stops at a bar.
+The palette is Tokyo Metro's nine line colors, then Toei's four.
+
+```yaml
+station_glyph: numbered
+interchange_glyph: numbered
+terminus_glyph: bar
+section_codes: letters
+```
+
+<Metro src="examples/themes/tokyo_metro.mmd" mmd={false} />
+
+### washington-metro
+
+After the Washington Metrorail map: very thick lines a hairline apart, a white dot ringed in black on every line at a stop, broad corners, the Capital Beltway's pale grey-green band round each section, and legend discs carrying each line's letter.
+The palette is WMATA's six line colors.
+
+```yaml
+station_glyph: dot
+interchange_glyph: dots
+dot_diameter: 1.0
+dot_ring_width: 0.26
+line_width: 9
+```
+
+<Metro src="examples/themes/washington_metro.mmd" mmd={false} />
+
+## Line colors
+
+A theme's `line_colors` gives the map's lines their colors, in the order the map declares them, starting again from the first color when the map has more lines than the list.
+Without it, each line keeps the color from its `%%metro line:` directive.
+
+Set `line_colors` at the top level for both palettes, or under `light:` and `dark:` to give each its own.
+`london-tube` does both: the TfL colors in light mode, and in dark mode the same list with the Piccadilly, Metropolitan and Elizabeth colors lightened to stay readable, and the black Northern line turned near-white.
+A line whose two palette colors differ follows the viewer's mode in an SVG, as the chrome does.
+
+To keep a built-in theme's look but your map's own line colors, stack a file that empties the list:
+
+```yaml title="my_colours.yaml"
+name: my-colours
+line_colors: []
+```
+
+```text
+%%metro style: london-tube, my_colours.yaml
+```
+
+## Station glyphs
+
+Three fields pick how a station is drawn.
+The last column names a theme above that draws each one.
+
+| Field               | Value      | Draws                                                                                      | See                                             |
+| ------------------- | ---------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `station_glyph`     | `pill`     | a capsule                                                                                  | `default`                                       |
+| (one line)          | `tick`     | a tab in the line's color, on the label's side                                             | `london-tube`                                   |
+|                     | `dot`      | a dot on the line, sized by `dot_diameter` and outlined by `dot_ring_width` and `dot_ring` | `nyc-subway`, `paris-metro`, `washington-metro` |
+|                     | `numbered` | a station-number marker ringed in the line's color                                         | `tokyo-metro`                                   |
+| `interchange_glyph` | `pill`     | one capsule across all the lines                                                           | `default`, `london-tube`, `paris-metro`         |
+| (several lines)     | `ring`     | a ring centred on the lines, or a bridged chain of them                                    | `london-tube` with rings                        |
+|                     | `dots`     | a dot on each line                                                                         | `nyc-subway`, `washington-metro`                |
+|                     | `numbered` | one station-number marker across the lines, ringed in `station_stroke`                     | `tokyo-metro`                                   |
+| `terminus_glyph`    | `nub`      | a square-cornered box across the lines                                                     | `default`                                       |
+| (line end)          | `bar`      | a buffer-stop bar across the bundle                                                        | `london-tube`, `tokyo-metro`                    |
+|                     | `ring`     | rings, or the `dots` or `numbered` interchange glyph when the theme uses one               | `london-tube` with rings, `nyc-subway`          |
+
+A line end with one line follows `station_glyph`, and its file icon always sits beyond the glyph.
+
+With `ring`, `ring_max_lines` is the most lines on one track that a single ring covers, and `ring_overflow` decides what a wider bundle gets: `chain`, the fewest touching rings that cover it, bridged by a strip in the station fill; or `grow`, one ring whose inside widens to cover it.
+Lines on separate tracks, as at a cross-track `%%metro interchange:` or a rail-mode station, get separate rings joined by a dumbbell link.
+
+The legend shows each line as a length of line, or with `legend_swatch: bullet` as a disc in its color carrying its code (`line_codes`: `letters` or `numbers`), in black or white, whichever reads better.
+
+Corner radius is a layout option, `curve_radius_ratio`: the radius at the line centre as a multiple of the line width.
+`london-tube` sets 3.5, the standard's three line widths to the inside edge of the line, so its 4 px lines bend at 14 px.
+Unset, corners bend at 10 px, and `stroke_scale` scales the radius either way.
 
 ## Stacking themes
 
@@ -61,7 +209,7 @@ nf-metro render pipeline.mmd -o pipeline.svg --theme london-tube
 %%metro style: seqera, london-tube
 ```
 
-This map takes the station glyphs, section style and fonts from `london-tube`, and every field `london-tube` leaves unset from `seqera`.
+This map takes the station glyphs, section style, fonts and line colors from `london-tube`, and every field `london-tube` leaves unset from `seqera`.
 Under both lies `default`, which supplies anything neither sets.
 Every stack starts from `default`; list only the themes you add on top.
 
@@ -72,7 +220,7 @@ A built-in theme sets only the fields its file lists.
 
 1. Create a YAML file whose name ends in `.yaml` or `.yml`.
 2. Give it a `name`, then set the fields you want to change.
-   Top-level fields apply to both palettes, and `light:` and `dark:` blocks override colors for one palette.
+   Top-level fields apply to both palettes, and `light:` and `dark:` blocks override colors (and `line_colors`) for one palette.
    Sizes and shapes are top-level only, because a map is laid out once for both palettes.
 3. Optionally, start from another theme with `extends:`, and set layout options in a `layout:` block.
 4. Add the file to a stack.
@@ -104,7 +252,7 @@ layout:
 `extends:` is shorthand for listing those themes earlier in the stack, so the line above is the same as `%%metro style: london-tube, house_style.yaml`.
 A theme without `extends:` sits directly on `default`, like every stack.
 
-A color left empty takes the field its description names: icon and badge colors take the station colors, the marker outline takes `station_stroke`, and `knockout_fill` (label halos and `open` markers) takes the background, or white on a transparent canvas.
+A color left empty takes the field its description names: icon and badge colors take the station colors, the marker outline and station-number codes take `station_stroke`, and `knockout_fill` (label halos and `open` markers) takes the background, or white on a transparent canvas.
 
 nf-metro checks the whole file against the theme's JSON Schema before it renders anything.
 An unknown field, a value of the wrong type or out of range (including `.inf` and `.nan`), a color it cannot read, a size inside `light:` or `dark:`, an unknown `layout:` option, or two files that extend each other stops the render with an error that names the file and the path to the bad value, such as `$.light.label_color`.
@@ -114,87 +262,11 @@ The schema ships with nf-metro as `nf_metro/themes/theme.schema.json` and is gen
 The first line of the example above points editors that use the YAML language server (VS Code's YAML extension, for one) at it, so they complete field names and flag mistakes as you type.
 Any other JSON Schema tool can validate a theme file against it too.
 
-### Interchange styles
-
-A station on several lines is an interchange.
-`interchange_glyph` picks how it is drawn:
-
-- `pill` (the default) draws one capsule across all its lines, in `station_fill` and `station_stroke`.
-- `ring` draws a ring centred on the lines, outlined in `station_stroke` and filled with `station_fill`.
-
-With `ring`, `ring_max_lines` is the most lines on one track that a single ring covers, and `ring_overflow` decides what a wider bundle gets:
-
-- `chain` draws the fewest rings that cover the bundle, centred on it, each ring's outer edge meeting the next ring's inner edge, with a strip in the station fill cut through the outlines where they meet so the centres join into one shape.
-  The spacing never changes, so every chain has the same neck, and a chain can reach a little past the outermost lines.
-- `grow` draws one ring whose inside widens to cover the whole bundle.
-
-So the three styles are: one standard-size ring (raise `ring_max_lines`), a bridged chain (`chain`), or one larger ring (`grow`).
-Lines on separate tracks, as at a cross-track `%%metro interchange:` or a rail-mode station, get separate rings joined by a dumbbell link.
-`london-tube` draws a white capsule with a heavy black outline (a light outline round a dark capsule in dark mode) and a `bar` at every line end.
-The Line Diagram Standard's own idiom is rings, which a theme extending `london-tube` gets with `interchange_glyph: ring`: one ring for two lines, and a chain from three up.
-
-Corner radius is a layout option, `curve_radius_ratio`: the radius at the line centre as a multiple of the line width. `london-tube` sets `layout: {curve_radius_ratio: 3}`, so its 4 px lines bend at 12 px. Unset, corners bend at 10 px, and `stroke_scale` scales the radius either way.
-
-A line end shared by several lines follows `terminus_glyph` instead:
-
-- `nub` (the default) draws a square-cornered box across the lines in the station colours.
-- `bar` draws a buffer-stop bar across the whole bundle, as thick as a station tab and overhanging the outermost lines by a tab's length, in `station_stroke`.
-- `ring` draws the interchange glyph above.
-
-A line end with one line follows `station_glyph`, and its file icon always sits beyond the glyph.
-
 ### Fonts
 
 The SVG names the theme's font and the viewer's browser draws it, so name a font your readers have, followed by fallbacks.
-`london-tube` asks for Gill Sans, which macOS and Windows with Office have.
+The transit themes ask for the faces their standards use (Gill Sans standing in for Johnston, Helvetica, Parisine, Frutiger) and fall back to common sans faces.
 PNG output, `--embed-font` and `--text-to-paths` draw every theme in the bundled Inter face, so the output is the same on any machine.
-
-## The built-in themes
-
-The built-in themes are the best worked examples of the format.
-Each is a short file in [`src/nf_metro/themes/`](https://github.com/seqeralabs/nf-metro/tree/main/src/nf_metro/themes).
-
-- `default.yaml` is the base.
-  It sets every field the schema leaves without a default, so it is the template for a complete theme.
-- `seqera.yaml` replaces the fonts, sizes and both palettes, and leaves the shapes alone.
-- `london_tube.yaml` changes shapes as well as colors, and is the example to copy for a different look.
-  Its geometry follows the construction rules of TfL's [Line Diagram Standard](https://content.tfl.gov.uk/tfl-line-diagram-standard.pdf), and the file's comments give the reasoning behind each choice.
-- `transparent.yaml` sets every color at the top level, so both palettes match, with `background_fill: none`, for maps embedded on a page that supplies its own background.
-
-```yaml title="london_tube.yaml (abridged)"
-name: london-tube
-
-station_glyph: tick
-station_tick_width: 1 # track-weight tabs
-station_tick_length: 1.5
-interchange_glyph: pill # ring for the standard's rings
-ring_max_lines: 2 # with ring: a chain from three lines up
-terminus_glyph: bar
-station_stroke_width: 2.5
-line_width: 4
-label_font_weight: normal
-section_stroke_dasharray: "6 4"
-number_sections: false
-uppercase_section_labels: true
-legend_stroke_width: 1.5
-
-light:
-  background_fill: "#ffffff"
-  label_color: "#1c3f94"
-  station_fill: "#ffffff"
-  station_stroke: "#000000"
-  muted_line_color: "#b3b3b3"
-  section_fill: transparent
-  legend_stroke: "#000000"
-dark:
-  background_fill: "#10141c"
-  label_color: "#dfe6ff"
-  station_fill: "#10141c"
-  station_stroke: "#ffffff"
-  muted_line_color: "#585a60"
-  section_fill: transparent
-  legend_stroke: "#ffffff"
-```
 
 ## Field reference
 

@@ -1,0 +1,34 @@
+%%metro title: nyc-subway
+%%metro style: nyc-subway
+%%metro line: short | Short reads | #1f77b4
+%%metro line: long | Long reads | #ff7f0e
+%%metro line: rna | RNA | #2ca02c
+%%metro file: reads | FASTQ
+%%metro file: report | HTML
+
+graph LR
+    subgraph prep [Prepare]
+        reads[ ]
+        trim[Trim]
+        qc[QC]
+        reads -->|short,long,rna| trim
+        trim -->|short,long,rna| qc
+    end
+    subgraph analyse [Analyse]
+        align[Align]
+        assemble[Assemble]
+        quant[Quantify]
+        merge[Merge]
+        align -->|short| merge
+        assemble -->|long| merge
+        quant -->|rna| merge
+    end
+    subgraph publish [Publish]
+        summarise[Summarise]
+        report[ ]
+        summarise -->|short,long,rna| report
+    end
+    qc -->|short| align
+    qc -->|long| assemble
+    qc -->|rna| quant
+    merge -->|short,long,rna| summarise

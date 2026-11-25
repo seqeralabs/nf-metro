@@ -25,8 +25,11 @@ gallery:
       "The rnaseq map under the built-in `london-tube` theme (`%%metro style: london-tube`):
       track-weight tabs for stations on one line, a buffer-stop bar at every line end, bold capsules at
       interchanges (or the standard's rings, with `interchange_glyph: ring`), bundled lines edge to
-      edge, unboxed sections and a humanist sans, after the geometry of TfL's Line Diagram Standard. Themes stack left to right (`%%metro style: seqera, london-tube`) and
-      can be [user-defined YAML files](/nf-metro/themes/#writing-your-own-theme)."
+      edge, unboxed sections and the TfL line colours, after TfL's Line Diagram and Colour Standards.
+      The [Themes page](/nf-metro/themes/#the-built-in-themes) shows every built-in theme, including
+      `nyc-subway`, `paris-metro`, `tokyo-metro` and `washington-metro`. Themes stack left to right
+      (`%%metro style: seqera, london-tube`) and can be
+      [user-defined YAML files](/nf-metro/themes/#writing-your-own-theme)."
   - id: directional_flow
     source_dir: examples
     category: Feature Showcase
