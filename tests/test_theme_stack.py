@@ -82,10 +82,12 @@ def test_an_unknown_theme_name_has_no_rename_hint():
     assert "no longer" not in str(excinfo.value)
 
 
-def test_only_london_tube_sets_layout_options():
-    for name in STYLE_NAMES - {"london-tube"}:
+def test_only_the_transit_themes_set_layout_options():
+    for name in ("default", "seqera", "transparent"):
         assert resolve_stack(name).layout == {}
     assert resolve_stack("london-tube").layout == {"curve_radius_ratio": 3.5}
+    for name in ("nyc-subway", "paris-metro", "tokyo-metro", "washington-metro"):
+        assert "curve_radius_ratio" in resolve_stack(name).layout
 
 
 def test_london_tube_sets_its_look_and_inherits_the_rest_from_default():
@@ -271,8 +273,8 @@ def test_per_output_theme_rejects_an_unknown_name():
 def test_playground_lists_the_two_palette_built_ins():
     paired = {name for name in STYLE_NAMES if is_adaptive(THEMES[name])}
     app = (ROOT / "website" / "public" / "playground" / "app.js").read_text()
-    keys = re.search(r"const THEME_KEYS = \[(.*?)\];", app).group(1)
-    assert {k.strip().strip('"') for k in keys.split(",")} == paired
+    keys = re.search(r"const THEME_KEYS = \[(.*?)\];", app, re.S).group(1)
+    assert set(re.findall(r'"([^"]+)"', keys)) == paired
     page = (ROOT / "website" / "src" / "pages" / "playground.astro").read_text()
     picker = re.search(r'<select id="opt-theme">(.*?)</select>', page, re.S).group(1)
     assert set(re.findall(r'<option value="([^"]+)"', picker)) == paired
