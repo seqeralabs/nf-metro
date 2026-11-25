@@ -4,7 +4,7 @@ more lines than the palette has colours.
 An extra colour is the in-gamut candidate farthest, in OKLab, from every
 colour already in use (the palette, earlier extras, the background and the
 inactive grey) among those reaching 3:1 against the light background. In dark
-mode each extra is that colour lightened, keeping its hue, to 3:1 against the
+mode each extra keeps its hue, lightened where needed to 3:1 against the
 dark background, so a line keeps its identity across modes.
 """
 

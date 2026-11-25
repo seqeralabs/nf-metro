@@ -159,7 +159,8 @@ line_width: 9
 
 A theme's `line_colors` gives the map's lines their colors, in the order the map declares them.
 A map with more lines than the list gets a generated color for each extra line: the color farthest, in the perceptual OKLab space, from every color already in use (the palette, earlier extras, the background and the inactive grey), among those readable at 3:1 on the light background.
-In dark mode each generated color is the same hue, lightened to 3:1 on the dark background, so a line keeps its identity across modes.
+In dark mode each generated color keeps its hue, lightened where it needs to be to reach 3:1 on the dark background, so a line keeps its identity across modes.
+A mode whose palette is shorter than the other's takes the longer palette's color at that place, lightened the same way in dark mode.
 The palette's own colors are never changed, and the same map always gets the same extras.
 Without it, each line keeps the color from its `%%metro line:` directive.
 

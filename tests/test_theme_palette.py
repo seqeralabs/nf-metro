@@ -231,3 +231,28 @@ def test_generated_colours_are_the_same_on_every_render():
     text = _many_lines(9)
     first = render_string(text, theme="washington-metro", mode="light")
     assert render_string(text, theme="washington-metro", mode="light") == first
+
+
+def test_a_shorter_mode_palette_fills_from_the_longer_rather_than_repeating(
+    tmp_path,
+):
+    from nf_metro.render.palette import contrast_ratio, line_color_pair
+
+    theme = resolve_stack(
+        _palette_theme(
+            tmp_path,
+            """\
+            light:
+              line_colors: ["#aa0000", "#00aa00", "#0000aa", "#aa00aa"]
+            dark:
+              line_colors: ["#ff8888", "#88ff88"]
+            """,
+        )
+    )
+    lines = list(parse_metro_mermaid(_many_lines(6)).lines.values())
+    pairs = [line_color_pair(theme.light, ln) for ln in lines]
+    dark = [p[1] for p in pairs]
+    assert dark[:2] == ["#ff8888", "#88ff88"]
+    assert len(set(dark)) == 6
+    for colour in dark[2:]:
+        assert contrast_ratio(colour, theme.dark.background_fill) >= 3.0
