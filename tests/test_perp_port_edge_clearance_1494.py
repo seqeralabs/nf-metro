@@ -54,7 +54,7 @@ from nf_metro.layout.phases.guards import (
     _guard_ports_clear_unanchored_box_edges,
 )
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 from nf_metro.parser.model import PortSide
 from nf_metro.render.constants import SECTION_NUM_CIRCLE_R_LARGE
 from nf_metro.render.section_header import resolve_all_section_headers
@@ -124,7 +124,7 @@ def _unanchored_edge_clearances(graph) -> list[tuple[str, str, float]]:
     "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
 )
 def test_ports_clear_unanchored_box_edges(path: Path) -> None:
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     flush = [
         (sid, pid, clear)
@@ -140,7 +140,7 @@ def test_ports_clear_unanchored_box_edges(path: Path) -> None:
 
 def test_guard_catches_planted_flush_port() -> None:
     """The runtime guard is not vacuous: seating a port on the top edge trips it."""
-    graph = parse_metro_mermaid(CARRIER_FIXTURE.read_text())
+    graph = parse_metro_mermaid_file(CARRIER_FIXTURE)
     compute_layout(graph)
     section = graph.sections["quantification"]
     pid = next(iter(section.entry_ports))
@@ -158,7 +158,7 @@ def test_guard_catches_a_port_whose_bundle_alone_rides_the_edge() -> None:
     bottom while its outermost lane sits on the border.  Measured at the station
     the layout reads as clean, so only a bundle-aware guard can fail it.
     """
-    graph = parse_metro_mermaid(FOUR_LANE_FIXTURE.read_text())
+    graph = parse_metro_mermaid_file(FOUR_LANE_FIXTURE)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     section = graph.sections["sec"]
@@ -177,7 +177,7 @@ def test_guard_catches_a_port_whose_bundle_alone_rides_the_edge() -> None:
 
 
 def test_carrier_row_entry_port_keeps_headroom() -> None:
-    graph = parse_metro_mermaid(CARRIER_FIXTURE.read_text())
+    graph = parse_metro_mermaid_file(CARRIER_FIXTURE)
     compute_layout(graph)
     section = graph.sections["quantification"]
     pid = next(iter(section.entry_ports))
@@ -190,7 +190,7 @@ def test_carrier_row_entry_port_keeps_headroom() -> None:
 
 def test_carrier_row_header_anchors_at_box_corner() -> None:
     """With the entry port clear of the top edge the header needs no nudge."""
-    graph = parse_metro_mermaid(CARRIER_FIXTURE.read_text())
+    graph = parse_metro_mermaid_file(CARRIER_FIXTURE)
     compute_layout(graph)
     polylines = [
         rp.points
@@ -228,7 +228,7 @@ def test_carrier_row_ports_sit_symmetrically_in_their_box() -> None:
     bundle is staggered toward the bottom edge and the entry's away from the top
     one, so equal *station* clearances would put the two drawn ends unlike.
     """
-    graph = parse_metro_mermaid(CARRIER_FIXTURE.read_text())
+    graph = parse_metro_mermaid_file(CARRIER_FIXTURE)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     section = graph.sections["quantification"]
@@ -263,7 +263,7 @@ def test_horizontal_perp_ports_keep_the_designed_inset(path: Path) -> None:
     smaller ``perp_port_edge_clearance()``, which leaves a novel map free to land
     a port short of the designed inset; the shipped corpus is held to it here.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     tight: list[str] = []
     for section in graph.sections.values():
@@ -369,7 +369,7 @@ def test_vertical_perp_port_pair_is_balanced_or_its_row_is_blocked(path: Path) -
     row-mate with no slack pins it at zero and the reserve has nothing to act on;
     balancing one section alone would drag its trunk off the row.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     for section, (low, high) in _iter_perp_pairs(graph, "y"):
         if abs(low - high) < EPSILON:
@@ -395,7 +395,7 @@ def test_perp_port_bundle_keeps_the_full_inset(path: Path) -> None:
     the border, not room the port station owes it.  Both rotations are checked
     here, since either reservation could lose the reach independently.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     short: list[str] = []
@@ -457,7 +457,7 @@ def test_perp_port_bundle_sits_below_its_port_in_either_vertical_flow(
     and every horizontal flow stacks lanes on +Y, so both mirrors put the bundle
     below the port and leave nothing above it.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     section = graph.sections[section_id]

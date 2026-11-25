@@ -31,7 +31,7 @@ from nf_metro.layout.routing.invariants import (
     check_gap_channels_materialized,
     check_orthogonal_turns_form_curves,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = ROOT / "examples" / "topologies"
@@ -48,7 +48,7 @@ CORPUS_IDS = [Path(p).stem for p in CORPUS]
 
 
 def _route(path: Path) -> tuple:
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)

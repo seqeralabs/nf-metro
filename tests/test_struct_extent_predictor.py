@@ -19,7 +19,7 @@ import pytest
 from nf_metro.layout.constants import SECTION_Y_PADDING
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.phases.bbox import _predict_section_content_bottom
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 from nf_metro.parser.model import MetroGraph, Section
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -67,7 +67,7 @@ def _row_ending_divergences(graph: MetroGraph) -> dict[str, float]:
 def test_structural_extent_matches_settled_within_tolerance(path: Path) -> None:
     """The structural extent in the snapshot coincides with the settled extent
     for every row-ending section across all gallery fixtures."""
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
 
     divergences = _row_ending_divergences(graph)
@@ -129,7 +129,7 @@ def test_predictor_matches_shrink_rule() -> None:
     relative to the then-current bbox tops) must reproduce
     ``_predict_section_content_bottom`` exactly, confirming the snapshot is
     the shrink rule and not an approximation."""
-    graph = parse_metro_mermaid((EXAMPLES_DIR / "genomic_pipeline.mmd").read_text())
+    graph = parse_metro_mermaid_file(EXAMPLES_DIR / "genomic_pipeline.mmd")
     compute_layout(graph)
     # The snapshot dict is populated during layout; every entry must be a
     # finite height that, added to a bbox top, reconstructs a content-bottom.

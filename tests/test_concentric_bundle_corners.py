@@ -34,7 +34,7 @@ from nf_metro.layout.routing.invariants import (
     check_standard_source_bundle_corner_inputs,
 )
 from nf_metro.layout.routing.normalize import _size_concentric_cohorts
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -63,7 +63,7 @@ def test_no_non_concentric_bundle_corners_in_gallery(path: Path) -> None:
     surfaces here as a failing fixture, even when that radius traces to an
     approved helper and so slips past the source ratchet.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -82,7 +82,7 @@ def test_no_non_concentric_bundle_corners_in_gallery(path: Path) -> None:
 def test_source_seam_turns_are_concentric_across_destinations() -> None:
     """One planned exit bundle keeps one arc centre as its members split."""
     path = EXAMPLES / "topologies" / "merge_trunk_over_low_section.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -101,7 +101,7 @@ def test_source_seam_turns_are_concentric_across_destinations() -> None:
 def test_cross_system_landing_corners_are_concentric_across_route_shapes() -> None:
     """One target landing cohort keeps one centre across distinct systems."""
     path = EXAMPLES / "topologies" / "convergent_offrow_exit_climb.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -138,7 +138,7 @@ def test_cross_system_landing_corners_are_concentric_across_route_shapes() -> No
 def test_short_planned_source_leads_share_a_clamp_safe_reference_radius() -> None:
     """A compact planned fan keeps one centre without moving its frozen axes."""
     path = FIXTURES / "route_reservations" / "reportho.metro"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     observation = observe_route_edges(graph, station_offsets=offsets)

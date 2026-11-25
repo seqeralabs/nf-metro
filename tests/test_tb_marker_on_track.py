@@ -17,7 +17,7 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.render.svg import station_marker_box
 from nf_metro.themes import THEMES
 
@@ -45,7 +45,7 @@ def _line_lane_at(route, station_id: str) -> float | None:
     "path", _gather_fixtures(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
 )
 def test_tb_marker_centred_on_drawn_lines(path: Path) -> None:
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
