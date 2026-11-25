@@ -271,7 +271,8 @@ def test_a_line_ringed_dot_greys_with_its_own_inactive_line(tmp_path):
     assert strokes == sorted([main, light.muted_line_color])
 
 
-def test_a_greyed_bullet_reads_against_both_modes_greys(tmp_path):
+@pytest.mark.parametrize("mode", ["light", "dark"])
+def test_a_greyed_bullet_reads_against_both_modes_greys(mode):
     from nf_metro.api import RenderConfig
 
     nyc = resolve_stack("nyc-subway")
@@ -279,7 +280,7 @@ def test_a_greyed_bullet_reads_against_both_modes_greys(tmp_path):
     svg = render_string(
         _MAP,
         theme="nyc-subway",
-        mode="light",
+        mode=mode,
         source_dir=str(RNASEQ.parent),
         config=RenderConfig(inactive_line_ids=frozenset({"star_rsem"})),
     )
