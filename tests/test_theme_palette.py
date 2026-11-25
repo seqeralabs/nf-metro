@@ -176,21 +176,11 @@ def test_the_html_legend_and_manifest_carry_the_theme_colours():
     ["london-tube", "nyc-subway", "paris-metro", "tokyo-metro", "washington-metro"],
 )
 def test_every_dark_line_colour_reads_against_its_background(name):
-    from PIL import ImageColor
-
-    def luminance(color: str) -> float:
-        channels = [c / 255 for c in ImageColor.getrgb(color)[:3]]
-        lin = [
-            c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-            for c in channels
-        ]
-        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    from nf_metro.render.palette import contrast_ratio
 
     dark = resolve_stack(name).dark
-    background = luminance(dark.background_fill)
     for colour in dark.line_colors:
-        hi, lo = sorted((luminance(colour), background), reverse=True)
-        assert (hi + 0.05) / (lo + 0.05) >= 3.0, colour
+        assert contrast_ratio(colour, dark.background_fill) >= 3.0, colour
 
 
 def _many_lines(count: int) -> str:
@@ -200,9 +190,9 @@ def _many_lines(count: int) -> str:
 
 
 def _wcag(a: str, b: str) -> float:
-    from nf_metro.render.palette import _contrast, _rgb
+    from nf_metro.render.palette import contrast_ratio
 
-    return _contrast(_rgb(a), _rgb(b))
+    return contrast_ratio(a, b)
 
 
 def test_lines_past_the_palette_get_distinct_readable_colours():

@@ -13,14 +13,22 @@ from __future__ import annotations
 import colorsys
 import math
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from PIL import ImageColor
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroLine
+    from nf_metro.render.style import Theme
 
-__all__ = ["extended_palette", "line_color", "line_color_pair"]
+__all__ = [
+    "color_pair",
+    "contrast_ratio",
+    "extended_palette",
+    "line_color",
+    "line_color_pair",
+    "luminance",
+]
 
 _MIN_CONTRAST = 3.0
 _LIGHT_FALLBACK = "#ffffff"
@@ -50,6 +58,18 @@ def _luminance(rgb: tuple[float, float, float]) -> float:
 
 def _contrast(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
     hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def luminance(color: str) -> float:
+    """WCAG relative luminance of *color*; 0 for a value that is not a colour."""
+    rgb = _rgb(color)
+    return 0.0 if rgb is None else _luminance(rgb)
+
+
+def contrast_ratio(a: str, b: str) -> float:
+    """WCAG contrast ratio between colours *a* and *b*."""
+    hi, lo = sorted((luminance(a), luminance(b)), reverse=True)
     return (hi + 0.05) / (lo + 0.05)
 
 
@@ -99,25 +119,42 @@ def _candidates() -> tuple[tuple[float, float, float], ...]:
     return tuple(out)
 
 
+# Extras are computed this many at a time; picks are prefix-stable, so one
+# block serves every line index inside it.
+_EXTRA_BLOCK = 16
+
+
 @lru_cache(maxsize=64)
+def _extras(
+    palette: tuple[str, ...], background: str, avoid: tuple[str, ...], count: int
+) -> tuple[str, ...]:
+    bg = _rgb(background)
+    if bg is None:
+        return ()
+    used = [_oklab(rgb) for c in (*palette, background, *avoid) if (rgb := _rgb(c))]
+    pool = [c for c in _candidates() if _contrast(c, bg) >= _MIN_CONTRAST]
+    labs = [_oklab(c) for c in pool]
+    nearest = [min(math.dist(lab, u) for u in used) for lab in labs]
+    picks: list[str] = []
+    while len(picks) < count and pool:
+        best = max(range(len(pool)), key=nearest.__getitem__)
+        chosen = labs[best]
+        picks.append(_hex(pool[best]))
+        del pool[best], labs[best], nearest[best]
+        nearest = [min(d, math.dist(lab, chosen)) for d, lab in zip(nearest, labs)]
+    return tuple(picks)
+
+
 def extended_palette(
     palette: tuple[str, ...], background: str, avoid: tuple[str, ...], count: int
 ) -> tuple[str, ...]:
     """*palette* extended to *count* colours, each extra reaching 3:1 against
     *background* and as far as possible from every colour in use and *avoid*."""
-    if count <= len(palette):
+    need = count - len(palette)
+    if need <= 0:
         return palette
-    bg = _rgb(background) or _rgb(_LIGHT_FALLBACK)
-    assert bg is not None
-    used = [_oklab(rgb) for c in (*palette, background, *avoid) if (rgb := _rgb(c))]
-    pool = [c for c in _candidates() if _contrast(c, bg) >= _MIN_CONTRAST]
-    extras: list[str] = []
-    while len(palette) + len(extras) < count and pool:
-        best = max(pool, key=lambda c: min(math.dist(_oklab(c), u) for u in used))
-        pool.remove(best)
-        used.append(_oklab(best))
-        extras.append(_hex(best))
-    return palette + tuple(extras)
+    block = -(-need // _EXTRA_BLOCK) * _EXTRA_BLOCK
+    return palette + _extras(palette, background, avoid, block)[:need]
 
 
 def _lighten_to(color: str, background: str) -> str:
@@ -135,11 +172,12 @@ def _lighten_to(color: str, background: str) -> str:
     return _hex(colorsys.hls_to_rgb(hue, lightness, saturation))
 
 
-def _mode_pair(theme: Any, field: str) -> tuple[str, str]:  # noqa: ANN401
-    for name, light, dark in theme.mode_colors:
-        if name == field:
+def color_pair(theme: Theme, name: str) -> tuple[str, str]:
+    """``(light, dark)`` values of colour field *name*."""
+    for field, light, dark in theme.mode_colors:
+        if field == name:
             return light, dark
-    value = getattr(theme, field)
+    value: str = getattr(theme, name)
     return value, value
 
 
@@ -147,7 +185,7 @@ def _opaque(color: str, fallback: str) -> str:
     return color if _rgb(color) is not None else fallback
 
 
-def line_color_pair(theme: Any, line: MetroLine) -> tuple[str, str]:  # noqa: ANN401
+def line_color_pair(theme: Theme, line: MetroLine) -> tuple[str, str]:
     """``(light, dark)`` colour of *line* under *theme*: its palette colour by
     declaration order, an extension colour past the palette's end, or its own
     colour when the palette for that mode is empty."""
@@ -156,27 +194,23 @@ def line_color_pair(theme: Any, line: MetroLine) -> tuple[str, str]:  # noqa: AN
     base = light or dark
     if not base:
         return line.color, line.color
-    bg_light, bg_dark = _mode_pair(theme, "background_fill")
+    bg_light, bg_dark = color_pair(theme, "background_fill")
     bg_light = _opaque(bg_light, _LIGHT_FALLBACK)
     bg_dark = _opaque(bg_dark, _DARK_FALLBACK)
-    extra = None
-    if index >= len(base):
-        avoid = _mode_pair(theme, "muted_line_color")
-        extra = extended_palette(base, bg_light, avoid, index + 1)[index]
+    avoid = color_pair(theme, "muted_line_color")
 
     def pick(palette: tuple[str, ...], dark_mode: bool) -> str:
         if not palette:
             return line.color
         if index < len(palette):
             return palette[index]
-        if extra is None:
-            return palette[index % len(palette)]
+        extra = extended_palette(base, bg_light, avoid, index + 1)[index]
         return _lighten_to(extra, bg_dark) if dark_mode else extra
 
     return pick(light, False), pick(dark, True)
 
 
-def line_color(theme: Any, line: MetroLine) -> str:  # noqa: ANN401
+def line_color(theme: Theme, line: MetroLine) -> str:
     """*line*'s colour in the mode *theme* is baked for."""
     light, dark = line_color_pair(theme, line)
     return light if theme.mode == "light" else dark

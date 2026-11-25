@@ -82,7 +82,7 @@ from nf_metro.render.constants import (
     WATERMARK_FILL,
 )
 from nf_metro.render.ns import ns as _ns
-from nf_metro.render.palette import line_color_pair as _palette_pair
+from nf_metro.render.palette import color_pair, line_color_pair
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroLine
@@ -718,15 +718,6 @@ def adaptive_value(light: str, dark: str) -> str:
     return f"light-dark({light}, {dark})"
 
 
-def color_pair(theme: Theme, name: str) -> tuple[str, str]:
-    """``(light, dark)`` values of colour field *name*."""
-    for field, light, dark in theme.mode_colors:
-        if field == name:
-            return light, dark
-    value: str = getattr(theme, name)
-    return value, value
-
-
 def colors_adapt(theme: Theme, *names: str) -> bool:
     """Whether any of colour fields *names* differs between the two palettes."""
     return any(len(set(color_pair(theme, name))) > 1 for name in names)
@@ -749,11 +740,6 @@ def muted_paint_class(theme: Theme, muted: bool, prop: str) -> str:
     if not (muted and colors_adapt(theme, "muted_line_color")):
         return ""
     return _ns(MUTED_STROKE_CLASS if prop == "stroke" else MUTED_FILL_CLASS)
-
-
-def line_color_pair(theme: Theme, line: MetroLine) -> tuple[str, str]:
-    """``(light, dark)`` colour of *line* under *theme*'s two palettes."""
-    return _palette_pair(theme, line)
 
 
 def line_paint_class(

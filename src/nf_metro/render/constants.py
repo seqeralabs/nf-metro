@@ -13,7 +13,7 @@ from nf_metro.layout.constants import (
     ICON_CAPTION_GAP,
     SECTION_HEADER_ROUTE_CLEARANCE,
 )
-from nf_metro.render.palette import line_color
+from nf_metro.render.palette import contrast_ratio, line_color
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, MetroLine
@@ -472,20 +472,6 @@ def line_style_kwargs(style: str, theme: Theme) -> dict[str, str]:
 def readable_text_color(*backgrounds: str) -> str:
     """Black or white, whichever keeps the higher worst-case WCAG contrast
     against every one of *backgrounds*."""
-    from PIL import ImageColor
-
-    def luminance(color: str) -> float:
-        try:
-            rgb = ImageColor.getrgb(color)[:3]
-        except ValueError:
-            return 0.0
-        lin = [
-            c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-            for c in (v / 255 for v in rgb)
-        ]
-        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
-
-    lums = [luminance(c) for c in backgrounds]
-    on_black = min((lum + 0.05) / 0.05 for lum in lums)
-    on_white = min(1.05 / (lum + 0.05) for lum in lums)
+    on_black = min(contrast_ratio(bg, "#000000") for bg in backgrounds)
+    on_white = min(contrast_ratio(bg, "#ffffff") for bg in backgrounds)
     return "#000000" if on_black > on_white else "#ffffff"
