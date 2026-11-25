@@ -106,6 +106,7 @@ from nf_metro.layout.routing.corners import (
     padded_curve_radii,
     reference_anchored_radius,
     resolve_curve_radii,
+    shared_leg_radius,
     turn_shift,
     wholesale_corner_translation,
     widest_coincident_radius,
@@ -1357,8 +1358,8 @@ def _size_concentric_cohorts(
         for member, radius_index, shift, radii, shared in prepared:
             radii[radius_index] = reference_anchored_radius(shift, reference)
             for neighbour, leg in shared:
-                radii[neighbour] = min(
-                    radii[neighbour], max(0.0, leg - radii[radius_index])
+                radii[neighbour] = shared_leg_radius(
+                    radii[neighbour], leg, radii[radius_index]
                 )
             member.route.curve_radii = radii
             if cohort.right_angle:
