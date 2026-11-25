@@ -1396,7 +1396,7 @@ def _compute_flat_layout(
             x_offset + station.layer * x_spacing + layer_extra.get(station.layer, 0)
         )
         station.y = y_offset + track_rank[station.track] * y_spacing
-    reserve_fan_stagger_runway(graph, graph, None)
+    reserve_fan_stagger_runway(graph)
 
     _snap(graph, "flat")
 
@@ -1569,7 +1569,7 @@ def _compute_section_layout(
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
     for sec_id, sub in section_subgraphs.items():
-        reserve_fan_stagger_runway(graph, sub, graph.sections[sec_id])
+        reserve_fan_stagger_runway(graph, sub, graph.sections[sec_id], y_grid=y_spacing)
     _snap(graph, "1.2")
 
     # Stage 1.3: Place sections on the canvas

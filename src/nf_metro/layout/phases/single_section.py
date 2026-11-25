@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from collections import Counter
+from collections import Counter, defaultdict
+from collections.abc import Callable
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
@@ -29,6 +30,7 @@ from nf_metro.layout.constants import (
 from nf_metro.layout.geometry import (
     Axis,
     AxisFrame,
+    diagonal_stagger,
     lanes_run_along_x,
     lanes_run_along_y,
     section_lane_sign,
@@ -62,7 +64,6 @@ from nf_metro.layout.phases._common import (
     _build_section_subgraph,
     _exit_reaching_nodes,
     perp_entry_lands_left,
-    section_axes,
     section_exit_lines,
 )
 from nf_metro.layout.phases.off_track import (
@@ -234,60 +235,131 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             st.y = src.y
 
 
-def reserve_fan_stagger_runway(
-    graph: MetroGraph, sub: MetroGraph, section: Section | None
-) -> None:
-    """Lengthen every fanned bundle's diagonal to fit its lanes' stagger.
+def _spread_groups(
+    lanes: dict[tuple[str, str], set[str]],
+    drop: Callable[[tuple[str, str]], float],
+    by_hub: bool,
+) -> list[list[tuple[str, str]]]:
+    """Diagonal bundles grouped as ``_spread_diagonal_bundles`` spreads them.
 
-    A bundle of ``n`` lanes one lane pitch apart crossing a diagonal of drop
-    ``d`` and run ``r`` seats each lane's two corners on their turns'
-    bisectors, so its lanes' diagonals stagger along the flow axis by
-    ``(n - 1) * pitch * tan(phi / 2)``, with ``tan(phi / 2) =
-    (hypot(r, d) - r) / d``.  Every lane keeps its corner straight at both
-    ends, so the edge needs that stagger beyond both straights and the run.
-
-    Stations at or past an edge's far end along the flow axis move out by
-    its shortfall, and the section box grows by the same amount.  Edges are
-    taken in order of that far end, so each one is measured after every
-    shortfall nearer the flow start has been opened and a later opening
-    never shortens it.  Reads final cross-axis positions, so it runs once
-    the row grid has seated them.
+    With *by_hub*, a station with two or more targets takes every diagonal
+    lane leaving it once it has two, then a station with two or more sources
+    takes every remaining diagonal lane entering it once it has two, each hub
+    one cross-axis heading at a time.  Every other bundle spreads alone.
     """
-    flow, cross = section_axes(section)
+    hubs: tuple[defaultdict[str, set[str]], ...] = (defaultdict(set), defaultdict(set))
+    for pair in lanes:
+        hubs[0][pair[0]].add(pair[1])
+        hubs[1][pair[1]].add(pair[0])
+
+    def claimed(pairs: list[tuple[str, str]], end: int) -> dict[tuple[str, str], str]:
+        count: Counter[str] = Counter()
+        for pair in pairs:
+            if len(hubs[end][pair[end]]) > 1:
+                count[pair[end]] += len(lanes[pair])
+        return {pair: pair[end] for pair in pairs if count[pair[end]] >= 2}
+
+    diagonals = [pair for pair in lanes if abs(drop(pair)) > COORD_TOLERANCE_FINE]
+    forks = claimed(diagonals, 0) if by_hub else {}
+    joins = claimed([p for p in diagonals if p not in forks], 1) if by_hub else {}
+    groups: defaultdict[tuple[object, ...], list[tuple[str, str]]] = defaultdict(list)
+    for pair in diagonals:
+        heading = drop(pair) > 0
+        if pair in forks:
+            key: tuple[object, ...] = ("fork", forks[pair], heading)
+        elif pair in joins:
+            key = ("join", joins[pair], heading)
+        else:
+            key = pair
+        groups[key].append(pair)
+    return list(groups.values())
+
+
+def reserve_fan_stagger_runway(
+    graph: MetroGraph,
+    sub: MetroGraph | None = None,
+    section: Section | None = None,
+    *,
+    y_grid: float = 0.0,
+) -> None:
+    """Lengthen *sub*'s (else *graph*'s) fanned diagonals to fit the stagger
+    their spread groups apply.
+
+    ``_spread_diagonal_bundles`` shifts each lane of a diagonal along the flow
+    axis by its offset from its group's centre times ``half_turn_tan``, then
+    slides the whole group by one shift, so every edge of a group needs the
+    group's whole stagger beyond both endpoint straights and its diagonal run.
+    For ``N`` lanes that is at most ``diagonal_stagger`` at the group's steepest
+    drop.  A lanes-along-Y section spreads its diagonals by hub
+    (:func:`_spread_groups`); a vertical flow bakes its offsets into each route,
+    so every bundle there spreads alone.  Lanes come from *graph*'s edges: a
+    section subgraph also carries hidden layout-only edges that are never routed.
+
+    Each shortfall opens just before its edge's downstream station, edges taken
+    in flow order of that station, so each is measured after every opening
+    upstream of it.  Reads final cross-axis positions, so it runs once the row
+    grid has seated them.  Stage 6.4 snaps every station Y onto a *y_grid*
+    lattice, so an opening along a vertical flow is whole lattice steps.
+    """
+    stations = (graph if sub is None else sub).stations
+    direction = (section.direction if section else None) or "LR"
+    flow, cross = AxisFrame.axes_for_direction(direction)
+    lanes: defaultdict[tuple[str, str], set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        if edge.source in stations and edge.target in stations:
+            lanes[(edge.source, edge.target)].add(edge.line_id)
+
+    def lines(group: list[tuple[str, str]]) -> int:
+        return len(set().union(*(lanes[pair] for pair in group)))
+
+    def drop(pair: tuple[str, str]) -> float:
+        source, target = (getattr(stations[sid], cross) for sid in pair)
+        return target - source
+
+    groups = [
+        group
+        for group in _spread_groups(lanes, drop, lanes_run_along_y(direction))
+        if lines(group) > 1
+    ]
+    if not groups:
+        return
+
     pitch = graph_offset_step(graph)
     run = active_metrics().diagonal_run
+    straight = min_straight_edge()
+    bypass_flat = min_station_flat_length()
 
     def stub(station_id: str) -> float:
-        if is_bypass_v(station_id):
-            return min_station_flat_length()
-        return min_straight_edge()
+        return bypass_flat if is_bypass_v(station_id) else straight
 
-    lanes = Counter(
-        (edge.source, edge.target)
-        for edge in graph.edges
-        if edge.source in sub.stations and edge.target in sub.stations
-    )
-    bundles = [
-        (sub.stations[source], sub.stations[target], count)
-        for (source, target), count in lanes.items()
-        if count >= 2
-    ]
-    bundles.sort(
-        key=lambda bundle: max(getattr(bundle[0], flow), getattr(bundle[1], flow))
-    )
-    for source, target, count in bundles:
-        drop = abs(getattr(target, cross) - getattr(source, cross))
-        if drop <= COORD_TOLERANCE_FINE:
-            continue
-        stagger = (count - 1) * pitch * (math.hypot(run, drop) - run) / drop
-        need = stub(source.id) + stub(target.id) + run + stagger
-        near, far = sorted((getattr(source, flow), getattr(target, flow)))
-        shortfall = need - (far - near)
+    need: dict[tuple[str, str], float] = {}
+    for group in groups:
+        steepest = max(abs(drop(pair)) for pair in group)
+        stagger = diagonal_stagger(lines(group), pitch, run, steepest)
+        for pair in group:
+            need[pair] = stub(pair[0]) + stub(pair[1]) + run + stagger
+
+    sign = AxisFrame.flow_sign(direction)
+    quantum = y_grid if lanes_run_along_x(direction) else 0.0
+
+    def downstream(pair: tuple[str, str]) -> float:
+        return max(sign * getattr(stations[sid], flow) for sid in pair)
+
+    for pair in sorted(need, key=downstream):
+        lo, hi = sorted(getattr(stations[sid], flow) for sid in pair)
+        shortfall = need[pair] - (hi - lo)
         if shortfall <= COORD_TOLERANCE_FINE:
             continue
-        for station in sub.stations.values():
+        if quantum > 0:
+            shortfall = quantum * math.ceil(
+                (shortfall - COORD_TOLERANCE_FINE) / quantum
+            )
+        # Everything on the high-coordinate side of the gap moves, so the
+        # section box keeps its low edge on either flow sense.
+        cut = hi - COORD_TOLERANCE_FINE if sign > 0 else lo + COORD_TOLERANCE_FINE
+        for station in stations.values():
             position = getattr(station, flow)
-            if position >= far - COORD_TOLERANCE_FINE:
+            if position >= cut:
                 setattr(station, flow, position + shortfall)
         if section is not None:
             size = "bbox_w" if flow == "x" else "bbox_h"
