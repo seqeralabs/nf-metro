@@ -236,6 +236,7 @@ from nf_metro.render.manifest import build_manifest
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import class_prefix_context
 from nf_metro.render.ns import ns as _ns
+from nf_metro.render.palette import line_color
 from nf_metro.render.path_geometry import materialize_source_turnout_paths
 from nf_metro.render.plan import (
     _RENDER_GRAPH_EXCLUDED_FIELDS,
@@ -2583,7 +2584,7 @@ def _build_render_plan_scaled(
             width=svg_width,
             height=svg_height,
             station_radius=theme.station_radius,
-            line_colors=theme.line_colors,
+            line_colors={lid: line_color(theme, ln) for lid, ln in graph.lines.items()},
             extra_node_data=boxes,
         )
 

@@ -1135,7 +1135,7 @@
         "default": "2,4"
       },
       "line_colors": {
-        "description": "Colours the map's lines take in the order they are declared, starting again from the first when a map has more lines than the list. Set it under `light:` and `dark:` to give each palette its own. Empty keeps each line's `%%metro line:` colour.",
+        "description": "Colours the map's lines take in the order they are declared. Lines past the end of the list get generated colours, each as distinct as possible from those in use and readable against the background. Set it under `light:` and `dark:` to give each palette its own. Empty keeps each line's `%%metro line:` colour.",
         "x-group": "Lines",
         "type": "array",
         "items": {

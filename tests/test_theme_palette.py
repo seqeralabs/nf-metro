@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import textwrap
 import xml.etree.ElementTree as ET
 
@@ -36,10 +37,11 @@ def _edge_strokes(svg: str) -> dict[str, str]:
     }
 
 
-def test_lines_take_the_palette_in_declaration_order_and_wrap(tmp_path):
+def test_lines_take_the_palette_in_declaration_order_then_new_colours(tmp_path):
     theme = _palette_theme(tmp_path, 'line_colors: ["#aa0000", "#00aa00"]\n')
     strokes = _edge_strokes(render_string(THREE_LINES, theme=theme, mode="light"))
-    assert strokes == {"a": "#aa0000", "b": "#00aa00", "c": "#aa0000"}
+    assert (strokes["a"], strokes["b"]) == ("#aa0000", "#00aa00")
+    assert strokes["c"] not in {"#aa0000", "#00aa00", "#111111", "#222222", "#333333"}
 
 
 def test_declaration_order_survives_a_layout_reordering_of_the_lines():
@@ -66,14 +68,17 @@ def test_each_mode_bakes_its_own_palette(tmp_path):
         tmp_path,
         """\
         light:
-          line_colors: ["#000000"]
+          line_colors: ["#000000", "#550000"]
         dark:
-          line_colors: ["#ffffff"]
+          line_colors: ["#ffffff", "#ffaaaa"]
         """,
     )
-    for mode, colour in (("light", "#000000"), ("dark", "#ffffff")):
+    for mode, colours in (
+        ("light", {"main": "#000000", "alt": "#550000"}),
+        ("dark", {"main": "#ffffff", "alt": "#ffaaaa"}),
+    ):
         strokes = _edge_strokes(render_string(MMD, theme=theme, mode=mode))
-        assert set(strokes.values()) == {colour}
+        assert strokes == colours
 
 
 def test_a_palette_set_for_one_mode_leaves_the_other_with_the_map_colours(
@@ -161,7 +166,7 @@ def test_the_html_legend_and_manifest_carry_the_theme_colours():
         width=10,
         height=10,
         station_radius=1.0,
-        line_colors=tube.dark.line_colors,
+        line_colors={lid: dark[ln.palette_index] for lid, ln in graph.lines.items()},
     )
     assert [g["color"] for g in manifest["groups"]] == list(dark[:3])
 
@@ -186,3 +191,53 @@ def test_every_dark_line_colour_reads_against_its_background(name):
     for colour in dark.line_colors:
         hi, lo = sorted((luminance(colour), background), reverse=True)
         assert (hi + 0.05) / (lo + 0.05) >= 3.0, colour
+
+
+def _many_lines(count: int) -> str:
+    ids = [f"l{i}" for i in range(count)]
+    decl = "".join(f"%%metro line: {i} | {i.upper()} | #123456\n" for i in ids)
+    return decl + "graph LR\n    s -->|" + ",".join(ids) + "| t\n"
+
+
+def _wcag(a: str, b: str) -> float:
+    from nf_metro.render.palette import _contrast, _rgb
+
+    return _contrast(_rgb(a), _rgb(b))
+
+
+def test_lines_past_the_palette_get_distinct_readable_colours():
+    from nf_metro.render.palette import _oklab, _rgb, line_color_pair
+
+    wmata = resolve_stack("washington-metro")
+    graph = parse_metro_mermaid(_many_lines(10))
+    pairs = [line_color_pair(wmata.light, ln) for ln in graph.lines.values()]
+    light = [p[0] for p in pairs]
+    dark = [p[1] for p in pairs]
+    assert light[:6] == list(wmata.light.line_colors)
+    assert len(set(light)) == 10
+    labs = [_oklab(_rgb(c)) for c in light]
+    nearest = min(math.dist(a, b) for i, a in enumerate(labs) for b in labs[i + 1 :])
+    assert nearest > 0.05
+    for colour in light[6:]:
+        assert _wcag(colour, wmata.light.background_fill) >= 3.0
+    for colour in dark[6:]:
+        assert _wcag(colour, wmata.dark.background_fill) >= 3.0
+
+
+def test_a_generated_colour_keeps_its_hue_in_dark_mode():
+    import colorsys
+
+    from nf_metro.render.palette import _rgb, line_color_pair
+
+    wmata = resolve_stack("washington-metro")
+    line = list(parse_metro_mermaid(_many_lines(8)).lines.values())[7]
+    light, dark = line_color_pair(wmata.light, line)
+    hue_light = colorsys.rgb_to_hls(*_rgb(light))[0]
+    hue_dark = colorsys.rgb_to_hls(*_rgb(dark))[0]
+    assert hue_light == pytest.approx(hue_dark, abs=0.02)
+
+
+def test_generated_colours_are_the_same_on_every_render():
+    text = _many_lines(9)
+    first = render_string(text, theme="washington-metro", mode="light")
+    assert render_string(text, theme="washington-metro", mode="light") == first

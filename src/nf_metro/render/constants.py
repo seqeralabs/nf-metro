@@ -13,6 +13,7 @@ from nf_metro.layout.constants import (
     ICON_CAPTION_GAP,
     SECTION_HEADER_ROUTE_CLEARANCE,
 )
+from nf_metro.render.palette import line_color
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, MetroLine
@@ -262,13 +263,7 @@ def effective_line_color(
         return active_color
     if line is None:
         return FALLBACK_LINE_COLOR
-    return html.escape(palette_pick(theme.line_colors, line))
-
-
-def palette_pick(palette: tuple[str, ...], line: MetroLine) -> str:
-    """*line*'s colour from *palette* by declaration order, or its own when
-    *palette* is empty."""
-    return palette[line.palette_index % len(palette)] if palette else line.color
+    return html.escape(line_color(theme, line))
 
 
 def station_is_muted(

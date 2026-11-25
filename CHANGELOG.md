@@ -157,7 +157,9 @@ history.
 - `line_colors` theme setting: a list of colours the map's lines take in the
   order they are declared, set for both palettes or per palette under
   `light:`/`dark:`. A line whose two palette colours differ follows the
-  viewer's mode in an SVG. An empty list keeps the map's own colours.
+  viewer's mode in an SVG. An empty list keeps the map's own colours. Lines
+  past the end of the list get generated colours, each as distinct as
+  possible from those in use and readable against the background.
 - Station glyphs `dot` (one line) and `dots` (one on each line of an
   interchange), sized by `dot_diameter`, `dot_ring_width` and `dot_ring`, and
   `numbered`, a station-number marker of the section's code and the

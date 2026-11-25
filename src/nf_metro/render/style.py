@@ -80,9 +80,9 @@ from nf_metro.render.constants import (
     STROKE_DASHARRAY,
     TERMINUS_FONT_COLOR,
     WATERMARK_FILL,
-    palette_pick,
 )
 from nf_metro.render.ns import ns as _ns
+from nf_metro.render.palette import line_color_pair as _palette_pair
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroLine
@@ -493,10 +493,11 @@ class Theme:
     )
     line_colors: tuple[str, ...] = _field(
         (),
-        doc="Colours the map's lines take in the order they are declared, "
-        "starting again from the first when a map has more lines than the "
-        "list. Set it under `light:` and `dark:` to give each palette its own. "
-        "Empty keeps each line's `%%metro line:` colour.",
+        doc="Colours the map's lines take in the order they are declared. Lines "
+        "past the end of the list get generated colours, each as distinct as "
+        "possible from those in use and readable against the background. Set "
+        "it under `light:` and `dark:` to give each palette its own. Empty "
+        "keeps each line's `%%metro line:` colour.",
         group="Lines",
         palette=True,
     )
@@ -752,8 +753,7 @@ def muted_paint_class(theme: Theme, muted: bool, prop: str) -> str:
 
 def line_color_pair(theme: Theme, line: MetroLine) -> tuple[str, str]:
     """``(light, dark)`` colour of *line* under *theme*'s two palettes."""
-    light, dark = theme.mode_line_colors
-    return palette_pick(light, line), palette_pick(dark, line)
+    return _palette_pair(theme, line)
 
 
 def line_paint_class(
