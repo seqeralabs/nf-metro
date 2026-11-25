@@ -103,16 +103,57 @@ def test_touching_fan_corners_leave_no_seam(name, prefix):
                 None if radii is None else list(radii),
             )
     assert len(lanes) == 6
+    assert _worst_curve_seam(list(lanes.values()), theme.line_width) <= 0.1
+
+
+def _worst_curve_seam(lanes, line_width: float) -> float:
+    """Widest gap between neighbouring touching lanes anywhere on a curve."""
     worst = 0.0
-    ordered = sorted(lanes.values(), key=lambda lane: lane[0][0][1])
+    ordered = sorted(lanes, key=lambda lane: (lane[0][0][1], lane[0][0][0]))
     for (pa, ra), (pb, rb) in zip(ordered, ordered[1:]):
         other = [q for q, _ in _samples(pb, rb, 150)]
         for q, on_curve in _samples(pa, ra, 150):
             if on_curve:
-                worst = max(
-                    worst, min(math.dist(q, s) for s in other) - theme.line_width
-                )
-    assert worst <= 0.1
+                worst = max(worst, min(math.dist(q, s) for s in other) - line_width)
+    return worst
+
+
+_PREPROCESSING_FAN = (
+    ("umi_tools_extract", "trimgalore"),
+    ("trimgalore", "fastqc_trimmed"),
+    ("fastqc_trimmed", "sortmerna"),
+    ("fastqc_trimmed", "ribodetector"),
+    ("sortmerna", "fastqc_filtered"),
+    ("ribodetector", "fastqc_filtered"),
+)
+
+
+@pytest.mark.parametrize("ratio", [None, 2.0, 3.0, 4.5])
+@pytest.mark.parametrize("line_width", [3, 5, 6, 9])
+def test_wide_touching_fan_corners_leave_no_seam(tmp_path, line_width, ratio):
+    """Touching lanes nest through every corner of a fan whose diagonals
+    differ in steepness, at any line width and corner radius."""
+    theme_file = tmp_path / "theme.yaml"
+    layout = "" if ratio is None else f"layout:\n  curve_radius_ratio: {ratio}\n"
+    theme_file.write_text(f"name: wide\nline_width: {line_width}\n{layout}")
+    path = _ROOT / "examples" / "rnaseq_sections.mmd"
+    text = f"%%metro style: {theme_file}\n%%metro track_gap: 0\n" + path.read_text()
+    graph = prepare_graph(text, source_dir=str(path.parent))
+    theme = resolve_theme(graph)
+    plan = build_render_plan(graph, theme)
+    bundles = defaultdict(list)
+    for route, points, radii in zip(
+        plan.routes, plan.route_polylines, plan.route_curve_radii
+    ):
+        key = (route.edge.source, route.edge.target)
+        if key in _PREPROCESSING_FAN:
+            bundles[key].append((list(points), None if radii is None else list(radii)))
+    assert set(bundles) == set(_PREPROCESSING_FAN)
+    seams = {
+        key: round(_worst_curve_seam(lanes, theme.line_width), 2)
+        for key, lanes in bundles.items()
+    }
+    assert max(seams.values()) <= 0.1, seams
 
 
 # One cubic per corner holds a circle to 1e-3 of its radius up to a right
