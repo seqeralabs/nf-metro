@@ -1307,8 +1307,10 @@ in pipeline order.
 - **Precondition**: All Y phases done; routing geometry derivable.
 - **Postcondition**: Loop side stations sit at the visual centre of
   their horizontal loop run, or as near it as leaves both fanned diagonals
-  their `fan_stagger_needs` room (the routing bubble-centring move keeps the
-  same bound).
+  their `fan_stagger_needs` room, measured to each neighbour's settled X.
+  Routing's bubble centring keeps the same bound on every station it moves,
+  its column-alignment drag included: one pass in a fixed order, each move
+  seated against the moves before it.
 - **Invariants preserved**: Station Y. Pure-side-branch classification
   is strict (see `test_loop_recenter_only_for_pure_side_branches`).
 - **Related tests**: `test_fan_station_centered_on_loop`,

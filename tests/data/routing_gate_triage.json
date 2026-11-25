@@ -1384,7 +1384,7 @@
   "status": "defensive"
  },
  "postprocess.py::if new_x is None:::#1": {
-  "note": "Bubble centring declines a station when seat_within_fan_room finds no flow position leaving both its fanned diagonals their stagger room. Every corpus centring candidate has room for its stagger on both sides, so the decline arm has no fixture; it wants a station whose upstream and downstream fans together need more flow length than its neighbours leave.",
+  "note": "Bubble centring declines a station when _FanRoom.seat (seat_within_fan_room) finds no flow position leaving both its fanned diagonals their stagger room. Every corpus centring candidate has room for its stagger on both sides, so the decline arm has no fixture; it wants a station whose upstream and downstream fans together need more flow length than its neighbours leave.",
   "status": "needs-review"
  },
  "rail.py::if conn is not None:::#1": {
@@ -1789,6 +1789,14 @@
  },
  "normalize.py::if new is None or new == old:::#1": {
   "note": "The slot retarget runs when a coincidence fusion snaps a leg onto an X in another inter-column gap. With merge feeders seated on the trunk descent at plan time, every swept fusion lands in the gap its leg declared, so only the no-op arm runs; a fusion that does cross gaps still needs its declaration moved.",
+  "status": "needs-review"
+ },
+ "postprocess.py::if seated is None:::#1": {
+  "note": "Station-move pass declines a candidate when _FanRoom.seat finds no position against the moves already recorded. Each earlier move was seated against this station's unmoved X, so that X still leaves every fanned diagonal its room unless routing began with one already short on both sides; no corpus fixture does, so the decline arm has no fixture.",
+  "status": "needs-review"
+ },
+ "postprocess.py::if new_x is None:::#2": {
+  "note": "Sibling alignment leaves a station in place when _FanRoom.seat finds no position against the settled moves. Every settled X was seated the same way, so the station's own X leaves its fanned diagonals their room unless routing began with one already short on both sides; no corpus fixture does, so the decline arm has no fixture.",
   "status": "needs-review"
  }
 }
