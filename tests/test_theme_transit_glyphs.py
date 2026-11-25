@@ -10,7 +10,7 @@ from theme_helpers import RNASEQ, SVG_NS, classed, write
 
 from nf_metro.api import render_string
 from nf_metro.layout.constants import TB_LABEL_H_SPACING
-from nf_metro.layout.labels import tb_label_gap
+from nf_metro.layout.labels import beside_label_gap
 from nf_metro.layout.pass_metrics import metrics_context
 from nf_metro.parser import parse_metro_mermaid
 from nf_metro.render.constants import readable_text_color
@@ -214,21 +214,27 @@ def test_bullet_text_takes_the_better_worst_case_contrast(backgrounds, text):
     assert readable_text_color(*backgrounds) == text
 
 
-def test_a_vertical_label_gap_widens_only_with_a_larger_label_offset():
-    assert tb_label_gap() == pytest.approx(TB_LABEL_H_SPACING)
+def test_a_beside_label_gap_widens_only_with_a_larger_label_offset():
+    assert beside_label_gap() == pytest.approx(TB_LABEL_H_SPACING)
     with metrics_context(label_offset=16.0):
-        assert tb_label_gap() == pytest.approx(TB_LABEL_H_SPACING + 5.0)
+        assert beside_label_gap() == pytest.approx(TB_LABEL_H_SPACING + 5.0)
     with metrics_context(label_offset=4.0):
-        assert tb_label_gap() == pytest.approx(TB_LABEL_H_SPACING)
+        assert beside_label_gap() == pytest.approx(TB_LABEL_H_SPACING)
 
 
 @pytest.mark.parametrize(
     "theme", ["nyc-subway", "paris-metro", "tokyo-metro", "washington-metro"]
 )
 @pytest.mark.parametrize("mode", ["light", "dark"])
-def test_each_transit_theme_renders_the_rnaseq_map(theme, mode):
+def test_each_transit_theme_draws_the_rnaseq_map_in_its_palette(theme, mode):
     root = _svg(_MAP, theme, mode)
-    assert root.tag == f"{SVG_NS}svg"
+    palette = set(getattr(resolve_stack(theme), mode).line_colors)
+    strokes = {
+        el.get("stroke")
+        for el in root.iter(f"{SVG_NS}path")
+        if el.get("data-line-id") and el.get("fill") == "none"
+    }
+    assert strokes and strokes <= palette
 
 
 def test_only_a_numbered_theme_styles_station_codes():
@@ -238,3 +244,46 @@ def test_only_a_numbered_theme_styles_station_codes():
     assert rule in render_string(
         _MAP, theme="tokyo-metro", source_dir=str(RNASEQ.parent)
     )
+
+
+def test_a_line_ringed_dot_greys_with_its_own_inactive_line(tmp_path):
+    from nf_metro.api import RenderConfig
+
+    theme = write(
+        tmp_path,
+        "dots.yaml",
+        "name: d\nextends: nyc-subway\ndot_ring: line\ndot_ring_width: 0.1\n",
+    )
+    light = resolve_stack(str(theme)).light
+    root = ET.fromstring(
+        render_string(
+            TWO_LINES,
+            theme=str(theme),
+            mode="light",
+            config=RenderConfig(inactive_line_ids=frozenset({"alt"})),
+        )
+    )
+    strokes = sorted(
+        dot.get("stroke") for dot in _station(root, "b").iter(f"{SVG_NS}circle")
+    )
+    graph = parse_metro_mermaid(TWO_LINES)
+    main = light.line_colors[graph.lines["main"].palette_index]
+    assert strokes == sorted([main, light.muted_line_color])
+
+
+def test_a_greyed_bullet_reads_against_both_modes_greys(tmp_path):
+    from nf_metro.api import RenderConfig
+
+    nyc = resolve_stack("nyc-subway")
+    grey_pair = (nyc.light.muted_line_color, nyc.dark.muted_line_color)
+    svg = render_string(
+        _MAP,
+        theme="nyc-subway",
+        mode="light",
+        source_dir=str(RNASEQ.parent),
+        config=RenderConfig(inactive_line_ids=frozenset({"star_rsem"})),
+    )
+    bullet = next(
+        el for el in ET.fromstring(svg).iter(f"{SVG_NS}text") if el.text == "A"
+    )
+    assert bullet.get("fill") == readable_text_color(*grey_pair)

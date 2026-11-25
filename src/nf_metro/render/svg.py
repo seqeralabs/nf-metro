@@ -2583,6 +2583,7 @@ def _build_render_plan_scaled(
             width=svg_width,
             height=svg_height,
             station_radius=theme.station_radius,
+            line_colors=theme.line_colors,
             extra_node_data=boxes,
         )
 
@@ -5059,6 +5060,7 @@ def _render_stations(
             positive_fan,
             muted,
             (label_points or {}).get(station.id),
+            inactive_line_ids,
         )
         if target is not d:
             d.append(target)
@@ -5073,6 +5075,7 @@ def _render_station_into(
     positive_fan: set[str],
     muted: bool,
     label_point: tuple[float, float] | None = None,
+    inactive_line_ids: frozenset[str] = frozenset(),
 ) -> None:
     """Draw one station's glyph and terminus icons into a container.
 
@@ -5206,6 +5209,7 @@ def _render_station_into(
             muted,
             label_point,
             line_offsets,
+            inactive_line_ids,
         ),
     )
 

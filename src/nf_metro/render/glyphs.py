@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import drawsvg as draw
 
 from nf_metro.layout.constants import COORD_TOLERANCE_FINE
+from nf_metro.layout.geometry import AxisFrame, lanes_run_along_x
 from nf_metro.render.constants import effective_line_color
 from nf_metro.render.ns import ns as _ns
 from nf_metro.render.style import (
@@ -109,7 +110,8 @@ class Bundle(NamedTuple):
 
     ``station_data`` is the attributes every glyph element of the station
     carries; ``label_point`` is where its label sits, which a tab faces;
-    ``line_offsets`` is each line's drawn offset, which a dot sits on.
+    ``line_offsets`` is each line's drawn offset, which a dot sits on, and
+    ``inactive_line_ids`` the lines a dot in its line's colour greys for.
     """
 
     station: Station
@@ -120,6 +122,7 @@ class Bundle(NamedTuple):
     muted: bool = False
     label_point: tuple[float, float] | None = None
     line_offsets: Mapping[str, float] = MappingProxyType({})
+    inactive_line_ids: frozenset[str] = frozenset()
 
     @property
     def axis(self) -> CrossAxis:
@@ -304,13 +307,17 @@ def _line_offset(bundle: Bundle, line_id: str, rank: int, count: int) -> float:
 def _ring_paint(
     theme: Theme, line: MetroLine | None, bundle: Bundle, in_line_colour: bool
 ) -> tuple[str, str]:
-    """``(stroke, class)`` of a dot or marker ring: in its line's colour, or in
-    ``station_stroke``, over a face in the station fill."""
+    """``(stroke, class)`` of a dot or marker ring: in its line's colour, greyed
+    when that line is inactive, or in ``station_stroke``, over a face in the
+    station fill."""
     hole = _ns("nf-metro-ring-hole")
     if in_line_colour:
-        muted_ids = frozenset({line.id}) if bundle.muted and line else frozenset()
+        muted = bundle.muted or (
+            line is not None and line.id in bundle.inactive_line_ids
+        )
+        muted_ids = frozenset({line.id}) if muted and line else frozenset()
         stroke = effective_line_color(line, theme, muted_ids)
-        paint = line_paint_class(theme, line, bundle.muted, "stroke")
+        paint = line_paint_class(theme, line, muted, "stroke")
     else:
         stroke = theme.station_stroke
         paint = maybe_muted_class("nf-metro-ring", bundle.muted)
@@ -364,8 +371,8 @@ def station_code(graph: MetroGraph, station: Station, style: str) -> tuple[str, 
         and not st.is_port
         and not st.is_blank_terminus
     ]
-    along_x = section.direction in ("LR", "RL")
-    sign = -1.0 if section.direction in ("RL", "BT") else 1.0
+    along_x = not lanes_run_along_x(section.direction)
+    sign = AxisFrame.flow_sign(section.direction)
 
     def flow_key(st: Station) -> tuple[float, float]:
         along, across = (st.x, st.y) if along_x else (st.y, st.x)

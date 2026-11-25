@@ -120,9 +120,12 @@ def test_an_inactive_line_greys_instead_of_taking_its_palette_colour(tmp_path):
     svg = render_string(
         MMD,
         theme=theme,
+        mode="light",
         config=RenderConfig(inactive_line_ids=frozenset({"main"})),
     )
     assert "nf-metro-line-paint-0" not in svg
+    grey = resolve_stack(theme).light.muted_line_color
+    assert _edge_strokes(svg)["main"] == grey
 
 
 def test_london_tube_draws_the_tfl_colours_and_keeps_northern_visible_in_dark():
@@ -136,3 +139,28 @@ def test_london_tube_draws_the_tfl_colours_and_keeps_northern_visible_in_dark():
 def test_a_palette_entry_must_be_a_colour(tmp_path):
     with pytest.raises(ThemeError, match="is not a colour"):
         resolve_stack(_palette_theme(tmp_path, 'line_colors: ["#zz0000"]\n'))
+
+
+def test_the_html_legend_and_manifest_carry_the_theme_colours():
+    from nf_metro.api import RenderConfig
+    from nf_metro.render.manifest import build_manifest
+
+    tube = resolve_stack("london-tube")
+    graph = parse_metro_mermaid(THREE_LINES)
+    html = render_string(
+        THREE_LINES,
+        theme="london-tube",
+        config=RenderConfig(output_format="html"),
+    )
+    light, dark = tube.light.mode_line_colors
+    assert f"light-dark({light[1]}, {dark[1]})" in html
+    assert light[0] in html
+    assert '"#111111"' not in html
+    manifest = build_manifest(
+        graph,
+        width=10,
+        height=10,
+        station_radius=1.0,
+        line_colors=tube.dark.line_colors,
+    )
+    assert [g["color"] for g in manifest["groups"]] == list(dark[:3])

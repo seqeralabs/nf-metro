@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from nf_metro.manifest import build_manifest_data
+from nf_metro.render.constants import palette_pick
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
@@ -26,6 +27,7 @@ def build_manifest(
     width: int,
     height: int,
     station_radius: float,
+    line_colors: tuple[str, ...] = (),
     extra_node_data: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the manifest dict from the graph the renderer just laid out.
@@ -76,7 +78,11 @@ def build_manifest(
         height=height,
         nodes=nodes,
         groups=[
-            {"id": line.id, "label": line.display_name, "color": line.color}
+            {
+                "id": line.id,
+                "label": line.display_name,
+                "color": palette_pick(line_colors, line),
+            }
             for line in graph.lines.values()
         ],
         regions=[{"id": sid, "label": sec.name} for sid, sec in drawn_sections.items()],

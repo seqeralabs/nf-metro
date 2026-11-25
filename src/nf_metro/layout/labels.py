@@ -96,7 +96,7 @@ def tb_left_label_marker_pitch(
     right_min_offset = min(0.0, lane_sign * right_span)
     return (
         label_text_width(label)
-        + tb_label_gap()
+        + beside_label_gap()
         + TB_PILL_EDGE_OFFSET
         - right_min_offset
         + TB_PILL_EDGE_OFFSET
@@ -1497,7 +1497,7 @@ def _place_station_label(
     )
 
 
-def tb_label_gap() -> float:
+def beside_label_gap() -> float:
     """Gap between a vertical-flow station's pill and the label beside it,
     widened by however far the active ``label_offset`` exceeds its default."""
     return TB_LABEL_H_SPACING + max(0.0, active_metrics().label_offset - LABEL_OFFSET)
@@ -1514,7 +1514,7 @@ def label_beside_pill(
     return LabelPlacement(
         station_id=station.id,
         text=station.label,
-        x=pill_edge - tb_label_gap() if left else pill_edge + tb_label_gap(),
+        x=pill_edge - beside_label_gap() if left else pill_edge + beside_label_gap(),
         y=station.y,
         above=True,
         text_anchor="end" if left else "start",

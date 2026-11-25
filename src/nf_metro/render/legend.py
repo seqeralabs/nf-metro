@@ -52,6 +52,7 @@ from nf_metro.render.ns import ns as _ns
 from nf_metro.render.style import (
     SWATCH_BULLET,
     Theme,
+    color_pair,
     line_color_pair,
     line_paint_class,
     ordinal_code,
@@ -385,7 +386,11 @@ def _render_bullets(
                 **({"class_": paint} if paint else {}),
             )
         )
-        shades = (theme.muted_line_color,) if muted else line_color_pair(theme, ml)
+        shades = (
+            color_pair(theme, "muted_line_color")
+            if muted
+            else line_color_pair(theme, ml)
+        )
         d.append(
             draw.Text(
                 ordinal_code(ml.palette_index + 1, theme.line_codes),

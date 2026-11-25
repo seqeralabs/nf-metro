@@ -2,12 +2,13 @@
 # After the Tokyo subway route map (Tokyo Metro and Toei, 2023) and Tokyo
 # Metro's station numbering mark (CI manual, 2025): every station is its
 # number, a white face ringed in its line's colour around a letter and two
-# digits; a station on several lines is one marker across them ringed in dark
-# grey. Here the letter is the station's section, which its badge also shows,
-# and the digits count along the section's flow; a nameless line end has no
-# number and stops at a bar. Thick lines, rounded
-# octilinear corners, bold black labels and a pale blue legend. Line colours
-# are the Tokyo Metro CI manual's nine line colours, then Toei's four.
+# digits, and a station on several lines is one marker across them ringed in
+# dark grey. Here the letter is the station's section, which its badge also
+# shows, and the digits count along the section's flow; a nameless line end
+# has no number and stops at a bar. Thick lines, rounded octilinear corners,
+# bold black labels and a pale blue legend. Line colours: Tokyo Metro's nine
+# from its CI manual, then Toei's four from the ODPT open-data railway
+# colours.
 name: tokyo-metro
 
 station_glyph: numbered

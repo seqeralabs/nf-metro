@@ -7,14 +7,14 @@ import html
 import json
 from importlib.resources import files
 from string import Template
-from typing import Literal
+from typing import Any, Literal
 
 from nf_metro.options import MODES
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.driver import get_driver_js
 from nf_metro.render.font_embed import apply_font_portability
 from nf_metro.render.plan import RenderPlan
-from nf_metro.render.style import Theme
+from nf_metro.render.style import Theme, adaptive_value, line_color_pair
 from nf_metro.render.svg import build_render_plan, emit_render_plan
 from nf_metro.text_metrics import metrics_face_for_portability
 
@@ -103,12 +103,13 @@ def emit_render_plan_html(
     svg = apply_font_portability(svg, font_portability)
 
     graph = plan.graph
+    theme: Any = plan.theme
     title = graph.title or "nf-metro map"
     lines = [
         {
             "id": lid,
             "label": ln.display_name,
-            "color": ln.color,
+            "color": adaptive_value(*line_color_pair(theme, ln)),
             "style": ln.style or "solid",
         }
         for lid, ln in graph.lines.items()
