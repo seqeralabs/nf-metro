@@ -611,7 +611,15 @@ function zoomFit() {
 
 // The selector picks the theme; light/dark is the separate Mode control, so
 // theme and mode stay independent.
-const THEME_KEYS = ["default", "seqera", "london-tube"];
+const THEME_KEYS = [
+  "default",
+  "seqera",
+  "london-tube",
+  "nyc-subway",
+  "paris-metro",
+  "tokyo-metro",
+  "washington-metro",
+];
 
 // [control id, directive key, kind]
 const DIRECTIVE_CONTROLS = [
