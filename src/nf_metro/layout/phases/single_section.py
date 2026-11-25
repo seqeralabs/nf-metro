@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE_FINE,
     ENTRY_SHIFT_LR,
     ENTRY_SHIFT_TB,
     EXIT_GAP_MULTIPLIER,
@@ -22,6 +24,7 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_ROOM,
     TERMINUS_ICON_ROOM_V,
     TERMINUS_WIDTH,
+    graph_offset_step,
 )
 from nf_metro.layout.geometry import (
     Axis,
@@ -52,12 +55,14 @@ from nf_metro.layout.pass_metrics import (
     label_height_approx,
     metrics_context,
     min_station_flat_length,
+    min_straight_edge,
     station_radius_approx,
 )
 from nf_metro.layout.phases._common import (
     _build_section_subgraph,
     _exit_reaching_nodes,
     perp_entry_lands_left,
+    section_axes,
     section_exit_lines,
 )
 from nf_metro.layout.phases.off_track import (
@@ -227,6 +232,66 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             if collision:
                 continue
             st.y = src.y
+
+
+def reserve_fan_stagger_runway(
+    graph: MetroGraph, sub: MetroGraph, section: Section | None
+) -> None:
+    """Lengthen every fanned bundle's diagonal to fit its lanes' stagger.
+
+    A bundle of ``n`` lanes one lane pitch apart crossing a diagonal of drop
+    ``d`` and run ``r`` seats each lane's two corners on their turns'
+    bisectors, so its lanes' diagonals stagger along the flow axis by
+    ``(n - 1) * pitch * tan(phi / 2)``, with ``tan(phi / 2) =
+    (hypot(r, d) - r) / d``.  Every lane keeps its corner straight at both
+    ends, so the edge needs that stagger beyond both straights and the run.
+
+    Stations at or past an edge's far end along the flow axis move out by
+    its shortfall, and the section box grows by the same amount.  Edges are
+    taken in order of that far end, so each one is measured after every
+    shortfall nearer the flow start has been opened and a later opening
+    never shortens it.  Reads final cross-axis positions, so it runs once
+    the row grid has seated them.
+    """
+    flow, cross = section_axes(section)
+    pitch = graph_offset_step(graph)
+    run = active_metrics().diagonal_run
+
+    def stub(station_id: str) -> float:
+        if is_bypass_v(station_id):
+            return min_station_flat_length()
+        return min_straight_edge()
+
+    lanes = Counter(
+        (edge.source, edge.target)
+        for edge in graph.edges
+        if edge.source in sub.stations and edge.target in sub.stations
+    )
+    bundles = [
+        (sub.stations[source], sub.stations[target], count)
+        for (source, target), count in lanes.items()
+        if count >= 2
+    ]
+    bundles.sort(
+        key=lambda bundle: max(getattr(bundle[0], flow), getattr(bundle[1], flow))
+    )
+    for source, target, count in bundles:
+        drop = abs(getattr(target, cross) - getattr(source, cross))
+        if drop <= COORD_TOLERANCE_FINE:
+            continue
+        stagger = (count - 1) * pitch * (math.hypot(run, drop) - run) / drop
+        need = stub(source.id) + stub(target.id) + run + stagger
+        near, far = sorted((getattr(source, flow), getattr(target, flow)))
+        shortfall = need - (far - near)
+        if shortfall <= COORD_TOLERANCE_FINE:
+            continue
+        for station in sub.stations.values():
+            position = getattr(station, flow)
+            if position >= far - COORD_TOLERANCE_FINE:
+                setattr(station, flow, position + shortfall)
+        if section is not None:
+            size = "bbox_w" if flow == "x" else "bbox_h"
+            setattr(section, size, getattr(section, size) + shortfall)
 
 
 def _has_horizontal_predecessor_section(graph: MetroGraph, section: Section) -> bool:
