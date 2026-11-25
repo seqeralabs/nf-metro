@@ -16,6 +16,7 @@ from nf_metro.layout.constants import (
 )
 from nf_metro.layout.geometry import (
     Point,
+    half_turn_tan,
     lanes_run_along_x,
     quantize_coord,
     segment_intersects_bbox,
@@ -297,18 +298,17 @@ def _render_time_spread_delta(rp: RoutedPath, offset: float) -> float:
 
     A Y-only offset under-separates a diagonal: its perpendicular component is
     only the offset times the sine of the diagonal's angle to the Y axis.  The
-    scale restoring it is ``tan(phi / 2)`` for the route's own deflection
-    ``phi`` off the horizontal (``sqrt(2) - 1`` for a 45-degree leg), which
-    also seats each lane's corner on the turn's bisector, so a hub's diagonals
-    of different steepness each turn about one centre.
+    route's own ``half_turn_tan`` restores it, so a hub's diagonals of different
+    steepness each turn about one centre.
     """
     d_x = rp.points[2][0] - rp.points[1][0]
     d_y = rp.points[2][1] - rp.points[1][1]
-    if abs(d_y) <= COORD_TOLERANCE_FINE:
-        return 0.0
-    scale = (math.hypot(d_x, d_y) - abs(d_x)) / abs(d_y)
-    cross_sign = -1.0 if d_y > 0 else 1.0
-    return cross_sign * offset * scale * (1.0 if d_x >= 0 else -1.0)
+    return (
+        -offset
+        * half_turn_tan(d_x, d_y)
+        * math.copysign(1.0, d_x)
+        * math.copysign(1.0, d_y)
+    )
 
 
 def _apply_diagonal_spread(

@@ -18,6 +18,7 @@ from nf_metro.layout.geometry import (
     AxisFrame,
     axis_split,
     diagonal_centreline,
+    diagonal_stagger,
     flow_entry_side,
     lanes_run_along_x,
     section_bbox_span,
@@ -551,7 +552,7 @@ def _route_flow_side_lane_change(
     lateral = abs(tq - sq)
     if lateral < COORD_TOLERANCE:
         return None
-    spread = _diagonal_spread(len(line_ids), ctx.offset_step, ctx.diagonal_run, lateral)
+    spread = diagonal_stagger(len(line_ids), ctx.offset_step, ctx.diagonal_run, lateral)
     end_straights = 2 * min_straight_edge()
     slack = abs(tp - sp) - ctx.diagonal_run - end_straights
     if slack < spread:
@@ -772,16 +773,6 @@ def _same_line_chain_route(
             and abs(points[k + 1][0] - p[0]) < COORD_TOLERANCE_FINE
         )
     ]
-
-
-def _diagonal_spread(n: int, step: float, run: float, lateral: float) -> float:
-    """Flow-axis room *n* parallel diagonals need to separate by *step*.
-
-    Each diagonal covers *run* along the flow axis and *lateral* across it;
-    translating the lines along the flow axis opens a *step* of perpendicular
-    clearance between neighbours at the cost of this much extra run.
-    """
-    return (n - 1) * step * (math.hypot(run, lateral) - run) / lateral
 
 
 _Box = tuple[float, float, float, float]
