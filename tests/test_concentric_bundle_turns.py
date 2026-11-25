@@ -134,10 +134,8 @@ def _arc_centres(points, radii):
     ]
 
 
-def _render(text: str, source_dir: Path, theme_text: str | None = None, tmp_path=None):
-    if theme_text is not None:
-        theme_file = tmp_path / "theme.yaml"
-        theme_file.write_text(theme_text)
+def _render(text: str, source_dir: Path, theme_file: Path | None = None):
+    if theme_file is not None:
         text = f"%%metro style: {theme_file}\n" + text
     graph = prepare_graph(text, source_dir=str(source_dir))
     theme = resolve_theme(graph)
@@ -183,9 +181,17 @@ def _assert_concentric(graph, theme, plan, edges) -> None:
     assert max(centre_errors.values()) <= 0.1, centre_errors
 
 
+def _theme_file(tmp_path: Path, theme_text: str) -> Path:
+    theme_file = tmp_path / "theme.yaml"
+    theme_file.write_text(theme_text)
+    return theme_file
+
+
 def _assert_rnaseq_fan_concentric(theme_text: str, prefix: str, tmp_path) -> None:
     path = _ROOT / "examples" / "rnaseq_sections.mmd"
-    rendered = _render(prefix + path.read_text(), path.parent, theme_text, tmp_path)
+    rendered = _render(
+        prefix + path.read_text(), path.parent, _theme_file(tmp_path, theme_text)
+    )
     _assert_concentric(*rendered, _PREPROCESSING_FAN)
 
 
@@ -227,21 +233,58 @@ _HUB_FAN_BUNDLES = (
 )
 
 
-@pytest.mark.parametrize("direction", ["LR", "RL", "TB"])
-@pytest.mark.parametrize("ratio", [2.0, 2.5, 3.0, 3.5, 4.0, 4.5])
-@pytest.mark.parametrize("line_width", [3, 4, 5, 6, 7, 8, 9])
+# Every (line width, ratio) at which each direction aborts when each of the
+# hub's bundles reserves only its own stagger.
+_HUB_FAN_ABORTS = {
+    "LR": {
+        6: (4.5,),
+        7: (3.5, 4.0, 4.5),
+        8: (3.0, 3.5, 4.0, 4.5),
+        9: (2.5, 3.0, 3.5, 4.0, 4.5),
+    },
+    "RL": {
+        6: (4.5,),
+        7: (3.5, 4.0, 4.5),
+        8: (3.0, 3.5, 4.0, 4.5),
+        9: (2.5, 3.0, 3.5, 4.0, 4.5),
+    },
+    "TB": {6: (4.0, 4.5), 7: (3.5, 4.0, 4.5), 8: (3.0, 3.5), 9: (2.5, 3.0)},
+}
+_HUB_FAN_CASES = sorted(
+    {
+        (direction, width, ratio)
+        for direction in _HUB_FAN_ABORTS
+        for width in (3, 6, 9)
+        for ratio in (2.0, 3.0, 4.5)
+    }
+    | {
+        (direction, width, ratio)
+        for direction, by_width in _HUB_FAN_ABORTS.items()
+        for width, ratios in by_width.items()
+        for ratio in ratios
+    }
+)
+
+
+@pytest.mark.parametrize(("direction", "line_width", "ratio"), _HUB_FAN_CASES)
 def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
     tmp_path, direction, line_width, ratio
 ):
     """A hub spreads every lane it fans one way as one group, so each of its
-    bundles needs room for the whole group's stagger, not only its own."""
-    text = _HUB_FAN.read_text().replace("direction: LR", f"direction: {direction}")
-    rendered = _render(
-        "%%metro track_gap: 0\n" + text,
-        _HUB_FAN.parent,
+    bundles needs room for the whole group's stagger, not only its own.  The
+    parity check that Stage 1.2's ``_spread_groups`` matches the spread pass."""
+    text = _HUB_FAN.read_text()
+    assert "direction: LR" in text
+    theme = _theme_file(
+        tmp_path,
         f"name: wide\nline_width: {line_width}\n"
         f"layout:\n  curve_radius_ratio: {ratio}\n",
-        tmp_path,
+    )
+    rendered = _render(
+        "%%metro track_gap: 0\n"
+        + text.replace("direction: LR", f"direction: {direction}"),
+        _HUB_FAN.parent,
+        theme,
     )
     _assert_concentric(*rendered, _HUB_FAN_BUNDLES)
 

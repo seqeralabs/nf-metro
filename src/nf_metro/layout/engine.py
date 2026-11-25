@@ -1396,7 +1396,7 @@ def _compute_flat_layout(
             x_offset + station.layer * x_spacing + layer_extra.get(station.layer, 0)
         )
         station.y = y_offset + track_rank[station.track] * y_spacing
-    reserve_fan_stagger_runway(graph)
+    reserve_fan_stagger_runway(graph, graph, None)
 
     _snap(graph, "flat")
 

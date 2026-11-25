@@ -34,7 +34,7 @@ def _reserve(direction: str, layout, edges) -> dict[str, float]:
     for source, target, line in edges:
         sub.add_edge(Edge(source=source, target=target, line_id=line))
     section = Section(id="s", name="s", direction=direction)
-    reserve_fan_stagger_runway(sub, section=section, y_grid=_GRID)
+    reserve_fan_stagger_runway(sub, sub, section, y_grid=_GRID)
     origin = getattr(sub.stations["src"], flow)
     return {
         sid: sign * (getattr(st, flow) - origin) for sid, st in sub.stations.items()
@@ -71,6 +71,13 @@ def test_each_bundle_opens_after_the_openings_upstream_of_it(direction):
 
 @pytest.mark.parametrize("direction", ["TB", "BT"])
 def test_vertical_flow_opens_whole_grid_steps(direction):
+    """Stage 6.4 snaps Y to the grid, so every opening is a multiple of it."""
     placed = _reserve(direction, _CHAINED, _CHAINED_EDGES)
     for sid, (f, _c) in _CHAINED.items():
         assert (placed[sid] - f) % _GRID == pytest.approx(0.0, abs=1e-6)
+
+
+def test_vertical_flow_requires_the_y_grid():
+    sub = MetroGraph()
+    with pytest.raises(AssertionError):
+        reserve_fan_stagger_runway(sub, sub, Section(id="s", name="s", direction="TB"))

@@ -388,11 +388,10 @@ in pipeline order.
 - **Postcondition**: Within each `(grid_row, direction)` group, all
   multi-station layers share one Y grid. Every in-section diagonal edge
   spans, along the flow axis, at least both endpoint straights, the diagonal
-  run and `(N - 1) * pitch * tan(phi_max / 2)`, where `N` counts the distinct
-  lines of the group the diagonal spread pass moves it with (its hub's
-  diagonals one cross-axis heading at a time on a lanes-along-Y section,
-  otherwise its own bundle) and `phi_max` is that group's steepest
-  deflection. Each shortfall opens just before the edge's downstream
+  run and `(N - 1) * pitch * tan(phi_max / 2)`, where `N` is the number of
+  distinct lines in the spread group (see `_spread_groups`: by hub and
+  heading on lanes-along-Y sections, per bundle otherwise) and `phi_max` is
+  that group's steepest deflection. Each shortfall opens just before the edge's downstream
   station, in whole `y_spacing` steps along a vertical flow, and the bbox
   flow-axis size grows by the same amount. `graph._row_y_grid_info` stores
   grid metadata for the debug overlay.

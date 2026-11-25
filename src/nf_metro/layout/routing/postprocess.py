@@ -303,12 +303,9 @@ def _render_time_spread_delta(rp: RoutedPath, offset: float) -> float:
     """
     d_x = rp.points[2][0] - rp.points[1][0]
     d_y = rp.points[2][1] - rp.points[1][1]
-    return (
-        -offset
-        * half_turn_tan(d_x, d_y)
-        * math.copysign(1.0, d_x)
-        * math.copysign(1.0, d_y)
-    )
+    cross_sign = -1.0 if d_y > 0 else 1.0
+    run_sign = 1.0 if d_x >= 0 else -1.0
+    return cross_sign * offset * half_turn_tan(d_x, d_y) * run_sign
 
 
 def _apply_diagonal_spread(
