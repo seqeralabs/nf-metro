@@ -43,3 +43,7 @@ datasets/layout_preferences/geometry_vectors.tar.gz
 work/
 .nextflow/
 .nextflow.log
+
+# Debug log the rich-codex action writes into the checkout before its
+# clean-tree check (.github/workflows/rich-codex.yml)
+rich_codex_*.log
