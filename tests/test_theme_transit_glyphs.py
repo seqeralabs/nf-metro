@@ -229,3 +229,12 @@ def test_a_vertical_label_gap_widens_only_with_a_larger_label_offset():
 def test_each_transit_theme_renders_the_rnaseq_map(theme, mode):
     root = _svg(_MAP, theme, mode)
     assert root.tag == f"{SVG_NS}svg"
+
+
+def test_only_a_numbered_theme_styles_station_codes():
+    rule = ".nf-metro-station-code"
+    assert rule not in render_string(TWO_LINES)
+    assert rule not in render_string(TWO_LINES, theme="nyc-subway")
+    assert rule in render_string(
+        _MAP, theme="tokyo-metro", source_dir=str(RNASEQ.parent)
+    )

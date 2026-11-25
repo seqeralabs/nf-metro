@@ -3427,7 +3427,11 @@ def _css_rule(cls: str, props: str, *also: str) -> str:
 
 def _chrome_applies(theme: Theme, field: str) -> bool:
     """Whether chrome colour *field* gets stylesheet rules under *theme*."""
-    return not CHROME[field].adaptive_only or colors_adapt(theme, field)
+    chrome = CHROME[field]
+    glyphs = (theme.station_glyph, theme.interchange_glyph)
+    if chrome.drawn_by and not any(g in chrome.drawn_by for g in glyphs):
+        return False
+    return not chrome.adaptive_only or colors_adapt(theme, field)
 
 
 def _chrome_binding_rules(theme: Theme) -> list[str]:

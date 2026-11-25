@@ -629,11 +629,14 @@ class Chrome(NamedTuple):
     target also gets a rule greying it when every line touching it is
     inactive. An ``adaptive_only`` colour gets its rules only when its light
     and dark values differ, and is otherwise left to the baked attribute.
+    ``drawn_by`` names glyph choices that draw its targets: when set, a theme
+    choosing none of them emits no rules for it.
     """
 
     css_var: str
     targets: tuple[tuple[str, str, bool], ...]
     adaptive_only: bool = False
+    drawn_by: tuple[str, ...] = ()
 
 
 #: Every chrome colour, in the order its CSS rules are emitted.
@@ -649,6 +652,7 @@ CHROME: MappingProxyType[str, Chrome] = MappingProxyType(
         "station_code_color": Chrome(
             "--nfm-map-station-code-color",
             (("nf-metro-station-code", "fill", True),),
+            drawn_by=(GLYPH_NUMBERED,),
         ),
         "caption_color": Chrome(
             "--nfm-map-caption-color", (("nf-metro-caption", "fill", False),), True
