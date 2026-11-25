@@ -77,6 +77,14 @@ gallery:
       trunk whose tilted names pack tighter than horizontal labels would, feeding a variant-calling
       section in the row below that fans out to three callers and back in -- the reserved vertical
       room keeps the hanging labels clear of the row beneath."
+  - id: wide_line_fans
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "Wide lines from a [user-defined theme file](/nf-metro/themes/#writing-your-own-theme)
+      (`line_width: 9`, `curve_radius_ratio: 2.0`, `track_gap: 0`): a deep six-line fan and a hub
+      fanning bundles of different drop keep every lane edge to edge, each corner turning about
+      its bundle's shared centre."
   - id: file_icons
     source_dir: examples
     category: Feature Showcase

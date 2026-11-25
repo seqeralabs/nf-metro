@@ -247,7 +247,10 @@ light.png | dark.png`) in a PNG.
   5, lanes leaving a hub opened gaps at their corners and outer lanes
   distorted, and some wide-line maps aborted. Each diagonal is spread by its
   own steepness, and the layout reserves the room a hub's fanned lanes need
-  along the flow.
+  along the flow. One line turning onto or off a hub's shared leg from several
+  edges draws one corner instead of a doubled stroke, and a diagonal too short
+  for both of its corners at the base radius splits between them and keeps its
+  bundle concentric.
 - Under `diamond_style: symmetric`, a two-way diamond or two-branch fan in a
   row whose bundles widen the row pitch sits half that pitch either side of
   its trunk, on the grid the rest of the row uses, instead of half the base
