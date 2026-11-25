@@ -297,21 +297,34 @@ button:disabled {
 :root[data-theme="light"] .CodeMirror-focused .CodeMirror-selected {
   background: #b9cdf0 !important;
 }
+/* Token colours match the docs' code blocks (Night Owl / Starlight light). */
 .cm-s-default .cm-comment {
-  color: #5c6b7a;
+  color: light-dark(#5f636f, #919f9f);
 }
-.cm-metro-directive {
-  color: var(--accent);
-  font-weight: 600;
-}
+.cm-metro-directive,
 .cm-metro-keyword {
-  color: #c792ea;
+  color: light-dark(#8844ae, #c792ea);
 }
-.cm-metro-line {
-  color: #ffcb6b;
+.cm-metro-property {
+  color: light-dark(#096e72, #80cbc4);
+}
+.cm-metro-constant {
+  color: light-dark(#3b61b0, #82aaff);
+}
+.cm-metro-hex {
+  color: light-dark(#aa0982, #ffeb95);
+}
+.cm-metro-number {
+  color: light-dark(#aa0982, #f78c6c);
 }
 .cm-metro-arrow {
-  color: #82aaff;
+  color: light-dark(#096e72, #7fdbca);
+}
+.cm-metro-edgelabel {
+  color: light-dark(#3b61b0, #ecc48d);
+}
+.cm-metro-nodelabel {
+  color: light-dark(#984e4d, #ecc48d);
 }
 
 #error {

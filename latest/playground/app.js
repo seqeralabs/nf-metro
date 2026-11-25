@@ -49,7 +49,7 @@ const SAMPLE_NEXTFLOW_DAG = `flowchart TB
 const SOURCE_COMPLETIONS = [
   ["%%metro title: ", "Map title"],
   ["%%metro line: id | Name | #19b7a5", "Define a route"],
-  ["%%metro style: nfcore", "Map brand"],
+  ["%%metro style: seqera", "Map theme"],
   ["%%metro mode: light", "Light or dark output"],
   ["%%metro direction: LR", "Section direction"],
   ["%%metro grid: section | 0,0", "Place a section"],
@@ -83,14 +83,51 @@ const examples = {};
 
 /* ------------------------------- editor -------------------------------- */
 
+// Mirrors src/grammars/metro.tmLanguage.json (the docs' code-block grammar);
+// keep the two in sync.
 function defineMode() {
+  const hex = { regex: /#[0-9A-Fa-f]{3,8}\b/, token: "metro-hex" };
+  const number = { regex: /\b\d+(?:\.\d+)?\b/, token: "metro-number" };
   CodeMirror.defineSimpleMode("metro", {
     start: [
-      { regex: /%%metro\b.*/, token: "metro-directive" },
+      {
+        regex: /(%%metro)(\s+)([a-zA-Z_]+:)/,
+        token: ["metro-directive", null, "metro-property"],
+        next: "directive",
+      },
       { regex: /%%.*/, token: "comment" },
-      { regex: /\b(graph|subgraph|end|LR|RL|TB|BT)\b/, token: "metro-keyword" },
-      { regex: /\|[^|]*\|/, token: "metro-line" },
-      { regex: /(--+>|<--+|-\.->|==+>)/, token: "metro-arrow" },
+      {
+        regex: /\b(graph|flowchart)(\s+)(LR|RL|TB|TD|BT)\b/,
+        token: ["metro-keyword", null, "metro-keyword"],
+      },
+      {
+        regex:
+          /\b(?:graph|flowchart|subgraph|end|direction|classDef|class|style|linkStyle)\b/,
+        token: "metro-keyword",
+      },
+      {
+        regex: /-{2,3}>|<-{2,3}|-\.->|-\.-|={2,3}>|===|~~~|--/,
+        token: "metro-arrow",
+      },
+      { regex: /\|[^|]*\|/, token: "metro-edgelabel" },
+      { regex: /[[({][^\])}]*[\])}]/, token: "metro-nodelabel" },
+      hex,
+      number,
+      { regex: /\w+/, token: null },
+    ],
+    // A directive runs to the end of its line. The zero-width `sol` rule
+    // drops back to `start` on the next line; CodeMirror retries the token
+    // after a non-advancing state change.
+    directive: [
+      { regex: /(?:)/, sol: true, next: "start" },
+      hex,
+      {
+        regex:
+          /\b(?:true|false|left|right|top|bottom|bundle|centered|rails|solid|dashed|dotted|definition|span|straight|symmetric)\b/,
+        token: "metro-constant",
+      },
+      number,
+      { regex: /\w+/, token: null },
     ],
   });
 }
@@ -572,11 +609,17 @@ function zoomFit() {
 // it, so the change is saved with the map and travels with export/share. (The
 // animate/chevrons/debug toggles are preview overlays handled separately.)
 
-// The selector picks the brand (palette identity); light/dark is the separate
-// Mode control, so brand and mode stay independent. Legacy sources may still
-// carry `%%metro style: dark`, which reads back as the nfcore brand.
-const THEME_KEYS = ["nfcore", "seqera"];
-const STYLE_ALIASES = { dark: "nfcore" };
+// The selector picks the theme; light/dark is the separate Mode control, so
+// theme and mode stay independent.
+const THEME_KEYS = [
+  "default",
+  "seqera",
+  "london-tube",
+  "nyc-subway",
+  "paris-metro",
+  "tokyo-metro",
+  "washington-metro",
+];
 
 // [control id, directive key, kind]
 const DIRECTIVE_CONTROLS = [
@@ -641,14 +684,22 @@ function applyDirectiveControl(id, key, kind) {
   doRender();
 }
 
+// A stack (`seqera, london-tube`) passes through when every entry is a
+// built-in theme; the selector then shows no single theme.
 function themeKeyFromSource() {
-  const value = (readDirective("style") || "").toLowerCase();
-  const key = STYLE_ALIASES[value] || value;
-  return THEME_KEYS.includes(key) ? key : "nfcore";
+  const entries = (readDirective("style") || "")
+    .toLowerCase()
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length && entries.every((key) => THEME_KEYS.includes(key)))
+    return entries.join(", ");
+  return "default";
 }
 
+// Every stack starts from `default`, so picking it drops the directive.
 function setThemeDirective(themeKey) {
-  setDirective("style", themeKey);
+  setDirective("style", themeKey === "default" ? null : themeKey);
   doRender();
 }
 

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 150" width="460" height="150" font-family="-apple-system,Segoe UI,Roboto,sans-serif" style="color-scheme: light dark">
+  <rect width="460" height="150" fill="light-dark(#fff, #1a1a1a)"/>
+  <text x="345" y="12" text-anchor="middle" font-size="11" fill="light-dark(#555, #cfd0d1)">viewer's color-scheme</text>
+
+  <rect x="10" y="55" width="200" height="40" rx="6" fill="light-dark(#f4f4f4, #2b2b2b)" stroke="light-dark(#333, #888)" stroke-width="1.5"/>
+  <text x="110" y="80" text-anchor="middle" font-size="13" fill="light-dark(#222, #eee)" font-family="Menlo,Consolas,monospace">light-dark(#fff, #1a1a1a)</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="light-dark(#888, #aaa)"/>
+    </marker>
+  </defs>
+
+  <path d="M210 68 C 260 68, 260 38, 298 38" stroke="light-dark(#888, #aaa)" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="235" y="48" font-size="11" fill="light-dark(#555, #cfd0d1)">light</text>
+  <rect x="305" y="25" width="26" height="26" rx="4" fill="#ffffff" stroke="light-dark(#333, #aaa)" stroke-width="1.5"/>
+  <text x="340" y="42" font-size="12" fill="light-dark(#222, #eee)">viewer sees #fff</text>
+
+  <path d="M210 82 C 260 82, 260 112, 298 112" stroke="light-dark(#888, #aaa)" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="235" y="105" font-size="11" fill="light-dark(#555, #cfd0d1)">dark</text>
+  <rect x="305" y="99" width="26" height="26" rx="4" fill="#1a1a1a" stroke="light-dark(#333, #aaa)" stroke-width="1.5"/>
+  <text x="340" y="116" font-size="12" fill="light-dark(#222, #eee)">viewer sees #1a1a1a</text>
+</svg>

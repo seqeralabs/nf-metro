@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="nf-metro">
+  <style>
+    /* Light browser: white tile + dark station ring. Dark browser: brand-dark
+       tile + white ring (mirrors the logo's light/dark behaviour). The two
+       green lines stay constant across modes. */
+    .tile { fill: #FFFFFF; }
+    .stn  { fill: #FFFFFF; stroke: #201637; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #201637; }
+      .stn  { fill: #201637; stroke: #FFFFFF; }
+    }
+  </style>
+  <rect class="tile" width="64" height="64" rx="13"/>
+  <!-- the nf-metro logo's top-left, sized to nearly fill the tile: two metro
+       lines leaving the start station, the lower one bending down its curve -->
+  <path d="M12.5 20 H58" fill="none" stroke="#0A967B" stroke-width="7" stroke-linecap="round"/>
+  <path d="M12.5 30 L33 30 Q45 30 50 42 L58 58" fill="none" stroke="#31C9AC"
+        stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect class="stn" x="6" y="10" width="13" height="30" rx="6.5" ry="6.5" stroke-width="4"/>
+</svg>
