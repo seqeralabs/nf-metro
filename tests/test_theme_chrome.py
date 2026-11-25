@@ -6,6 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import replace
 
+import pytest
 from theme_helpers import MMD, RNASEQ, ROOT, classed, station_glyphs, write
 
 from nf_metro.api import RenderConfig, prepare_graph, render_string
@@ -27,15 +28,18 @@ def _css(svg: str) -> str:
     return re.search(r"<style>(.*?)</style>", svg, re.S).group(1)
 
 
-def test_every_applicable_chrome_colour_reaches_the_stylesheet():
-    svg = render_string(MMD, theme="london-tube")
-    theme = THEMES["london-tube"]
-    for name, chrome in CHROME.items():
-        baked = getattr(theme, name)
+@pytest.mark.parametrize("name", ["london-tube", "tokyo-metro"])
+def test_every_applicable_chrome_colour_reaches_the_stylesheet(name):
+    svg = render_string(MMD, theme=name)
+    theme = THEMES[name]
+    glyphs = (theme.station_glyph, theme.interchange_glyph)
+    for field, chrome in CHROME.items():
+        baked = getattr(theme, field)
         expected = (
             bool(baked)
             and baked != "none"
-            and (not chrome.adaptive_only or colors_adapt(theme, name))
+            and (not chrome.adaptive_only or colors_adapt(theme, field))
+            and (not chrome.drawn_by or any(g in chrome.drawn_by for g in glyphs))
         )
         assert (chrome.css_var in svg) == expected, chrome.css_var
 
