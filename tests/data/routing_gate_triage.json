@@ -1792,7 +1792,7 @@
   "status": "needs-review"
  },
  "postprocess.py::if seated is None:::#1": {
-  "note": "Station-move pass declines a candidate when _FanRoom.seat finds no position against the moves already recorded. Each earlier move was seated against this station's unmoved X, so that X still leaves every fanned diagonal its room unless routing began with one already short on both sides; no corpus fixture does, so the decline arm has no fixture.",
+  "note": "Station-move pass declines a candidate when _FanRoom.seat finds no position against the moves already recorded. Each earlier move was seated against this station's unmoved X, so that X leaves every fanned diagonal its room unless routing began with one already short on both sides; no corpus fixture does, so the decline arm has no fixture.",
   "status": "needs-review"
  },
  "postprocess.py::if new_x is None:::#2": {
