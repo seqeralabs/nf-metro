@@ -19,6 +19,8 @@ Covers:
   unequal resolved radii.
 * Meaningfulness: a hand-planted radius mismatch at a coincident corner is
   caught, so the corpus check is not vacuous.
+* Diagonal turns: same-line diagonals joining (or leaving) one leg at one
+  vertex meet that leg at a single point.
 """
 
 from __future__ import annotations
@@ -125,6 +127,30 @@ def test_check_reports_unequal_radii_at_shared_turn() -> None:
 
     matched = [_make_route("a", "x", 14.0), _make_route("b", "x", 14.0)]
     assert not check_coincident_corner_radii(graph, matched, {})
+
+
+def _climb_onto_shared_flat(source: str, drop: float, radii: list[float]):
+    """A same-line route climbing a diagonal onto a flat that turns at (100, 100)."""
+    route = _make_route(source, "x", radii[0])
+    route.points = [(0.0, 100.0 + drop), (70.0, 100.0 + drop), (100.0, 100.0)]
+    route.points.append((200.0, 100.0))
+    route.curve_radii = radii
+    return route
+
+
+def test_check_reports_fused_diagonal_turns_meeting_their_flat_apart() -> None:
+    """Diagonals of different steepness joining one flat at one vertex must
+    meet it at one point; a lone leg at the base radius beside a bundled
+    leg's wider one draws two corners."""
+    from nf_metro.parser.model import MetroGraph
+
+    graph = MetroGraph()
+    lone = _climb_onto_shared_flat("lone", 300.0, [10.0, 10.0])
+    bundled = _climb_onto_shared_flat("bundled", 60.0, [10.0, 13.8])
+    assert check_coincident_corner_radii(graph, [lone, bundled], {})
+
+    lone.curve_radii = [10.0, 13.8]
+    assert not check_coincident_corner_radii(graph, [lone, bundled], {})
 
 
 def test_unify_uses_widest_radius_all_shared_legs_can_resolve() -> None:

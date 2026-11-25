@@ -299,7 +299,7 @@ def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
             (("fastp", "fastqc_trimmed"), ("trimgalore", "fastqc_trimmed")),
             id=f"rnaseq_metro-lw{lw}-r{ratio}",
         )
-        for lw, ratio in ((6, 4.5), (9, 3.0))
+        for lw, ratio in ((6, 4.5), (9, 3.0), (9, 4.5))
     ]
     + [
         pytest.param(
@@ -320,7 +320,9 @@ def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
 )
 def test_gallery_fans_keep_their_stagger_room(tmp_path, name, line_width, ratio, edges):
     """Stations settled after Stage 1.2 (loop-side recentring, bubble centring)
-    and the Stage 6.4 grid snap leave each fan the room its stagger needs."""
+    and the Stage 6.4 grid snap leave each fan the room its stagger needs, and
+    a diagonal too short for both of its corners at the base radius stays
+    concentric at each end."""
     path = _ROOT / "examples" / name
     theme = _theme_file(
         tmp_path,
@@ -329,6 +331,79 @@ def test_gallery_fans_keep_their_stagger_room(tmp_path, name, line_width, ratio,
     )
     rendered = _render("%%metro track_gap: 0\n" + path.read_text(), path.parent, theme)
     _assert_concentric(*rendered, edges)
+
+
+def _unit(a, b):
+    length = math.dist(a, b)
+    return ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+
+
+def _fused_diagonal_turns(plan):
+    """Same-line diagonal corners sharing a vertex and one leg.
+
+    Keyed by line, vertex and shared leg; each value lists, per route, how far
+    along that leg its curve meets it.
+    """
+    turns = defaultdict(list)
+    for route, points, radii in zip(
+        plan.routes, plan.route_polylines, plan.route_curve_radii
+    ):
+        points = list(points)
+        arms = resolve_curve_radii(points, None if radii is None else list(radii))
+        for k in range(1, len(points) - 1):
+            u_in, u_out = (
+                _unit(points[k - 1], points[k]),
+                _unit(points[k], points[k + 1]),
+            )
+            dot = u_in[0] * u_out[0] + u_in[1] * u_out[1]
+            if abs(u_in[0] * u_out[1] - u_in[1] * u_out[0]) < 1e-6 or abs(dot) < 1e-6:
+                continue
+            vertex = (round(points[k][0]), round(points[k][1]))
+            corner = points[k]
+            for side, leg, sign in (("in", u_in, -1.0), ("out", u_out, 1.0)):
+                along = corner[0] * leg[0] + corner[1] * leg[1] + sign * arms[k - 1]
+                key = (
+                    route.line_id,
+                    vertex,
+                    side,
+                    (round(leg[0], 3), round(leg[1], 3)),
+                )
+                turns[key].append(((route.edge.source, route.edge.target), along))
+    return {key: legs for key, legs in turns.items() if len(legs) > 1}
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["genomic_pipeline.mmd", "rnaseq_sections.mmd", "epitopeprediction.mmd"],
+)
+def test_fused_same_line_corners_meet_their_shared_leg_once(name):
+    """One line turning onto (or off) a shared leg at one vertex from several
+    edges draws one corner: every curve meets that leg at the same point, even
+    where some of the edges bundle with other lines and some run alone."""
+    path = _ROOT / "examples" / name
+    _graph, _theme, plan = _render(path.read_text(), path.parent)
+    spreads = {
+        key: round(max(a for _e, a in legs) - min(a for _e, a in legs), 2)
+        for key, legs in _fused_diagonal_turns(plan).items()
+    }
+    assert {key: s for key, s in spreads.items() if s > 0.1} == {}
+
+
+def test_genomic_hub_join_fuses_lone_and_bundled_legs():
+    """The vcfs join takes ten tumor_only legs, two of them running alone."""
+    path = _ROOT / "examples" / "genomic_pipeline.mmd"
+    _graph, _theme, plan = _render(path.read_text(), path.parent)
+    red = [
+        legs
+        for (line, _v, side, _leg), legs in _fused_diagonal_turns(plan).items()
+        if line == "tumor_only" and side == "out" and len(legs) == 10
+    ]
+    assert len(red) == 1
+    assert {edge for edge, _a in red[0]} >= {
+        ("lofreq", "vcfs"),
+        ("msisensor2", "vcfs"),
+        ("freebayes", "vcfs"),
+    }
 
 
 # One cubic per corner holds a circle to 1e-3 of its radius up to a right
