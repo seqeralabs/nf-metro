@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph, resolve_theme
+from nf_metro.manifest import read_manifest
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.html import emit_render_plan_html
-from nf_metro.render.manifest import read_manifest
 from nf_metro.render.plan import (
     RenderPlan,
     contains_mutable_model_reference,

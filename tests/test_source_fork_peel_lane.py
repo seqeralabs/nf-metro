@@ -27,9 +27,9 @@ from conftest import render_with_downgrades
 from layout_validator import _segments_cross, validate_layout
 from orientation_transform import Orientation, all_orientations, transform_source
 
-from nf_metro.layout.engine import _station_marker_bbox
 from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
 from nf_metro.layout.ordering import _seat_contender
+from nf_metro.layout.phases._common import _station_marker_bbox
 from nf_metro.layout.routing import compute_station_offsets
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.validate import drawn_segments, parse_route_polylines

@@ -13,7 +13,7 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.routing import route_edges
 from nf_metro.layout.routing.common import RoutedPath
-from nf_metro.layout.routing.core import _align_uncentered_siblings
+from nf_metro.layout.routing.postprocess import _align_uncentered_siblings
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, Station
 

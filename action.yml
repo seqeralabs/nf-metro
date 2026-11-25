@@ -20,9 +20,11 @@ inputs:
     required: false
     default: ""
   theme:
-    description: "Visual theme (default, seqera, ...)."
+    description: >-
+      Theme stack (default, seqera, london-tube, a theme file, or a comma list).
+      Leave empty to use the map's own '%%metro style:'; a value here replaces it.
     required: false
-    default: default
+    default: ""
   mode:
     description: >-
       Display mode to bake (light or dark). Leave empty to keep the theme's own
@@ -94,7 +96,11 @@ runs:
         # must not be able to point the write outside the map's own
         # directory. Harmless to pass alongside an explicit -o, which this
         # flag never applies to.
-        args=(render "$INPUT_PATH" --theme "$THEME" --reject-output-outside-source)
+        args=(render "$INPUT_PATH" --reject-output-outside-source)
+
+        if [ -n "$THEME" ]; then
+          args+=(--theme "$THEME")
+        fi
 
         # Each whitespace-separated 'output' value becomes its own -o (repeat -o
         # to write several formats from one input). When empty, the CLI resolves

@@ -10,17 +10,9 @@ import html
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
-    CANVAS_ORIGIN_MARGIN as CANVAS_ORIGIN_MARGIN,  # re-export
-)
-from nf_metro.layout.constants import (
     ICON_CAPTION_GAP,
     SECTION_HEADER_ROUTE_CLEARANCE,
 )
-from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
-from nf_metro.layout.constants import (
-    RAIL_KNOB_RADIUS_RATIO as RAIL_KNOB_RADIUS_RATIO,  # re-export
-)
-from nf_metro.layout.constants import TERMINUS_WIDTH as TERMINUS_WIDTH  # re-export
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, MetroLine
@@ -78,9 +70,6 @@ LEGEND_MARKER_PILL_RATIO: float = 1.7
 MARKER_PILL_LENGTH_RATIO: float = 4.0
 """Length of a ``pill`` marker along the line, as a multiple of the station radius."""
 
-# RAIL_KNOB_RADIUS_RATIO is re-exported from layout.constants (see top imports):
-# label placement and the renderer share one knob-radius ratio.
-
 RAIL_LINK_HALF_WIDTH_RATIO: float = 0.7
 """Rail-interchange connector bar half-width, as a multiple of the station radius."""
 
@@ -133,8 +122,6 @@ pixel-level measurement across CairoSVG and Chromium renderers."""
 
 ICON_STATION_GAP: float = 6.0
 """Gap between terminus station pill and file icon."""
-
-# ICON_INTER_GAP is imported from layout.constants (re-exported for render use)
 
 ICON_BBOX_MARGIN: float = 2.0
 """Margin around icon bounding box for clamping."""

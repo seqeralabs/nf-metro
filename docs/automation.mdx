@@ -21,7 +21,6 @@ The composite action renders the map and reports what it wrote and whether anyth
   with:
     # [!callout /input/] Path of the `.mmd` to render.
     input: assets/metro_map.mmd
-    theme: default
     embed-font: "true"
 # steps.metro.outputs.output-path — the path(s) written, one per line
 # steps.metro.outputs.changed     — 'true' when any output differs from the committed version
@@ -31,7 +30,7 @@ Every input is optional:
 
 - `input`: default `assets/metro_map.mmd`.
 - `output`: default is the map's `%%metro output:` path(s), else the sibling `.svg`. Give several whitespace-separated paths to write more than one format in a single run, each taken from its extension: `output: "assets/metro_map.svg assets/metro_map.png"`. A path here can't contain a space; declare it with `%%metro output:` in the `.mmd` instead if it needs one.
-- `theme`: default `default`, which overrides the map's own `%%metro style:`.
+- `theme`: no default, so the map's own `%%metro style:` applies. A value replaces that style entirely.
 - `mode`: no default.
 - `embed-font`: default `true`.
 - `version`: the nf-metro version to install.
@@ -73,14 +72,14 @@ The hook matches `*.mmd` and writes the sibling `.svg`.
 `assets/metro_map.mmd` becomes `assets/metro_map.svg`.
 A map that declares `%%metro output:` paths instead writes those (for example an `.svg` and a `.png`), so a single commit keeps every declared file in sync.
 Each of those paths can set its own `animate`/`mode`/`theme`/`scale`/`raster_width` after a `|`, so the hook needs no `args` to keep a light/dark/animated set current.
-It runs with `--theme default --embed-font` by default.
+It runs with `--embed-font` by default.
 Setting `args` replaces that whole list.
 Repeat the flags you want to keep alongside the new one:
 
 ```yaml title=".pre-commit-config.yaml"
 - id: nf-metro
-  # [!callout /--mode/] The one new flag. The rest repeat the defaults.
-  args: [--theme, default, --embed-font, --mode, light]
+  # [!callout /--mode/] The one new flag. The rest repeats the default.
+  args: [--embed-font, --mode, light]
 ```
 
-Drop `--theme default` if the map picks its own theme with a `%%metro style:` directive, which the flag would otherwise override.
+Add `--theme` only to replace the map's own `%%metro style:` for every run.

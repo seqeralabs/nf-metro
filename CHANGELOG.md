@@ -17,6 +17,9 @@ history.
 
 ### Breaking changes
 
+- `rich`, `rich-click` and `pyyaml` are core dependencies, for the colourful
+  help and errors and the YAML output of `render` and `info`. A recipe or
+  lockfile that lists nf-metro's dependencies by hand must add them.
 - `jsonschema` is a core dependency, and the `validate` extra is gone:
   `pip install nf-metro` brings everything `nf-metro validate-svg` and theme
   files need, and `pip install "nf-metro[validate]"` no longer names an extra.
@@ -32,10 +35,15 @@ history.
   `seqera-light`, `seqera-dark`) are gone, so `%%metro style:`, `--theme`
   and `theme=` take only `default`, `seqera`, `london-tube`, `transparent`
   and theme files. Pick the palette with `--mode` or `%%metro mode:`. A map
-  with no style has `MetroGraph.style == "default"`.
-- An unknown theme name raises `ThemeError` (an `NfMetroError` and
-  `ValueError`) instead of falling back to `default`, and `nf-metro info`
-  reports a map's style as written.
+  with no style has `MetroGraph.style == "default"`. A map that pinned a dark
+  palette with `%%metro style: dark` now writes `%%metro mode: dark`;
+  without it the map follows the viewer's light or dark preference.
+- An unknown theme name passed to `--theme`, a per-output `theme=` or the
+  Python API raises `ThemeError` (an `NfMetroError` and `ValueError`) instead
+  of falling back to `default`. In a `%%metro style:` directive it warns and
+  the map keeps `default`. Both messages name what replaces a retired name
+  (`nfcore`, `dark`, `nfcore-light`, ...). `nf-metro info` reports a map's
+  style as written.
 - Theme fields renamed: `background_color` to `background_fill`,
   `legend_background` to `legend_fill`, `animation_ball_color` to
   `animation_ball_fill`, `bridge_glyph` to `bridge_lines`, the file-icon
@@ -65,6 +73,33 @@ history.
 - `serve-multi` lays out and renders every posted map with its `--theme`
   stack, layout options included; a posted map's `%%metro style:` is ignored.
   `live.server.serve_multi` and `RunRegistry` take a `ResolvedTheme`.
+- A section whose ID starts with `_` is a hidden section: it keeps its grid
+  cell but draws no box, title or number badge. An existing map with such an
+  ID loses that section's box.
+- `nf-metro render` takes `--from nextflow|snakemake`, the spelling `convert`
+  already uses. `--from-nextflow` is gone, as are the `from_nextflow` argument
+  of `prepare_graph` and `render_string` (pass `input_format="nextflow"`) and the
+  `from_nextflow` key of a `render-many` job (use `"from": "nextflow"`).
+- `nf-metro render` prints the paths it wrote as YAML on stdout (version,
+  inputs, outputs) instead of a one-line summary; summaries and warnings go to
+  stderr. A script that parsed the old line must read the YAML.
+- `render_string` takes its render options only through `config=RenderConfig(...)`.
+  The flat `output_format`, `debug`, `responsive`, `embed_font`,
+  `text_to_paths`, `svg_class_prefix`, `inject_dark_mode_css`, `chrome_css`,
+  `self_color_scheme`, `bare`, `embed_basename` and `inactive_line_ids`
+  keyword arguments are gone.
+- The GitHub Action's `theme` input and the pre-commit hook no longer pass
+  `--theme default`. A map's own `%%metro style:` now applies in CI and in the
+  hook; set the `theme` input or hook `args` to replace it for every run.
+- `nf_metro.render` no longer re-exports the manifest API, and
+  `nf_metro.render.manifest` holds only `build_manifest`. Import `read_manifest`,
+  `match_node_ids`, `manifest_schema` and the rest from `nf_metro.manifest`.
+  `nf_metro.render.constants` no longer re-exports `CANVAS_ORIGIN_MARGIN`,
+  `ICON_INTER_GAP`, `RAIL_KNOB_RADIUS_RATIO` or `TERMINUS_WIDTH`; they live in
+  `nf_metro.layout.constants`.
+- `nf_metro.layout.engine` and `nf_metro.layout.routing.core` export only what
+  they define. Private helpers they used to re-export are imported from the
+  `layout.phases` and `layout.routing` modules that define them.
 
 ### Added
 
@@ -111,7 +146,7 @@ history.
   bold capsules at interchanges, bundled lines edge to edge and a 30% grey for
   inactive lines. `interchange_glyph: ring` over it gives the standard's
   interchange rings and bridged chains instead.
-- Experimental Snakemake input: `nf-metro render --from-snakemake` and
+- Experimental Snakemake input: `nf-metro render --from snakemake` and
   `nf-metro convert` turn `snakemake --rulegraph` or `--dag` output (DOT or
   mermaid-js) into a metro map. `nf-metro convert` detects the input format,
   or takes `--from nextflow|snakemake`. Lines follow the rule graph: a
@@ -128,8 +163,7 @@ history.
   remaining sections number from 1 as if it were absent (#2058).
 - Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
   but draws no box, title or number badge, mirroring hidden stations. Use it
-  to place stations independently without a visible section. Existing maps
-  with a `_`-prefixed section ID lose that section's box.
+  to place stations independently without a visible section.
 - `%%metro output:` paths take per-output render overrides after a `|`:
   `animate`, `mode=`, `theme=`, `scale=`, and `raster_width=`. One
   `nf-metro render` pass now writes a static SVG, an animated SVG, and a

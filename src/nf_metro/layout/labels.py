@@ -663,7 +663,7 @@ def _station_marker_boxes(
     Reuses the engine's pill geometry, which returns None for ports, hidden
     stations and junctions -- none of which render a marker to collide with.
     """
-    from nf_metro.layout.engine import _station_marker_bbox
+    from nf_metro.layout.phases._common import _station_marker_bbox
 
     return {
         sid: bbox
@@ -1863,7 +1863,7 @@ def _rail_panel_marker_extents(
     past that centre; clearing to the pill edge keeps the angled text off
     those markers.  Returns an empty map when the graph has no rail sections.
     """
-    from nf_metro.layout.engine import _station_marker_bbox
+    from nf_metro.layout.phases._common import _station_marker_bbox
 
     extents: dict[str, tuple[float, float]] = {}
     if not graph._rail_y:

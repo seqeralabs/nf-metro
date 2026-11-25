@@ -143,7 +143,7 @@ The manifest is serialized to JSON and injected as a `<metadata>` element inside
 
 The tool-neutral serialization and deserialization logic lives in `nf_metro.manifest`, a dependency-free package built to be lifted into its own distribution.
 `render/manifest.py` is the thin nf-metro-specific adapter.
-It imports from `nf_metro.manifest` and re-exports the public API, which keeps existing `nf_metro.render.manifest` import paths working.
+It imports from `nf_metro.manifest` and holds only `build_manifest`, which maps a laid-out graph onto the standard's vocabulary.
 
 `manifest_metadata_svg(manifest)` returns the raw SVG `<metadata>` XML string for cases where the caller assembles the SVG element manually.
 

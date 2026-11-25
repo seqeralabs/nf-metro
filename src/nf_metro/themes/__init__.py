@@ -54,13 +54,39 @@ def _builtin(name: str) -> ThemeLayer:
     return load_theme_file(_BUILTIN_DIR / _BUILTIN_FILES[name], validate=False)
 
 
+#: Names earlier releases accepted, and what replaces each.
+_RENAMED_STYLES = {
+    "nfcore": "use 'default'",
+    "nfcore-light": "use 'default' with '--mode light' or '%%metro mode: light'",
+    "nfcore-dark": "use 'default' with '--mode dark' or '%%metro mode: dark'",
+    "seqera-light": "use 'seqera' with '--mode light' or '%%metro mode: light'",
+    "seqera-dark": "use 'seqera' with '--mode dark' or '%%metro mode: dark'",
+    "dark": "it is a mode: use '--mode dark' or '%%metro mode: dark'",
+    "light": "use 'transparent' for the transparent theme, or '--mode light' "
+    "or '%%metro mode: light' for a light palette",
+}
+
+
+def renamed_style_hint(value: str) -> str:
+    """What replaces each retired name in the stack *value*, or ``""``."""
+    hints = [
+        f"{entry.strip()!r} is no longer a theme name: "
+        f"{_RENAMED_STYLES[entry.strip().lower()]}"
+        for entry in value.split(",")
+        if entry.strip().lower() in _RENAMED_STYLES
+    ]
+    return "; ".join(hints)
+
+
 def _builtin_name(entry: str) -> str:
     name = entry.strip().lower()
     if name not in _BUILTIN_FILES:
+        hint = renamed_style_hint(entry)
         raise ThemeError(
             f"unknown theme {entry!r}; expected one of "
             + ", ".join(sorted(STYLE_NAMES))
             + ", or a .yaml theme file"
+            + (f" ({hint})" if hint else "")
         )
     return name
 
@@ -192,6 +218,7 @@ __all__ = [
     "LIGHT",
     "MODES",
     "STYLE_NAMES",
+    "renamed_style_hint",
     "THEMES",
     "ResolvedTheme",
     "ThemeError",

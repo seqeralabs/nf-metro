@@ -387,7 +387,7 @@ def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx
     """Build indexes for bubble-station centering."""
     # Imported here to avoid a top-level cycle (engine does not depend on
     # routing, so this one-way import is safe).
-    from nf_metro.layout.engine import _divergence_target_ys
+    from nf_metro.layout.phases.fan_bundles import _divergence_target_ys
 
     all_sources: dict[str, set[str]] = defaultdict(set)
     all_targets: dict[str, set[str]] = defaultdict(set)

@@ -34,6 +34,7 @@ from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
     _center_inter_row_channel,
+    _compute_diagonal_placement,
 )
 from nf_metro.parser.model import (
     Edge,
@@ -219,8 +220,6 @@ def _diagonal_placement(
     convergence point (the fork source or the join target) so a rail eases off
     the fan early and runs flat the rest of the column.
     """
-    from nf_metro.layout.routing.core import _compute_diagonal_placement
-
     # The diagonal's horizontal span equals the vertical rail separation (a true
     # 45 degrees), clamped to DIAGONAL_RUN.  A station that both forks and joins
     # has no single convergence point to bias toward, so it centres.

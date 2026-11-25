@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
+from nf_metro.layout.constants import CANVAS_ORIGIN_MARGIN
 from nf_metro.parser.model import MetroGraph, PermissiveGuardWarning
-from nf_metro.render.constants import CANVAS_ORIGIN_MARGIN
 from nf_metro.render.svg import RenderPlan, build_render_plan
 from nf_metro.themes import resolve_theme
 

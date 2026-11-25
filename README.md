@@ -19,7 +19,7 @@ Generate metro-map-style SVG diagrams from Mermaid graph definitions with `%%met
 - **Interactive HTML** - pan, zoom, hover for station details, click a line in the legend to isolate it and zoom to its extent.
 - **Live progress overlay** - light up stations in real time as a Nextflow pipeline runs, using `nf-metro serve` with Nextflow's `-with-weblog`.
 - **Dashboard mode** - `nf-metro serve-multi` hosts many pipelines or runs side by side on one page.
-- **Nextflow DAG import** - convert a `-with-dag` Mermaid export into a metro map with `nf-metro convert` (or `--from-nextflow` on `render`).
+- **Nextflow DAG import** - convert a `-with-dag` Mermaid export into a metro map with `nf-metro convert` (or `--from nextflow` on `render`).
 - **Embedded data manifest** - every SVG carries a machine-readable JSON manifest so overlays and downstream tools can address stations without re-running the layout engine.
 
 ## Installation

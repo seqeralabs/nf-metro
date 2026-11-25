@@ -51,7 +51,7 @@ from nf_metro.layout.routing.reserved_bands import (
     build_reserved_corridors,
     seat_bundle_in_claimed_bands,
 )
-from nf_metro.render.manifest import read_manifest
+from nf_metro.manifest import read_manifest
 from nf_metro.render.plan import freeze_render_value
 from nf_metro.render.svg import (
     build_observed_render_plan,

@@ -8,7 +8,7 @@ from dataclasses import replace
 
 from theme_helpers import MMD, RNASEQ, ROOT, classed, station_glyphs, write
 
-from nf_metro.api import prepare_graph, render_string
+from nf_metro.api import RenderConfig, prepare_graph, render_string
 from nf_metro.render import render_svg
 from nf_metro.render.style import CHROME, colors_adapt
 from nf_metro.themes import DEFAULT_DARK_THEME, THEMES, resolve_stack
@@ -67,7 +67,7 @@ def test_ring_line_ends_follow_the_mode_under_pill_interchanges(tmp_path):
                 theme=str(theme),
                 mode=mode,
                 source_dir=str(RNASEQ.parent),
-                inactive_line_ids=_all_inactive(_MAP),
+                config=RenderConfig(inactive_line_ids=_all_inactive(_MAP)),
             )
         )
         assert (
@@ -105,14 +105,19 @@ def test_a_caption_colour_that_differs_by_mode_follows_it(tmp_path):
 
 def test_inactive_lines_take_the_theme_muted_grey():
     svg = render_string(
-        MMD, theme="london-tube", mode="light", inactive_line_ids=frozenset({"alt"})
+        MMD,
+        theme="london-tube",
+        mode="light",
+        config=RenderConfig(inactive_line_ids=frozenset({"alt"})),
     )
     assert 'stroke="#b3b3b3"' in svg
 
 
 def test_inactive_styling_follows_the_mode_in_the_default_svg():
     svg = render_string(
-        _MMD_TWO_STATIONS, theme="london-tube", inactive_line_ids=frozenset({"alt"})
+        _MMD_TWO_STATIONS,
+        theme="london-tube",
+        config=RenderConfig(inactive_line_ids=frozenset({"alt"})),
     )
     switch = "var(--nfm-map-muted-color, light-dark(#b3b3b3, #585a60))"
     assert f".nf-metro-muted-stroke {{ stroke: {switch}; }}" in svg
@@ -127,7 +132,11 @@ def test_inactive_styling_follows_the_mode_in_the_default_svg():
 
 
 def test_default_inactive_render_adds_no_switching_classes():
-    svg = render_string(MMD, theme="default", inactive_line_ids=frozenset({"alt"}))
+    svg = render_string(
+        MMD,
+        theme="default",
+        config=RenderConfig(inactive_line_ids=frozenset({"alt"})),
+    )
     assert "nf-metro-muted-stroke" not in svg
     assert "nf-metro-muted-fill" not in svg
 
@@ -137,9 +146,8 @@ def test_a_muted_bar_terminus_greys_in_a_baked_render():
         _MAP,
         theme="london-tube",
         mode="dark",
-        chrome_css=False,
         source_dir=str(RNASEQ.parent),
-        inactive_line_ids=_all_inactive(_MAP),
+        config=RenderConfig(chrome_css=False, inactive_line_ids=_all_inactive(_MAP)),
     )
     bar = station_glyphs(ET.fromstring(svg))["fastq_in"]
     assert "nf-metro-terminus-bar" in bar.get("class")

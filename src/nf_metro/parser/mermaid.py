@@ -115,7 +115,7 @@ def _check_unsupported_input(text: str) -> None:
         raise ValueError(
             "This looks like raw Snakemake --rulegraph or --dag output. Use "
             "'nf-metro convert' to convert it to nf-metro format first, or "
-            "pass '--from-snakemake' (experimental) to 'nf-metro render'.\n\n"
+            "pass '--from snakemake' (experimental) to 'nf-metro render'.\n\n"
             "See: https://seqeralabs.github.io/nf-metro/latest/snakemake/"
         )
 
@@ -128,7 +128,7 @@ def _check_unsupported_input(text: str) -> None:
             "This looks like raw Nextflow DAG output (flowchart syntax "
             "without %%metro directives). Use 'nf-metro convert' to "
             "convert it to nf-metro format first, or pass "
-            "'--from-nextflow' to 'nf-metro render'.\n\n"
+            "'--from nextflow' to 'nf-metro render'.\n\n"
             "See: https://seqeralabs.github.io/nf-metro/latest/nextflow/"
         )
 

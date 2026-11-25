@@ -82,7 +82,7 @@ def main() -> None:
         add("Test fixtures", stem, gallery.TEST_FIXTURES_DIR / f"{stem}.mmd")
 
     # Nextflow `-with-dag` inputs are intentionally excluded: they are raw
-    # mermaid, not metro maps, and only render via --from-nextflow conversion.
+    # mermaid, not metro maps, and only render via --from nextflow conversion.
 
     OUTPUT.write_text(json.dumps(groups, indent=2) + "\n")
     total = sum(len(g["entries"]) for g in groups)

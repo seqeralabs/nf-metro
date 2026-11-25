@@ -6,9 +6,9 @@ import warnings
 import pytest
 
 from nf_metro.layout import compute_layout
+from nf_metro.manifest import MANIFEST_ELEMENT_ID, read_manifest
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import render_svg
-from nf_metro.render.manifest import MANIFEST_ELEMENT_ID, read_manifest
 from nf_metro.themes import THEMES
 
 _METADATA_BLOCK = re.compile(

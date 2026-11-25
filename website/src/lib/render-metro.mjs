@@ -127,7 +127,6 @@ function findFiles(dir, recursive = true, suffix = ".mmd") {
 export const INPUT_FORMATS = {
   nextflow: {
     letter: "n",
-    flag: "--from-nextflow",
     ext: ".mmd",
     lang: "metro",
     lines: "sections",
@@ -135,7 +134,6 @@ export const INPUT_FORMATS = {
   },
   snakemake: {
     letter: "s",
-    flag: "--from-snakemake",
     ext: ".dot",
     lang: "dot",
     lines: "graph",
@@ -218,7 +216,7 @@ function prewarmMetroCache() {
     return;
   }
 
-  /** @type {Array<{input:string, output:string, debug:boolean, from_nextflow:boolean, from_snakemake:boolean, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
+  /** @type {Array<{input:string, output:string, debug:boolean, from?:string, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
   const jobs = [];
 
   function addJob(file, mode) {
@@ -232,8 +230,7 @@ function prewarmMetroCache() {
         input: file,
         output: cacheFile,
         debug: mode.includes("d"),
-        from_nextflow: mode.includes("n"),
-        from_snakemake: mode.includes("s"),
+        from: Object.entries(INPUT_FORMATS).find(([, f]) => mode.includes(f.letter))?.[0],
         no_self_color_scheme: true,
         no_chrome_css: mode.includes("c"),
         layout_options: layoutOptions,
@@ -358,7 +355,7 @@ export function renderMetroFile(
       "--no-manifest",
     ];
     if (debug) args.push("--debug");
-    if (converter && !converted) args.push(converter.flag);
+    if (converter && !converted) args.push("--from", inputFormat);
     if (!chromeCss) args.push("--no-chrome-css");
     if (animate) args.push("--animate");
     runNfMetro(args, file);
@@ -459,7 +456,7 @@ export function renderMetroBinary(file, opts) {
       "--no-manifest",
     ];
     if (debug) args.push("--debug");
-    if (converter) args.push(converter.flag);
+    if (converter) args.push("--from", inputFormat);
     if (animate) args.push("--animate");
     if (duration != null) args.push("--duration", String(duration));
     if (fps != null) args.push("--fps", String(fps));

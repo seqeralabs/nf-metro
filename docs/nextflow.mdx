@@ -26,7 +26,7 @@ The resulting file uses the Nextflow `flowchart TB` Mermaid syntax, which nf-met
 
 ## Direct rendering
 
-The quickest way to get a metro map is to convert and render in one step with the `--from-nextflow` flag.
+The quickest way to get a metro map is to convert and render in one step with the `--from nextflow` flag.
 The examples that follow show the unedited output.
 
 ### Flat pipeline (no subworkflows)
@@ -48,7 +48,7 @@ workflow {
 
 ```bash
 nextflow run flat_pipeline.nf -preview -with-dag dag.mmd
-nf-metro render dag.mmd -o pipeline.svg --from-nextflow
+nf-metro render dag.mmd -o pipeline.svg --from nextflow
 ```
 
 <Metro
@@ -133,7 +133,7 @@ workflow {
 
 ```bash
 nextflow run with_subworkflows.nf -preview -with-dag dag.mmd
-nf-metro render dag.mmd -o pipeline.svg --from-nextflow
+nf-metro render dag.mmd -o pipeline.svg --from nextflow
 ```
 
 <Metro
@@ -172,7 +172,7 @@ workflow {
 
 ```bash
 nextflow run variant_calling.nf -preview -with-dag dag.mmd
-nf-metro render dag.mmd -o pipeline.svg --from-nextflow
+nf-metro render dag.mmd -o pipeline.svg --from nextflow
 ```
 
 <Metro

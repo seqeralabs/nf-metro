@@ -54,9 +54,7 @@ from nf_metro.themes.stack import THEMEABLE_LAYOUT_OPTIONS
 class RenderConfig:
     """Render-side options that control SVG/HTML output format and appearance.
 
-    Pass as ``config=RenderConfig(...)`` to :func:`render_string` instead of
-    the individual keyword arguments.  When *config* is supplied to
-    ``render_string``, the matching flat keyword arguments are ignored.
+    Pass as ``config=RenderConfig(...)`` to :func:`render_string`.
     """
 
     output_format: Literal["svg", "html"] = "svg"
@@ -222,23 +220,6 @@ def _resolve_commitment_options(
     return opts
 
 
-def _resolve_input_format(
-    input_format: InputFormat | None, from_nextflow: bool
-) -> InputFormat | None:
-    """Fold the ``from_nextflow`` shorthand into an ``input_format`` name.
-
-    ``from_nextflow=True`` means ``input_format="nextflow"``; naming a
-    different format alongside it is a contradiction and raises.
-    """
-    if not from_nextflow:
-        return input_format
-    if input_format not in (None, "nextflow"):
-        raise ValueError(
-            f"from_nextflow=True contradicts input_format={input_format!r}"
-        )
-    return "nextflow"
-
-
 def _parse_source(
     text: str,
     *,
@@ -253,8 +234,7 @@ def _parse_source(
     Runs the grammar, directives, and pre-layout inference, applying the
     parse-time half of the option cascade (``fold_threshold``,
     ``auto_process``, ``process_scope``, ``line_order`` provenance,
-    ``line_spread``) and the *input_format* conversion (``--from-nextflow``,
-    ``--from-snakemake``), but never
+    ``line_spread``) and the *input_format* conversion (``--from``), but never
     :func:`~nf_metro.layout.compute_layout`.
 
     Hand the result to :func:`prepare_graph` to finish the job (there, as
@@ -383,7 +363,6 @@ def prepare_graph(
     text: str | MetroGraph,
     *,
     input_format: InputFormat | None = None,
-    from_nextflow: bool = False,
     title: str | None = None,
     line_spread: str | None = None,
     logo: str | None = None,
@@ -465,7 +444,7 @@ def prepare_graph(
     """
     graph = _prepare_graph_state(
         text,
-        input_format=_resolve_input_format(input_format, from_nextflow),
+        input_format=input_format,
         title=title,
         line_spread=line_spread,
         logo=logo,
@@ -499,26 +478,13 @@ def render_string(
     config: RenderConfig | None = None,
     theme: str | None = None,
     mode: str | None = None,
-    output_format: Literal["svg", "html"] = "svg",
     input_format: InputFormat | None = None,
-    from_nextflow: bool = False,
     title: str | None = None,
     line_spread: str | None = None,
     logo: str | None = None,
     legend: str | None = None,
     layout_options: Mapping[str, object] | None = None,
     source_dir: str = "",
-    debug: bool = False,
-    responsive: bool = False,
-    embed_font: bool = False,
-    text_to_paths: bool = False,
-    svg_class_prefix: str = "",
-    inject_dark_mode_css: bool = True,
-    chrome_css: bool = True,
-    self_color_scheme: bool = True,
-    bare: bool = False,
-    embed_basename: str = "metro_map.html",
-    inactive_line_ids: frozenset[str] | None = None,
 ) -> str:
     """Render *text* to an SVG (default) or interactive HTML string.
 
@@ -531,19 +497,13 @@ def render_string(
     its ``%%metro logo:`` paths resolve; a caller rendering file text must pass
     it or those paths only resolve when the process cwd happens to match.
 
-    *config* groups all render-side options into a :class:`RenderConfig` bundle.
-    When supplied, the individual render-side keyword arguments (``output_format``,
-    ``debug``, ``responsive``, ``embed_font``, ``text_to_paths``,
-    ``svg_class_prefix``, ``inject_dark_mode_css``, ``chrome_css``,
-    ``self_color_scheme``, ``bare``, ``embed_basename``, ``inactive_line_ids``)
-    are ignored in favour of *config*, and passing any of them with a non-default
-    value alongside *config* warns. Pass one or the other, not both.
-
-    *self_color_scheme* — when ``True`` (default) the root ``<svg>`` element
-    declares ``color-scheme: light dark`` so ``light-dark()`` custom properties
-    resolve against the viewer's OS preference. Set ``False`` when inlining the
-    SVG into a host page that owns the color-scheme (matches ``--no-self-color-scheme``
-    on the CLI).
+    *config* is a :class:`RenderConfig` carrying every render-side option
+    (output format, ``debug``, ``responsive``, ``embed_font``, and so on). Its
+    ``self_color_scheme`` (default ``True``) makes the root ``<svg>`` declare
+    ``color-scheme: light dark`` so ``light-dark()`` custom properties resolve
+    against the viewer's OS preference; set it ``False`` when inlining the SVG
+    into a host page that owns the color-scheme (the CLI's
+    ``--no-self-color-scheme``).
 
     Raises everything :func:`prepare_graph` documents, plus three render-only
     cases from the draw step (:func:`render_graph`):
@@ -577,39 +537,10 @@ def render_string(
       settlement's reasoning and its code have come apart, which leaves no
       geometry worth a best-effort draw.
     """
-    flat = RenderConfig(
-        output_format=output_format,
-        debug=debug,
-        responsive=responsive,
-        embed_font=embed_font,
-        text_to_paths=text_to_paths,
-        svg_class_prefix=svg_class_prefix,
-        inject_dark_mode_css=inject_dark_mode_css,
-        chrome_css=chrome_css,
-        self_color_scheme=self_color_scheme,
-        baked_mode=(mode or "").strip() or None,
-        bare=bare,
-        embed_basename=embed_basename,
-        inactive_line_ids=inactive_line_ids,
-    )
-    if config is not None:
-        defaults = RenderConfig()
-        shadowed = sorted(
-            name
-            for name, value in vars(flat).items()
-            if value != getattr(defaults, name)
-        )
-        if shadowed:
-            warnings.warn(
-                f"render_string: config= supersedes the flat render kwargs; "
-                f"ignoring {shadowed}",
-                stacklevel=2,
-            )
-    effective_cfg = config or flat
+    effective_cfg = config or RenderConfig(baked_mode=(mode or "").strip() or None)
     graph = prepare_graph(
         text,
         input_format=input_format,
-        from_nextflow=from_nextflow,
         title=title,
         line_spread=line_spread,
         logo=logo,
@@ -621,7 +552,7 @@ def render_string(
         metrics_face=effective_cfg.metrics_face,
         theme=theme,
     )
-    if config is None and flat.baked_mode is None:
-        flat.baked_mode = graph.mode.strip() or None
+    if config is None and effective_cfg.baked_mode is None:
+        effective_cfg.baked_mode = graph.mode.strip() or None
     theme_obj = resolve_theme(graph, mode=mode)
     return render_graph(graph, theme_obj, effective_cfg)

@@ -398,8 +398,8 @@ def test_cli_empty_override_forces_all_active():
     assert MUTED not in rects["z"]
 
 
-def test_render_string_flat_kwarg_overrides():
-    svg = _svg(TWO_LINE_MAP, inactive_line_ids=frozenset({"a"}))
+def test_render_string_config_overrides():
+    svg = _svg(TWO_LINE_MAP, config=RenderConfig(inactive_line_ids=frozenset({"a"})))
     assert _rects_by_station(svg)["x"] == {MUTED}
 
 

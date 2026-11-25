@@ -136,11 +136,9 @@ def _setup_imports(worktree: Path) -> dict:
     sys.path.insert(0, str(tests))
 
     # Late imports so the worktree's source tree is authoritative.
-    from nf_metro.layout.engine import (  # noqa: E402
-        _station_marker_bbox,
-        compute_layout,
-    )
+    from nf_metro.layout.engine import compute_layout  # noqa: E402
     from nf_metro.layout.labels import place_labels  # noqa: E402
+    from nf_metro.layout.phases._common import _station_marker_bbox  # noqa: E402
     from nf_metro.layout.routing import (  # noqa: E402
         compute_station_offsets,
         route_edges,

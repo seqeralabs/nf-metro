@@ -277,10 +277,10 @@ Emit the bytes directly:
 
 ## Read and match
 
-`nf_metro.render` re-exports the canonical reader and matcher, which are also available from `nf_metro.manifest`:
+The canonical reader and matcher live in `nf_metro.manifest`:
 
 ```python
-from nf_metro.render import read_manifest, match_node_ids
+from nf_metro.manifest import read_manifest, match_node_ids
 
 manifest = read_manifest(open("pipeline.svg").read())
 match_node_ids(manifest, "NFCORE_RNASEQ:RNASEQ:FASTQC")   # -> ["fastqc"]
