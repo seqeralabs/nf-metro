@@ -25,7 +25,7 @@ import pytest
 from nf_metro.layout.constants import COORD_TOLERANCE, CURVE_RADIUS
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = REPO_ROOT / "examples" / "topologies"
@@ -39,7 +39,7 @@ KNOWN_MERGED_DESCENT_EXEMPTIONS = {"dogleg_exempt_sameline.mmd"}
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text(), max_station_columns=15)
+    graph = parse_metro_mermaid_file(path, max_station_columns=15)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     return graph, route_edges_centred(graph, station_offsets=offsets)

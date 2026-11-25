@@ -34,7 +34,7 @@ from nf_metro.layout.routing.common import (
     is_orthogonal_turn,
 )
 from nf_metro.layout.routing.corners import outer_lane_radius, resolve_curve_radii
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = ROOT / "examples" / "topologies"
@@ -46,7 +46,7 @@ _RADIUS_TOL = 0.5
 
 
 def _route(path: Path) -> tuple:
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     return graph, route_edges_centred(graph, station_offsets=offsets)
@@ -97,9 +97,7 @@ def test_column_gap_edges_reports_no_gap_where_lower_column_is_absent() -> None:
     the canvas origin would span two real columns of the map, and any channel
     inside that span would match it.
     """
-    graph = parse_metro_mermaid(
-        (TOPOLOGIES / "merge_offrow_continuation.mmd").read_text()
-    )
+    graph = parse_metro_mermaid_file(TOPOLOGIES / "merge_offrow_continuation.mmd")
     compute_layout(graph)
     left, right = column_gap_edges(graph, 1, 2, row=0)
     assert right <= left, f"fabricated gap [{left:.0f}..{right:.0f}] in an empty cell"

@@ -9,8 +9,15 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
-from nf_metro.layout.constants import graph_offset_step
+from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP, graph_offset_step
+from nf_metro.layout.routing.common import (
+    OffsetRegime,
+    RoutedPath,
+    planner_owns_segment_or_boundary,
+)
 from nf_metro.layout.routing.corners import resolve_curve_radii, turn_shift
+from nf_metro.layout.routing.normalize import _size_concentric_cohorts
+from nf_metro.parser.model import Edge
 from nf_metro.render.svg import _drawn_pieces, _piece_at, build_render_plan
 from nf_metro.themes import resolve_theme
 
@@ -272,7 +279,7 @@ def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
 ):
     """A hub spreads every lane it fans one way as one group, so each of its
     bundles needs room for the whole group's stagger, not only its own.  The
-    parity check that Stage 1.2's ``_spread_groups`` matches the spread pass."""
+    parity check that Stage 1.2's ``spread_groups`` matches the spread pass."""
     text = _HUB_FAN.read_text()
     assert "direction: LR" in text
     theme = _theme_file(
@@ -287,6 +294,169 @@ def test_hub_fanning_bundles_of_mixed_drop_stay_concentric(
         theme,
     )
     _assert_concentric(*rendered, _HUB_FAN_BUNDLES)
+
+
+@pytest.mark.parametrize(
+    ("name", "line_width", "ratio", "edges"),
+    [
+        pytest.param(
+            "rnaseq_metro.mmd",
+            lw,
+            ratio,
+            (("fastp", "fastqc_trimmed"), ("trimgalore", "fastqc_trimmed")),
+            id=f"rnaseq_metro-lw{lw}-r{ratio}",
+        )
+        for lw, ratio in ((6, 4.5), (9, 3.0), (9, 4.5))
+    ]
+    + [
+        pytest.param(
+            "genomic_pipeline.mmd",
+            9,
+            4.5,
+            (("applybqsr", "mosdepth"), ("applybqsr", "ngscheckmate")),
+            id="genomic_pipeline-applybqsr",
+        ),
+        pytest.param(
+            "genomeassembly_staggered.mmd",
+            9,
+            4.5,
+            (("scaffolding_bwamem2", "yahs"), ("scaffolding_minimap2", "yahs")),
+            id="genomeassembly_staggered-yahs",
+        ),
+    ],
+)
+def test_gallery_fans_keep_their_stagger_room(tmp_path, name, line_width, ratio, edges):
+    """Stations settled after Stage 1.2 (loop-side recentring, bubble centring)
+    and the Stage 6.4 grid snap leave each fan the room its stagger needs, and
+    a diagonal too short for both of its corners at the base radius stays
+    concentric at each end."""
+    path = _ROOT / "examples" / name
+    theme = _theme_file(
+        tmp_path,
+        f"name: wide\nline_width: {line_width}\n"
+        f"layout:\n  curve_radius_ratio: {ratio}\n",
+    )
+    rendered = _render("%%metro track_gap: 0\n" + path.read_text(), path.parent, theme)
+    _assert_concentric(*rendered, edges)
+
+
+def _unit(a, b):
+    length = math.dist(a, b)
+    return ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+
+
+def _fused_diagonal_turns(plan):
+    """Same-line diagonal corners sharing a vertex and one leg.
+
+    Keyed by line, vertex and shared leg; each value lists, per route, how far
+    along that leg its curve meets it.
+    """
+    turns = defaultdict(list)
+    for route, points, radii in zip(
+        plan.routes, plan.route_polylines, plan.route_curve_radii
+    ):
+        points = list(points)
+        arms = resolve_curve_radii(points, None if radii is None else list(radii))
+        for k in range(1, len(points) - 1):
+            u_in, u_out = (
+                _unit(points[k - 1], points[k]),
+                _unit(points[k], points[k + 1]),
+            )
+            dot = u_in[0] * u_out[0] + u_in[1] * u_out[1]
+            if abs(u_in[0] * u_out[1] - u_in[1] * u_out[0]) < 1e-6 or abs(dot) < 1e-6:
+                continue
+            vertex = (round(points[k][0]), round(points[k][1]))
+            corner = points[k]
+            for side, leg, sign in (("in", u_in, -1.0), ("out", u_out, 1.0)):
+                along = corner[0] * leg[0] + corner[1] * leg[1] + sign * arms[k - 1]
+                key = (
+                    route.line_id,
+                    vertex,
+                    side,
+                    (round(leg[0], 3), round(leg[1], 3)),
+                )
+                turns[key].append(((route.edge.source, route.edge.target), along))
+    return {key: legs for key, legs in turns.items() if len(legs) > 1}
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["genomic_pipeline.mmd", "rnaseq_sections.mmd", "epitopeprediction.mmd"],
+)
+def test_fused_same_line_corners_meet_their_shared_leg_once(name):
+    """One line turning onto (or off) a shared leg at one vertex from several
+    edges draws one corner: every curve meets that leg at the same point, even
+    where some of the edges bundle with other lines and some run alone."""
+    path = _ROOT / "examples" / name
+    _graph, _theme, plan = _render(path.read_text(), path.parent)
+    spreads = {
+        key: round(max(a for _e, a in legs) - min(a for _e, a in legs), 2)
+        for key, legs in _fused_diagonal_turns(plan).items()
+    }
+    assert {key: s for key, s in spreads.items() if s > 0.1} == {}
+
+
+def test_genomic_hub_join_fuses_lone_and_bundled_legs():
+    """The vcfs join takes ten tumor_only legs, two of them running alone."""
+    path = _ROOT / "examples" / "genomic_pipeline.mmd"
+    _graph, _theme, plan = _render(path.read_text(), path.parent)
+    red = [
+        legs
+        for (line, _v, side, _leg), legs in _fused_diagonal_turns(plan).items()
+        if line == "tumor_only" and side == "out" and len(legs) == 10
+    ]
+    assert len(red) == 1
+    assert {edge for edge, _a in red[0]} >= {
+        ("lofreq", "vcfs"),
+        ("msisensor2", "vcfs"),
+        ("freebayes", "vcfs"),
+    }
+
+
+_DOGLEG_DIAGONAL = 15.0
+
+
+def _dogleg_lane(line_id: str, offset: float) -> RoutedPath:
+    """A lane jogging down a short 45-degree diagonal, *offset* outward of
+    its first turn, with both corners at the base radius and a route plan
+    owning its last segment, and so the corner that segment leaves."""
+    half = math.sqrt(0.5)
+    slide = math.tan(math.radians(22.5)) * offset
+    drop = _DOGLEG_DIAGONAL * half
+    points = [
+        (0.0, -offset),
+        (100.0 + slide, -offset),
+        (100.0 + drop + slide, drop - offset),
+        (200.0, drop - offset),
+    ]
+    return RoutedPath(
+        edge=Edge(source=f"{line_id}_src", target=f"{line_id}_tgt", line_id=line_id),
+        line_id=line_id,
+        points=points,
+        is_inter_section=True,
+        offset_regime=OffsetRegime.BAKED,
+        curve_radii=[CURVE_RADIUS, CURVE_RADIUS],
+        route_system_owned_segment_ranks=(3,),
+    )
+
+
+def test_planned_far_corner_keeps_its_radius_when_a_short_leg_is_split():
+    """A diagonal too short for both its corners takes its planned far corner
+    as fixed, giving the near corner only what that leaves of the leg."""
+    routes = [_dogleg_lane("a", 0.0), _dogleg_lane("b", OFFSET_STEP)]
+    assert 2 * CURVE_RADIUS > _DOGLEG_DIAGONAL
+    assert all(
+        planner_owns_segment_or_boundary(route, 2)
+        and not planner_owns_segment_or_boundary(route, 1)
+        for route in routes
+    )
+
+    _size_concentric_cohorts(routes, CURVE_RADIUS, {}, OFFSET_STEP)
+
+    radii = [route.curve_radii for route in routes]
+    assert [r[1] for r in radii] == [CURVE_RADIUS, CURVE_RADIUS]
+    assert all(r[0] + r[1] <= _DOGLEG_DIAGONAL + 1e-6 for r in radii), radii
+    assert radii[0][0] < radii[1][0], radii
 
 
 # One cubic per corner holds a circle to 1e-3 of its radius up to a right

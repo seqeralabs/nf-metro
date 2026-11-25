@@ -34,7 +34,7 @@ from nf_metro.layout.routing.invariants import (
     check_shared_run_turn_preserves_bundle_order,
     check_tb_exit_corner_preserves_column_order,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -68,7 +68,7 @@ def test_no_bundle_order_violations_in_gallery(path: Path) -> None:
     routing handler that creates a flipped concentric bundle would
     cause exactly one fixture to start failing here.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -103,7 +103,7 @@ def test_cross_column_perp_entry_preserves_bundle_order(stem: str) -> None:
     and renders a crossover at the drop.
     """
     path = EXAMPLES / "topologies" / f"{stem}.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -184,7 +184,7 @@ def test_no_tb_exit_corner_column_flips_in_gallery(path: Path) -> None:
     regression to the exit-corner drop X, the exit-port Y order, or the
     downstream reversal flag would surface as exactly one fixture failing here.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -211,7 +211,7 @@ def test_tb_exit_corner_continues_column_and_keeps_bundle_order(path: Path) -> N
     reversal corner into a downstream section, the case where the exit-corner
     drop X, the exit-port Y order, and the downstream reversal flag must agree.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -244,7 +244,7 @@ def test_no_shared_run_turn_flips_in_gallery(path: Path) -> None:
     gap-bundle seating, to a coincidence fusion's reference column, or to a
     port's lane order would surface as exactly one fixture failing here.
     """
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -272,7 +272,7 @@ def test_exit_run_drop_columns_nest_across_three_handlers() -> None:
     on that owned column is what keeps ``main`` clear of it.
     """
     path = EXAMPLES / "topologies" / "exit_run_three_drop_columns.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -323,7 +323,7 @@ def test_riboseq_u_turn_corridor_is_accepted() -> None:
         / "curve_invariant_repros"
         / "riboseq_inter_row_corridor.mmd"
     )
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -485,7 +485,7 @@ def test_disjoint_runs_sharing_a_name_are_free_to_differ_at_the_two_ends() -> No
     of that separate frame invariant.
     """
     path = EXAMPLES / "topologies" / "target_lane_transition.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph, validate=True)
     offsets = dict(compute_station_offsets(graph))
     entry_id = "source__entry_left_2"
@@ -518,9 +518,9 @@ def test_exit_lane_rise_keeps_the_entry_bundle_order() -> None:
     must carry the re-slot through rather than crossing the pair on the rise.
     """
     path = EXAMPLES / "topologies" / "exit_lane_rise_bundle_order.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
 
     assert check_exit_inherits_entry_bundle_order(graph, offsets) == []
-    compute_layout(parse_metro_mermaid(path.read_text()), validate=True)
+    compute_layout(parse_metro_mermaid_file(path), validate=True)

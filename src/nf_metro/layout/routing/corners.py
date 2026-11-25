@@ -606,6 +606,12 @@ def widest_coincident_radius(radii: Iterable[float]) -> float:
     return max(radii)
 
 
+def shared_leg_radius(radius: float, leg: float, taken: float) -> float:
+    """*radius* cut to what a *leg* of that length leaves once the corner at its
+    other end takes *taken* of it, and never below zero."""
+    return min(radius, max(0.0, leg - taken))
+
+
 def reference_anchored_radius(
     signed_offset: float,
     base_radius: float,

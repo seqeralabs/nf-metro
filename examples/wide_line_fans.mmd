@@ -1,0 +1,38 @@
+%%metro title: Wide-line fans
+%%metro style: wide_line_fans.yaml
+%%metro line: star_salmon | STAR + Salmon | #2db572
+%%metro line: star_rsem | STAR + RSEM | #0570b0
+%%metro line: hisat2 | HISAT2 | #f5c542
+%%metro line: bowtie2 | Bowtie2 + Salmon | #ff8c00
+%%metro line: salmon | Salmon | #e63946
+%%metro line: kallisto | Kallisto | #7b2d3b
+
+graph LR
+    subgraph trimming [Trimming]
+        reads[Reads]
+        extract[UMI extract]
+        fastp[fastp]
+        trimgalore[Trim Galore!]
+        fastqc[FastQC]
+        reads -->|star_salmon,star_rsem,hisat2,bowtie2,salmon,kallisto| extract
+        extract -->|star_salmon,star_rsem,hisat2,bowtie2,salmon,kallisto| fastp
+        extract -->|star_salmon,star_rsem,hisat2,bowtie2,salmon,kallisto| trimgalore
+        fastp -->|star_salmon,star_rsem,hisat2,bowtie2,salmon,kallisto| fastqc
+        trimgalore -->|star_salmon,star_rsem,hisat2,bowtie2,salmon,kallisto| fastqc
+    end
+
+    subgraph alignment [Alignment]
+        prepare[Prepare]
+        star[STAR]
+        hisat2_align[HISAT2 / Bowtie2]
+        pseudo[Pseudo-align]
+        quant[Quantify]
+        prepare -->|star_salmon,star_rsem| star
+        prepare -->|hisat2,bowtie2| hisat2_align
+        prepare -->|salmon,kallisto| pseudo
+        star -->|star_salmon,star_rsem| quant
+        hisat2_align -->|hisat2,bowtie2| quant
+        pseudo -->|salmon,kallisto| quant
+    end
+
+    fastqc -->|star_salmon,star_rsem,hisat2,bowtie2,salmon,kallisto| prepare

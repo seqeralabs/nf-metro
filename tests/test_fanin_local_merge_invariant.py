@@ -24,7 +24,7 @@ import pytest
 
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.phases.guards import _converge_sibling_merge_violations
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -42,7 +42,7 @@ def _gather_fixtures() -> list[Path]:
 
 
 def _layout(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph, validate=False)
     return graph
 

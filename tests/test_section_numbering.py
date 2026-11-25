@@ -13,7 +13,7 @@ import pytest
 
 from nf_metro.api import render_string
 from nf_metro.layout.engine import compute_layout
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 from nf_metro.parser.model import MetroGraph
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -81,8 +81,7 @@ class TestSectionNumberingOrder:
     def test_all_examples_sequential_with_only_cross_row_route_returns(self):
         """Backward edges should only rejoin a completed route from another row."""
         for mmd_path in sorted(EXAMPLES_DIR.rglob("*.mmd")):
-            text = mmd_path.read_text()
-            g = parse_metro_mermaid(text)
+            g = parse_metro_mermaid_file(mmd_path)
             if not g.sections:
                 continue
             compute_layout(g)

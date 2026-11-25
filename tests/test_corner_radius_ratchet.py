@@ -56,6 +56,7 @@ APPROVED_RADIUS_HELPERS = frozenset(
         "reference_anchored_radius",
         "resolve_curve_radii",
         "resolve_curve_radius_at",
+        "shared_leg_radius",
         "widest_coincident_radius",
     }
 )

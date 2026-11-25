@@ -31,7 +31,7 @@ from nf_metro.layout.routing.invariants import (
     check_fanout_tail_join,
     fanout_junctions,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = REPO_ROOT / "tests" / "fixtures" / "topologies"
@@ -46,7 +46,7 @@ def _gather_fixtures() -> list[Path]:
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     routes = route_edges(graph, station_offsets=compute_station_offsets(graph))
     return graph, routes
@@ -110,7 +110,7 @@ def test_merge_junctions_excluded_from_fanout() -> None:
     # collector-fan-in-style fixtures carry merge junctions; assert any junction
     # with multiple distinct upstream sources is excluded.
     for path in _gather_fixtures():
-        graph = parse_metro_mermaid(path.read_text())
+        graph = parse_metro_mermaid_file(path)
         compute_layout(graph)
         fanouts = fanout_junctions(graph)
         for jid in graph.junction_ids:

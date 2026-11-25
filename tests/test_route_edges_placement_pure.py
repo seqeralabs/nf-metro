@@ -24,7 +24,7 @@ from conftest import content_corpus
 from nf_metro.convert import convert_nextflow_dag
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 
 CORPUS = content_corpus()
 
@@ -36,6 +36,7 @@ def test_route_edges_does_not_move_stations(fixture):
     if is_nextflow:
         text = convert_nextflow_dag(text)
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(path.parent)
     compute_layout(graph, validate=False)
 
     before = {sid: (s.x, s.y) for sid, s in graph.stations.items()}
@@ -67,7 +68,7 @@ def test_route_edges_splits_variant_calling_column_only_in_routes():
     an in-place mutation.
     """
     path = Path(__file__).resolve().parent.parent / "examples" / "variant_calling.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph, validate=False)
 
     shared_x = graph.stations["gatk"].x

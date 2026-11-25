@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import math
-from collections import Counter, defaultdict
-from collections.abc import Callable
-from operator import itemgetter
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
@@ -26,12 +23,10 @@ from nf_metro.layout.constants import (
     TERMINUS_ICON_ROOM,
     TERMINUS_ICON_ROOM_V,
     TERMINUS_WIDTH,
-    graph_offset_step,
 )
 from nf_metro.layout.geometry import (
     Axis,
     AxisFrame,
-    diagonal_stagger,
     lanes_run_along_x,
     lanes_run_along_y,
     section_lane_sign,
@@ -58,7 +53,6 @@ from nf_metro.layout.pass_metrics import (
     label_height_approx,
     metrics_context,
     min_station_flat_length,
-    min_straight_edge,
     station_radius_approx,
 )
 from nf_metro.layout.phases._common import (
@@ -67,6 +61,7 @@ from nf_metro.layout.phases._common import (
     perp_entry_lands_left,
     section_exit_lines,
 )
+from nf_metro.layout.phases.fan_stagger import Pair, fan_stagger_needs
 from nf_metro.layout.phases.off_track import (
     _align_phantom_pass_throughs,
     _compute_fork_join_gaps,
@@ -236,58 +231,6 @@ def _align_terminus_to_upstream(graph: MetroGraph) -> None:
             st.y = src.y
 
 
-_Pair = tuple[str, str]
-
-
-def _spread_groups(
-    line_ids: dict[_Pair, set[str]],
-    drop: Callable[[_Pair], float],
-    by_hub: bool,
-) -> list[list[_Pair]]:
-    """Diagonal bundles grouped as ``_spread_diagonal_bundles`` spreads them.
-
-    Must match that pass's grouping.  With *by_hub*, a station with two or more
-    targets takes every diagonal lane leaving it once it has two, then a station
-    with two or more sources takes every remaining diagonal lane entering it
-    once it has two, each hub one cross-axis heading at a time.  Every other
-    bundle spreads alone.
-    """
-    diagonals = [pair for pair in line_ids if abs(drop(pair)) > COORD_TOLERANCE_FINE]
-    if not by_hub:
-        return [[pair] for pair in diagonals]
-
-    targets: defaultdict[str, set[str]] = defaultdict(set)
-    sources: defaultdict[str, set[str]] = defaultdict(set)
-    for source, target in line_ids:
-        targets[source].add(target)
-        sources[target].add(source)
-
-    def claimed(
-        pairs: list[_Pair], hub: Callable[[_Pair], str], spokes: dict[str, set[str]]
-    ) -> dict[_Pair, str]:
-        count: Counter[str] = Counter()
-        for pair in pairs:
-            if len(spokes[hub(pair)]) > 1:
-                count[hub(pair)] += len(line_ids[pair])
-        return {pair: hub(pair) for pair in pairs if count[hub(pair)] >= 2}
-
-    fork_end, join_end = itemgetter(0), itemgetter(1)
-    forks = claimed(diagonals, fork_end, targets)
-    joins = claimed(
-        [pair for pair in diagonals if pair not in forks], join_end, sources
-    )
-    groups: defaultdict[_Pair | tuple[str, str, bool], list[_Pair]] = defaultdict(list)
-    for pair in diagonals:
-        heading = drop(pair) > 0
-        if pair in forks:
-            groups[("fork", forks[pair], heading)].append(pair)
-        elif pair in joins:
-            groups[("join", joins[pair], heading)].append(pair)
-        else:
-            groups[pair].append(pair)
-    return list(groups.values())
-
-
 def reserve_fan_stagger_runway(
     graph: MetroGraph,
     sub: MetroGraph,
@@ -295,61 +238,26 @@ def reserve_fan_stagger_runway(
     *,
     y_grid: float | None = None,
 ) -> None:
-    """Lengthen *sub*'s fanned diagonals to fit their spread groups' stagger.
+    """Lengthen *sub*'s fanned diagonals to their ``fan_stagger_needs``.
 
-    The diagonal spread pass slides each group by one shift, so every edge of a
-    group needs the group's whole stagger: ``diagonal_stagger`` over its
-    distinct lines at its steepest drop.  Groups follow :func:`_spread_groups`,
-    by hub when lanes run along Y and per bundle otherwise.  Lanes come from
-    *graph*'s edges because a section subgraph also carries hidden layout-only
-    edges that are never routed.  Stage 6.4 snaps every station Y onto the
-    *y_grid* lattice, so an opening along a vertical flow is whole lattice steps.
+    *y_grid* is the lattice Stage 6.4 snaps *sub*'s station Ys to.  Along a
+    vertical flow that snap moves stations along the flow, so an opening there
+    is whole lattice steps.
     """
     stations = sub.stations
     direction = (section.direction if section else None) or "LR"
-    flow, cross = AxisFrame.axes_for_direction(direction)
+    flow = AxisFrame.axes_for_direction(direction)[0]
     quantum = 0.0
     if lanes_run_along_x(direction):
         assert y_grid is not None, "a vertical flow needs the Stage 6.4 Y grid"
         quantum = y_grid
-    line_ids: defaultdict[_Pair, set[str]] = defaultdict(set)
-    for edge in graph.edges:
-        if edge.source in stations and edge.target in stations:
-            line_ids[(edge.source, edge.target)].add(edge.line_id)
-
-    def line_count(group: list[_Pair]) -> int:
-        return len(set().union(*(line_ids[pair] for pair in group)))
-
-    def drop(pair: _Pair) -> float:
-        source, target = (getattr(stations[sid], cross) for sid in pair)
-        return target - source
-
-    groups = [
-        group
-        for group in _spread_groups(line_ids, drop, lanes_run_along_y(direction))
-        if line_count(group) > 1
-    ]
-    if not groups:
+    need = fan_stagger_needs(graph, stations, direction, y_grid=y_grid)
+    if not need:
         return
-
-    pitch = graph_offset_step(graph)
-    run = active_metrics().diagonal_run
-    straight = min_straight_edge()
-    bypass_flat = min_station_flat_length()
-
-    def stub(station_id: str) -> float:
-        return bypass_flat if is_bypass_v(station_id) else straight
-
-    need: dict[_Pair, float] = {}
-    for group in groups:
-        steepest = max(abs(drop(pair)) for pair in group)
-        stagger = diagonal_stagger(line_count(group), pitch, run, steepest)
-        for pair in group:
-            need[pair] = stub(pair[0]) + stub(pair[1]) + run + stagger
 
     sign = AxisFrame.flow_sign(direction)
 
-    def downstream(pair: _Pair) -> float:
+    def downstream(pair: Pair) -> float:
         return max(sign * getattr(stations[sid], flow) for sid in pair)
 
     for pair in sorted(need, key=downstream):

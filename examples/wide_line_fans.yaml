@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../src/nf_metro/themes/theme.schema.json
+# Wide lines bundled edge to edge, each corner bending at twice the 9px line
+# width.
+name: wide-line-fans
+line_width: 9
+
+layout:
+  curve_radius_ratio: 2.0
+  track_gap: 0

@@ -15,6 +15,7 @@ from nf_metro.layout.constants import (
     STATION_MOVE_TOLERANCE,
 )
 from nf_metro.layout.geometry import (
+    AxisFrame,
     Point,
     half_turn_tan,
     lanes_run_along_x,
@@ -26,6 +27,10 @@ from nf_metro.layout.pass_metrics import (
     active_metrics,
     min_station_flat_length,
     min_straight_edge,
+)
+from nf_metro.layout.phases.fan_stagger import (
+    graph_fan_stagger_needs,
+    seat_within_fan_room,
 )
 from nf_metro.layout.routing.common import (
     OffsetRegime,
@@ -370,6 +375,44 @@ def _apply_diagonal_spread(
         _shift_diagonal(rp, delta, ai)
 
 
+@dataclass(frozen=True)
+class _FanRoom:
+    """Each station's fanned diagonals as ``(neighbour, need)`` on either side."""
+
+    upstream: dict[str, list[tuple[str, float]]]
+    downstream: dict[str, list[tuple[str, float]]]
+
+    @classmethod
+    def of(cls, graph: MetroGraph) -> _FanRoom:
+        upstream: dict[str, list[tuple[str, float]]] = defaultdict(list)
+        downstream: dict[str, list[tuple[str, float]]] = defaultdict(list)
+        for (source, target), need in graph_fan_stagger_needs(graph).items():
+            downstream[source].append((target, need))
+            upstream[target].append((source, need))
+        return cls(dict(upstream), dict(downstream))
+
+    def seat(
+        self, graph: MetroGraph, sid: str, x: float, moves: dict[str, float]
+    ) -> float | None:
+        """The X nearest *x* that leaves each of *sid*'s fanned diagonals its need.
+
+        Each neighbour is measured at its settled X, its entry in *moves* or
+        else its placed X, so a move seated here never undoes the room an
+        earlier move left.  ``None`` when no X leaves them all their need.
+        """
+
+        def room(side: dict[str, list[tuple[str, float]]]) -> list[tuple[float, float]]:
+            return [
+                (moves.get(other, graph.stations[other].x), need)
+                for other, need in side.get(sid, ())
+            ]
+
+        station = graph.stations[sid]
+        sec = graph.sections.get(station.section_id) if station.section_id else None
+        sign = AxisFrame.flow_sign(sec.direction if sec is not None else "LR")
+        return seat_within_fan_room(x, sign, room(self.upstream), room(self.downstream))
+
+
 @dataclass
 class _BubbleCtx:
     """Pre-computed indexes for bubble-centering logic."""
@@ -393,6 +436,7 @@ class _BubbleCtx:
     # above and one below the station's own Y.
     divergence_anchors: set[str]
     planned_geometry_stations: set[str]
+    fan_room: _FanRoom
 
 
 def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx:
@@ -439,6 +483,7 @@ def _build_bubble_ctx(routes: list[RoutedPath], graph: MetroGraph) -> _BubbleCtx
         diag_out_targets=diag_out_targets,
         original_x=original_x,
         divergence_anchors=_divergence_target_ys(graph),
+        fan_room=_FanRoom.of(graph),
         planned_geometry_stations={
             station_id
             for route in routes
@@ -761,7 +806,11 @@ def _centering_candidate(
         return None
 
     if shared_source or shared_target or has_flat_side or multi_diag:
-        new_x = (in_diag_end_x + out_diag_start_x) / 2
+        new_x = ctx.fan_room.seat(
+            graph, sid, (in_diag_end_x + out_diag_start_x) / 2, {}
+        )
+        if new_x is None:
+            return None
         return (new_x, in_routes, flat_in, out_routes, flat_out)
 
     # Simple case: shift both diagonals to equalise the flats.
@@ -820,12 +869,18 @@ def _apply_station_moves(
     candidates: dict[str, _StationMoveCandidate],
     original_x: dict[str, float],
     moves: dict[str, float],
+    fan_room: _FanRoom,
 ) -> None:
     """Second pass: record station-move requests with companion consensus.
 
     Only moves a station when all column companions (visible stations at
     the same original X in the same section) are also candidates.  This
     preserves column alignment when only some stations want to centre.
+
+    Each candidate's target was seated against its neighbours' placed Xs, so
+    it is re-seated against the moves already recorded: two ends of one fanned
+    diagonal can both be candidates, and each alone may leave the room that
+    both together would take.
 
     The X-target is recorded in ``moves`` (a request the render path applies);
     the routes bounding the station are adjusted here, since those are routing
@@ -839,6 +894,10 @@ def _apply_station_moves(
         flat_out,
     ) in candidates.items():
         station = graph.stations[sid]
+        seated = fan_room.seat(graph, sid, new_x, moves)
+        if seated is None:
+            continue
+        new_x = seated
         # Hidden bypass V helpers have no marker, so column alignment
         # with visible companions isn't a visible concern - centre them
         # without requiring companion consensus.
@@ -878,12 +937,15 @@ def _align_uncentered_siblings(
     graph: MetroGraph,
     original_x: dict[str, float],
     moves: dict[str, float],
+    fan_room: _FanRoom,
 ) -> None:
     """Post-pass: drag unmoved stations to match their centered siblings.
 
     Groups stations by (section, original_x).  Only operates when moved
     stations disagree (spread > 1px): finds the majority X position and
-    realigns outliers and unmoved stations to match.
+    realigns outliers and unmoved stations to match, each only as near it as
+    leaves its fanned diagonals their room.  X is the flow axis only in a
+    horizontal flow, so vertical-flow sections are left alone.
 
     Reads each station's settled X from ``moves`` (the requests
     :func:`_apply_station_moves` recorded), falling back to ``original_x``;
@@ -897,6 +959,9 @@ def _align_uncentered_siblings(
     col_groups: dict[tuple[str | None, float], list[str]] = defaultdict(list)
     for sid, s in graph.stations.items():
         if s.is_port or s.is_hidden:
+            continue
+        sec = graph.sections.get(s.section_id) if s.section_id else None
+        if sec is not None and lanes_run_along_x(sec.direction or "LR"):
             continue
         ox = original_x.get(sid)
         if ox is None:
@@ -945,14 +1010,17 @@ def _align_uncentered_siblings(
         target_x = majority_x
 
         for sid in unmoved:
+            new_x = fan_room.seat(graph, sid, target_x, moves)
+            if new_x is None:
+                continue
             old_x = settled_x(sid)
-            moves[sid] = target_x
+            moves[sid] = new_x
             for rp in routes_by_src.get(sid, []):
                 if abs(rp.points[0][0] - old_x) < STATION_MOVE_TOLERANCE:
-                    rp.points[0] = (target_x, rp.points[0][1])
+                    rp.points[0] = (new_x, rp.points[0][1])
             for rp in routes_by_tgt.get(sid, []):
                 if abs(rp.points[-1][0] - old_x) < STATION_MOVE_TOLERANCE:
-                    rp.points[-1] = (target_x, rp.points[-1][1])
+                    rp.points[-1] = (new_x, rp.points[-1][1])
 
 
 def _center_bubble_stations(
@@ -976,6 +1044,10 @@ def _center_bubble_stations(
     3. **Sibling alignment** - drags remaining unmoved stations to match
        the majority of their centered column group.
 
+    Every station move, in one pass and one fixed order, is seated against
+    the settled positions of the moves before it, so each fanned diagonal
+    keeps the flow length ``fan_stagger_needs`` gives it.
+
     Route points are adjusted in place (routing output); the per-station
     X-targets are returned as ``{station_id: x}`` move requests for the
     render path to apply, so ``route_edges`` leaves ``graph.stations`` intact.
@@ -983,8 +1055,8 @@ def _center_bubble_stations(
     ctx = _build_bubble_ctx(routes, graph)
     candidates = _collect_centering_candidates(graph, ctx)
     moves: dict[str, float] = {}
-    _apply_station_moves(graph, candidates, ctx.original_x, moves)
-    _align_uncentered_siblings(routes, graph, ctx.original_x, moves)
+    _apply_station_moves(graph, candidates, ctx.original_x, moves, ctx.fan_room)
+    _align_uncentered_siblings(routes, graph, ctx.original_x, moves, ctx.fan_room)
     return moves
 
 

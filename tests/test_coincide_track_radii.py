@@ -56,7 +56,7 @@ from nf_metro.layout.routing.normalize import (
     _set_vchannel_x,
     _VChannel,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -225,7 +225,7 @@ def _touched_corner_mismatches(
     monkeypatch.setattr(normalize, "_reseat_concentric_flanking", reseat_spy)
     monkeypatch.setattr(normalize, "_set_vchannel_x", vspy)
     monkeypatch.setattr(normalize, "_set_htrunk_y", hspy)
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -418,7 +418,7 @@ def test_named_coincide_fixtures_snap_at_least_one_corner(
         touched.append(ch)
 
     monkeypatch.setattr(normalize, "_set_vchannel_x", spy)
-    graph = parse_metro_mermaid((EXAMPLES / fixture).read_text())
+    graph = parse_metro_mermaid_file(EXAMPLES / fixture)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     route_edges(graph, station_offsets=offsets)
