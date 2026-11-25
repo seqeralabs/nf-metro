@@ -6,6 +6,7 @@ Release notes for nf-metro, newest first.
 
 | Version                             | Date       | Highlights                                                                                                                                                                                  |
 | ----------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [v3.0.0](/nf-metro/releases/3.0.0/) | 2026-11-25 | Theme stacks and theme files, five transit themes, Snakemake input, `curve_radius_ratio`, breaking cleanup of theme names, dependencies and the Python API                                  |
 | [v2.1.0](/nf-metro/releases/2.1.0/) | 2026-09-15 | Native PNG export, looping GIF/WebP/MP4/WebM export, long tail of routing and layout fixes                                                                                                  |
 | [v2.0.0](/nf-metro/releases/2.0.0/) | 2026-09-05 | Breaking directive validation, content-hugging section boxes, inactive lines, `stroke_scale`, visual-order numbering, GitHub Action + pre-commit hook, route-planning engine completed      |
 | [v1.1.0](/nf-metro/releases/1.1.0/) | 2026-07-01 | `track_gap` option, packing sections into a shared grid cell, playground logo upload, long tail of fold/bypass/convergence routing fixes                                                    |
