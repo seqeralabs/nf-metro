@@ -48,7 +48,13 @@ from nf_metro.render.constants import (
 )
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import ns as _ns
-from nf_metro.render.style import Theme, line_paint_class
+from nf_metro.render.style import (
+    SWATCH_BULLET,
+    Theme,
+    line_color_pair,
+    line_paint_class,
+    ordinal_code,
+)
 from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
 
 
@@ -317,6 +323,9 @@ def _render_swatch(
     constituent line as a stripe at a small vertical offset, so the swatch
     reads as a bundle of adjacent lines, each honouring its style.
     """
+    if theme.legend_swatch == SWATCH_BULLET:
+        _render_bullets(d, row, theme, x0, entry_y, swatch_width, inactive_line_ids)
+        return
     n = len(row.lines)
     if n == 1:
         offsets = [0.0]
@@ -339,6 +348,80 @@ def _render_swatch(
                 **_swatch_paint_class(theme, ml, inactive_line_ids),
             )
         )
+
+
+# Fraction of a legend row's height a bullet's diameter takes, and of the
+# diameter its code's font size takes.
+_BULLET_DIAMETER = 0.85
+_BULLET_FONT = 0.6
+
+
+def _render_bullets(
+    d: draw.Drawing,
+    row: _LegendRow,
+    theme: Theme,
+    x0: float,
+    entry_y: float,
+    swatch_width: float,
+    inactive_line_ids: frozenset[str],
+) -> None:
+    """Draw a row as a disc per line in its colour, carrying the line's code;
+    discs that would overrun the swatch overlap to fit it."""
+    diameter = _BULLET_DIAMETER * theme.legend_line_height
+    n = len(row.lines)
+    step = diameter * 1.1
+    if n > 1 and (n - 1) * step + diameter > swatch_width:
+        step = max(swatch_width - diameter, 0.0) / (n - 1)
+    for i, ml in enumerate(row.lines):
+        muted = ml.id in inactive_line_ids
+        fill = effective_line_color(ml, theme, inactive_line_ids)
+        paint = line_paint_class(theme, ml, muted, "fill")
+        cx = x0 + diameter / 2 + i * step
+        d.append(
+            draw.Circle(
+                cx,
+                entry_y,
+                diameter / 2,
+                fill=fill,
+                **({"class_": paint} if paint else {}),
+            )
+        )
+        shades = (theme.muted_line_color,) if muted else line_color_pair(theme, ml)
+        d.append(
+            draw.Text(
+                ordinal_code(ml.palette_index + 1, theme.line_codes),
+                _BULLET_FONT * diameter,
+                cx,
+                entry_y,
+                fill=readable_text_color(*shades),
+                font_family=theme.label_font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                dy=TEXT_VCENTER_DY,
+            )
+        )
+
+
+def readable_text_color(*backgrounds: str) -> str:
+    """Black or white, whichever keeps the higher worst-case WCAG contrast
+    against every one of *backgrounds*."""
+    from PIL import ImageColor
+
+    def luminance(color: str) -> float:
+        try:
+            rgb = ImageColor.getrgb(color)[:3]
+        except ValueError:
+            return 0.0
+        lin = [
+            c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+            for c in (v / 255 for v in rgb)
+        ]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    lums = [luminance(c) for c in backgrounds]
+    on_black = min((lum + 0.05) / 0.05 for lum in lums)
+    on_white = min(1.05 / (lum + 0.05) for lum in lums)
+    return "#000000" if on_black > on_white else "#ffffff"
 
 
 def _swatch_paint_class(

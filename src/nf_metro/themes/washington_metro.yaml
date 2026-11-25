@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=theme.schema.json
+# After the Washington Metrorail map (Lance Wyman, 1976; WMATA system map,
+# 2026): very thick lines a hairline apart, a white dot ringed in black on
+# every line at a stop, broad corners, Helvetica Neue Medium labels, the
+# Capital Beltway's pale grey-green band, and legend discs carrying each
+# line's letter. Line colours are WMATA's GTFS route colours, which the
+# system map's CMYK matches.
+name: washington-metro
+
+# Dots as wide as the line: a 0.26-wide black ring round a white centre.
+station_glyph: dot
+interchange_glyph: dots
+terminus_glyph: ring
+dot_diameter: 1.0
+dot_ring_width: 0.26
+line_width: 9
+line_cap: butt
+label_font_family: "'Helvetica Neue', Helvetica, Arial, sans-serif"
+label_font_weight: "500"
+number_sections: false
+section_stroke_width: 5
+section_corner_radius: 28
+section_label_font_weight: bold
+legend_swatch: bullet
+line_codes: letters
+legend_swatch_width: 24
+legend_corner_radius: 0
+legend_stroke_width: 0
+layout:
+  track_gap: 1
+  curve_radius_ratio: 2.0
+
+# Red, Blue, Orange, Green, Yellow, Silver.
+line_colors: ["#C80F2D", "#009CDE", "#ED8B00", "#00B140", "#FFD100", "#919D9D"]
+
+light:
+  background_fill: "#ffffff"
+  title_color: "#000000"
+  label_color: "#000000"
+  station_fill: "#ffffff"
+  station_stroke: "#000000"
+  muted_line_color: "#c4c4c4"
+  section_fill: transparent
+  section_stroke: "#becfbc" # the Beltway band, CMYK 8/0/9/19
+  section_label_color: "#4d4d4d"
+  legend_fill: "#ffffff"
+  legend_text_color: "#000000"
+
+dark:
+  background_fill: "#121417"
+  title_color: "#ffffff"
+  label_color: "#f2f2f2"
+  station_fill: "#ffffff"
+  station_stroke: "#000000"
+  muted_line_color: "#4f5257"
+  section_fill: transparent
+  section_stroke: "#3e4a3d"
+  section_label_color: "#b8c2b7"
+  legend_fill: "#121417"
+  legend_text_color: "#f2f2f2"

@@ -30,6 +30,7 @@ from nf_metro.layout.constants import (
     LABEL_BBOX_MARGIN,
     LABEL_MARGIN,
     LABEL_NUDGE_MAX,
+    LABEL_OFFSET,
     LABEL_OVERLAP_TOL,
     LABEL_WRAP_MIN_LINE_CHARS,
     PORT_LABEL_MAX_DX,
@@ -95,7 +96,7 @@ def tb_left_label_marker_pitch(
     right_min_offset = min(0.0, lane_sign * right_span)
     return (
         label_text_width(label)
-        + TB_LABEL_H_SPACING
+        + tb_label_gap()
         + TB_PILL_EDGE_OFFSET
         - right_min_offset
         + TB_PILL_EDGE_OFFSET
@@ -1496,6 +1497,12 @@ def _place_station_label(
     )
 
 
+def tb_label_gap() -> float:
+    """Gap between a vertical-flow station's pill and the label beside it,
+    widened by however far the active ``label_offset`` exceeds its default."""
+    return TB_LABEL_H_SPACING + max(0.0, active_metrics().label_offset - LABEL_OFFSET)
+
+
 def label_beside_pill(
     station: Station, pill_edge: float, *, left: bool
 ) -> LabelPlacement:
@@ -1507,7 +1514,7 @@ def label_beside_pill(
     return LabelPlacement(
         station_id=station.id,
         text=station.label,
-        x=pill_edge - TB_LABEL_H_SPACING if left else pill_edge + TB_LABEL_H_SPACING,
+        x=pill_edge - tb_label_gap() if left else pill_edge + tb_label_gap(),
         y=station.y,
         above=True,
         text_anchor="end" if left else "start",

@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=theme.schema.json
+# After the Tokyo subway route map (Tokyo Metro and Toei, 2023) and Tokyo
+# Metro's station numbering mark (CI manual, 2025): every station is its
+# number, a white face ringed in its line's colour around a letter and two
+# digits; a station on several lines is one marker across them ringed in dark
+# grey. Here the letter is the station's section, which its badge also shows,
+# and the digits count along the section's flow; a nameless line end has no
+# number and stops at a bar. Thick lines, rounded
+# octilinear corners, bold black labels and a pale blue legend. Line colours
+# are the Tokyo Metro CI manual's nine line colours, then Toei's four.
+name: tokyo-metro
+
+station_glyph: numbered
+interchange_glyph: numbered
+terminus_glyph: bar
+number_marker_diameter: 4.4
+line_width: 5
+label_font_family: "Frutiger, 'Hiragino Sans', 'Noto Sans JP', 'Helvetica Neue', Arial, sans-serif"
+label_font_weight: bold
+section_codes: letters
+section_stroke_width: 1
+section_corner_radius: 10
+legend_corner_radius: 10
+icon_fill: "#ffffff"
+icon_stroke: "#6d6e71"
+layout:
+  track_gap: 1
+  curve_radius_ratio: 2.5
+  # Room for the marker, which reaches past the lines it sits on.
+  label_offset: 16
+
+# Marunouchi, Tozai, Ginza, Chiyoda, Hanzomon, Fukutoshin, Yurakucho,
+# Namboku, Hibiya; Toei Asakusa, Mita, Shinjuku, Oedo.
+line_colors:
+  ["#F62E36", "#009BBF", "#FF9500", "#00BB85", "#8F76D6", "#9C5E31", "#C1A470",
+   "#00AC9B", "#B5B5AC", "#FF535F", "#0067B0", "#9FB01C", "#CF3366"]
+
+light:
+  background_fill: "#ffffff"
+  title_color: "#000000"
+  label_color: "#000000"
+  station_fill: "#ffffff"
+  station_stroke: "#6d6e71" # the route map's interchange grey, K60
+  station_code_color: "#000000"
+  muted_line_color: "#c8c8c8"
+  section_fill: transparent
+  section_stroke: "#c8d7e6"
+  section_label_color: "#000000"
+  section_badge_fill: "#000000"
+  section_badge_text_color: "#ffffff"
+  legend_fill: "#e8f1fa"
+  legend_text_color: "#000000"
+
+dark:
+  background_fill: "#14181d"
+  title_color: "#ffffff"
+  label_color: "#f0f0f0"
+  station_fill: "#ffffff"
+  station_stroke: "#9a9ba0"
+  station_code_color: "#000000"
+  muted_line_color: "#50555c"
+  section_fill: transparent
+  section_stroke: "#34414f"
+  section_label_color: "#f0f0f0"
+  section_badge_fill: "#ffffff"
+  section_badge_text_color: "#000000"
+  legend_fill: "#1d2733"
+  legend_text_color: "#f0f0f0"

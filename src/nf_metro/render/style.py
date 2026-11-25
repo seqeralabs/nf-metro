@@ -16,9 +16,18 @@ __all__ = [
     "FONT_FAMILY_PATTERN",
     "DASHARRAY_PATTERN",
     "FONT_WEIGHTS",
+    "CODES_LETTERS",
+    "CODES_NUMBERS",
+    "GLYPH_DOT",
+    "GLYPH_DOTS",
+    "GLYPH_NUMBERED",
     "GLYPH_PILL",
     "GLYPH_RING",
     "GLYPH_TICK",
+    "PAINT_LINE",
+    "PAINT_STATION",
+    "SWATCH_BULLET",
+    "SWATCH_LINE",
     "LINE_PAINT_CLASS",
     "MUTED_FILL_CLASS",
     "MUTED_STROKE_CLASS",
@@ -36,6 +45,7 @@ __all__ = [
     "line_color_pair",
     "line_paint_class",
     "muted_paint_class",
+    "ordinal_code",
 ]
 
 import dataclasses
@@ -82,6 +92,15 @@ _MISSING: Any = dataclasses.MISSING
 GLYPH_PILL = "pill"
 GLYPH_TICK = "tick"
 GLYPH_RING = "ring"
+GLYPH_DOT = "dot"
+GLYPH_DOTS = "dots"
+GLYPH_NUMBERED = "numbered"
+PAINT_STATION = "station"
+PAINT_LINE = "line"
+CODES_NUMBERS = "numbers"
+CODES_LETTERS = "letters"
+SWATCH_LINE = "line"
+SWATCH_BULLET = "bullet"
 RING_CHAIN = "chain"
 RING_GROW = "grow"
 TERMINUS_NUB = "nub"
@@ -301,6 +320,20 @@ class Theme:
     legend_swatch_width: float = _field(
         LEGEND_SWATCH_WIDTH, doc="Length of each line swatch, px.", group="Legend"
     )
+    legend_swatch: str = _field(
+        SWATCH_LINE,
+        doc="How the legend shows each line: `line`, a length of the line, or "
+        "`bullet`, a disc in the line's colour carrying the line's code.",
+        group="Legend",
+        choices=(SWATCH_LINE, SWATCH_BULLET),
+    )
+    line_codes: str = _field(
+        CODES_LETTERS,
+        doc="The code each line carries on a legend `bullet`, in declaration "
+        "order: `letters` (A, B, ...) or `numbers` (1, 2, ...).",
+        group="Legend",
+        choices=(CODES_LETTERS, CODES_NUMBERS),
+    )
 
     station_fill: str = _field(
         doc="Inside of station capsules, interchange rings and the strip "
@@ -331,26 +364,32 @@ class Theme:
         GLYPH_PILL,
         doc="How a station on one line is drawn. `pill` draws a capsule. "
         "`tick` draws a tab in the line's colour on the label's side, "
-        "and a bar across the line's end (a buffer stop) at a terminus.",
+        "and a bar across the line's end (a buffer stop) at a terminus. "
+        "`dot` draws a dot on the line. `numbered` draws a station-number "
+        "marker: a ring in the line's colour around the station's code.",
         group="Stations",
-        choices=(GLYPH_PILL, GLYPH_TICK),
+        choices=(GLYPH_PILL, GLYPH_TICK, GLYPH_DOT, GLYPH_NUMBERED),
     )
     interchange_glyph: str = _field(
         GLYPH_PILL,
         doc="How a station on several lines is drawn. `pill` draws a capsule "
         "across them. `ring` draws one ring centred on the lines, or a chain "
         "of touching rings bridged by a strip when the lines are too wide for "
-        "one.",
+        "one. `dots` draws a dot on each line. `numbered` draws a "
+        "station-number marker across the lines, ringed in `station_stroke`; "
+        "a nameless line end has no number, and takes `terminus_glyph`.",
         group="Stations",
-        choices=(GLYPH_PILL, GLYPH_RING),
+        choices=(GLYPH_PILL, GLYPH_RING, GLYPH_DOTS, GLYPH_NUMBERED),
     )
     terminus_glyph: str = _field(
         TERMINUS_NUB,
         doc="How a line end shared by several lines is drawn. `nub` is a "
         "square-cornered box across the lines in the station colours; `bar` is "
         "a buffer-stop bar across the whole bundle, as thick as a tab and "
-        "overhanging the outermost lines by a tab's length; `ring` draws the "
-        "interchange glyph. A line end with one line follows `station_glyph`.",
+        "overhanging the outermost lines by a tab's length; `ring` draws "
+        "interchange rings, or the `dots` or `numbered` interchange glyph when "
+        "the theme draws interchanges with one. A line end with one line "
+        "follows `station_glyph`.",
         group="Stations",
         choices=(TERMINUS_NUB, TERMINUS_BAR, GLYPH_RING),
     )
@@ -393,6 +432,44 @@ class Theme:
         "chain of rings, or `grow`, one ring whose inside widens to cover it.",
         group="Stations",
         choices=(RING_CHAIN, RING_GROW),
+    )
+    dot_diameter: float = _field(
+        1.0,
+        doc="Outside diameter of a `dot` or `dots` station, × `line_width`.",
+        group="Stations",
+    )
+    dot_ring_width: float = _field(
+        0.25,
+        doc="Width of a dot's outline, × `line_width`. Half of `dot_diameter` "
+        "draws a solid dot.",
+        group="Stations",
+    )
+    dot_ring: str = _field(
+        PAINT_STATION,
+        doc="Colour of a dot's outline: `station`, the station colours "
+        "(`station_stroke` around `station_fill`), or `line`, the colour of the "
+        "line the dot sits on.",
+        group="Stations",
+        choices=(PAINT_STATION, PAINT_LINE),
+    )
+    number_marker_diameter: float = _field(
+        3.0,
+        doc="Outside diameter of a `numbered` station marker, × `line_width`; "
+        "across several lines the marker also spans them.",
+        group="Stations",
+    )
+    station_code_color: str = _field(
+        "",
+        doc="Code on a `numbered` station marker. Empty takes `station_stroke`.",
+        group="Stations",
+        color=True,
+    )
+    section_codes: str = _field(
+        CODES_NUMBERS,
+        doc="How sections are coded on their badges and in station-number "
+        "codes: `numbers` (1, 2, ...) or `letters` (A, B, ...).",
+        group="Sections",
+        choices=(CODES_NUMBERS, CODES_LETTERS),
     )
 
     line_width: float = _field(doc="Route stroke width, px.", group="Lines")
@@ -569,6 +646,10 @@ CHROME: MappingProxyType[str, Chrome] = MappingProxyType(
         "label_color": Chrome(
             "--nfm-map-label-color", (("nf-metro-station-label", "fill", True),)
         ),
+        "station_code_color": Chrome(
+            "--nfm-map-station-code-color",
+            (("nf-metro-station-code", "fill", True),),
+        ),
         "caption_color": Chrome(
             "--nfm-map-caption-color", (("nf-metro-caption", "fill", False),), True
         ),
@@ -686,3 +767,15 @@ def line_paint_class(
     if light == dark:
         return ""
     return _ns(f"{LINE_PAINT_CLASS}-{line.palette_index}-{prop}")
+
+
+def ordinal_code(index: int, style: str) -> str:
+    """The *index*-th (from 1) code in *style*: ``3`` or ``C``, and past ``Z``
+    the spreadsheet-column sequence ``AA``, ``AB``, ..."""
+    if style == CODES_NUMBERS:
+        return str(index)
+    letters = ""
+    while index > 0:
+        index, rem = divmod(index - 1, 26)
+        letters = chr(ord("A") + rem) + letters
+    return letters

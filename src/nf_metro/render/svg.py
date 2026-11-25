@@ -131,7 +131,7 @@ from nf_metro.layout.routing.invariants import (
     CurveInvariantError,
     assert_render_curve_invariants,
 )
-from nf_metro.layout.routing.offsets import drawn_bundle_span
+from nf_metro.layout.routing.offsets import drawn_bundle_span, drawn_line_offsets
 from nf_metro.layout.routing.reserved_bands import build_reserved_corridors
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
 from nf_metro.layout.routing.system_emission import (
@@ -271,6 +271,7 @@ from nf_metro.render.style import (
     is_adaptive,
     line_color_pair,
     line_paint_class,
+    ordinal_code,
 )
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
@@ -3571,7 +3572,7 @@ def _draw_section_badge(
     )
     d.append(
         draw.Text(
-            str(section.number),
+            ordinal_code(section.number, theme.section_codes),
             theme.section_badge_font_size,
             placement.badge_cx,
             placement.badge_cy,
@@ -5178,11 +5179,25 @@ def _render_station_into(
             _append_terminus_icons(d, station, graph, theme, min_off, max_off, muted)
         return
 
+    line_offsets = (
+        drawn_line_offsets(graph, station, station_offsets, positive_fan)
+        if station_offsets and not graph.station_is_rail(station.id)
+        else {}
+    )
     _draw_bundle_station(
         d,
         graph,
         theme,
-        Bundle(station, min_off, max_off, is_tb_vert, station_data, muted, label_point),
+        Bundle(
+            station,
+            min_off,
+            max_off,
+            is_tb_vert,
+            station_data,
+            muted,
+            label_point,
+            line_offsets,
+        ),
     )
 
 

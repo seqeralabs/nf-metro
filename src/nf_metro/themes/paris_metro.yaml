@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=theme.schema.json
+# After the Paris metro plan (IDFM, 2026): thin lines nearly touching, a
+# white dot ringed in its line's colour at each stop, black-outlined white
+# capsules at interchanges, wide soft corners, inner Paris on a light grey
+# panel, and a slate legend of numbered line discs. Line colours are the
+# IDFM Referentiel des lignes, after the 2019 "nouvelle palette"
+# (Referentiel des symboles de mode et indices de ligne v1).
+name: paris-metro
+
+station_glyph: dot
+dot_ring: line
+dot_diameter: 1.4
+dot_ring_width: 0.35
+interchange_glyph: pill
+station_stroke_width: 1.2
+line_width: 4
+line_cap: butt
+label_font_family: "Parisine, 'IDF Voyageur', 'Avenir Next', Avenir, 'Helvetica Neue', Arial, sans-serif"
+label_font_weight: normal
+number_sections: false
+section_stroke_width: 0
+section_corner_radius: 14
+section_label_font_weight: bold
+legend_swatch: bullet
+line_codes: numbers
+legend_swatch_width: 24
+legend_corner_radius: 10
+icon_fill: "#ffffff"
+icon_stroke: "#231f20"
+layout:
+  track_gap: 1
+  curve_radius_ratio: 4.5
+
+# Lines 1 to 14 in order, so line n's colour carries the code n.
+line_colors:
+  ["#FFBE00", "#0055C8", "#6E6E00", "#A0006E", "#FF5A00", "#82DC73", "#FF82B4",
+   "#D282BE", "#D2D200", "#DC9600", "#6E491E", "#00643C", "#82C8E6", "#640082"]
+
+light:
+  background_fill: "#ffffff"
+  title_color: "#231f20"
+  label_color: "#231f20"
+  station_fill: "#ffffff"
+  station_stroke: "#231f20"
+  muted_line_color: "#c2c2c2"
+  section_fill: "#e9e9e9"
+  section_stroke: transparent
+  section_label_color: "#46505b"
+  legend_fill: "#46505b" # the plan's slate frame
+  legend_text_color: "#ffffff"
+
+dark:
+  background_fill: "#1e2329"
+  title_color: "#f2f2f2"
+  label_color: "#e8e8e8"
+  station_fill: "#ffffff"
+  station_stroke: "#231f20"
+  muted_line_color: "#525a63"
+  section_fill: "#2a3038"
+  section_stroke: transparent
+  section_label_color: "#aeb6bf"
+  legend_fill: "#46505b"
+  legend_text_color: "#ffffff"

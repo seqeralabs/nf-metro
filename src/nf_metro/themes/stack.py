@@ -57,6 +57,7 @@ _TAKES = {
     "section_badge_text_color": "station_fill",
     "icon_fill": "station_fill",
     "icon_stroke": "station_stroke",
+    "station_code_color": "station_stroke",
 }
 
 

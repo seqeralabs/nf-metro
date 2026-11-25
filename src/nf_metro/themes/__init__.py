@@ -42,6 +42,10 @@ _BUILTIN_FILES = {
     "default": "default.yaml",
     "seqera": "seqera.yaml",
     "london-tube": "london_tube.yaml",
+    "nyc-subway": "nyc_subway.yaml",
+    "paris-metro": "paris_metro.yaml",
+    "tokyo-metro": "tokyo_metro.yaml",
+    "washington-metro": "washington_metro.yaml",
     "transparent": "transparent.yaml",
 }
 

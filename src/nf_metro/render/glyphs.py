@@ -1,4 +1,5 @@
-"""Station glyphs a theme can choose: tabs, terminus bars and interchange rings.
+"""Station glyphs a theme can choose: tabs, terminus bars, interchange rings,
+dots and station-number markers.
 
 Glyph sizes are multiples of the theme's ``line_width``. Offsets run across a
 station's lines: along y in an LR/RL section, along x in a TB/BT one.
@@ -18,6 +19,7 @@ __all__ = [
     "ring_groups",
     "ring_layout",
     "station_axis",
+    "station_code",
     "station_tab_box",
 ]
 
@@ -32,12 +34,17 @@ from nf_metro.layout.constants import COORD_TOLERANCE_FINE
 from nf_metro.render.constants import effective_line_color
 from nf_metro.render.ns import ns as _ns
 from nf_metro.render.style import (
+    GLYPH_DOT,
+    GLYPH_DOTS,
+    GLYPH_NUMBERED,
     GLYPH_RING,
     GLYPH_TICK,
+    PAINT_LINE,
     RING_GROW,
     TERMINUS_BAR,
     Theme,
     line_paint_class,
+    ordinal_code,
 )
 
 if TYPE_CHECKING:
@@ -100,7 +107,8 @@ class Bundle(NamedTuple):
     """A station as drawn: the span of its lines across the flow, and how.
 
     ``station_data`` is the attributes every glyph element of the station
-    carries; ``label_point`` is where its label sits, which a tab faces.
+    carries; ``label_point`` is where its label sits, which a tab faces;
+    ``line_offsets`` is each line's drawn offset, which a dot sits on.
     """
 
     station: Station
@@ -110,6 +118,7 @@ class Bundle(NamedTuple):
     station_data: Mapping[str, str] = MappingProxyType({})
     muted: bool = False
     label_point: tuple[float, float] | None = None
+    line_offsets: Mapping[str, float] = MappingProxyType({})
 
     @property
     def axis(self) -> CrossAxis:
@@ -281,6 +290,180 @@ def _draw_bundle_rings(
     draw_ring_chain(d, [layout], bundle.axis, theme, bundle.station_data, bundle.muted)
 
 
+def _line_offset(bundle: Bundle, line_id: str, rank: int, count: int) -> float:
+    """*line_id*'s drawn offset, else the *rank*-th of *count* even steps
+    across the bundle."""
+    if line_id in bundle.line_offsets:
+        return bundle.line_offsets[line_id]
+    if count == 1:
+        return bundle.min_off
+    return bundle.min_off + rank * (bundle.max_off - bundle.min_off) / (count - 1)
+
+
+def _draw_dots(
+    d: draw.Group | draw.Drawing,
+    graph: MetroGraph,
+    theme: Theme,
+    bundle: Bundle,
+    line_ids: Sequence[str],
+) -> None:
+    """Draw a dot on each of *line_ids* where it crosses the station.
+
+    The outline is drawn as a stroke centred inside the dot's outside edge, so
+    an outline half the diameter wide fills it.
+    """
+    lw = theme.line_width
+    outer = theme.dot_diameter * lw / 2
+    width = min(theme.dot_ring_width * lw, outer)
+    muted_ids = frozenset(line_ids) if bundle.muted else frozenset()
+    group_el = draw.Group(**bundle.station_data)
+    for rank, lid in enumerate(line_ids):
+        line = graph.lines.get(lid)
+        if theme.dot_ring == PAINT_LINE:
+            stroke = effective_line_color(line, theme, muted_ids)
+            ring_class = line_paint_class(theme, line, bundle.muted, "stroke")
+        else:
+            stroke = theme.station_stroke
+            ring_class = maybe_muted_class("nf-metro-ring", bundle.muted)
+        group_el.append(
+            draw.Circle(
+                *bundle.point(_line_offset(bundle, lid, rank, len(line_ids))),
+                outer - width / 2,
+                fill=theme.station_fill,
+                stroke=stroke,
+                stroke_width=width,
+                class_=f"{_ns('nf-metro-ring-hole')} {ring_class}".strip(),
+            )
+        )
+    d.append(group_el)
+
+
+def station_code(graph: MetroGraph, station: Station, style: str) -> tuple[str, str]:
+    """``(section code, two-digit number)`` of *station*: its section's code
+    and its place along that section's flow, counting the stations a
+    ``numbered`` marker draws."""
+    section = graph.sections.get(station.section_id or "")
+    if section is None:
+        return "", ""
+    members = [
+        st
+        for sid in section.station_ids
+        if (st := graph.stations.get(sid)) is not None
+        and not st.is_port
+        and not st.is_blank_terminus
+    ]
+    along_x = section.direction in ("LR", "RL")
+    sign = -1.0 if section.direction in ("RL", "BT") else 1.0
+
+    def flow_key(st: Station) -> tuple[float, float]:
+        along, across = (st.x, st.y) if along_x else (st.y, st.x)
+        return sign * along, across
+
+    members.sort(key=flow_key)
+    place = next((i for i, st in enumerate(members, 1) if st.id == station.id), 0)
+    return ordinal_code(section.number, style), f"{place:02d}"
+
+
+# Station-number marker proportions, × the marker's outside diameter: the
+# Tokyo Metro numbering mark's ring, code cap height and digit height, and
+# where their baselines sit from the centre.
+_NUMBER_RING = 0.1175
+_CODE_FONT = 0.248 / 0.72
+_CODE_BASELINE = -0.073
+_DIGIT_FONT = 0.267 / 0.72
+_DIGIT_BASELINE = 0.264
+
+
+def _draw_number_marker(
+    d: draw.Group | draw.Drawing,
+    graph: MetroGraph,
+    theme: Theme,
+    bundle: Bundle,
+    line_ids: Sequence[str],
+) -> None:
+    """Draw a station-number marker: the station's code on a face ringed in
+    its one line's colour, or a capsule across several lines ringed in
+    ``station_stroke``."""
+    diameter = theme.number_marker_diameter * theme.line_width
+    ring = _NUMBER_RING * diameter
+    inset = diameter - ring
+    lo, hi = bundle.min_off, bundle.max_off
+    axis = bundle.axis
+    group_el = draw.Group(**bundle.station_data)
+    if len(line_ids) == 1:
+        line = graph.lines.get(line_ids[0])
+        muted_ids = frozenset(line_ids) if bundle.muted else frozenset()
+        stroke = effective_line_color(line, theme, muted_ids)
+        ring_class = line_paint_class(theme, line, bundle.muted, "stroke")
+    else:
+        stroke = theme.station_stroke
+        ring_class = maybe_muted_class("nf-metro-ring", bundle.muted)
+    group_el.append(
+        draw.Rectangle(
+            *axis.box(inset, axis.base + lo - inset / 2, hi - lo + inset),
+            rx=inset / 2,
+            fill=theme.station_fill,
+            stroke=stroke,
+            stroke_width=ring,
+            class_=f"{_ns('nf-metro-ring-hole')} {ring_class}".strip(),
+        )
+    )
+    cx, cy = axis.point((lo + hi) / 2)
+    code, number = station_code(graph, bundle.station, theme.section_codes)
+    text_class = maybe_muted_class("nf-metro-station-code", bundle.muted)
+    for text, font, baseline in (
+        (code, _CODE_FONT, _CODE_BASELINE),
+        (number, _DIGIT_FONT, _DIGIT_BASELINE),
+    ):
+        group_el.append(
+            draw.Text(
+                text,
+                font * diameter,
+                cx,
+                cy + baseline * diameter,
+                fill=theme.station_code_color,
+                font_family=theme.label_font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                class_=text_class,
+            )
+        )
+    d.append(group_el)
+
+
+def _draw_unnumbered_end(
+    d: draw.Group | draw.Drawing, theme: Theme, bundle: Bundle, line_count: int
+) -> bool:
+    """Draw a nameless line end under a ``numbered`` theme, which has no
+    number to show: ``terminus_glyph`` across however many lines end there,
+    rings standing in for the marker."""
+    if theme.terminus_glyph == TERMINUS_BAR:
+        _draw_terminus_bar(d, theme, bundle)
+        return True
+    if theme.terminus_glyph == GLYPH_RING:
+        _draw_bundle_rings(d, bundle, line_count, theme)
+        return True
+    return False
+
+
+def _draw_terminus_bar(
+    d: draw.Group | draw.Drawing, theme: Theme, bundle: Bundle
+) -> None:
+    data = bundle.station_data
+    bar_class = maybe_muted_class("nf-metro-terminus-bar", bundle.muted)
+    d.append(
+        draw.Rectangle(
+            *bundle_end_bar_box(bundle, theme),
+            fill=theme.station_stroke,
+            **{**data, "class_": f"{data['class_']} {bar_class}"},
+        )
+    )
+
+
+_LINE_GLYPHS = {GLYPH_DOT: _draw_dots, GLYPH_NUMBERED: _draw_number_marker}
+_BUNDLE_GLYPHS = {GLYPH_DOTS: _draw_dots, GLYPH_NUMBERED: _draw_number_marker}
+
+
 def draw_line_station_glyph(
     d: draw.Group | draw.Drawing, graph: MetroGraph, theme: Theme, bundle: Bundle
 ) -> bool:
@@ -291,6 +474,15 @@ def draw_line_station_glyph(
     station = bundle.station
     data = bundle.station_data
     lines = graph.station_lines(station.id)
+    numbers_blank_end = station.is_blank_terminus and GLYPH_NUMBERED in (
+        theme.station_glyph,
+        theme.interchange_glyph,
+    )
+    if numbers_blank_end:
+        return _draw_unnumbered_end(d, theme, bundle, len(lines))
+    if len(lines) == 1 and theme.station_glyph in _LINE_GLYPHS:
+        _LINE_GLYPHS[theme.station_glyph](d, graph, theme, bundle, lines)
+        return True
     if theme.station_glyph == GLYPH_TICK and len(lines) == 1:
         line = graph.lines.get(lines[0])
         color = effective_line_color(
@@ -309,20 +501,21 @@ def draw_line_station_glyph(
         return True
     if station.is_blank_terminus and len(lines) >= 2:
         if theme.terminus_glyph == TERMINUS_BAR:
-            bar_class = maybe_muted_class("nf-metro-terminus-bar", bundle.muted)
-            d.append(
-                draw.Rectangle(
-                    *bundle_end_bar_box(bundle, theme),
-                    fill=theme.station_stroke,
-                    **{**data, "class_": f"{data['class_']} {bar_class}"},
-                )
-            )
+            _draw_terminus_bar(d, theme, bundle)
             return True
         if theme.terminus_glyph != GLYPH_RING:
             return False
+        if theme.interchange_glyph in _BUNDLE_GLYPHS:
+            _BUNDLE_GLYPHS[theme.interchange_glyph](d, graph, theme, bundle, lines)
+        else:
+            _draw_bundle_rings(d, bundle, len(lines), theme)
+        return True
+    if len(lines) < 2:
+        return False
+    if theme.interchange_glyph == GLYPH_RING:
         _draw_bundle_rings(d, bundle, len(lines), theme)
         return True
-    if theme.interchange_glyph == GLYPH_RING and len(lines) >= 2:
-        _draw_bundle_rings(d, bundle, len(lines), theme)
+    if theme.interchange_glyph in _BUNDLE_GLYPHS:
+        _BUNDLE_GLYPHS[theme.interchange_glyph](d, graph, theme, bundle, lines)
         return True
     return False
