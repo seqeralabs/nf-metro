@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
-from nf_metro.layout.routing.corners import turn_shift
+from nf_metro.layout.constants import graph_offset_step
+from nf_metro.layout.routing.corners import resolve_curve_radii, turn_shift
 from nf_metro.render.svg import _drawn_pieces, _piece_at, build_render_plan
 from nf_metro.themes import resolve_theme
 
@@ -128,16 +129,29 @@ _PREPROCESSING_FAN = (
 )
 
 
-@pytest.mark.parametrize("ratio", [None, 2.0, 3.0, 4.5])
-@pytest.mark.parametrize("line_width", [3, 5, 6, 9])
-def test_wide_touching_fan_corners_leave_no_seam(tmp_path, line_width, ratio):
-    """Touching lanes nest through every corner of a fan whose diagonals
-    differ in steepness, at any line width and corner radius."""
+def _pitch_error(inner, outer, pitch: float) -> float:
+    """Largest departure from *pitch* of the distance between two lanes,
+    measured from every point of *outer*: straights, diagonals and arcs."""
+    targets = [q for q, _ in _samples(*inner, 150)]
+    return max(
+        abs(min(math.dist(q, s) for s in targets) - pitch)
+        for q, _ in _samples(*outer, 150)
+    )
+
+
+def _arc_centres(points, radii):
+    resolved = resolve_curve_radii(points, radii)
+    return [
+        _centre(points[k - 1 : k + 2], resolved[k - 1])
+        for k in range(1, len(points) - 1)
+    ]
+
+
+def _fan_concentricity(theme_text: str, prefix: str, tmp_path):
     theme_file = tmp_path / "theme.yaml"
-    layout = "" if ratio is None else f"layout:\n  curve_radius_ratio: {ratio}\n"
-    theme_file.write_text(f"name: wide\nline_width: {line_width}\n{layout}")
+    theme_file.write_text(theme_text)
     path = _ROOT / "examples" / "rnaseq_sections.mmd"
-    text = f"%%metro style: {theme_file}\n%%metro track_gap: 0\n" + path.read_text()
+    text = f"%%metro style: {theme_file}\n{prefix}" + path.read_text()
     graph = prepare_graph(text, source_dir=str(path.parent))
     theme = resolve_theme(graph)
     plan = build_render_plan(graph, theme)
@@ -149,11 +163,50 @@ def test_wide_touching_fan_corners_leave_no_seam(tmp_path, line_width, ratio):
         if key in _PREPROCESSING_FAN:
             bundles[key].append((list(points), None if radii is None else list(radii)))
     assert set(bundles) == set(_PREPROCESSING_FAN)
-    seams = {
-        key: round(_worst_curve_seam(lanes, theme.line_width), 2)
-        for key, lanes in bundles.items()
-    }
-    assert max(seams.values()) <= 0.1, seams
+    pitch = graph_offset_step(graph, theme.line_width)
+    pitch_errors: dict[tuple[str, str], float] = {}
+    centre_errors: dict[tuple[str, str], float] = {}
+    for key, lanes in bundles.items():
+        ordered = sorted(lanes, key=lambda lane: (lane[0][0][1], lane[0][0][0]))
+        pitch_errors[key] = round(
+            max(_pitch_error(a, b, pitch) for a, b in zip(ordered, ordered[1:])), 2
+        )
+        worst = 0.0
+        for a, b in zip(ordered, ordered[1:]):
+            assert len(a[0]) == len(b[0]), key
+            for ca, cb in zip(_arc_centres(*a), _arc_centres(*b)):
+                worst = max(worst, math.dist(ca, cb))
+        centre_errors[key] = round(worst, 2)
+    return pitch_errors, centre_errors
+
+
+@pytest.mark.parametrize("ratio", [None, 2.0, 3.0, 4.5])
+@pytest.mark.parametrize("line_width", [3, 5, 6, 9])
+def test_wide_fan_lanes_stay_concentric(tmp_path, line_width, ratio):
+    """Touching lanes keep one pitch along the whole of every edge of a fan
+    whose diagonals differ in steepness, and neighbouring lanes turn about
+    one centre, at any line width and corner radius."""
+    layout = "" if ratio is None else f"layout:\n  curve_radius_ratio: {ratio}\n"
+    pitch_errors, centre_errors = _fan_concentricity(
+        f"name: wide\nline_width: {line_width}\n{layout}",
+        "%%metro track_gap: 0\n",
+        tmp_path,
+    )
+    assert max(pitch_errors.values()) <= 0.1, pitch_errors
+    assert max(centre_errors.values()) <= 0.1, centre_errors
+
+
+def test_gapped_wide_fan_lanes_stay_concentric(tmp_path):
+    """A wide butt-capped line with a one-pixel gap between lanes nests the
+    same way."""
+    pitch_errors, centre_errors = _fan_concentricity(
+        "name: wide\nline_width: 9\nline_cap: butt\n"
+        "layout:\n  curve_radius_ratio: 2.0\n",
+        "%%metro track_gap: 1\n",
+        tmp_path,
+    )
+    assert max(pitch_errors.values()) <= 0.1, pitch_errors
+    assert max(centre_errors.values()) <= 0.1, centre_errors
 
 
 # One cubic per corner holds a circle to 1e-3 of its radius up to a right
