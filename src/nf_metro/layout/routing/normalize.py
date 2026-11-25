@@ -1310,12 +1310,14 @@ def _size_concentric_cohorts(
     X offset and reference for the channel passes that read them.
 
     A diagonal cohort shares each leg with the corner at its far end, unless
-    an earlier cohort or a right-angle cohort sizes that corner: it counts
-    that corner at no more than half of what the leg leaves once both shifts
-    are taken off (a corner no cohort sizes has none), plus that corner's own
-    shift, and leaves that corner no more than the rest of the leg.  A leg
-    too short for both corners at the base radius is so split evenly rather
-    than left to whichever corner is sized first.
+    an earlier cohort or a right-angle cohort sizes that corner, or (when
+    *respect_owned_corners*) a planner owns it: it counts that corner at no
+    more than half of what the leg leaves once both shifts are taken off (a
+    corner no cohort sizes has none), plus that corner's own shift, and leaves
+    that corner no more than the rest of the leg.  A leg too short for both
+    corners at the base radius is so split evenly rather than left to
+    whichever corner is sized first.  A corner the leg is not shared with
+    counts at its own radius and is never written.
     """
     cohorts = [
         (cohort, *_cohort_shifts(cohort))
@@ -1340,7 +1342,9 @@ def _size_concentric_cohorts(
             counted, shared = (
                 (radii, [])
                 if cohort.right_angle
-                else _shared_far_corners(member, shift, radii, order, sized_by)
+                else _shared_far_corners(
+                    member, shift, radii, order, sized_by, respect_owned_corners
+                )
             )
             budgets.append(
                 (corner_radius_budget(member.points, counted, radius_index), shift)
@@ -1371,6 +1375,7 @@ def _shared_far_corners(
     radii: list[float],
     order: int,
     sized_by: Mapping[tuple[int, int], _SizedBy],
+    respect_owned_corners: bool,
 ) -> tuple[list[float], list[tuple[int, float]]]:
     """The radii *member*'s diagonal corner budgets against, and each
     ``(far corner, leg)`` it shares a leg with, as
@@ -1383,6 +1388,10 @@ def _shared_far_corners(
             continue
         sizer = sized_by.get((id(member.route), neighbour))
         if sizer is not None and (sizer.right_angle or sizer.order <= order):
+            continue
+        if respect_owned_corners and planner_owns_segment_or_boundary(
+            member.route, neighbour + 1
+        ):
             continue
         other_shift = 0.0 if sizer is None else sizer.shift
         leg = dist(

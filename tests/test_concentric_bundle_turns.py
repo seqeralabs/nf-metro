@@ -9,8 +9,15 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
-from nf_metro.layout.constants import graph_offset_step
+from nf_metro.layout.constants import CURVE_RADIUS, OFFSET_STEP, graph_offset_step
+from nf_metro.layout.routing.common import (
+    OffsetRegime,
+    RoutedPath,
+    planner_owns_segment_or_boundary,
+)
 from nf_metro.layout.routing.corners import resolve_curve_radii, turn_shift
+from nf_metro.layout.routing.normalize import _size_concentric_cohorts
+from nf_metro.parser.model import Edge
 from nf_metro.render.svg import _drawn_pieces, _piece_at, build_render_plan
 from nf_metro.themes import resolve_theme
 
@@ -404,6 +411,52 @@ def test_genomic_hub_join_fuses_lone_and_bundled_legs():
         ("msisensor2", "vcfs"),
         ("freebayes", "vcfs"),
     }
+
+
+_DOGLEG_DIAGONAL = 15.0
+
+
+def _dogleg_lane(line_id: str, offset: float) -> RoutedPath:
+    """A lane jogging down a short 45-degree diagonal, *offset* outward of
+    its first turn, with both corners at the base radius and a route plan
+    owning its last segment, and so the corner that segment leaves."""
+    half = math.sqrt(0.5)
+    slide = math.tan(math.radians(22.5)) * offset
+    drop = _DOGLEG_DIAGONAL * half
+    points = [
+        (0.0, -offset),
+        (100.0 + slide, -offset),
+        (100.0 + drop + slide, drop - offset),
+        (200.0, drop - offset),
+    ]
+    return RoutedPath(
+        edge=Edge(source=f"{line_id}_src", target=f"{line_id}_tgt", line_id=line_id),
+        line_id=line_id,
+        points=points,
+        is_inter_section=True,
+        offset_regime=OffsetRegime.BAKED,
+        curve_radii=[CURVE_RADIUS, CURVE_RADIUS],
+        route_system_owned_segment_ranks=(3,),
+    )
+
+
+def test_planned_far_corner_keeps_its_radius_when_a_short_leg_is_split():
+    """A diagonal too short for both its corners takes its planned far corner
+    as fixed, giving the near corner only what that leaves of the leg."""
+    routes = [_dogleg_lane("a", 0.0), _dogleg_lane("b", OFFSET_STEP)]
+    assert 2 * CURVE_RADIUS > _DOGLEG_DIAGONAL
+    assert all(
+        planner_owns_segment_or_boundary(route, 2)
+        and not planner_owns_segment_or_boundary(route, 1)
+        for route in routes
+    )
+
+    _size_concentric_cohorts(routes, CURVE_RADIUS, {}, OFFSET_STEP)
+
+    radii = [route.curve_radii for route in routes]
+    assert [r[1] for r in radii] == [CURVE_RADIUS, CURVE_RADIUS]
+    assert all(r[0] + r[1] <= _DOGLEG_DIAGONAL + 1e-6 for r in radii), radii
+    assert radii[0][0] < radii[1][0], radii
 
 
 # One cubic per corner holds a circle to 1e-3 of its radius up to a right
