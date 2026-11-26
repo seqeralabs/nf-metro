@@ -33,7 +33,7 @@ light:
   background_fill: "#ffffff"
   label_color: "#201637"
   title_color: "#201637"
-  section_fill: "#f7f7f7"
+  section_fill: "#e2f7f3"
   section_stroke: "#cfd0d1"
   section_label_color: "#065647"
   legend_fill: "rgba(255, 255, 255, 0.9)"
