@@ -1,10 +1,11 @@
 # yaml-language-server: $schema=theme.schema.json
-# Seqera brand (brand.seqera.io): Dark Brand #201637 for text and strokes,
-# Deep Green #065647 for section labels, Medium Grey #cfd0d1 for borders,
-# Soft Grey #f7f7f7 for section fills. Brand Green #31C9AC is never used for
-# text, so it is left to the metro lines. Inter is the brand's body face;
-# Degular (display) and JetBrains Mono (code) are not used because a theme
-# sets one font stack for all text.
+# Seqera brand (brand.seqera.io). Dark Brand #201637 is the text and stroke
+# color, Deep Green #065647 the section label, Medium Grey #cfd0d1 the border
+# and Soft Grey #f7f7f7 the section fill. Brand Green #31C9AC is decorative
+# only (section badges, animation ball, the lead line color), never text, and
+# carries Dark Brand on top of it. Inter is the brand's body face; Degular
+# (display) and JetBrains Mono (code) are not used because a theme sets one
+# font stack for all text.
 name: seqera
 
 station_fill: "#ffffff"
@@ -17,7 +18,10 @@ label_font_weight: "600"
 title_font_size: 26
 section_label_font_size: 17
 legend_font_size: 16
+animation_ball_color: "#31C9AC"
 animation_ball_stroke: "#201637"
+section_badge_fill: "#31C9AC"
+section_badge_text_color: "#201637"
 animation_ball_stroke_width: 1.5
 
 # Brand colors only, ordered so similar ones (the two greens, the two
