@@ -144,6 +144,8 @@ export const INPUT_FORMATS = {
 /**
  * Compute the cache key for a given (mode, source) pair.
  * Must stay in sync with the hash in renderMetroFile.
+ * The cached SVG embeds a class prefix derived from this hash (see classPrefix),
+ * so the `class-prefix` token ties cache entries to prefixed output.
  * @param {string} source  Raw .mmd source text.
  * @param {string} mode    Render mode string: "", "d" (debug), "n"/"s" (Nextflow/Snakemake
  *   input), "G"/"S" (graph/section lines), "c" (chrome-less), "a" (animate), combinations thereof.
@@ -151,7 +153,7 @@ export const INPUT_FORMATS = {
  */
 function cacheHash(source, mode) {
   return createHash("sha256")
-    .update(`${NF_METRO_VERSION}\n${mode}\n${source}`)
+    .update(`${NF_METRO_VERSION}\nclass-prefix\n${mode}\n${source}`)
     .digest("hex")
     .slice(0, 16);
 }
