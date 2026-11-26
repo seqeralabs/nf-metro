@@ -1,10 +1,14 @@
 # yaml-language-server: $schema=theme.schema.json
-# Seqera brand: Inter type and the Platform palette, stepping down from the
-# brand navy (#160F26) into deep purple-greys for dark mode.
+# Seqera brand (brand.seqera.io): Dark Brand #201637 for text and strokes,
+# Deep Green #065647 for section labels, Medium Grey #cfd0d1 for borders,
+# Soft Grey #f7f7f7 for section fills. Brand Green #31C9AC is never used for
+# text, so it is left to the metro lines. Inter is the brand's body face;
+# Degular (display) and JetBrains Mono (code) are not used because a theme
+# sets one font stack for all text.
 name: seqera
 
 station_fill: "#ffffff"
-station_stroke: "#2D273C"
+station_stroke: "#201637"
 station_stroke_width: 2
 line_width: 4
 label_font_family: "'Inter Variable', Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
@@ -13,27 +17,27 @@ label_font_weight: "600"
 title_font_size: 26
 section_label_font_size: 17
 legend_font_size: 16
-animation_ball_stroke: "#2D273C"
+animation_ball_stroke: "#201637"
 animation_ball_stroke_width: 1.5
 
 light:
-  background_fill: "#f8f9fa"
-  label_color: "#242424"
-  title_color: "#160F26"
-  section_fill: "#F3F3F4"
-  section_stroke: "#D0CFD4"
-  section_label_color: "#6c757d"
-  legend_fill: "rgba(248, 249, 250, 0.9)"
-  legend_text_color: "#242424"
-  marker_stroke: "#2D273C"
+  background_fill: "#ffffff"
+  label_color: "#201637"
+  title_color: "#201637"
+  section_fill: "#f7f7f7"
+  section_stroke: "#cfd0d1"
+  section_label_color: "#065647"
+  legend_fill: "rgba(255, 255, 255, 0.9)"
+  legend_text_color: "#201637"
+  marker_stroke: "#201637"
 
 dark:
-  background_fill: "#1a1625"
-  label_color: "#e0d9f7"
-  title_color: "#f0ecff"
-  section_fill: "#231e30"
-  section_stroke: "#3d3650"
-  section_label_color: "#9d94b8"
-  legend_fill: "rgba(0, 0, 0, 0.4)"
-  legend_text_color: "#e0d9f7"
-  marker_stroke: "#7b6ea6"
+  background_fill: "#201637"
+  label_color: "#ffffff"
+  title_color: "#ffffff"
+  section_fill: "#2b2144"
+  section_stroke: "#3f3559"
+  section_label_color: "#cfd0d1"
+  legend_fill: "rgba(32, 22, 55, 0.85)"
+  legend_text_color: "#ffffff"
+  marker_stroke: "#cfd0d1"
