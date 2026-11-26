@@ -486,7 +486,7 @@ Gates with an un-exercised arm:
 
 ## `inter_section_handlers.py`
 
-238/389 gates fully exercised.
+240/389 gates fully exercised.
 
 Gates with an un-exercised arm:
 
@@ -880,7 +880,7 @@ Gates with an un-exercised arm:
 
 ## `offsets.py`
 
-569/682 gates fully exercised.
+570/682 gates fully exercised.
 
 Gates with an un-exercised arm:
 
