@@ -27,7 +27,7 @@ animation_ball_stroke_width: 1.5
 # Brand colors only, ordered so similar ones (the two greens, the two
 # near-blacks) never sit next to each other; lines past the list get
 # generated colors.
-line_colors: ["#31C9AC", "#7b6ea6", "#201637", "#8fe3d1", "#065647"]
+line_colors: ["#31C9AC", "#7b6ea6", "#201637", "#a99bd6", "#065647"]
 
 light:
   background_fill: "#ffffff"
