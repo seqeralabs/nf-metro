@@ -20,11 +20,10 @@ legend_font_size: 16
 animation_ball_stroke: "#201637"
 animation_ball_stroke_width: 1.5
 
-# Brand Green and a lifted brand purple lead. Amber, blue and coral follow so
-# lines bundled side by side stay distinguishable; Deep Green and Dark Brand
-# come last because they read as near-black next to each other.
-line_colors:
-  ["#31C9AC", "#6b4fd8", "#f2a31b", "#2f80ed", "#e5484d", "#065647", "#201637"]
+# Brand colors only, ordered so similar ones (the two greens, the two
+# near-blacks) never sit next to each other; lines past the list get
+# generated colors.
+line_colors: ["#31C9AC", "#7b6ea6", "#201637", "#8fe3d1", "#065647"]
 
 light:
   background_fill: "#ffffff"
@@ -38,8 +37,7 @@ light:
   marker_stroke: "#201637"
 
 dark:
-  line_colors:
-    ["#31C9AC", "#a995ff", "#ffb84d", "#5eb4ff", "#ff7a7f", "#8fe3d1", "#ffffff"]
+  line_colors: ["#31C9AC", "#a79bd0", "#3f8f7f", "#ffffff", "#7fe3cf"]
   background_fill: "#201637"
   label_color: "#ffffff"
   title_color: "#ffffff"
