@@ -18,7 +18,7 @@ label_font_weight: "600"
 title_font_size: 26
 section_label_font_size: 17
 legend_font_size: 16
-animation_ball_color: "#31C9AC"
+animation_ball_fill: "#31C9AC"
 animation_ball_stroke: "#201637"
 section_badge_fill: "#31C9AC"
 section_badge_text_color: "#201637"
