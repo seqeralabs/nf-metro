@@ -157,6 +157,18 @@ function cacheHash(source, mode) {
 }
 
 /**
+ * Per-map SVG class prefix. Inline SVG `<style>` rules are document-global, so
+ * maps sharing the default `nf-metro-*` class names restyle one another
+ * whenever their stylesheets differ (themes, modes). Deriving the prefix from
+ * the cache hash keeps it unique per map and stable across rebuilds.
+ * @param {string} hash  Cache hash of the map.
+ * @returns {string}
+ */
+function classPrefix(hash) {
+  return `m${hash.slice(0, 8)}`;
+}
+
+/**
  * Collect the `.mmd` source paths that need a chrome-less ("baked colour")
  * render for OG image generation: every pipelines content-collection entry
  * (website/src/content/pipelines.json, written by `scripts/build_gallery.py`
@@ -216,7 +228,7 @@ function prewarmMetroCache() {
     return;
   }
 
-  /** @type {Array<{input:string, output:string, debug:boolean, from?:string, no_self_color_scheme:boolean, no_chrome_css:boolean, layout_options:{manifest:boolean, animate?:boolean}}>} */
+  /** @type {Array<{input:string, output:string, debug:boolean, from?:string, no_self_color_scheme:boolean, no_chrome_css:boolean, svg_class_prefix:string, layout_options:{manifest:boolean, animate?:boolean}}>} */
   const jobs = [];
 
   function addJob(file, mode) {
@@ -233,6 +245,7 @@ function prewarmMetroCache() {
         from: Object.entries(INPUT_FORMATS).find(([, f]) => mode.includes(f.letter))?.[0],
         no_self_color_scheme: true,
         no_chrome_css: mode.includes("c"),
+        svg_class_prefix: classPrefix(hash),
         layout_options: layoutOptions,
       });
     }
@@ -353,6 +366,8 @@ export function renderMetroFile(
       tmpOutput,
       "--no-self-color-scheme",
       "--no-manifest",
+      "--svg-class-prefix",
+      classPrefix(hash),
     ];
     if (debug) args.push("--debug");
     if (converter && !converted) args.push("--from", inputFormat);
