@@ -30,6 +30,14 @@ gallery:
       `nyc-subway`, `paris-metro`, `tokyo-metro` and `washington-metro`. Themes stack left to right
       (`%%metro style: seqera, london-tube`) and can be
       [user-defined YAML files](/nf-metro/themes/#writing-your-own-theme)."
+  - id: rnaseq_seqera
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "The rnaseq map under the built-in `seqera` theme (`%%metro style: seqera`): the brand
+      palette of Dark Brand text, Soft Green sections, Brand Green section badges and a
+      brand-led line colour order, in Inter. The same map follows the viewer's light or dark
+      mode."
   - id: directional_flow
     source_dir: examples
     category: Feature Showcase

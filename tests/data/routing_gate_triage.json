@@ -1535,10 +1535,6 @@
   "note": "An up-and-over feeder into a port with a column record: a dealt column lands the bundle on its channels, a declined one keeps the riser laterals. Both arms are reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` (declined) and `tests/fixtures/regressions/perp_entry_column_straight_drop.mmd`; a generated-map sweep reaches it (10 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
  },
- "inter_section_handlers.py::if all(abs(dy) <= ctx.curve_radius for dy in vertical_steps):::#1": {
-  "note": "A flat arrival (no vertical leg longer than the curve radius) classifies as a U-turn hand-over. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` and the inline maps `tests/test_layout_invariants.py` (_TRUNK_FORK_ROW_PEER) and `tests/test_samerow_bypass_entry_lanes.py` (LEVEL_RETURN_MMD); a generated-map sweep reaches it (329 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
-  "status": "needs-review"
- },
  "inter_section_handlers.py::if column is None:::#1": {
   "note": "An up-and-over feeder into a port with a column record skips the sole-feeder test. Reached by `tests/fixtures/regressions/perp_entry_column_feeder_conflict.mmd` and `tests/fixtures/regressions/perp_entry_column_straight_drop.mmd`; a generated-map sweep reaches it (10 of 8000 maps). The sweep's roots exclude tests/fixtures/regressions/ and maps written inline in tests, so no swept fixture evaluates it.",
   "status": "needs-review"
@@ -1781,10 +1777,6 @@
  },
  "inter_section_handlers.py::if markers and max(markers) < ep.y:::#1": {
   "note": "The decline arm skips an earlier-row box over a merge landing run that has a marker or side port at or below the run, so the run would cross it rather than pass beneath it; _merge_entry_route_kind then routes the feeder by CORRIDOR or AROUND_BELOW. Reachable, but the only swept landing run short of clearance under an earlier-row box is genomeassembly_staggered's, which passes beneath scaffolding.",
-  "status": "needs-review"
- },
- "inter_section_handlers.py::if exit_port is not None and _port_run_direction(exit_port) is run_direction:::#1": {
-  "note": "An L-shape junction fan hangs off a LEFT or RIGHT exit port and runs on in the exit's own direction toward targets beyond the junction, so its source always resolves to an exit port facing the run. The fall-through, for a junction fed by a TOP/BOTTOM exit or a fan running back against its exit, is a guard no swept topology builds this L-shape for.",
   "status": "needs-review"
  },
  "normalize.py::if new is None or new == old:::#1": {
