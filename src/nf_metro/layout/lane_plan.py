@@ -138,14 +138,15 @@ section's peel and parting orders as the section order does.  An exit
 carries, on lines it shares with an upstream exit it descends from, that
 exit's order where both reach one entry.
 
-**Lanes.**  A fan plan's carriers keep their slot; a line riding a level edge
-into a part from an earlier part of its run keeps that lane, a run whose lines
-are one node's whole bundle keeps that node's lanes, and a line riding a
-seam-pinned entry of the run its entry lane, unless a carrier's slot differs
-or a line it conflicts with holds that lane (pins).  A line none of those
-fixes that leaves the run by an exit whose connector runs straight across a
-straight seam to an entry where a fan plan's carrier slot fixes it takes the
-exit lane landing on that slot (a *fan seam*),
+**Lanes.**  A fan plan's carriers keep their slot, one per line on a run
+(carriers disagreeing on a line's slot along one run fail closed); a line
+riding a level edge into a part from an earlier part of its run keeps that
+lane, a run whose lines are one node's whole bundle keeps that node's lanes,
+and a line riding a seam-pinned entry of the run its entry lane, unless a
+carrier's slot differs or a line it conflicts with holds that lane (pins).
+A line none of those fixes that leaves the run by an exit whose connector
+runs straight across a straight seam to an entry where a fan plan's carrier
+slot fixes it takes the exit lane landing on that slot (a *fan seam*),
 where its exits agree on one such lane and no fixed line holds it.  The other
 lines take lanes in run order: one past the highest lane of an earlier line
 they coexist with; with none, the lane of an earlier
@@ -1798,8 +1799,15 @@ class _Tracks:
         fixed: dict[str, int] = {}
         for n in members:
             for lid in graph.station_lines(n):
-                if (n, lid) in self.fan_slots:
-                    fixed.setdefault(lid, self.fan_slots[(n, lid)])
+                slot = self.fan_slots.get((n, lid))
+                if slot is None:
+                    continue
+                if fixed.setdefault(lid, slot) != slot:
+                    raise RuntimeError(
+                        f"fan carriers on run {key!r} of {sec.id!r} give "
+                        f"{lid!r} slots {fixed[lid]} and {slot}; a run holds "
+                        "one lane per line"
+                    )
         pins = self._part_pins(run, fixed)
         for lid, lane in pins.items():
             fixed.setdefault(lid, lane)

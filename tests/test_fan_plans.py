@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import nf_metro.layout.fan_plans as fan_plans
+import nf_metro.layout.lane_plan as lane_plan
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
@@ -2908,8 +2909,10 @@ def test_branches_only_crossing_at_a_station_leave_it_free() -> None:
 
 def test_crossing_branches_hold_distinct_lanes_at_the_entry_they_cross() -> None:
     """Qc's spur and Parent's parent_child only cross at Child's entry: the
-    entry carries no fan slot, the hand-overs at Fastqc and Align keep theirs,
-    and the two lines hold distinct lanes there."""
+    entry carries no fan slot, and the hand-overs at Fastqc and Align keep
+    theirs.  parent_child holds the lane on one side of main at the entry,
+    so Fastqc hands spur the lane on the other, and spur runs on it straight
+    into Child."""
     graph = parse_metro_mermaid(CROSSING_BRANCHES.read_text())
     compute_layout(graph, validate=True)
     carriers = {
@@ -2919,10 +2922,93 @@ def test_crossing_branches_hold_distinct_lanes_at_the_entry_they_cross() -> None
         for carrier in plan.offset_carriers
     }
     assert "child__entry_left_5" not in carriers
-    assert carriers["fastqc"] == {"main": 0, "spur": 1}
+    assert carriers["fastqc"] == {"main": 0, "spur": -1}
     assert carriers["align"] == {"main": 0, "parent_child": 1}
     lanes = recorded_lane_plan(graph).tracks.lanes
     assert (
-        lanes[("child__entry_left_5", "spur")]
+        lanes[("fastqc", "spur")]
+        == lanes[("qc__exit_right_2", "spur")]
+        == lanes[("child__entry_left_5", "spur")]
         != lanes[("child__entry_left_5", "parent_child")]
     )
+
+
+FLAT_LEVER_SINGLE = (
+    ROOT
+    / "tests"
+    / "data"
+    / "bypass_label_obstacles"
+    / "flat_lever_collinear_retry_single.mmd"
+)
+
+
+@pytest.mark.parametrize(
+    ("downstream_lines", "expected"),
+    [
+        (("l0", "l1", "l3", "l4"), {"l0": 0, "l4": 1, "l3": 2, "l1": 3}),
+        (("l0", "l3"), {"l0": 0, "l3": 2}),
+    ],
+    ids=["born_line_takes_a_free_lane", "departed_line_leaves_its_lane_empty"],
+)
+def test_a_carrier_keeps_its_upstream_carriers_lanes_along_a_run(
+    downstream_lines: tuple[str, ...], expected: dict[str, int]
+) -> None:
+    graph = parse_metro_mermaid(FLAT_LEVER_SINGLE.read_text())
+    carriers = {
+        "s0n0": frozenset({"l0", "l3", "l4"}),
+        "s0n1": frozenset(downstream_lines),
+    }
+
+    slots = fan_plans._run_consistent_slots(graph, ("l0", "l1", "l4", "l3"), carriers)
+
+    assert slots["s0n0"] == {"l0": 0, "l4": 1, "l3": 2}
+    assert slots["s0n1"] == expected
+
+
+def test_a_fan_line_holds_one_slot_along_each_run() -> None:
+    graph = parse_metro_mermaid(FLAT_LEVER_SINGLE.read_text())
+    compute_layout(graph)
+    (carriers,) = (
+        {
+            carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
+            for carrier in plan.offset_carriers
+        }
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+    )
+    upstream, downstream = carriers["s0n0"], carriers["s0n1"]
+    assert {lid: downstream[lid] for lid in upstream} == upstream
+
+
+@pytest.mark.parametrize("holder_ahead", [True, False])
+def test_a_departing_name_takes_the_side_its_next_meeting_leaves_free(
+    holder_ahead: bool,
+) -> None:
+    graph = parse_metro_mermaid(CROSSING_BRANCHES.read_text())
+    carriers = {
+        "fastqc": frozenset({"main", "spur"}),
+        "align": frozenset({"main", "parent_child"}),
+    }
+    if holder_ahead:
+        carriers["__junction_6"] = frozenset({"main", "parent_child"})
+    slots = fan_plans._run_consistent_slots(
+        graph, ("main", "spur", "parent_child"), carriers
+    )
+
+    fan_plans._seat_departures_on_the_free_side(graph, carriers, slots)
+
+    assert slots["fastqc"] == {"main": 0, "spur": -1 if holder_ahead else 1}
+
+
+def test_carriers_disagreeing_on_a_line_along_one_run_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Disagreeing(lane_plan._Tracks):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            self.fan_slots[("child__entry_left_5", "parent_child")] = 2
+
+    monkeypatch.setattr(lane_plan, "_Tracks", Disagreeing)
+    graph = parse_metro_mermaid(CROSSING_BRANCHES.read_text())
+    with pytest.raises(RuntimeError, match="one lane per line"):
+        compute_layout(graph)
