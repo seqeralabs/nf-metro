@@ -2127,7 +2127,7 @@ def _guard_sparse_loop_station_clears_column_neighbour(
     """A sparse single-line loop station clears its same-column neighbours by
     at least a row pitch.
 
-    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.14) shifts a
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.12) shifts a
     sparse loop station (one edge in, one edge out, both endpoints on the
     section trunk) one row off the trunk only to clear a busier same-row
     sibling whose inbound bundle crosses its column.  Fired without that
@@ -5544,27 +5544,27 @@ GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         ),
     ),
     # A sparse loop-side station (single line in/out, full-bundle row-mates)
-    # sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset;
+    # sits on the trunk Y until Stage 6.12 shifts it to a half-grid offset;
     # before that the sibling bundle's route passes through its marker bbox.
     GuardSpec(
         _guard_no_line_crosses_non_consumer,
         "A",
         needs=frozenset({"offsets", "routes"}),
         bisection_safe=True,
-        first_valid_stage="after Stage 6.14",
+        first_valid_stage="after Stage 6.12",
     ),
-    # The sparse loop-station shift runs at Stage 6.14, so its crowding
+    # The sparse loop-station shift runs at Stage 6.12, so its crowding
     # outcome is only observable from that checkpoint onward.
     GuardSpec(
         _guard_sparse_loop_station_clears_column_neighbour,
         "A",
         bisection_safe=True,
-        first_valid_stage="after Stage 6.14",
+        first_valid_stage="after Stage 6.12",
         issue_pin=("#1071",),
         narrow_reason=(
             "Scoped to sparse single-line loop stations (one edge in, one out, "
             "both endpoints on the section trunk) on LR/RL sections -- the only "
-            "stations Stage 6.14 shifts -- and exempts half-grid symfan members "
+            "stations Stage 6.12 shifts -- and exempts half-grid symfan members "
             "that legitimately sit a half pitch from a column neighbour."
         ),
     ),

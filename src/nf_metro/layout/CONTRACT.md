@@ -172,7 +172,7 @@ bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
 |---|---|---|
 | `_guard_stations_in_sections` | after Stage 5.3 | Stage 5.2's off-track lift moves stations above the section bbox; Stage 5.3 grows the bbox to enclose them. |
 | `_guard_no_station_overlap` | after Stage 6.12 | It reads station offsets, which read the lane plan decided at the close of Stage 6.12. Pre-snap fan placement can also sit a fraction of a pitch off the row grid until Stage 6.4's snap pulls every station onto the grid on distinct same-column slots. |
-| `_guard_no_line_crosses_non_consumer` | after Stage 6.14 | A sparse loop-side station sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
+| `_guard_no_line_crosses_non_consumer` | after Stage 6.12 | A sparse loop-side station sits on the trunk Y until Stage 6.12 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
 
 Three further guards are excluded from the bisection set entirely
 (meaningful only at the final boundary); the `_run_pass_c_guards`

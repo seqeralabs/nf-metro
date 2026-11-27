@@ -115,7 +115,7 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `_guard_ports_clear_unanchored_box_edges`                | A    |     7.9 | final only                                |
 | `_guard_no_station_overlap`                              | A    |    13.5 | bisection (first valid: after Stage 6.4)  |
 | `_guard_no_coincident_station_coords`                    | A    |     3.3 | bisection (first valid: after Stage 6.4)  |
-| `_guard_no_line_crosses_non_consumer`                    | A    |    74.7 | bisection (first valid: after Stage 6.14) |
+| `_guard_no_line_crosses_non_consumer`                    | A    |    74.7 | bisection (first valid: after Stage 6.12) |
 | `_guard_station_x_column_drift`                          | A    |     6.0 | bisection (first valid: start)            |
 | `_guard_row_trunk_cy_consistent`                         | B    |    12.1 | final-only                                |
 | `_guard_off_track_clear_of_anchor`                       | B    |     3.5 | final-only                                |
