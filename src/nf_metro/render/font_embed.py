@@ -23,7 +23,7 @@ import html
 import re
 from collections import namedtuple
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from nf_metro.text_metrics import (
     DEFAULT_TEXT_METRICS,
@@ -89,6 +89,50 @@ _DEFS_END = "</defs>"
 
 # Holds a pair of per-weight values (regular, bold).
 _FontPair = namedtuple("_FontPair", ["regular", "bold"])
+
+
+class _FontVerticalMetrics(NamedTuple):
+    """Font-unit vertical metrics used to resolve SVG dominant-baseline."""
+
+    ascent: float
+    descent: float
+    cap_height: float
+    x_height: float
+
+
+def _vertical_metrics_from_tables(hhea: object, os2: object) -> _FontVerticalMetrics:
+    ascent = float(getattr(hhea, "ascent", 0))
+    descent = float(getattr(hhea, "descent", 0))
+    cap_height = float(getattr(os2, "sCapHeight", 0) or ascent)
+    x_height = float(getattr(os2, "sxHeight", 0) or cap_height * 0.7)
+    return _FontVerticalMetrics(
+        ascent=ascent,
+        descent=descent,
+        cap_height=cap_height,
+        x_height=x_height,
+    )
+
+
+def _dominant_baseline_shift(
+    dominant_baseline: str,
+    metrics: _FontVerticalMetrics,
+    scale: float,
+) -> float:
+    """Return downward SVG pixel shift from anchor y to the alphabetic baseline."""
+    key = dominant_baseline.strip().lower()
+    if key == "hanging":
+        return metrics.cap_height * scale
+    if key == "central":
+        return ((metrics.ascent + metrics.descent) / 2.0) * scale
+    if key == "middle":
+        return (metrics.x_height / 2.0) * scale
+    if key in ("text-before-edge", "text-top"):
+        return metrics.ascent * scale
+    if key in ("text-after-edge", "text-bottom", "ideographic"):
+        return metrics.descent * scale
+    if key == "mathematical":
+        return (metrics.cap_height / 2.0) * scale
+    return 0.0
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -224,9 +268,13 @@ def text_to_paths(svg: str) -> str:
     glyphsets = _FontPair(regular.getGlyphSet(), bold.getGlyphSet())
     cmaps = _FontPair(regular.getBestCmap(), bold.getBestCmap())
     upems = _FontPair(regular["head"].unitsPerEm, bold["head"].unitsPerEm)
+    vmetrics = _FontPair(
+        _vertical_metrics_from_tables(regular["hhea"], regular["OS/2"]),
+        _vertical_metrics_from_tables(bold["hhea"], bold["OS/2"]),
+    )
 
     def _replace(match: re.Match[str]) -> str:
-        return _text_elem_to_paths(match, glyphsets, cmaps, upems)
+        return _text_elem_to_paths(match, glyphsets, cmaps, upems, vmetrics)
 
     return _TEXT_ELEM_RE.sub(_replace, svg)
 
@@ -248,6 +296,7 @@ def _text_elem_to_paths(
     glyphsets: _FontPair,
     cmaps: _FontPair,
     upems: _FontPair,
+    vmetrics_pair: _FontPair,
 ) -> str:
     """Convert one matched <text …>content</text> to a <g> of <path> elements."""
     from fontTools.pens.svgPathPen import SVGPathPen  # type: ignore[import]
@@ -268,16 +317,18 @@ def _text_elem_to_paths(
     fill = attrs.get("fill", "#000000")
     text_anchor = attrs.get("text-anchor", "start")
     dy_str = attrs.get("dy", "0")
+    dominant_baseline = attrs.get("dominant-baseline", "auto")
     transform = attrs.get("transform", "")
-
-    dy = _parse_dy(dy_str, font_size)
-    baseline_y = y + dy
 
     is_bold = is_bold_weight(font_weight)
     glyphset = glyphsets.bold if is_bold else glyphsets.regular
     cmap = cmaps.bold if is_bold else cmaps.regular
     upem = upems.bold if is_bold else upems.regular
+    vmetrics = vmetrics_pair.bold if is_bold else vmetrics_pair.regular
     scale = font_size / upem
+
+    dy = _parse_dy(dy_str, font_size)
+    baseline_y = y + dy + _dominant_baseline_shift(dominant_baseline, vmetrics, scale)
 
     metrics_style = TextStyle(font_size, font_weight, MetricsFace.INTER)
 
