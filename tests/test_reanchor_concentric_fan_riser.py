@@ -2,8 +2,10 @@
 
 Two corners joined by one riser split its length in proportion to their
 declared radii.  A riser that is exactly as long as those two radii have no
-slack, so raising the fan corner's radius takes length from its partner, which
-then resolves below the radius it declares.
+slack, so raising the fan corner's radius would take length from its partner,
+which would then resolve below the radius it declares.  The fan corner's
+budget is the riser less its partner's declared radius, so the re-anchor seats
+it at exactly that slack.
 """
 
 from __future__ import annotations
@@ -56,7 +58,11 @@ def test_reanchor_keeps_zero_slack_riser_partner_at_its_declared_radius(
     _reanchor_concentric_corner_fans([inner, outer], {}, CURVE_RADIUS)
 
     assert inner.curve_radii is not None
-    assert inner.curve_radii[fan_index] > inner_radii[fan_index]
+    assert inner.concentric_corner_bases_by_segment
+    riser = abs(inner_points[2][1] - inner_points[1][1])
+    assert inner.curve_radii[fan_index] == pytest.approx(
+        riser - inner_radii[partner_index], abs=COORD_TOLERANCE_FINE
+    )
     for route in (inner, outer):
         assert route.curve_radii is not None
         resolved = resolve_curve_radii(route.points, route.curve_radii)
