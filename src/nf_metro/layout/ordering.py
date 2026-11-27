@@ -519,11 +519,17 @@ def _claimed_peel_lane(
     graph: MetroGraph | None,
     line_base: dict[str, float] | None,
 ) -> float | None:
-    """Lane a placed source-fork predecessor claimed for peel branch *node*."""
+    """Lane a placed source-fork predecessor claimed for peel branch *node*.
+
+    The claim only keeps a sibling source off the lane, so a fork that is the
+    only predecessor-less station of *G* claims nothing.
+    """
     if graph is None or line_base is None:
         return None
     for pred in G.predecessors(node):
-        if pred in tracks:
+        if pred in tracks and any(
+            other != pred and not G.in_degree(other) for other in G.nodes
+        ):
             lane = _source_peel_lanes(
                 pred, tracks[pred], G, graph, line_base, line_gap
             ).get(node)
