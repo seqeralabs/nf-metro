@@ -359,7 +359,7 @@ in pipeline order.
   station assigned a local `(x, y)`, a `layer`, and a `track`. Section
   `bbox_x/y/w/h` reflect the local content extent, and `Section.lane_ends`
   holds the lines pinned to an end of the section's lane order (read by the
-  offsets phase that re-slots them), and `Section.lane_end_seeds` maps each
+  lane plan, see "Lane plan record"), and `Section.lane_end_seeds` maps each
   such line to the contenders that set its pin.
 - **Invariants preserved**: Ports (`is_port=True`) are not positioned.
   Inter-section edges in `graph.edges` are untouched. Junctions are not
@@ -1622,7 +1622,10 @@ through the record's draw accessors (`planned_offsets` in
   `PortOrderBuilder` (`layout/port_order_plan.py`) for entry orders and feeding
   it exit orders and the orders straight seams pin at entries.  Born lines
   leaving a divergence fan read `fanout_divergence_peel_order`
-  (`layout/fan_ordering.py`) in their section flow's frame.  `start_layout`,
+  (`layout/fan_ordering.py`) in their section flow's frame.  A run seats the
+  lines Stage 1.1 pins to a lane end (`Section.lane_ends`,
+  `Section.lane_end_seeds`, decided by `ordering.peel_lane_ends`) past the
+  other lanes of each piece of the line its contenders reach.  `start_layout`,
   called at the top of `_layout_once`, clears the previous layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
   packs as they stand at the close of Stage 6.12, the last stage that moves a

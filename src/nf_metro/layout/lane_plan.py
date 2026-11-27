@@ -163,11 +163,18 @@ lines, lifted past its bundle-mates laned before it and the free line before
 it, clamped below its pinned bundle-mates after it.  A free line never takes a
 lane a line it coexists with holds, nor one beside a line that runs from the
 run's entry port past one of its stations where the other stops (a *breeze*):
-it steps up past both.  The run's stations then hold no lane none of its lines
-rides: the lanes between their outermost close up in order about its lowest
-pinned lane (else its lowest), lanes beyond them keeping their distance, where
-that moves no pinned lane: a line a straight seam pins never steps lanes along
-the straight run.
+it steps up past both.  A line its section pins to an end of the lane order
+(``Section.lane_ends``, which placement decides) and none of those fixes is
+*end-pinned* on each piece of it the run carries (nodes its edges join along
+the run) that it reaches wholly from the contenders that set the pin
+(``Section.lane_end_seeds``): there it takes the lane one past the lowest (a
+negative pin) or highest lane the piece's other lines hold, pieces sharing a
+node taken together, the furthest-out pin outermost and lines pinned as far in
+the order of their lanes.  The run's stations then hold no lane none of its
+lines rides: the lanes between their outermost close up in order about its
+lowest pinned or end-pinned lane (else its lowest), lanes beyond them keeping
+their distance, where that moves no pinned or end-pinned lane: a line a
+straight seam pins never steps lanes along the straight run.
 
 **Lines in a seam-pinned run.**  Outside a part entered by bundles, a line
 riding no entry of a run holding a seam-pinned entry lies beside the fixed
@@ -196,6 +203,7 @@ Validation reads lanes and routes only from the stage-6.12 checkpoint on.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
@@ -1837,9 +1845,41 @@ class _Tracks:
             lanes = self._fill(
                 run, order, slots, fixed, bool(pins), arrival, conflict, riding, joins
             )
+        lanes, ends = self._close_up(
+            members, lanes, self._end_pinned_lanes(run, lanes, fixed), fixed
+        )
+
+        def lane_at(n: str, lid: str) -> int:
+            return ends.get((n, lid), lanes[lid])
+
+        for n in members:
+            if n in self.seam_lanes:
+                self.seam_lanes[n] = {
+                    lid: lane_at(n, lid) for lid in self.seam_lanes[n]
+                }
+            for lid in graph.station_lines(n):
+                self.lanes[(n, lid)] = lane_at(n, lid)
+                if lid in fan_seamed:
+                    self.fan_seams[(n, lid)] = lane_at(n, lid)
+
+    def _close_up(
+        self,
+        members: Sequence[str],
+        lanes: Mapping[str, int],
+        ends: dict[tuple[str, str], int],
+        fixed: Mapping[str, int],
+    ) -> tuple[dict[str, int], dict[tuple[str, str], int]]:
+        """*lanes* and *ends* with the lanes between the run's outermost
+        closed up about its lowest pinned lane (else its lowest), where that
+        moves no lane *fixed* or *ends* holds."""
+        graph = self.graph
+
+        def lane_at(n: str, lid: str) -> int:
+            return ends.get((n, lid), lanes[lid])
+
         stops = (
             [
-                lanes[lid]
+                lane_at(n, lid)
                 for n in members
                 if n not in graph.ports
                 for lid in graph.station_lines(n)
@@ -1848,28 +1888,114 @@ class _Tracks:
             or [0]
         )
         lo, hi = min(stops), max(stops)
-        held = sorted({v for v in lanes.values() if lo <= v <= hi})
+        held = sorted(
+            {
+                v
+                for n in members
+                for lid in graph.station_lines(n)
+                if lo <= (v := lane_at(n, lid)) <= hi
+            }
+        )
 
         def close(v: int) -> int:
             return (
-                held.index(v)
+                bisect_left(held, v)
                 if lo <= v <= hi
                 else v - lo
                 if v < lo
                 else v - hi + len(held) - 1
             )
 
-        anchor = min((lanes[lid] for lid in fixed), default=lo)
-        packed = {lid: anchor - close(anchor) + close(v) for lid, v in lanes.items()}
-        if all(packed[lid] == lanes[lid] for lid in fixed):
-            lanes = packed
-        for n in members:
-            if n in self.seam_lanes:
-                self.seam_lanes[n] = {lid: lanes[lid] for lid in self.seam_lanes[n]}
-            for lid in graph.station_lines(n):
-                self.lanes[(n, lid)] = lanes[lid]
-                if lid in fan_seamed:
-                    self.fan_seams[(n, lid)] = lanes[lid]
+        pinned = [*(lanes[lid] for lid in fixed), *ends.values()]
+        anchor = min(pinned, default=lo)
+
+        def pack(v: int) -> int:
+            return anchor - close(anchor) + close(v)
+
+        if not all(pack(v) == v for v in pinned):
+            return dict(lanes), ends
+        return (
+            {lid: pack(v) for lid, v in lanes.items()},
+            {key: pack(v) for key, v in ends.items()},
+        )
+
+    def _end_pinned_lanes(
+        self, run: _Run, lanes: Mapping[str, int], fixed: Mapping[str, int]
+    ) -> dict[tuple[str, str], int]:
+        """Each ``(node, line)`` of *run* a lane-end pin seats, with its lane.
+
+        A line its section pins to an end of the lane order
+        (``Section.lane_ends``) and no fixed lane holds is pinned on each piece
+        of it the run carries (nodes its edges join along the run) that it
+        reaches wholly from the contenders that set the pin
+        (``Section.lane_end_seeds``).  Pieces sharing a node form a cluster:
+        its pinned lines step past the lowest (a negative pin) or highest lane
+        the cluster's other lines hold, the furthest-out pin outermost and lines
+        pinned as far keeping the order of the lanes they were filled on.
+        """
+        graph = self.graph
+        section = graph.sections[run.sec.id]
+        ends = {
+            lid: pin
+            for lid, pin in section.lane_ends.items()
+            if lid in lanes and lid not in fixed
+        }
+        pieces: list[tuple[str, frozenset[str]]] = []
+        for lid in sorted(ends):
+            reach = graph.line_reach(lid, section.lane_end_seeds.get(lid, ()))
+            for piece in self._line_pieces(run, lid):
+                if piece <= reach:
+                    pieces.append((lid, piece))
+        clusters: list[list[tuple[str, frozenset[str]]]] = []
+        for item in pieces:
+            joined = [c for c in clusters if any(item[1] & other for _l, other in c)]
+            merged = [item, *(x for c in joined for x in c)]
+            clusters = [c for c in clusters if c not in joined] + [merged]
+        out: dict[tuple[str, str], int] = {}
+        for cluster in clusters:
+            nodes = frozenset().union(*(piece for _lid, piece in cluster))
+            pinned = {lid for lid, _piece in cluster}
+            others = [
+                lanes[m]
+                for n in nodes
+                for m in graph.station_lines(n)
+                if m not in pinned
+            ]
+            if not others:
+                continue
+            for toward, edge in ((-1, min(others)), (1, max(others))):
+                stack = sorted(
+                    (lid for lid in pinned if ends[lid] * toward > 0),
+                    key=lambda lid: (abs(ends[lid]), toward * lanes[lid], lid),
+                )
+                for k, lid in enumerate(stack, start=1):
+                    for piece_lid, piece in cluster:
+                        if piece_lid == lid:
+                            for n in piece:
+                                out[(n, lid)] = edge + toward * k
+        return out
+
+    def _line_pieces(self, run: _Run, lid: str) -> list[frozenset[str]]:
+        """The node sets *run* carries *lid* through, joined by its edges
+        along the run."""
+        graph = self.graph
+        nodes = sorted(n for n in run.members if lid in graph.station_lines(n))
+        parent = {n: n for n in nodes}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for n in nodes:
+            for target in run.sec.outs.get((n, lid), ()):
+                if target in parent:
+                    parent[find(target)] = find(n)
+        pieces: dict[str, set[str]] = {}
+        for n in nodes:
+            pieces.setdefault(find(n), set()).add(n)
+        return [frozenset(piece) for piece in pieces.values()]
 
     def _fan_seam_pins(
         self, members: Sequence[str], fixed: Mapping[str, int]

@@ -98,9 +98,6 @@ _KNOWN_DEFECTS = {
     "test_no_guard_downgrade": {
         ("fed_fork_across_sections", o): _CORRIDOR for o in _TB + _BT
     },
-    "test_no_line_crosses_another": {
-        ("fed_fork_across_sections", o): _CORRIDOR for o in _TB
-    },
     "test_contender_shapes_stay_clear": {
         **{
             (f"centered_{order}", o): _CENTRED_TB_ABORT
@@ -109,11 +106,7 @@ _KNOWN_DEFECTS = {
         },
         **{
             (shape, o): _STACKED_FEED
-            for shape in [
-                *(f"flat_frame_{order}" for order in DECLARATION_ORDERS),
-                *_FED_SHAPES,
-                _AUTO_GRID,
-            ]
+            for shape in [*_FED_SHAPES, _AUTO_GRID]
             for o in _TB
         },
         **{
