@@ -136,8 +136,8 @@ ALLOWED_IMPORTS = {
             ("nf_metro.layout.routing.context", "BypassNeed"),
             ("nf_metro.layout.routing.context", "boxed_fanout_junction"),
             ("nf_metro.layout.routing.context", "packed_cell_same_row_bypass"),
-            ("nf_metro.layout.constants", "CURVE_RADIUS"),
-            ("nf_metro.layout.constants", "INTER_ROW_HEADER_CLEARANCE"),
+            ("nf_metro.layout.pass_metrics", "active_curve_radius"),
+            ("nf_metro.layout.pass_metrics", "inter_row_header_clearance"),
             ("nf_metro.layout.constants", "SECTION_ROUTE_CLEARANCE"),
             ("nf_metro.layout.constants", "COORD_TOLERANCE"),
             ("nf_metro.layout.constants", "SECTION_X_PADDING"),
@@ -153,6 +153,7 @@ ALLOWED_IMPORTS = {
     lane_plan_module: frozenset(
         {
             ("__future__", "annotations"),
+            ("bisect", "bisect_left"),
             ("collections.abc", "Callable"),
             ("collections.abc", "Iterable"),
             ("collections.abc", "Mapping"),

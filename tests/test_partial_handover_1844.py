@@ -79,7 +79,7 @@ def _witness(row_align: str = "content", *, validate: bool = False):
 
 
 def _svg(graph) -> str:
-    return emit_render_plan(build_render_plan(graph, THEMES["nfcore"]))
+    return emit_render_plan(build_render_plan(graph, THEMES["default"]))
 
 
 def test_partial_exit_port_rides_its_own_trunk():

@@ -126,7 +126,7 @@ def test_a_junction_branch_leaves_on_its_feeding_exits_side(name: str) -> None:
         layout_options={"fold_threshold": 1},
         source_dir=str(path.parent),
     )
-    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
+    plan = build_render_plan(graph, resolve_theme(graph, "light"))
     (points,) = (
         points
         for route, points in zip(plan.routes, plan.route_polylines)

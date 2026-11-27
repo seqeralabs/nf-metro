@@ -38,6 +38,7 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.lane_plan import LANE_PLAN_STAGE, LanePlan, LanePlanNotSealed
+from nf_metro.layout.pass_metrics import graph_layout_context
 from nf_metro.layout.phase_state import CANONICAL_STAGE_ORDER
 from nf_metro.layout.phases import guards as guards_module
 from nf_metro.layout.port_order_plan import ApproachKind, SideRule, port_travel
@@ -130,13 +131,15 @@ def _drawn(path: Path) -> _Drawn:
     if not settled:
         return _Drawn(None)
     graph, last = settled[-1]
+    with graph_layout_context(graph):
+        step = graph_offset_step(graph)
     return _Drawn(
         graph,
         source._lane_plan,
         dict(last.station_offsets),
         list(last.routes),
         [list(p) for p in last.route_polylines],
-        graph_offset_step(graph),
+        step,
         observed.route_plan.exit_turn_plans,
         seam_pins,
     )

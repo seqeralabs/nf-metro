@@ -362,7 +362,7 @@ def test_a_feeder_past_the_far_side_port_loops_round_its_section(text: str) -> N
     of the junction crosses any section.
     """
     graph = prepare_graph(text)
-    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
+    plan = build_render_plan(graph, resolve_theme(graph, "light"))
     (port_id,) = graph.sections["sec2"].entry_ports
     entry = same_row_bypass_entry(graph, port_id)
     assert entry is not None and entry.u_turn == {"l0"}

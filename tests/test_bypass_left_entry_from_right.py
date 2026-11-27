@@ -43,7 +43,7 @@ def test_lines_parting_at_the_fork_descend_in_their_departure_order() -> None:
         / "examples/topologies/bypass_left_entry_from_right.mmd"
     )
     graph = prepare_graph(path.read_text())
-    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
+    plan = build_render_plan(graph, resolve_theme(graph, "light"))
     branches = {
         route.line_id: points
         for route, points in zip(plan.routes, plan.route_polylines)

@@ -1330,7 +1330,6 @@ def _keyed_concentric_corners(
             )
         if route.curve_radii is None or not right_angles:
             continue
-
         for kind, owner, (rank, incoming, outgoing) in (
             ("source", route.edge.source, right_angles[0]),
             ("target", route.edge.target, right_angles[-1]),
