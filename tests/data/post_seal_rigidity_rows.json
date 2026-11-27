@@ -1,0 +1,27 @@
+{
+ "owner": "#2094 (7rp-4a)",
+ "replacement": "the planned fan frame is realised before the lane plan is sealed and no later stage moves a plan-owned station, so no station moves within its section after 6.12",
+ "rows": {
+  "examples/epitopeprediction.mmd": [
+   "6.17"
+  ],
+  "examples/line_spread.mmd": [
+   "6.17"
+  ],
+  "examples/topologies/fanout_hub_two_line_trunk.mmd": [
+   "6.17"
+  ],
+  "examples/topologies/fanout_line_reused_nonadjacent_leg.mmd": [
+   "6.17"
+  ],
+  "examples/topologies/paired_input_fan_branch_tree.mmd": [
+   "6.17"
+  ],
+  "examples/topologies/port_fed_three_branch_diamond.mmd": [
+   "6.17"
+  ],
+  "examples/topologies/symmetric_diamond_odd_slot_entry.mmd": [
+   "6.17"
+  ]
+ }
+}
