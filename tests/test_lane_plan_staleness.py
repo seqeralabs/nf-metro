@@ -107,23 +107,24 @@ def _probe(path: Path) -> _Probe:
     sizers: set[str] = set()
     first: dict[int, str] = {}
     nonrigid: list[set[str]] = []
-    frame: list[Frame] = []
+    previous: Frame | None = None
     real_snap = engine_module._snap
     build = lane_plan_module.build_lane_plan
 
     def snap(graph: MetroGraph, phase_id: str) -> None:
+        nonlocal previous
         real_snap(graph, phase_id)
         if phase_id not in CANONICAL_STAGE_ORDER:
             return
         index = CANONICAL_STAGE_ORDER.index(phase_id)
         if index == _DECIDED:
             nonrigid.append(set())
-            frame[:] = [_section_frames(graph)]
-        elif index > _DECIDED and frame:
+            previous = _section_frames(graph)
+        elif index > _DECIDED and previous is not None:
             current = _section_frames(graph)
-            if _frames_differ(frame[0], current):
+            if _frames_differ(previous, current):
                 nonrigid[-1].add(phase_id)
-            frame[:] = [current]
+            previous = current
         plan = graph._lane_plan
         if plan is None or index <= _DECIDED or build(graph) == plan:
             return

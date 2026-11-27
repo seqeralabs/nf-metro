@@ -2092,15 +2092,13 @@ def _place_pass_c_content(
     # Reposition each side station to the midpoint of the two diagonal
     # corner Xs derived from the actual routing geometry.
     _run_placement_per_row(graph, validate, "6.12", _recenter_loop_side_stations)
-    # Shift a sparse loop station off a busier sibling's inbound bundle: the
-    # bundle's span is read from the station Xs the recentre just settled.
+    # Reads each inbound bundle's span from the station Xs the recentre settles.
     _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
     if graph.diamond_style == "symmetric":
         _apply_half_grid_symmetric_diamonds(graph, y_spacing)
-    # Seat on a full row a half-pitch station whose straddling partner has
-    # gone.  Reads the half-grid marks, so it follows every pass above that
-    # places or dissolves a half-pitch pair; the Stage 6.17 marks name only
-    # plan-owned stations, which it skips.
+    # Reads the half-grid marks, so it follows every pass that places or
+    # dissolves a half-pitch pair; the Stage 6.17 marks name only plan-owned
+    # stations, which it skips.
     _expand_orphaned_half_grid_stations(graph, y_spacing, section_y_padding)
     _snap(graph, "6.12")
     # Every mover of stations within a row has run: decide the lane plan.  The
