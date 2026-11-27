@@ -61,7 +61,7 @@ from nf_metro.layout.phases.balancing import (
     _fan_free_content_upward,
     _fan_source_inputs_upward,
     _recenter_loop_side_stations,
-    _shift_and_propagate_loop_stations,
+    _shift_sparse_loop_stations_to_clear_bundle,
     _snap_inter_section_port_pairs,
 )
 from nf_metro.layout.phases.bbox import (
@@ -489,7 +489,7 @@ def compute_layout(
         # Must run after every layout/re-layout pass has settled: it only marks
         # half-grid station ids for post-layout invariants. Moving it earlier lets
         # the mark feed a subsequent pass's placement decisions (Stage 6.4's grid
-        # snap, Stage 6.18's orphan expansion), corrupting their geometry.
+        # snap, Stage 6.12's orphan expansion), corrupting their geometry.
         _register_half_grid_reconvergence_branches(graph)
 
 
@@ -1835,7 +1835,6 @@ def _settle_pass_c(
     _stack_rows(
         graph,
         validate=validate,
-        y_spacing=y_spacing,
         section_y_padding=section_y_padding,
         section_y_gap=section_y_gap,
     )
@@ -2093,6 +2092,16 @@ def _place_pass_c_content(
     # Reposition each side station to the midpoint of the two diagonal
     # corner Xs derived from the actual routing geometry.
     _run_placement_per_row(graph, validate, "6.12", _recenter_loop_side_stations)
+    # Shift a sparse loop station off a busier sibling's inbound bundle: the
+    # bundle's span is read from the station Xs the recentre just settled.
+    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
+    if graph.diamond_style == "symmetric":
+        _apply_half_grid_symmetric_diamonds(graph, y_spacing)
+    # Seat on a full row a half-pitch station whose straddling partner has
+    # gone.  Reads the half-grid marks, so it follows every pass above that
+    # places or dissolves a half-pitch pair; the Stage 6.17 marks name only
+    # plan-owned stations, which it skips.
+    _expand_orphaned_half_grid_stations(graph, y_spacing, section_y_padding)
     _snap(graph, "6.12")
     # Every mover of stations within a row has run: decide the lane plan.  The
     # box sizers below read its lanes and move no station relative to another.
@@ -2131,13 +2140,12 @@ def _stack_rows(
     graph: MetroGraph,
     *,
     validate: bool,
-    y_spacing: float,
     section_y_padding: float,
     section_y_gap: float,
 ) -> None:
     """Stage 6.13 and Stage 6.14: the cross-row inter-row stacking -- shrink
-    and tighten row-mate bboxes, then shift sparse loop-side stations and
-    propagate the resulting bbox growth to lower rows."""
+    and tighten row-mate bboxes, then push lower rows clear of any box the
+    Stage 6.12 sparse loop shift grew downward."""
     # Stage 6.13: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
     # bottom rows away from the bbox bottom), then pull lower rows up
@@ -2149,16 +2157,10 @@ def _stack_rows(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.13")
 
-    # Stage 6.14: Shift sparse loop-side stations (e.g. ``grea`` -- one
-    # incoming, one outgoing, single-line consumer) onto a half-grid Y
-    # when sharing the full-row Y with a busier sibling whose inbound
-    # bundle would otherwise cross the sparse station's marker bbox.
-    # When the shift grows a section's bbox downward, the helper also
-    # pushes lower-row sections down internally to restore
-    # ``section_y_gap``.
-    _shift_and_propagate_loop_stations(
-        graph, y_spacing, section_y_padding, section_y_gap
-    )
+    # Stage 6.14: The Stage 6.12 sparse loop shift may grow a box downward
+    # after row offsets were fixed from the pre-grow heights; push the rows
+    # below it down to restore ``section_y_gap``.
+    push_lower_rows_after_bbox_grow(graph, section_y_gap)
     _snap(graph, "6.14")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
@@ -2261,7 +2263,7 @@ def _finalize_layout(
         _run_pass_c_guards(graph, "after Stage 6.16")
 
     # Stage 6.17: Re-materialise semantic fan frames against their settled
-    # centreline, then compact unsupported legacy diamonds where requested.
+    # centreline.
     _run_placement(
         graph,
         validate,
@@ -2269,16 +2271,7 @@ def _finalize_layout(
         _apply_planned_fan_geometry,
         _snapshot_planned_fan_centrelines(graph),
     )
-    if graph.diamond_style == "symmetric":
-        _apply_half_grid_symmetric_diamonds(graph, y_spacing)
     _snap(graph, "6.17")
-
-    # Stage 6.18: Seat orphaned half-pitch stations on a full grid row (see
-    # _expand_orphaned_half_grid_stations and CONTRACT.md Stage 6.18).  Must
-    # follow every pass that places or dissolves a half-pitch pair, so the
-    # half-grid marks are final.
-    _expand_orphaned_half_grid_stations(graph, y_spacing, section_y_padding)
-    _snap(graph, "6.18")
 
     # Stage 6.17 is a late semantic placement, downstream of the corpus-wide
     # content-top fit.  Refit only the sections whose plan-owned coordinates it

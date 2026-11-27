@@ -25,7 +25,6 @@ from nf_metro.layout.phases._common import (
 from nf_metro.layout.phases.bbox import (
     _lift_would_cause_uturn,
     _loop_corner_x,
-    push_lower_rows_after_bbox_grow,
 )
 from nf_metro.layout.phases.fan_stagger import (
     seat_within_fan_room,
@@ -1218,25 +1217,6 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
         _snap_loop_column_mates(graph, section)
 
 
-def _shift_and_propagate_loop_stations(
-    graph: MetroGraph,
-    y_spacing: float,
-    section_y_padding: float,
-    section_y_gap: float,
-) -> None:
-    """Shift sparse loop-side stations onto a half-pitch Y, then
-    propagate any bbox growth to lower rows.
-
-    Two-phase unified helper.  Phase 1 shifts sparse single-line loop
-    stations clear of busier siblings' inbound bundles (and may grow
-    the section bbox downward).  Phase 2 propagates any bbox growth
-    to lower rows so ``section_y_gap`` is preserved; it is a no-op
-    when phase 1 didn't grow anything.
-    """
-    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
-    push_lower_rows_after_bbox_grow(graph, section_y_gap)
-
-
 def _inbound_bundle_spans_x(graph: MetroGraph, consumer: Station, x: float) -> bool:
     """Whether *consumer*'s inbound bundle traverses column *x*.
 
@@ -1263,9 +1243,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
     y_spacing: float,
     section_y_padding: float | None = None,
 ) -> None:
-    """Phase 1 of :func:`_shift_and_propagate_loop_stations`.
-
-    Shift single-line loop side stations onto a half-pitch Y when
+    """Shift single-line loop side stations onto a half-pitch Y when
     their full-row Y collides with a busier sibling's inbound bundle.
 
     The bypass virtual station mechanism (``_insert_bypass_stations``)
@@ -1286,7 +1264,7 @@ def _shift_sparse_loop_stations_to_clear_bundle(
     shift S vertically by one full ``y_spacing`` away from the trunk
     on the side it already sits on, so its marker bbox sits clear of
     the sibling's bundle Y range.  The section bbox is grown when
-    necessary; phase 2 then closes the row gap that growth opened.
+    necessary; Stage 6.14 then closes the row gap that growth opened.
     """
     if section_y_padding is None:
         section_y_padding = active_metrics().section_y_padding

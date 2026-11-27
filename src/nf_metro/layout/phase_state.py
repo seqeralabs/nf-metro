@@ -72,7 +72,7 @@ NON_STAGE_PHASES: tuple[str, ...] = (
 # Section-layout stage ids in execution order.  Mirrors the ``_snap(graph, ...)``
 # checkpoints in ``engine._compute_section_layout`` and its Pass C helpers;
 # ``test_phase_state_registry`` asserts the two stay identical.  Note ``6.15a``
-# runs before ``6.15``, and ``6.18a`` follows ``6.18``.
+# runs before ``6.15``, and ``6.18a`` follows ``6.17``.
 CANONICAL_STAGE_ORDER: tuple[str, ...] = (
     "1.1", "1.2", "1.3", "1.4", "1.5",
     "2.1",
@@ -81,7 +81,7 @@ CANONICAL_STAGE_ORDER: tuple[str, ...] = (
     "5.1", "5.2", "5.3", "5.4", "5.5",
     "6.1", "6.2", "6.3", "6.4", "6.6", "6.7", "6.8", "6.9", "6.10",
     "6.11", "6.12", "6.12a", "6.12b", "6.12c",
-    "6.13", "6.14", "6.15a", "6.15", "6.16", "6.17", "6.18", "6.18a",
+    "6.13", "6.14", "6.15a", "6.15", "6.16", "6.17", "6.18a",
 )  # fmt: skip
 
 
@@ -124,7 +124,7 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
     "_row_y_grid_info": PhaseFieldSpec(
         name="_row_y_grid_info",
         writer_stage="1.2",
-        reader_stages=("4.2", "6.3", "6.4", "6.18"),
+        reader_stages=("4.2", "6.3", "6.4", "6.12"),
         enforcement=FieldEnforcement.REQUIRE_WRITER,
         why=(
             "row-grid metadata from Stage 1.2's _align_row_y_grids; the grid-group "
@@ -135,13 +135,13 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
     "half_grid_station_ids": PhaseFieldSpec(
         name="half_grid_station_ids",
         writer_stage="6.3",
-        reader_stages=("6.4", "6.18"),
+        reader_stages=("6.4", "6.12"),
         enforcement=FieldEnforcement.REQUIRE_WRITER,
         why=(
             "2-branch symfan stations Stage 6.3 places at half-pitch; Stage 6.4's "
             "grid snap must skip them or it snaps their intentional half-grid Y to "
-            "the full grid, and Stage 6.18 reads the set to find members whose "
-            "pair partner moved to a full row"
+            "the full grid, and Stage 6.12's orphan expansion reads the set to "
+            "find members whose pair partner moved to a full row"
         ),
         run_condition_attr="center_ports",
     ),
