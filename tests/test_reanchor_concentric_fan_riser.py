@@ -1,11 +1,9 @@
 """Re-anchoring a concentric fan must not starve the other corner of a riser.
 
 Two corners joined by one riser split its length in proportion to their
-declared radii.  A riser that is exactly as long as those two radii have no
-slack, so raising the fan corner's radius would take length from its partner,
-which would then resolve below the radius it declares.  The fan corner's
-budget is the riser less its partner's declared radius, so the re-anchor seats
-it at exactly that slack.
+declared radii.  A riser exactly as long as those two radii has no slack, so
+the fan corner's radius is capped at the riser less its partner's declared
+radius, which keeps the partner at the radius it declares.
 """
 
 from __future__ import annotations

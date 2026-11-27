@@ -1520,13 +1520,16 @@ def _run_consistent_slots(
     carrier's lane for every line run between them, and for a line the
     upstream carrier hands over and this one takes back (it leaves the one by
     no edge and reaches the other by none), so a line holds one lane along its
-    run even where another name carries the run between.  Its other lines take
-    the lowest free lanes from its first frame lane, in frame order; a lane a
-    departed line held stays empty rather than letting a later line slide
-    sideways into it mid-straight.  A chain head, or a join fed by several
-    carriers, packs its lines on consecutive lanes from its first frame lane;
-    where that disagrees with a feeder along one run, the lane plan refuses the
-    run.
+    run even where another name carries the run between.  Any other line the
+    two share inherits nothing: leaving the upstream carrier by an edge, or
+    reaching this one by an edge, it travels a path of its own past the run,
+    so its upstream lane says nothing about where it rides here.  The
+    carrier's other lines take the lowest free lanes from its first frame
+    lane, in frame order; a lane a departed line held stays empty rather than
+    letting a later line slide sideways into it mid-straight.  A chain head,
+    or a join fed by several carriers, packs its lines on consecutive lanes
+    from its first frame lane; where that disagrees with a feeder along one
+    run, the lane plan refuses the run.
     """
     rank = {line_id: index for index, line_id in enumerate(offset_line_order)}
     feeds: dict[str, list[tuple[str, str]]] = defaultdict(list)
@@ -1564,8 +1567,10 @@ def _run_consistent_slots(
                 for _source, line_id in feeds[station_id]
                 if line_id in upstream
             }
-            for line_id in carriers[station_id].intersection(upstream):
-                if _hands_back(graph, source, station_id, line_id):
+            for line_id in lines:
+                if line_id in upstream and _hands_back(
+                    graph, source, station_id, line_id
+                ):
                     inherited[line_id] = upstream[line_id]
         lane = rank[lines[0]]
         if not inherited:
