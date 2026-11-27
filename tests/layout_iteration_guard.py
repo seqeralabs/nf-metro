@@ -230,6 +230,7 @@ RENDER_MODULES = frozenset(
     {
         "__init__.py",
         "animate.py",
+        "animation_waves.py",
         "bridges.py",
         "constants.py",
         "driver.py",
