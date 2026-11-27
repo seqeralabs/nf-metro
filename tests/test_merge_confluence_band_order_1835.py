@@ -30,8 +30,9 @@ EXAMPLES = REPO_ROOT / "examples"
 PORT = "orf_calling__entry_left_7"
 
 
-def _route(text: str):
+def _route(text: str, source_dir: str = ""):
     graph = parse_metro_mermaid(text)
+    graph.source_dir = source_dir
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
@@ -127,5 +128,5 @@ def _corpus_fixtures() -> list[Path]:
 
 @pytest.mark.parametrize("fixture", _corpus_fixtures(), ids=lambda p: p.stem)
 def test_no_shipped_fixture_trips_the_confluence_oracle(fixture: Path) -> None:
-    graph, routes = _route(fixture.read_text())
+    graph, routes = _route(fixture.read_text(), str(fixture.parent))
     assert check_merge_confluence_band_order(routes, graph) == []

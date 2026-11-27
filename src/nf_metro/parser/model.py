@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar, Literal, TypedDict
@@ -13,12 +14,14 @@ from nf_metro.parser.provenance import LayoutProvenance
 if TYPE_CHECKING:
     from nf_metro.layout.fan_plans import FanPlanExecution, FanPlanQuery
     from nf_metro.layout.lane_plan import LanePlan
+    from nf_metro.layout.pass_metrics import LayoutMetrics
     from nf_metro.layout.route_plan import FanPlan
     from nf_metro.parser.route_topology import (
         RouteResolutionTrace,
         RouteTopology,
         RouteTopologyQuery,
     )
+    from nf_metro.themes.stack import ResolvedTheme
 
 
 class RowGridInfo(TypedDict):
@@ -154,6 +157,9 @@ class MetroLine:
     # ``--inactive-lines`` flag / ``inactive_line_ids`` config) supplies its own
     # set, which replaces this default outright.
     default_inactive: bool = False
+    # Declaration order, which picks the line's colour from a theme's
+    # ``line_colors``; layout may reorder ``MetroGraph.lines``, this never.
+    palette_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -444,6 +450,25 @@ class Section:
     # and cascades through the off-track ``layer_push`` to shift the downstream
     # subtree along.  Empty (a no-op) for every layout that draws no such strike.
     off_track_lead_extra: dict[str, int] = field(default_factory=dict)
+    # Lines pinned to an end of the section's lane order, set by track
+    # assignment for a line that joins the bundle from one side of the trunk:
+    # negative pins toward the first lane, positive toward the last, and a
+    # larger magnitude pins further out.
+    lane_ends: dict[str, float] = field(default_factory=dict)
+    # The stations whose runs set each pinned line's pin; the pin holds only
+    # where the line reaches from them.
+    lane_end_seeds: dict[str, frozenset[str]] = field(default_factory=dict)
+
+
+def agreed_lane_end(pins: Iterable[float]) -> float | None:
+    """The lane-end pin several *pins* of one line agree on, else ``None``.
+
+    Pins agree when they all point toward the same end; the outermost wins.
+    """
+    values = list(pins)
+    if values and (all(v > 0 for v in values) or all(v < 0 for v in values)):
+        return max(values, key=abs)
+    return None
 
 
 class UnresolvedEndpointError(NfMetroError, ValueError):
@@ -484,7 +509,7 @@ class MetroGraph:
 
     title: str = ""
     caption: str = ""
-    style: str = "dark"
+    style: str = "default"
     # Display mode (``light`` / ``dark``), orthogonal to the brand in ``style``.
     # Empty means unset: the brand's own default mode applies.
     mode: str = ""
@@ -512,6 +537,19 @@ class MetroGraph:
     layout_provenance: LayoutProvenance = field(
         default_factory=LayoutProvenance, repr=False
     )
+    # Registry options a ``%%metro`` directive set, so a theme's layout options
+    # fill only the ones the map left unset.
+    directive_options: set[str] = field(default_factory=set, repr=False)
+    # The resolved theme stack layout and render use (the caller's
+    # ``--theme``, else the map's style), once bound.
+    resolved_theme: ResolvedTheme | None = field(
+        default=None, repr=False, compare=False
+    )
+    # The metrics compute_layout reserved against. Later measurements of the
+    # laid-out geometry bind these, whatever theme the graph is drawn in.
+    layout_metrics: LayoutMetrics | None = field(
+        default=None, repr=False, compare=False
+    )
     # Multi-section grid cells: a ``%%metro grid:`` directive may name several
     # comma-separated sections that share one cell.  Keyed by (col, row); each
     # value is the listed-order member ids, which pack side-by-side along the
@@ -527,6 +565,13 @@ class MetroGraph:
     y_spacing: float | None = None
     section_x_gap: float | None = None
     section_y_gap: float | None = None
+    section_x_padding: float | None = None
+    section_y_padding: float | None = None
+    # None = the engine's default; layout passes read these through
+    # nf_metro.layout.pass_metrics.
+    label_offset: float | None = None
+    diagonal_run: float | None = None
+    curve_radius_ratio: float | None = None
     # Perpendicular offset step between parallel lines in bundles (px).
     # None = use the built-in default (4 px). Set to 0 to collapse all
     # lines to a single shared track with no lateral separation.
@@ -768,6 +813,8 @@ class MetroGraph:
         self._edges_to_cache = None
 
     def add_line(self, line: MetroLine) -> None:
+        known = self.lines.get(line.id)
+        line.palette_index = known.palette_index if known else len(self.lines)
         self.lines[line.id] = line
 
     def default_inactive_line_ids(self) -> frozenset[str]:
@@ -877,6 +924,17 @@ class MetroGraph:
         """
         lines = set(self.station_lines(station_id))
         return [lid for lid in self.lines if lid in lines]
+
+    def line_reach(self, line_id: str, starts: Iterable[str]) -> set[str]:
+        """Stations *line_id* reaches from *starts* along its edges, *starts* too."""
+        reach = set(starts)
+        stack = list(reach)
+        while stack:
+            for edge in self.edges_from(stack.pop()):
+                if edge.line_id == line_id and edge.target not in reach:
+                    reach.add(edge.target)
+                    stack.append(edge.target)
+        return reach
 
     def edges_from(self, station_id: str) -> list[Edge]:
         """Return edges whose ``source`` is *station_id* (lazy adjacency cache)."""

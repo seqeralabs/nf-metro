@@ -52,7 +52,7 @@ def _drawn_crossings(path: Path) -> int:
         warnings.simplefilter("ignore")
         graph = parse_metro_mermaid(path.read_text())
         compute_layout(graph)
-        plan = build_render_plan(graph, resolve_theme(None, graph))
+        plan = build_render_plan(graph, resolve_theme(graph))
     offsets, routes = measured_geometry(plan.graph, plan)
     polylines = drawn_polylines(routes, offsets)
     return sum(

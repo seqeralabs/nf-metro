@@ -340,7 +340,7 @@ def test_lines_rising_together_into_a_bt_bottom_entry_hold_its_lane_order():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(BT_BOTTOM_ENTRY_MAP)
-        plan = build_observed_render_plan(graph, resolve_theme(None, graph)).plan
+        plan = build_observed_render_plan(graph, resolve_theme(graph)).plan
 
     port = next(
         pid

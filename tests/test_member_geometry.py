@@ -66,7 +66,7 @@ from nf_metro.layout.routing.corridor_cohorts import (
     CorridorClearanceShortfall,
 )
 from nf_metro.layout.routing.families import RouteFamilyId
-from nf_metro.layout.routing.normalize import _rederive_semantic_end_corners, _VChannel
+from nf_metro.layout.routing.normalize import _size_concentric_cohorts, _VChannel
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.routing.planning import _allocation_eligible_system_ids
 from nf_metro.layout.routing.reserved_bands import (
@@ -768,10 +768,11 @@ def test_reportho_owned_lead_is_frozen_at_its_concentric_radius() -> None:
         dict(route.concentric_corner_offsets_by_segment),
         dict(route.concentric_corner_bases_by_segment),
     )
-    _rederive_semantic_end_corners(
+    _size_concentric_cohorts(
         observation.routes,
         CURVE_RADIUS,
         compute_station_offsets(graph),
+        OFFSET_STEP,
     )
     assert (
         tuple(route.curve_radii),
@@ -828,7 +829,7 @@ def test_owned_corner_preview_regressions_match_plans_and_render(
     assert (
         render_graph(
             graph,
-            resolve_theme(None, graph),
+            resolve_theme(graph),
             RenderConfig(chrome_css=False),
         ).find("<svg ")
         > 0
@@ -1018,7 +1019,6 @@ def test_reservation_reroute_keeps_identity_and_reuses_settled_template() -> Non
     graph, first = _observe(ROOT / "examples" / "genomeassembly.mmd")
     routes, _moves, second_plan = _route_edges(
         graph,
-        DIAGONAL_RUN,
         CURVE_RADIUS,
         compute_station_offsets(graph),
         observe_plan=True,
@@ -1126,7 +1126,7 @@ def test_reservation_reroute_reseats_port_peeloff_after_reconciliation() -> None
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = build_observed_render_plan(graph, resolve_theme(graph))
     assert observed.route_plan is not None
     plan = next(
         item

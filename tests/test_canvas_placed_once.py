@@ -170,7 +170,7 @@ def _settled(
     with warnings.catch_warnings(), pytest.MonkeyPatch.context() as patch:
         warnings.simplefilter("ignore")
         patch.setattr(svg, "_settle_render_geometry", keep)
-        build_render_plan(graph, resolve_theme(None, graph))
+        build_render_plan(graph, resolve_theme(graph))
     (only,) = settles
     return only
 
@@ -238,7 +238,7 @@ def test_the_render_settles_once_and_draws_that_settle_moved(
     monkeypatch.setattr(svg, "_settle_render_geometry", spy)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        plan = build_render_plan(graph, resolve_theme(None, graph))
+        plan = build_render_plan(graph, resolve_theme(graph))
 
     assert len(settles) == 1
     drawn = [list(route.points) for route in plan.routes]
@@ -263,7 +263,7 @@ def test_a_junction_off_its_anchor_is_refused_not_moved() -> None:
         assert_junctions_on_their_anchors(graph)
     assert (junction.x, junction.y) == laid_out
     with pytest.raises(LayoutInvariantError, match=jid):
-        build_render_plan(graph, resolve_theme(None, graph))
+        build_render_plan(graph, resolve_theme(graph))
 
 
 def _numbers(value: object, where: str = "") -> Iterator[tuple[str, float]]:
@@ -344,7 +344,7 @@ def _render_plan(path: Path):
     graph = _laid_out(path, {})
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return build_render_plan(graph, resolve_theme(None, graph))
+        return build_render_plan(graph, resolve_theme(graph))
 
 
 def _parsed(path: Path, is_nextflow: bool) -> MetroGraph:
@@ -400,7 +400,7 @@ def test_a_wrap_into_the_topmost_row_stays_below_the_map_top(
     graph = _laid_out(path, {})
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        plan = build_render_plan(graph, resolve_theme(None, graph))
+        plan = build_render_plan(graph, resolve_theme(graph))
     routes = [
         route
         for route in plan.routes

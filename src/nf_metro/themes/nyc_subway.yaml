@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=theme.schema.json
+# After Massimo Vignelli's diagrammatic subway map (1972, revived 2008-2011):
+# every service its own line, parallel lines all but touching, a small black
+# dot wherever a line stops and no separate interchange symbol, octilinear
+# runs with tight concentric corners, Helvetica Medium in black on white, and
+# the legend as the coloured route bullets of the 1970 NYCTA Graphics
+# Standards Manual. Line colours are the MTA's published route colours (the
+# "MTA Colors" open dataset and subway GTFS, 2026).
+name: nyc-subway
+
+# A solid dot (an outline half the diameter wide), a little larger than the
+# diagram's so it reads at map scale.
+station_glyph: dot
+interchange_glyph: dots
+terminus_glyph: ring
+dot_diameter: 0.65
+dot_ring_width: 0.325
+line_width: 6
+line_cap: butt
+label_font_family: "'Helvetica Neue', Helvetica, Arial, sans-serif"
+label_font_weight: "500"
+title_font_weight: bold
+number_sections: false
+section_stroke_width: 1
+section_corner_radius: 0
+section_label_font_weight: bold
+legend_swatch: bullet
+line_codes: letters
+legend_swatch_width: 24
+legend_corner_radius: 0
+icon_fill: "#ffffff"
+icon_stroke: "#000000"
+layout:
+  track_gap: 1
+  curve_radius_ratio: 2.5
+
+# 1 2 3 red, A C E blue, 4 5 6 green, N Q R W yellow, B D F M orange, 7
+# purple, G lime, J Z brown, T turquoise, L and shuttle grey.
+line_colors:
+  ["#D82233", "#0062CF", "#009952", "#F6BC26", "#EB6800", "#9A38A1", "#799534",
+   "#8E5C33", "#008EB7", "#7C858C"]
+
+light:
+  background_fill: "#ffffff"
+  title_color: "#000000"
+  label_color: "#000000"
+  station_fill: "#ffffff"
+  station_stroke: "#000000"
+  muted_line_color: "#c8c8c8"
+  section_fill: transparent
+  section_stroke: "#d6d6d6"
+  section_label_color: "#000000"
+  legend_fill: "#ffffff"
+  legend_text_color: "#000000"
+
+# The Standards Manual's white-on-black sign panels.
+dark:
+  background_fill: "#000000"
+  title_color: "#ffffff"
+  label_color: "#ffffff"
+  station_fill: "#000000"
+  station_stroke: "#ffffff"
+  muted_line_color: "#4a4a4a"
+  section_fill: transparent
+  section_stroke: "#3a3a3a"
+  section_label_color: "#ffffff"
+  legend_fill: "#000000"
+  legend_text_color: "#ffffff"

@@ -11,8 +11,9 @@ from __future__ import annotations
 import warnings
 from typing import TYPE_CHECKING
 
-from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO, MIN_STATION_FLAT_LENGTH
+from nf_metro.layout.constants import DIAGONAL_SLOPE_RATIO
 from nf_metro.layout.geometry import lanes_run_along_x, lanes_run_along_y
+from nf_metro.layout.pass_metrics import min_station_flat_length
 from nf_metro.layout.phases._common import _restoring_layout_geometry
 from nf_metro.parser.model import LayoutGeometryWarning, MetroGraph, is_bypass_v
 
@@ -42,7 +43,7 @@ def _icon_label_obstacles(
     from nf_metro.render.svg import _compute_icon_obstacles
     from nf_metro.themes import resolve_theme
 
-    return _compute_icon_obstacles(graph, resolve_theme(None, graph), offsets)
+    return _compute_icon_obstacles(graph, resolve_theme(graph), offsets)
 
 
 def _probe_label_placements(
@@ -367,7 +368,7 @@ def _bypass_v_flat_gaps_from(
             if into_v
             else abs(r.points[1][0] - r.points[0][0])
         )
-        if flat < MIN_STATION_FLAT_LENGTH - 0.5:
+        if flat < min_station_flat_length() - 0.5:
             gaps.add((sec.id, v.layer if into_v else v.layer + 1))
     return gaps
 
@@ -414,7 +415,7 @@ def _vertical_bypass_v_short_runouts(
     return {
         (sec_of[vid], graph.stations[vid].layer)
         for vid, run in run_out.items()
-        if run < MIN_STATION_FLAT_LENGTH - 0.5
+        if run < min_station_flat_length() - 0.5
     }
 
 

@@ -37,7 +37,7 @@ def test_arriving_lines_meet_their_internal_lanes(path: Path, port_id: str) -> N
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         plan = render_graph_result(
-            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+            graph, resolve_theme(graph, mode=None), RenderConfig()
         ).plan
     arrivals: dict[str, float] = {}
     departures: dict[str, float] = {}

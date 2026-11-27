@@ -7,12 +7,14 @@ from collections import defaultdict
 from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_COARSE,
     COORD_GROUP_DIGITS_FINE,
-    DIAGONAL_RUN,
     SAME_COORD_TOLERANCE,
-    SECTION_Y_PADDING,
 )
 from nf_metro.layout.geometry import quantize_coord
-from nf_metro.layout.pass_metrics import icon_half_height_approx, station_radius_approx
+from nf_metro.layout.pass_metrics import (
+    active_metrics,
+    icon_half_height_approx,
+    station_radius_approx,
+)
 from nf_metro.layout.phases._common import (
     _ref_bbox_top,
     _ref_y,
@@ -24,6 +26,10 @@ from nf_metro.layout.phases.bbox import (
     _lift_would_cause_uturn,
     _loop_corner_x,
     push_lower_rows_after_bbox_grow,
+)
+from nf_metro.layout.phases.fan_stagger import (
+    seat_within_fan_room,
+    section_fan_stagger_needs,
 )
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import (
@@ -987,6 +993,7 @@ def _recenter_section_loop_sides(
     avoid perturbing placements main already settled on.
     """
     port_ids = section.port_ids
+    need = section_fan_stagger_needs(graph, section)
     for sid in section.station_ids:
         if sid in port_ids:
             continue
@@ -1008,8 +1015,19 @@ def _recenter_section_loop_sides(
             min(corner_left, corner_right) <= midpoint <= max(corner_left, corner_right)
         ):
             continue
+        sign = 1.0 if tgt.x > src.x else -1.0
+        seated = seat_within_fan_room(
+            midpoint,
+            sign,
+            [(src.x, need.get((src.id, st.id), 0.0))],
+            [(tgt.x, need.get((st.id, tgt.id), 0.0))],
+        )
+        if seated is None:
+            continue
+        midpoint = seated
         is_multiline = len(graph.edges_to(sid)) > 1 or len(graph.edges_from(sid)) > 1
-        min_recenter_delta = DIAGONAL_RUN / 4.0 if is_multiline else DIAGONAL_RUN / 3.0
+        run = active_metrics().diagonal_run
+        min_recenter_delta = run / 4.0 if is_multiline else run / 3.0
         if abs(midpoint - st.x) < min_recenter_delta:
             continue
         st.x = midpoint
@@ -1243,7 +1261,7 @@ def _inbound_bundle_spans_x(graph: MetroGraph, consumer: Station, x: float) -> b
 def _shift_sparse_loop_stations_to_clear_bundle(
     graph: MetroGraph,
     y_spacing: float,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_y_padding: float | None = None,
 ) -> None:
     """Phase 1 of :func:`_shift_and_propagate_loop_stations`.
 
@@ -1270,6 +1288,8 @@ def _shift_sparse_loop_stations_to_clear_bundle(
     the sibling's bundle Y range.  The section bbox is grown when
     necessary; phase 2 then closes the row gap that growth opened.
     """
+    if section_y_padding is None:
+        section_y_padding = active_metrics().section_y_padding
     if y_spacing <= 0:
         return
 

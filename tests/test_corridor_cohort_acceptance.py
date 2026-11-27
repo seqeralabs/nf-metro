@@ -139,7 +139,7 @@ def _render(path: str) -> RoutePlan:
     graph = prepare_graph(source.read_text(), source_dir=str(source.parent))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = svg.build_observed_render_plan(graph, resolve_theme(graph))
     return observed.route_plan
 
 
@@ -197,7 +197,7 @@ def test_serialized_plan_is_independent_of_the_hash_seed() -> None:
         "from nf_metro.render import svg\n"
         f"path = Path({str(ROOT / MERGE_RIGHT_ENTRY)!r})\n"
         "graph = prepare_graph(path.read_text(), source_dir=str(path.parent))\n"
-        "observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))\n"
+        "observed = svg.build_observed_render_plan(graph, resolve_theme(graph))\n"
         "text = serialize_route_plan(observed.route_plan)\n"
         "print(hashlib.sha256(text.encode()).hexdigest())\n"
     )

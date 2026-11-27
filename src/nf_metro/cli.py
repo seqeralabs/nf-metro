@@ -7,6 +7,7 @@ import dataclasses
 import json
 import math
 import os
+import random
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
@@ -21,6 +22,7 @@ from nf_metro import __version__
 from nf_metro.api import (
     RenderConfig,
     _parse_source,
+    apply_theme_layout,
     prepare_graph,
     render_graph_result,
     resolve_theme,
@@ -32,6 +34,7 @@ from nf_metro.console import (
     print_banner,
     progress_bar,
 )
+from nf_metro.convert import INPUT_FORMATS, LINE_MODES, InputFormat, LineMode
 from nf_metro.explain import build_explain, format_explain_json, format_explain_text
 from nf_metro.introspect import (
     build_info,
@@ -49,9 +52,13 @@ from nf_metro.layout import (
 )
 from nf_metro.layout.constants import (
     DEFAULT_LINE_WIDTH,
+    DIAGONAL_RUN,
+    LABEL_OFFSET,
     OFFSET_STEP,
     SECTION_X_GAP,
+    SECTION_X_PADDING,
     SECTION_Y_GAP,
+    SECTION_Y_PADDING,
 )
 from nf_metro.live.server import DEFAULT_OVERLAY, OVERLAY_STYLES
 from nf_metro.options import (
@@ -76,7 +83,15 @@ from nf_metro.parser.model import (
 from nf_metro.render import validate_render
 from nf_metro.render.constants import LOGO_GAP
 from nf_metro.render.video import VIDEO_FORMATS, NotAnimatedError, VideoFormat
-from nf_metro.themes import DEFAULT_MODE, STYLE_NAMES, THEMES, resolve_style
+from nf_metro.themes import (
+    DEFAULT_MODE,
+    MODES,
+    ThemeError,
+    anchor_stack,
+    bound_stack,
+    check_stack,
+    resolve_stack,
+)
 
 RenderFormat = Literal["svg", "html", "png", "gif", "webp", "mp4", "webm"]
 _RENDER_FORMATS: tuple[str, ...] = get_args(RenderFormat)
@@ -307,21 +322,36 @@ def _layout_opts_for(
 
 
 def _graph_key(
-    out_format: RenderFormat, layout_opts: Mapping[str, object]
-) -> tuple[Literal["svg", "html"], bool]:
+    out_format: RenderFormat,
+    layout_opts: Mapping[str, object],
+    theme: str | None = None,
+) -> tuple[Literal["svg", "html"], bool, str | None]:
     """Return the cache key for the graph *out_format* is rendered from.
 
-    Two outputs share a prepared graph only when they share both a backend and
-    an animation state - whether the animation came from the run's own
+    Two outputs share a prepared graph only when they share a backend, an
+    animation state - whether the animation came from the run's own
     --animate, from a video format forcing it on, or from one output's
-    ``%%metro output: ... | animate`` override. Mode and theme are absent on
-    purpose: they are baked when the graph is serialised, not laid out, so a
-    static SVG and a light/dark PNG pair still share a single layout run.
+    ``%%metro output: ... | animate`` override - and a theme stack, since a
+    theme can set layout options. Mode is absent on purpose: it is baked when
+    the graph is serialised, not laid out, so a static SVG and a light/dark PNG
+    pair share a single layout run.
     """
     animated = bool(layout_opts.get("animate")) or _forces_animation(
         out_format, layout_opts
     )
-    return _svg_format_for(out_format), animated
+    return _svg_format_for(out_format), animated, theme
+
+
+def _theme_stack(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> str | None:
+    """Check a theme stack: built-in names and existing .yaml theme files."""
+    if value is not None:
+        try:
+            check_stack(value, must_exist=True)
+        except ThemeError as e:
+            raise click.BadParameter(str(e), ctx, param) from None
+    return value
 
 
 class _FiniteFloatRange(click.FloatRange):
@@ -428,12 +458,17 @@ _LAYOUT_DEFAULT_TEXT: dict[str, str] = {
     "y_spacing": "auto",
     "section_x_gap": _trim_number(SECTION_X_GAP),
     "section_y_gap": _trim_number(SECTION_Y_GAP),
+    "section_x_padding": _trim_number(SECTION_X_PADDING),
+    "section_y_padding": _trim_number(SECTION_Y_PADDING),
+    "label_offset": _trim_number(LABEL_OFFSET),
+    "diagonal_run": _trim_number(DIAGONAL_RUN),
     # OFFSET_STEP is the centre-to-centre pitch the None default resolves
     # to; the option itself is the visual edge-to-edge gap, offset minus
     # the assumed stroke width (resolve_offset_step's inverse).
     "track_gap": _trim_number(OFFSET_STEP - DEFAULT_LINE_WIDTH),
     "fold_threshold": str(DEFAULT_FOLD_THRESHOLD),
     "label_angle": "from theme",
+    "curve_radius_ratio": "from theme",
     "legend_logo_gap": _trim_number(LOGO_GAP),
     "width": "auto from content",
     "height": "auto from content",
@@ -648,7 +683,7 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     options=[
         "--output",
         "--format",
-        "--from-nextflow",
+        "--from",
         "--debug",
         "--reject-output-outside-source",
     ],
@@ -669,6 +704,8 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
         "--y-spacing",
         "--section-x-gap",
         "--section-y-gap",
+        "--section-x-padding",
+        "--section-y-padding",
         "--track-gap",
         "--fold-threshold",
         "--diamond-style",
@@ -677,6 +714,9 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
         "--center-ports",
         "--compact-offsets",
         "--label-angle",
+        "--label-offset",
+        "--diagonal-run",
+        "--curve-radius-ratio",
         "--font-scale",
         "--stroke-scale",
         "--width",
@@ -764,15 +804,21 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
 )
 @click.option(
     "--theme",
-    type=click.Choice(sorted(STYLE_NAMES)),
+    metavar="THEMES",
+    callback=_theme_stack,
     default=None,
     cls=_DescribedDefault,
-    default_text="from %%metro style, else nfcore",
-    help="Visual theme.",
+    default_text="from %%metro style, else default",
+    help=(
+        "Visual theme: default, seqera, transparent, or a transit theme "
+        "(london-tube, nyc-subway, paris-metro, tokyo-metro, washington-metro), "
+        "a .yaml theme file, or a comma list of these stacked left to right on "
+        "default."
+    ),
 )
 @click.option(
     "--mode",
-    type=click.Choice(["light", "dark"]),
+    type=click.Choice(MODES),
     default=None,
     cls=_DescribedDefault,
     default_text="from %%metro mode",
@@ -807,10 +853,15 @@ def _run_batch(items: list[tuple[str, Callable[[], None]]]) -> None:
     help="Position of the legend+logo block.",
 )
 @click.option(
-    "--from-nextflow",
-    is_flag=True,
-    default=False,
-    help="Convert Nextflow -with-dag mermaid input before rendering.",
+    "--from",
+    "input_format",
+    type=click.Choice(INPUT_FORMATS),
+    default=None,
+    cls=_DescribedDefault,
+    default_text="an nf-metro map",
+    help="Convert a workflow manager's DAG before rendering: Nextflow "
+    "[code]-with-dag[/] mermaid, or (experimental) Snakemake [code]--rulegraph[/] "
+    "or [code]--dag[/] output (DOT or mermaid-js).",
 )
 @click.option(
     "--title",
@@ -898,7 +949,7 @@ def render(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    from_nextflow: bool,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -930,6 +981,8 @@ def render(
         raise click.UsageError("-o/--output can only be used with a single INPUT_FILE.")
 
     inactive_line_ids = _parse_inactive_lines(inactive_lines)
+    if input_format == "snakemake":
+        _echo_snakemake_quip()
 
     def _job_layout_opts(overrides: Mapping[str, object]) -> dict[str, object]:
         """The run's layout options with this output's own `animate` folded in.
@@ -941,6 +994,12 @@ def render(
         if "animate" not in overrides:
             return layout_opts
         return {**layout_opts, "animate": overrides["animate"]}
+
+    def _job_theme(overrides: Mapping[str, object], source: Path) -> str | None:
+        """The output's own ``theme=``, its files relative to the map, else --theme."""
+        if "theme" not in overrides:
+            return theme
+        return anchor_stack(str(overrides["theme"]), source.resolve().parent)
 
     def _job(
         input_file: Path,
@@ -964,13 +1023,13 @@ def render(
             raster_width=job_raster_width,
             fps=fps,
             duration=duration,
-            theme=cast("str | None", overrides.get("theme", theme)),
+            theme=_job_theme(overrides, input_file),
             mode=cast("str | None", overrides.get("mode", mode)),
             debug=debug,
             logo=logo,
             line_spread=line_spread,
             legend=legend,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             responsive=responsive,
             embed_font=embed_font,
@@ -1025,7 +1084,7 @@ def render(
                 text = source.read_text()
                 return _parse_source(
                     text,
-                    from_nextflow=from_nextflow,
+                    input_format=input_format,
                     title=title,
                     line_spread=line_spread,
                     layout_options=layout_opts,
@@ -1054,10 +1113,10 @@ def render(
         lets every job in this call skip its own read+parse, whether they
         share a layout or not.
         """
-        graphs: dict[tuple[Literal["svg", "html"], bool], MetroGraph] = {}
+        graphs: dict[tuple[Literal["svg", "html"], bool, str | None], MetroGraph] = {}
         job_opts = [_job_layout_opts(job.overrides) for job in jobs]
         keys = [
-            _graph_key(job.format, opts)
+            _graph_key(job.format, opts, _job_theme(job.overrides, source))
             for job, opts in zip(jobs, job_opts, strict=True)
         ]
         if len(jobs) > 1:
@@ -1070,7 +1129,7 @@ def render(
                         if key not in graphs:
                             graphs[key] = _prepare_graph_for_render(
                                 source,
-                                from_nextflow=from_nextflow,
+                                input_format=input_format,
                                 title=title,
                                 line_spread=line_spread,
                                 logo=logo,
@@ -1080,6 +1139,7 @@ def render(
                                 svg_format=key[0],
                                 error_prefix=_error_prefix(source, quiet=True),
                                 parsed=parsed,
+                                theme=_job_theme(job.overrides, source),
                             )
                 finally:
                     _report_render_warnings(
@@ -1167,6 +1227,35 @@ def _print_render_result(sources: list[Path], paths: list[Path]) -> None:
     echo_yaml("\n".join(to_yaml(document)))
 
 
+# A deliberate easter egg for Snakemake runs of the CLI. The Python API
+# prints nothing.
+SNAKEMAKE_QUIPS = (
+    "Convincing user that Nextflow is better than Snakemake...",
+    "Snakes on a train...",
+    "Converting rules into processes (old habits)...",
+    "Teaching the snake to ride the metro...",
+    "Politely not mentioning channels...",
+    "Checking whether this workflow has met nf-core yet...",
+    "Reticulating splines... wrong snake, sorry.",
+)
+
+
+def _echo_snakemake_quip() -> None:
+    console.print(f"[dim italic]{random.choice(SNAKEMAKE_QUIPS)}[/]")
+
+
+def _input_format_from_job(job: Mapping[str, object]) -> InputFormat | None:
+    """The render-many job's ``from`` value, which must name an input format."""
+    value = job.get("from")
+    if value is None:
+        return None
+    if value not in INPUT_FORMATS:
+        raise ValueError(
+            f"'from' must be one of {', '.join(INPUT_FORMATS)}, not {value!r}"
+        )
+    return cast(InputFormat, value)
+
+
 def _render_one(
     input_file: Path,
     output: Path,
@@ -1182,7 +1271,7 @@ def _render_one(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    from_nextflow: bool,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -1226,7 +1315,7 @@ def _render_one(
                 logo=logo,
                 line_spread=line_spread,
                 legend=legend,
-                from_nextflow=from_nextflow,
+                input_format=input_format,
                 title=title,
                 responsive=responsive,
                 embed_font=embed_font,
@@ -1258,7 +1347,7 @@ def _render_one(
 def _prepare_graph_for_render(
     input_file: Path,
     *,
-    from_nextflow: bool,
+    input_format: InputFormat | None,
     title: str | None,
     line_spread: str | None,
     logo: Path | None,
@@ -1268,6 +1357,7 @@ def _prepare_graph_for_render(
     svg_format: Literal["svg", "html"],
     error_prefix: str,
     parsed: MetroGraph | None = None,
+    theme: str | None = None,
 ) -> MetroGraph:
     """Lay out *input_file*, reporting a typed failure via `_clean_error`.
 
@@ -1282,7 +1372,7 @@ def _prepare_graph_for_render(
     try:
         return prepare_graph(
             source,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             line_spread=line_spread,
             logo=str(logo) if logo is not None else None,
@@ -1291,6 +1381,7 @@ def _prepare_graph_for_render(
             source_dir=str(input_file.resolve().parent),
             bare=bare,
             output_format=svg_format,
+            theme=theme,
         )
     except _SOURCE_ERRORS as e:
         _clean_error(e, error_prefix)
@@ -1311,7 +1402,7 @@ def _render_one_unsafe(
     logo: Path | None,
     line_spread: str | None,
     legend: str | None,
-    from_nextflow: bool,
+    input_format: InputFormat | None,
     title: str | None,
     responsive: bool,
     embed_font: bool,
@@ -1336,7 +1427,7 @@ def _render_one_unsafe(
     if graph is None:
         graph = _prepare_graph_for_render(
             input_file,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             line_spread=line_spread,
             logo=logo,
@@ -1346,6 +1437,7 @@ def _render_one_unsafe(
             svg_format=svg_format,
             error_prefix=error_prefix,
             parsed=parsed,
+            theme=theme,
         )
 
     if format_ in _RASTER_FORMATS:
@@ -1360,7 +1452,7 @@ def _render_one_unsafe(
         embed_font = not text_to_paths
         mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
 
-    theme_obj = resolve_theme(theme, graph, mode=mode)
+    theme_obj = resolve_theme(graph, mode=mode)
 
     if format_ == "html":
         # The interactive page supplies its own responsive frame, chrome, and
@@ -1583,7 +1675,7 @@ def render_many(manifest_file: Path) -> None:
                 logo=Path(str(logo_raw)) if logo_raw else None,
                 line_spread=_str_or_none("line_spread"),
                 legend=_str_or_none("legend"),
-                from_nextflow=bool(job.get("from_nextflow", False)),
+                input_format=_input_format_from_job(job),
                 title=_str_or_none("title"),
                 responsive=bool(job.get("responsive", False)),
                 embed_font=bool(job.get("embed_font", False)),
@@ -1621,35 +1713,64 @@ def render_many(manifest_file: Path) -> None:
     default=None,
     help="Pipeline title for the converted output.",
 )
+@click.option(
+    "--from",
+    "input_format",
+    type=click.Choice(INPUT_FORMATS),
+    default=None,
+    cls=_DescribedDefault,
+    default_text="detected from the input",
+    help="Workflow manager that wrote INPUT_FILE. Snakemake is experimental.",
+)
+@click.option(
+    "--lines",
+    type=click.Choice(LINE_MODES),
+    default=None,
+    cls=_DescribedDefault,
+    default_text="sections for Nextflow, graph for Snakemake",
+    help="How to draw metro lines: [code]graph[/] runs [code]main[/] along the "
+    "longest chain into the final step and gives each other chain its own "
+    "line (one-section maps only); [code]sections[/] builds lines from the "
+    "pipeline's sections.",
+)
 def convert(
     input_file: Path,
     output: Path | None,
     title: str | None,
+    input_format: InputFormat | None,
+    lines: LineMode | None,
 ) -> None:
-    """Convert a Nextflow [code]-with-dag[/] mermaid file to nf-metro format.
+    """Convert a workflow manager's DAG export to nf-metro format.
 
-    Takes a [code].mmd[/] file produced by
-    [code]nextflow -with-dag file.mmd[/]. The output can be rendered as-is or
-    hand-tuned first.
+    Takes a Nextflow [code]-with-dag[/] mermaid file, or (experimental) the
+    DOT or mermaid-js output of [code]snakemake --rulegraph[/] or
+    [code]--dag[/]. The output can be rendered as-is or hand-tuned first.
     """
     from nf_metro.convert import (
         FeedbackEdgesDroppedWarning,
-        convert_nextflow_dag,
-        is_nextflow_dag,
+        convert_dag,
+        detect_input_format,
     )
 
     text = input_file.read_text()
 
-    if not is_nextflow_dag(text):
+    input_format = input_format or detect_input_format(text)
+    if input_format is None:
         click.echo(
-            "Warning: input does not look like a Nextflow DAG "
-            "(expected 'flowchart TB' header)",
+            "Warning: could not recognise the input as a Nextflow or "
+            "Snakemake DAG; converting it as Nextflow. Pass --from to choose.",
             err=True,
         )
+        input_format = "nextflow"
+    if input_format == "snakemake":
+        _echo_snakemake_quip()
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        result = convert_nextflow_dag(text, title=title or "")
+        try:
+            result = convert_dag(text, input_format, title=title or "", lines=lines)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
 
     if caught:
         _echo_block("Warnings", [str(w.message) for w in caught])
@@ -1664,10 +1785,10 @@ def convert(
         click.echo(result, nl=False)
     else:
         output.write_text(result if result.endswith("\n") else result + "\n")
-        # Count sections and processes in the output
         sections = result.count("subgraph ")
-        processes = result.count("([")
-        summary = f"Converted {processes} processes, {sections} sections"
+        stations = result.count("([")
+        noun = "rules" if input_format == "snakemake" else "processes"
+        summary = f"Converted {stations} {noun}, {sections} sections"
         if dropped:
             plural = "" if dropped == 1 else "s"
             summary += f", {dropped} feedback connection{plural} removed"
@@ -1842,11 +1963,12 @@ def explain(
 )
 @click.option(
     "--theme",
-    type=click.Choice(sorted(STYLE_NAMES)),
+    metavar="THEMES",
+    callback=_theme_stack,
     default=None,
     cls=_DescribedDefault,
-    default_text="from %%metro style, else nfcore",
-    help="Visual theme for a [code].mmd[/] input.",
+    default_text="from %%metro style, else default",
+    help="Visual theme for a [code].mmd[/] input, the same values as render's.",
 )
 @click.option(
     "--overlay",
@@ -1920,11 +2042,13 @@ def serve(
     else:
         try:
             graph = parse_metro_mermaid(input_file.read_text())
+            graph.source_dir = str(input_file.resolve().parent)
+            apply_theme_layout(graph, bound_stack(graph, theme))
             compute_layout(graph)
         except (ValueError, PhaseInvariantError) as e:
             raise click.ClickException(str(e))
 
-        theme_obj = resolve_theme(theme, graph)
+        theme_obj = resolve_theme(graph)
         mapped = sorted(graph.process_mapping)
         if not mapped:
             click.echo(
@@ -1976,8 +2100,9 @@ def serve(
 )
 @click.option(
     "--theme",
-    type=click.Choice(sorted(STYLE_NAMES)),
-    default="nfcore",
+    metavar="THEMES",
+    callback=_theme_stack,
+    default="default",
     show_default=True,
     help="Visual theme applied to every map registered with this server.",
 )
@@ -2015,7 +2140,7 @@ def serve_multi_cmd(
             err=True,
         )
     httpd = serve_multi(
-        THEMES[resolve_style(theme)],
+        resolve_stack(theme),
         host=host,
         port=port,
         token=token,
@@ -2140,14 +2265,9 @@ def validate_svg_cmd(svg_file: Path, geometry: bool) -> None:
     With [code]--geometry[/] it also runs the render-geometry guards on the drawn
     ink.
     """
-    from nf_metro.render import manifest_schema, read_manifest
+    import jsonschema
 
-    try:
-        import jsonschema
-    except ImportError:
-        raise click.ClickException(
-            'validate-svg needs jsonschema: pip install "nf-metro[validate]"'
-        )
+    from nf_metro.manifest import manifest_schema, read_manifest
 
     svg = svg_file.read_text()
     manifest = read_manifest(svg)

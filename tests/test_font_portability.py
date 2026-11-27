@@ -31,7 +31,7 @@ FIXTURE_FILE = EXAMPLES[0]
 def _render(fixture: Path, font_portability: str | None = None) -> str:
     graph = parse_metro_mermaid_file(fixture)
     compute_layout(graph)
-    return render_svg(graph, THEMES["nfcore"], font_portability=font_portability)  # type: ignore[arg-type]
+    return render_svg(graph, THEMES["default"], font_portability=font_portability)  # type: ignore[arg-type]
 
 
 # ── embed ────────────────────────────────────────────────────────────────────
@@ -135,14 +135,14 @@ def test_text_to_paths_draws_visible_replacement_for_missing_glyph() -> None:
 
 
 def test_portable_render_uses_inter_metrics_during_layout() -> None:
-    from nf_metro.api import render_string
+    from nf_metro.api import RenderConfig, render_string
 
     source = (
         "%%metro line: x | X | #0570b0\n"
         "graph LR\nsubgraph s [S]\n%%metro direction: TB\na[WWW] -->|x| b[Ill]\nend\n"
     )
     fallback = render_string(source)
-    embedded = render_string(source, embed_font=True)
+    embedded = render_string(source, config=RenderConfig(embed_font=True))
 
     def section_width(svg: str) -> float:
         import xml.etree.ElementTree as ET

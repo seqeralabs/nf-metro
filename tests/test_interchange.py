@@ -18,7 +18,7 @@ from nf_metro.layout.phases.guards import (
     _guard_interchange_bar_clears_non_members,
     _guard_interchange_label_clears_connector,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_file
 from nf_metro.render import render_svg
 from nf_metro.themes import THEMES
 
@@ -135,7 +135,7 @@ def test_render_emits_single_connector_and_suppresses_duplicate_pill():
     g = _layout(
         _PARALLEL.format(directive="%%metro interchange: dedup | tumor | normal\n")
     )
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     # The interchange link bar carries the rail-connector class, keyed to the
     # node id (drawn once for the whole glyph).
     assert svg.count('data-station-id="dedup"') >= 1
@@ -183,7 +183,7 @@ def test_auto_detection_abstains_when_a_diverging_member_cannot_be_un_straddled(
     layers downstream), so its rail slopes off its base track -- no lane order
     can make the two member rails adjacent, and reordering would only manufacture
     a straddle over cat_fastq.  Auto-detection must keep abstaining there."""
-    g = parse_metro_mermaid((EXAMPLES / "longread_variant_calling.mmd").read_text())
+    g = parse_metro_mermaid_file(EXAMPLES / "longread_variant_calling.mmd")
     assert "samtools_merge" not in {c.node_id for c in g.interchanges}
 
 
@@ -231,7 +231,7 @@ def test_directive_bundles_multiple_lines_on_one_rail():
     assert members["dedup"] == {"a", "b"}
     assert set().union(*members.values()) == {"a", "b", "c"}
     # One knob per (member, line) pair, so all three lines are knobbed.
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     assert svg.count('class="nf-metro-rail-knob"') >= 3
 
 
@@ -290,7 +290,7 @@ def test_marked_interchange_renders_as_a_tinted_interchange():
         )
     )
     g = _layout(src)
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     assert "nf-metro-rail-connector" in svg
     assert "#4CAF50" in svg
 
@@ -301,7 +301,7 @@ def test_interchange_bar_never_spans_a_non_member_station(fixture):
     rails; no other station may sit within that span at the bar's column, or
     the bar would visibly cut through that station's marker.  This is exactly
     the always-on guard's contract, so exercise it directly over the corpus."""
-    g = parse_metro_mermaid(fixture.read_text())
+    g = parse_metro_mermaid_file(fixture)
     compute_layout(g)
     _guard_interchange_bar_clears_non_members(g, fixture.name)
 
@@ -357,7 +357,7 @@ def test_interchange_label_never_lands_on_its_connector(fixture):
     """No cross-track interchange's label overlaps the connector bridge it spans,
     across the whole corpus -- the always-on guard's contract, exercised
     directly."""
-    g = parse_metro_mermaid(fixture.read_text())
+    g = parse_metro_mermaid_file(fixture)
     compute_layout(g)
     _guard_interchange_label_clears_connector(g, fixture.name)
 
@@ -385,7 +385,7 @@ def test_runtime_guard_flags_an_interchange_bar_over_a_non_member(monkeypatch):
     import nf_metro.layout.auto_layout as al
 
     monkeypatch.setattr(al, "_member_lines_pass_straight", lambda *a, **k: True)
-    g = parse_metro_mermaid((EXAMPLES / "longread_variant_calling.mmd").read_text())
+    g = parse_metro_mermaid_file(EXAMPLES / "longread_variant_calling.mmd")
     compute_layout(g, validate=False)
     with pytest.raises(PhaseInvariantError, match="spans non-member station"):
         _guard_interchange_bar_clears_non_members(g, "final")

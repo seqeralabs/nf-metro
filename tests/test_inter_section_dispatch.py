@@ -25,7 +25,7 @@ from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing import inter_section_handlers as H
 from nf_metro.layout.routing.families import RouteFamilyId
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import PortSide, UnresolvedEndpointError
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +44,7 @@ def _route_corpus(before_fixture: Callable[[str], None] | None = None) -> None:
         fixture = str(Path(path).relative_to(_ROOT))
         if before_fixture is not None:
             before_fixture(fixture)
-        graph = parse_metro_mermaid(Path(path).read_text())
+        graph = parse_metro_mermaid_file(Path(path))
         compute_layout(graph)
         route_edges(graph, station_offsets=compute_station_offsets(graph))
 

@@ -129,7 +129,7 @@ RESERVED_STAGES = {
 def _render(relative_path: str):
     path = ROOT / relative_path
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    return graph, svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    return graph, svg.build_observed_render_plan(graph, resolve_theme(graph))
 
 
 @pytest.mark.parametrize(
@@ -2128,7 +2128,7 @@ def test_no_solver_owner_contains_opposite_running_claims(
         layout_options={"permissive": True},
         source_dir=str(path.parent),
     )
-    svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    svg.build_observed_render_plan(graph, resolve_theme(graph))
 
     assert problems
     for ledger in ledgers:

@@ -27,6 +27,7 @@ from nf_metro.api import (
     _prepare_graph_state,
     resolve_theme,
 )
+from nf_metro.convert import INPUT_FORMATS, InputFormat
 from nf_metro.layout import compute_layout
 from nf_metro.layout.route_plan import (
     EmissionMemberId,
@@ -190,7 +191,7 @@ class LayoutCandidate:
 class CandidateExecutionRequest:
     source: str
     source_dir: str = ""
-    from_nextflow: bool = False
+    input_format: InputFormat | None = None
     title: str | None = None
     line_spread: str | None = None
     logo: str | None = None
@@ -291,7 +292,7 @@ class _InjectedWorkerError(RuntimeError):
 class _ProductionInput:
     source: str
     source_dir: str
-    from_nextflow: bool
+    input_format: InputFormat | None
     title: str | None
     line_spread: str | None
     logo: str | None
@@ -500,7 +501,7 @@ def _evaluate_attempt(
             begin(CandidateStage.PREPARATION)
             graph = _prepare_graph_state(
                 production.source,
-                from_nextflow=production.from_nextflow,
+                input_format=production.input_format,
                 title=production.title,
                 line_spread=production.line_spread,
                 logo=production.logo,
@@ -509,6 +510,7 @@ def _evaluate_attempt(
                 source_dir=production.source_dir,
                 bare=production.render.bare,
                 output_format="svg",
+                theme=production.theme,
                 layout_commitments=LayoutCommitmentOverlay(
                     production.caller_pins, attempt.commitments
                 ),
@@ -571,7 +573,7 @@ def _evaluate_attempt(
 
         try:
             begin(CandidateStage.LAYOUT)
-            theme = resolve_theme(production.theme, graph, mode=production.mode)
+            theme = resolve_theme(graph, mode=production.mode)
             compute_layout(graph, validate=True, validation_theme=theme)
             graph_evidence = _graph_evidence(graph, GraphState.SETTLED)
         except Exception as exc:  # noqa: BLE001
@@ -1378,8 +1380,10 @@ def _validate_request(
         raise ValueError("candidate execution request is malformed")
     if not isinstance(request.source, str) or not isinstance(request.source_dir, str):
         raise ValueError("candidate source and source directory must be strings")
-    if not isinstance(request.from_nextflow, bool):
-        raise ValueError("from_nextflow must be a boolean")
+    if request.input_format is not None and request.input_format not in INPUT_FORMATS:
+        raise ValueError(
+            f"input_format must be one of {', '.join(INPUT_FORMATS)} or None"
+        )
     for name, value in (
         ("title", request.title),
         ("line_spread", request.line_spread),
@@ -1454,7 +1458,7 @@ def _production_input(
     return _ProductionInput(
         source=request.source,
         source_dir=request.source_dir,
-        from_nextflow=request.from_nextflow,
+        input_format=request.input_format,
         title=request.title,
         line_spread=request.line_spread,
         logo=request.logo,

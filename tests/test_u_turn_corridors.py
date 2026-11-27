@@ -20,15 +20,16 @@ import nf_metro.layout.routing.exit_turns as exit_turns_module
 import nf_metro.layout.routing.inter_section_handlers as handlers_module
 import nf_metro.render.svg as svg
 from nf_metro.api import prepare_graph
-from nf_metro.layout.constants import BYPASS_CLEARANCE, SAME_Y_TOLERANCE
+from nf_metro.layout.constants import SAME_Y_TOLERANCE
+from nf_metro.layout.pass_metrics import bypass_clearance
 from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.layout.port_order_plan import (
-    _CORRIDOR_CLEAR,
     Approach,
     PortOrderBuilder,
     SideRule,
     _box,
     _Corridor,
+    _corridor_clear,
     _CorridorHop,
     _lateral,
     _runs_opposite,
@@ -84,7 +85,7 @@ def _laid(path: Path) -> _Laid:
         mp.setattr(lane_plan_module, "build_lane_plan", build)
         mp.setattr(svg, "_settle_once_on_the_canvas", keep)
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        build_render_plan(graph, resolve_theme(None, graph))
+        build_render_plan(graph, resolve_theme(graph))
     sealed = next(snap for snap, built in seals if built is graph._lane_plan)
     drawn, geometry = settled[-1]
     return _Laid(sealed, drawn, tuple(geometry.routes))
@@ -354,7 +355,7 @@ def test_room_another_line_ends_beyond_is_not_free(
     assert reach in builder.contested_ends(connector, target, travel)
     _a0, _a1, low, high = _box(target, travel)
     face = high if side == 1 else low
-    assert side * (reach - face) > _CORRIDOR_CLEAR
+    assert side * (reach - face) > _corridor_clear()
 
 
 @pytest.mark.parametrize("stem", [stem for stem, *_rest in CONTESTED])
@@ -679,7 +680,7 @@ def test_a_u_turn_drawn_through_a_section_aborts_the_render() -> None:
         mp.setattr(PortOrderBuilder, "decide_corridors", below)
         graph = prepare_graph(TALL_ROUNDED)
         with pytest.raises(LayoutInvariantError, match=r"\[u-turn pass-through\]"):
-            build_render_plan(graph, resolve_theme(None, graph))
+            build_render_plan(graph, resolve_theme(graph))
 
 
 # Same-row RIGHT-entry loops recorded round below: (map, connector).
@@ -706,7 +707,7 @@ def _below_channels(path: Path, key: _Key) -> set[float]:
         mp.setattr(handlers_module, "_right_entry_below_channel_y", spy)
         mp.setattr(exit_turns_module, "_right_entry_below_channel_y", spy)
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        build_render_plan(graph, resolve_theme(None, graph))
+        build_render_plan(graph, resolve_theme(graph))
     return seen
 
 
@@ -741,7 +742,7 @@ def test_same_row_right_under_run_stays_in_row_gap(stem: str, key: _Key) -> None
             continue
         if section.grid_row == source.grid_row:
             bottom = section.bbox_y + section.bbox_h
-            assert min(depths) >= bottom + BYPASS_CLEARANCE, section.id
+            assert min(depths) >= bottom + bypass_clearance(), section.id
         elif section.grid_row > source.grid_row:
             assert max(depths) <= section_header_safe_cap(section), section.id
     assert _below_channels(path, key) == {min(depths)}
@@ -756,11 +757,11 @@ def test_a_row_under_run_reads_every_column_a_section_spans() -> None:
     export, gather = graph.sections["sec2"], graph.sections["sec1"]
     report, vcf = graph.sections["sec4"], graph.sections["sec0"]
     floor = max(s.bbox_y + s.bbox_h for s in (export, gather))
-    assert under(graph, 0, 1, 2, None) == floor + BYPASS_CLEARANCE
+    assert under(graph, 0, 1, 2, None) == floor + bypass_clearance()
     report.grid_col_span = 2
     assert under(graph, 0, 1, 2, None) == section_header_safe_cap(report)
     report.grid_col_span = 1
     vcf.grid_col_span = 2
     vcf_floor = vcf.bbox_y + vcf.bbox_h
     assert vcf_floor > floor
-    assert under(graph, 0, 1, 2, None) == vcf_floor + BYPASS_CLEARANCE
+    assert under(graph, 0, 1, 2, None) == vcf_floor + bypass_clearance()

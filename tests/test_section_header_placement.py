@@ -31,7 +31,7 @@ from nf_metro.api import resolve_theme
 from nf_metro.layout.constants import SECTION_HEADER_PROTRUSION
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import MetroGraph, Section
 from nf_metro.render.constants import (
     SECTION_HEADER_ROUTE_PAD,
@@ -67,12 +67,12 @@ def _gather_fixtures() -> list[Path]:
 
 
 def _polylines_and_font(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
     polylines = [apply_route_offsets(route, offsets) for route in routes]
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
     return graph, polylines, theme.section_label_font_size, theme.title_font_size
 
 

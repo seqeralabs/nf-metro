@@ -22,6 +22,7 @@ from collections.abc import Callable, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
 
+from nf_metro.api import apply_theme_layout
 from nf_metro.layout import compute_layout
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.layout.routing.reversal import tb_positive_fan_sections
@@ -32,6 +33,7 @@ from nf_metro.parser.model import MetroGraph
 from nf_metro.render import render_svg
 from nf_metro.render.style import Theme
 from nf_metro.render.svg import station_marker_box
+from nf_metro.themes import DEFAULT_MODE, ResolvedTheme
 
 SVG_DIM_RE = re.compile(r'<svg[^>]*?\bwidth="([\d.]+)"[^>]*?\bheight="([\d.]+)"')
 
@@ -131,7 +133,7 @@ class MapModel:
 
     def __init__(self, graph: MetroGraph, theme: Theme) -> None:
         self.mapping = graph.process_mapping
-        self.is_light = _is_light_bg(theme.background_color)
+        self.is_light = _is_light_bg(theme.background_fill)
         svg = render_svg(graph, theme)
         self.svg_body = _strip_xml_decl(svg)
 
@@ -676,17 +678,25 @@ class RunRegistry:
     """
 
     def __init__(
-        self, theme: Theme, max_runs: int = 100, overlay: str = DEFAULT_OVERLAY
+        self,
+        stack: ResolvedTheme,
+        max_runs: int = 100,
+        overlay: str = DEFAULT_OVERLAY,
     ) -> None:
-        self.theme = theme
+        self.stack = stack
+        self.theme = theme = stack.for_mode(DEFAULT_MODE)
         self.max_runs = max_runs
         self.overlay = overlay if overlay in OVERLAY_STYLES else DEFAULT_OVERLAY
-        self.is_light = _is_light_bg(theme.background_color)
+        self.is_light = _is_light_bg(theme.background_fill)
         self.lock = threading.Lock()
         self.runs: dict[str, dict[str, Any]] = {}
 
     def register(self, mmd_text: str, name: str | None) -> str:
         graph = parse_metro_mermaid(mmd_text)
+        # Every map lays out and renders with the server's stack; a posted
+        # map's own style is never resolved, so it cannot name a theme file.
+        graph.resolved_theme = self.stack
+        apply_theme_layout(graph, self.stack)
         compute_layout(graph)
         model = MapModel(graph, self.theme)
         rid = uuid.uuid4().hex[:8]
@@ -865,14 +875,14 @@ def make_multi_handler(
 
 
 def serve_multi(
-    theme: Theme,
+    stack: ResolvedTheme,
     host: str = "127.0.0.1",
     port: int = 8080,
     token: str | None = None,
     overlay: str = DEFAULT_OVERLAY,
 ) -> ThreadingHTTPServer:
     """A persistent multi-run server: pipelines POST their .mmd to ``/maps``."""
-    registry = RunRegistry(theme, overlay=overlay)
+    registry = RunRegistry(stack, overlay=overlay)
     return ThreadingHTTPServer((host, port), make_multi_handler(registry, token))
 
 

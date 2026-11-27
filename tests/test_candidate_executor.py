@@ -167,9 +167,10 @@ def test_noop_attempt_matches_the_complete_production_pipeline() -> None:
         source_dir=request.source_dir,
         layout_options=options,
         bare=render.bare,
+        theme=request.theme,
     )
     compute_layout(graph, validate=True)
-    theme = resolve_theme(request.theme, graph, mode=request.mode)
+    theme = resolve_theme(graph, mode=request.mode)
     observed = build_observed_render_plan(
         graph,
         theme,

@@ -69,7 +69,7 @@ Animation uses the same offset paths.
 `emit_render_plan` draws in layers:
 
 1. **Section boxes.** Rounded rectangles with optional section labels and tick marks for group labels.
-2. **Edges.** Polylines from `RoutedPath.points`, with quadratic Bézier curves at corners, whose radius `routing/corners.py` computes.
+2. **Edges.** Polylines from `RoutedPath.points`, with rounded corners drawn as circular arcs (cubic Bézier circle approximations, `corner_arc_controls` in `routing/corners.py`) between the tangent points that file computes. Concentric lanes stay one lane step apart, within a fraction of a percent, at every turn angle.
    Where `compute_bridges` identifies a non-merging crossing, `_render_bridged_edge` draws the under-route with a gap (see [Bridges](#bridges-bridgespy)).
 3. **Station markers.** Pill-shaped rectangles, or circles and squares for alternative marker styles.
    Rail-mode interchange stations span several rails and are drawn by `_render_rail_pill`.
@@ -143,7 +143,7 @@ The manifest is serialized to JSON and injected as a `<metadata>` element inside
 
 The tool-neutral serialization and deserialization logic lives in `nf_metro.manifest`, a dependency-free package built to be lifted into its own distribution.
 `render/manifest.py` is the thin nf-metro-specific adapter.
-It imports from `nf_metro.manifest` and re-exports the public API, which keeps existing `nf_metro.render.manifest` import paths working.
+It imports from `nf_metro.manifest` and holds only `build_manifest`, which maps a laid-out graph onto the standard's vocabulary.
 
 `manifest_metadata_svg(manifest)` returns the raw SVG `<metadata>` XML string for cases where the caller assembles the SVG element manually.
 
@@ -163,7 +163,7 @@ It then runs four checks:
 - **offset-collapse** flags two distinct lines drawn flush where the offset plan placed them at least one `OFFSET_STEP` apart.
   Lines assigned to the same slot may share a track by design.
 - **chevron-off-stroke** flags a `--directional` chevron whose centre is off its own line's painted centreline, or whose heading departs from that stroke's downstream tangent, or whose ink reaches into one of its line's bridge gaps.
-  The stroke is read back with its quadratic corners, so a chevron inside a rounded corner is measured against the curve.
+  The stroke is read back with its rounded corners, so a chevron inside a rounded corner is measured against the curve.
 
 The label, marker and chevron checks need only the SVG, and they run in `validate-svg --geometry` and `render --validate`.
 The offset check also needs the original `RenderPlan`.
@@ -226,32 +226,32 @@ GIF frames are palette-indexed (`pal8`) with a shared palette Pillow quantises f
 The per-frame delay for GIF and WebP comes from the presentation timestamps in `_frame_ticks`, which round the running total rather than each frame, keeping the loop the length that was asked for.
 That tick time base has to be set on the stream's codec context: set on the stream instead, the muxer rescales from the nominal frame rate and an 8-second loop plays for 66.
 
-## Theming (`style.py`)
+## Theming (`style.py`, `themes/`)
 
-`Theme` is a keyword-only dataclass of visual properties: colors, font sizes, line widths, station radii, animation speed, and legend layout.
+`Theme` in `style.py` is the theme schema: one keyword-only dataclass whose fields are every visual setting a theme can carry.
+Each field's metadata records its description and reference group, whether it is a color, and its allowed values.
+`themes/schema.py` generates the JSON Schema theme files are validated against from it, and `scripts/theme_docs.py` writes that schema to `themes/theme.schema.json` and the field reference into `docs/themes.mdx` (both checked by `tests/test_theme_schema.py`).
+`CHROME` beside the dataclass maps each chrome color to its `--nfm-map-*` custom property and the classes and properties it paints, for `_inject_chrome_css`.
 
-Brand identity and display mode are orthogonal axes.
-Built-in themes live in `src/nf_metro/themes/`:
+Built-in themes are YAML files in `src/nf_metro/themes/` (`default.yaml`, `seqera.yaml`, `london_tube.yaml`, `transparent.yaml`), loaded by the same loader as user theme files (`themes/stack.py`), without re-validation (the test suite validates them).
+A `style`/`--theme` value is a stack of names and files.
+`resolve_stack` lays the stack over the `default` base and merges each mode separately into an immutable `ResolvedTheme` holding the light theme, the dark theme and the stack's layout options.
+`merge_layers` fills every empty derived color (icon and badge colors from the station colors, `knockout_fill` from the opaque background), so a resolved `Theme`'s fields are all concrete and the renderer reads them directly.
+A stack of built-in names is memoised, so a name always resolves to the same objects.
 
-- `nfcore.py` holds the nf-core brand as a light/dark pair, `NFCORE_LIGHT_THEME` and `NFCORE_DARK_THEME`.
-  They share one set of fonts and one line and station geometry, and differ only in the chrome palette.
-- `seqera.py` holds the Seqera Platform brand, likewise as a light/dark pair.
-- `light.py` holds `LIGHT_THEME`, the transparent embed theme with `background_color="none"`.
-  It belongs to no brand family and has no mode counterpart.
+Every resolved theme carries `mode_colors`, the light and dark value of every color field, so the renderer emits chrome as CSS `light-dark(<light>, <dark>)` without looking anything up, and a pair that matches emits the plain value.
+A station color reaches the stylesheet only when its two values differ; otherwise the baked attribute is right in both modes.
+`--no-chrome-css` bakes one concrete palette for consumers that cannot parse `light-dark()`.
 
-`themes/__init__.py` holds two registries.
-`THEME_MODES` maps a brand name to its `{light, dark}` pair.
-`THEMES` is the flat by-name registry that direct selection looks up, covering the bare brand names resolved at `DEFAULT_MODE`, the mode-suffixed names such as `nfcore-light` and `seqera-dark`, and `light`.
-`resolve_theme(theme, graph, mode)` combines the two axes.
-Brand comes from the explicit name or the graph's `style`, where `dark` is an alias for `nfcore`, and mode comes from the explicit argument, `%%metro mode:` or `DEFAULT_MODE`.
+`themes.bound_stack(graph, theme)` resolves the stack a graph lays out and renders with and binds it on the graph (`MetroGraph.resolved_theme`): the caller's `--theme` (or a per-output `theme=`), else the map's `%%metro style:`.
+`resolve_theme(graph, mode)` bakes it in one mode.
+`api.apply_theme_layout` writes the stack's `layout:` options the map's directives left unset (`MetroGraph.directive_options`); explicit caller options are applied after it.
 
-Because the axes are separable, one render carries both palettes.
-`mode_pair(theme)` recovers a brand's light and dark variants, and the chrome colors emit as CSS `light-dark(<light>, <dark>)`.
-A single SVG therefore adapts to the viewer's `color-scheme`.
-`--no-chrome-css` bakes one concrete palette instead, for consumers that cannot parse `light-dark()`.
+Layout reserves room for the theme's sizes: `compute_layout` records the station radius and outline, label size, icon size, line width, chevron size, scales and spacing options it laid out with as one `LayoutMetrics` on the graph (`MetroGraph.layout_metrics`), and `layout/pass_metrics.py` serves them to geometry helpers through one context.
+Every later measurement of that geometry (render settlement, guards, validators) binds the graph's recorded metrics through `graph_layout_context`, never the render theme's, so a layout can be drawn in another theme: its colors and glyphs follow the render theme while its geometry keeps its layout's.
+Sizes are the same in both palettes, so one layout serves every mode a render bakes.
 
-To add a brand, define a light and a dark `Theme` sharing one `brand` value, register the pair under `THEME_MODES`, and add its names to `THEMES`.
-It is then selectable through `%%metro style: <brand>` and `%%metro mode: <mode>`, or the `--theme` and `--mode` options.
+To add a built-in theme, add a YAML file, list it in `_BUILTIN_FILES` in `themes/__init__.py`, and add a gallery example.
 
 ## Module map
 

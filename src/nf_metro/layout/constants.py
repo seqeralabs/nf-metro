@@ -75,7 +75,7 @@ stays decoupled from the theme layer.
 STATION_STROKE_APPROX: float = 1.5
 """Approximate station marker stroke width for layout spacing calculations.
 
-Matches the nfcore theme; other themes use 2 px, a difference small enough to
+Matches the default theme; other themes use 2 px, a difference small enough to
 absorb in the label-clearance math (mirrors :data:`DEFAULT_LINE_WIDTH`).  A
 plain marker's outline is centred on its radius (outer edge at
 ``radius + stroke/2``); an interchange knob's outline is drawn outside the knob
@@ -211,52 +211,11 @@ places the icon and the router that seats the diagonal so the tail is uniform.
 """
 
 CURVE_RADIUS: float = 10.0
-"""Default corner radius for routed paths."""
+"""Base corner radius for routed paths, at ``stroke_scale`` 1.
 
-MIN_CORRIDOR_Y_OVERLAP: float = 2 * CURVE_RADIUS
-"""Minimum vertical overlap for two gap channels to share one corridor.
-
-Channels in the same inter-section gap and direction are grouped into a
-concentric corridor only when their vertical spans overlap by more than
-this much.  Two channels that overlap by less are not running parallel -
-they are stacked segments meeting at a single elbow (a deep descender
-landing on a port lane that another channel then leaves), and their
-turning corners sit within one corner-radius zone of each other.  Packing
-them into one ``OFFSET_STEP`` corridor makes those opposing elbows graze;
-treating them as separate corridors lets the gap layout distribute them
-across the gap width so the elbows stay clear.  Sized at twice the corner
-radius: an overlap that small is entirely inside the two corners' rounding
-zones, never a real parallel run."""
-
-PERP_PORT_EDGE_CLEARANCE: float = CURVE_RADIUS
-"""Minimum room a port keeps from the two bbox edges it is *not* anchored to.
-
-A port is pinned to one edge (a LEFT/RIGHT port to a vertical one, a TOP/BOTTOM
-port to a horizontal one) and is free along its other axis.  Flush against a
-second edge, its inbound run is drawn along the box border and the two read as
-one stroke; it also blocks the section header's above-left position, pushing
-the badge away from the corner it labels.  One curve radius is the shortest
-separation that still reads as a route inside the box rather than on its edge.
-"""
-
-MERGE_ROUTE_MARGIN: float = 2 * CURVE_RADIUS
-"""Distance between a section bbox edge and any merge branch/trunk
-vertical line in the inter-section gap."""
-
-MERGE_LINE_GAP: float = CURVE_RADIUS
-"""Minimum gap between a merge branch descent and trunk ascent."""
-
-MERGE_GAP_MIN: float = 2 * MERGE_ROUTE_MARGIN + MERGE_LINE_GAP
-"""Minimum inter-section gap for column pairs that have merge routing.
-
-Only applied to gaps where merge branches and trunks coexist."""
-
-MIN_INTER_SECTION_GAP: float = 4 * CURVE_RADIUS
-"""Minimum physical gap between adjacent section bboxes.
-
-Ensures the gap midpoint is at least 2*CURVE_RADIUS from each section
-edge, giving enough horizontal run for smooth curves at bypass route
-corners.  Derived as 4 * CURVE_RADIUS."""
+Layout and rendering read the radius in effect through
+:func:`nf_metro.layout.pass_metrics.active_curve_radius`, which takes it from a
+theme's ``curve_radius_ratio`` when one is set."""
 
 OFFSET_STEP: float = 4.0
 """Per-line offset increment for parallel lines in bundles."""
@@ -270,7 +229,7 @@ arcs need not share a centre."""
 DEFAULT_LINE_WIDTH: float = 3.0
 """Stroke width used when converting a visual *track_gap* to an offset step.
 
-Matches the nfcore theme (3 px). The seqera theme uses 4 px; that 1 px
+Matches the default theme (3 px). The seqera theme uses 4 px; that 1 px
 difference is absorbed by rounding elsewhere in the layout pipeline.
 """
 
@@ -301,18 +260,24 @@ def graph_offset_step(
     Layout and render both resolve the step here so the pitch they assume can
     never diverge.  *drawn_line_width* is the width strokes are actually painted
     at, ``stroke_scale`` already applied -- the render side passes its scaled
-    theme's value; the layout side omits it and gets the theme-agnostic
-    :data:`DEFAULT_LINE_WIDTH` proxy, scaled to match.
+    theme's value; the layout side omits it and gets the line width of the
+    theme it lays out for, scaled to match.
 
     ``stroke_scale`` widens the gap as well as the stroke.  Thickening tracks
     while holding the inter-track gap at its absolute default would close that
     gap up as the map is downscaled, merging a bundle into one fat stroke and
     costing exactly the line-counting legibility the scaling is meant to buy.
     """
+    from nf_metro.layout.pass_metrics import active_metrics
+
     scale = graph.stroke_scale
     if graph.track_gap is None:
         return OFFSET_STEP * scale
-    width = DEFAULT_LINE_WIDTH * scale if drawn_line_width is None else drawn_line_width
+    width = (
+        active_metrics().line_width * scale
+        if drawn_line_width is None
+        else drawn_line_width
+    )
     return graph.track_gap * scale + width
 
 
@@ -377,14 +342,19 @@ MIN_STRAIGHT_PORT: float = 5.0
 """Curve radius offset for port-adjacent edges."""
 
 MIN_STRAIGHT_EDGE: float = 10.0
-"""Minimum straight track for non-port edges."""
+"""Base minimum straight track at a non-port route end; read through
+:func:`nf_metro.layout.pass_metrics.min_straight_edge`, which keeps it room for
+a whole corner."""
 
 RAIL_TERMINUS_FAN_LEAD: float = 16.0
 """Flat lead a rail-mode blank terminus's fan runs along its convergence Y
 before fanning out to the rails, so the bundle reads as entering/leaving it."""
 
 MIN_STATION_FLAT_LENGTH: float = 20.0
-"""Minimum length of the visible horizontal flat segment THROUGH a station.
+"""Base minimum length of the visible horizontal flat segment THROUGH a
+station; read through
+:func:`nf_metro.layout.pass_metrics.min_station_flat_length`, which grows it
+with the corner radius.
 
 A station sitting on the polyline corner where two paths meet would
 otherwise have its flat fully consumed by the curve corner (CURVE_RADIUS
@@ -453,21 +423,21 @@ grazing it.  Enforced by ``test_routed_paths_clear_next_row_headers``."""
 DIRECTIONAL_MARKER_HALF_EXTENT: float = 4.0
 """Half-extent of a direction chevron about the path point carrying it.
 
-Mirrors ``Theme.directional_marker_size`` (the arm half-length and
+Mirrors ``Theme.chevron_size`` (the arm half-length and
 half-width), which the reservation ledger cannot read: a corridor's
 clearances are a property of its region, resolved before any theme is in
 hand."""
 
-WIDEST_THEME_LINE_WIDTH: float = 4.0
-"""The widest ``Theme.line_width`` any registered brand sets.
+CLEARANCE_FLOOR_LINE_WIDTH: float = 4.0
+"""The stroke width the canvas-edge clearance covers at least.
 
-A corridor's clearances are a property of its region, resolved before a theme
-is in hand, so a demand that has to hold for every brand takes the widest
-stroke rather than the default one.  Pinned to the registry by
-``test_the_canvas_edge_clearance_bounds_every_theme``."""
+:func:`~nf_metro.layout.pass_metrics.canvas_edge_clearance` widens the
+clearance to the active theme's ``line_width`` when that is wider, so this is
+a floor, not a bound on any theme. ``test_the_canvas_edge_clearance_bounds_every_theme``
+checks every built-in theme is covered."""
 
 CANVAS_EDGE_CLEARANCE: float = (
-    DIRECTIONAL_MARKER_HALF_EXTENT + WIDEST_THEME_LINE_WIDTH / 2
+    DIRECTIONAL_MARKER_HALF_EXTENT + CLEARANCE_FLOOR_LINE_WIDTH / 2
 )
 """Minimum distance between a canvas-margin corridor and the canvas edge.
 
@@ -479,45 +449,18 @@ demanding one flags every run that turns beside the canvas as short of room
 it does not need."""
 
 INTER_ROW_EDGE_CLEARANCE: float = 26.0
-"""Minimum distance between an inter-row wrap channel and the *box edge*
-it runs beneath (the upper section's bbox bottom).
+"""Base minimum distance between an inter-row wrap channel and the *box edge*
+it runs beneath (the upper section's bbox bottom); read through
+:func:`nf_metro.layout.pass_metrics.inter_row_edge_clearance`, which widens it
+to two corner radii when the radius needs more.
 
 The universal ``EDGE_TO_BUNDLE_CLEARANCE`` (16px) is the floor for a line
 sitting beside a bundle; a horizontal inter-row run sitting that close to
 a *section box edge* reads as running flush along the underside of the
 box.  This wider margin gives the run a visibly clear gap below the box.
-It is the box-edge counterpart of ``INTER_ROW_HEADER_CLEARANCE`` on the
+It is the box-edge counterpart of the inter-row header clearance on the
 lower side, keeping the channel's two margins symmetric about the real
 obstacles (box edge above, header badge below)."""
-
-BYPASS_CLEARANCE: float = INTER_ROW_EDGE_CLEARANCE
-"""Vertical clearance below the lowest intervening section for bypass routes.
-
-A bypass channel is a horizontal run drawn beneath a section's box edge, which
-is the relationship ``INTER_ROW_EDGE_CLEARANCE`` states, and the reservation
-ledger insets every row-gap corridor by that same margin.  A narrower margin
-here would seat a bypass inside the band its own reservation allocates it."""
-
-ROW_BAND_SLACK: float = BYPASS_CLEARANCE + Y_SPACING
-"""Vertical slack a same-row inter-section route may extend past the row band.
-
-A same-row wrap routes below the row's tallest section through a bypass
-channel sitting ``BYPASS_CLEARANCE`` below the band bottom, then stacks the
-bundle's per-line nest offsets (a few ``OFFSET_STEP`` each) on top, and adds
-up to one ``Y_SPACING`` for the diagonal corner approach.  This slack bounds
-that legitimate excursion so the band guard / invariant test admit a clean
-below-row wrap while still rejecting a route that dips a full row down."""
-
-INTER_ROW_HEADER_CLEARANCE: float = SECTION_HEADER_PROTRUSION + INTER_ROW_EDGE_CLEARANCE
-"""Distance from a section's bbox top to an inter-row channel above it.
-
-An adjacent-row wrap channel approaching a section from above must clear
-the header *badge* (which protrudes ``SECTION_HEADER_PROTRUSION`` above
-``bbox_y``) by ``INTER_ROW_EDGE_CLEARANCE``, the same margin the source
-side keeps from its bbox bottom.  Section placement reserves this band
-(``_wrap_bundle_row_minimums``) and routing centres within it
-(``_center_inter_row_channel``); the single definition keeps the two in
-lockstep."""
 
 # ---------------------------------------------------------------------------
 # Engine: entry/exit alignment
@@ -539,16 +482,16 @@ EXIT_GAP_MULTIPLIER: float = 0.6
 """Exit gap multiplier for flow-side exits."""
 
 JUNCTION_MARGIN: float = 10.0
-"""Baseline margin for positioning junctions in inter-section gaps.
+"""Distance a junction stands from what it is placed against.
 
-Junction placement helpers in ``layout/engine.py`` derive the actual margin
-from this baseline and the junction's fan-out width via
-``_required_junction_margin(n)``: a single-line junction (n=1) uses this
-baseline directly, while wider fans extend the margin to
-``CURVE_RADIUS + (n-1)*OFFSET_STEP + OFFSET_STEP/2`` so the leftmost
-line's curve start lands clear of the source section's bbox.  Keeping
-the baseline small preserves centred channel positions for simple
-fixtures (n=1, 2) while still ensuring clearance for wide fans (n>=3).
+A fan-out junction stands this far past its exit port, or
+``EDGE_TO_BUNDLE_CLEARANCE`` where a branch drops down the junction's own
+column; a merge junction this far past its right-most feeder or short of its
+entry port.  The distance is the same at every fan width and radius.  Routing
+places a fan's first corners a curve radius plus half the fan's width past the
+junction, so their runway grows with the radius and the fan on its own, and
+holds the fan's shared lead-in, which launches half its width behind the
+junction, at the exit port rather than inside the section the fan leaves.
 """
 
 MIN_PORT_STATION_GAP: float = 16.0
@@ -563,7 +506,7 @@ A port seated further out -- a perpendicular entry sits a whole entry shift clea
 of the row -- would otherwise be left with only the remainder and read as pinched
 against the border, so the box extends to give it the same room instead.
 
-Distinct from ``PERP_PORT_EDGE_CLEARANCE``: that is the hard floor a runtime
+Distinct from ``perp_port_edge_clearance()``: that is the hard floor a runtime
 guard enforces, this is the wider spacing placement aims for.
 """
 
@@ -654,7 +597,7 @@ TERMINUS_WIDTH: float = 28.0
 """Default width of terminus (file) icons.
 
 Used by both layout (for clearance calculations) and render (as the
-Theme.terminus_width default).
+Theme.icon_width default).
 """
 
 ICON_TERMINUS_FORK_LEAD: float = 38.0
@@ -686,7 +629,7 @@ caption text doesn't visually crash into the icon stroke."""
 ICON_HALF_HEIGHT: float = 16.0
 """Half-height of a terminus file icon for layout calculations.
 
-Single source of truth for the default icon half-height: ``Theme.terminus_height``
+Single source of truth for the default icon half-height: ``Theme.icon_height``
 defaults to ``2 * ICON_HALF_HEIGHT`` (see ``render.style.Theme``)."""
 
 ICON_CAPTION_GAP: float = 4.0
@@ -725,37 +668,26 @@ TERMINUS_ICON_GAP: float = 6.0
 Layout-side mirror of the renderer's ``ICON_STATION_GAP`` so the two
 agree on where the icon stack starts without layout depending on render."""
 
-TERMINUS_ICON_CLEARANCE: float = 58.0
-"""Minimum clearance from terminus station center to section bbox edge.
+TERMINUS_ICON_ROOM: float = 30.0
+"""Clearance from a terminus station centre to the section bbox edge, besides
+the file icon's own width: station radius (~5px) + icon gap (6px) + ~19px
+visual margin so icons don't crowd the section border."""
 
-Accounts for station_radius (~5px) + icon gap (6px) + icon width (28px) = 39px
-extent, plus ~19px visual margin so icons don't crowd the section border.
-"""
-
-TERMINUS_ICON_CLEARANCE_V: float = (
+TERMINUS_ICON_ROOM_V: float = (
     STATION_RADIUS_APPROX
     + TERMINUS_ICON_GAP
-    + 2 * ICON_HALF_HEIGHT
     + ICON_CAPTION_GAP
     + ICON_CAPTION_FONT_HEIGHT
     + 14.0  # visual margin so captions don't crowd the section border
 )
-"""Minimum clearance from a terminus station center to the section bbox
-edge along the *vertical* (flow) axis, used by TB/BT sections.
+"""Clearance from a terminus station centre to the section bbox edge along
+the *vertical* (flow) axis of a TB/BT section, besides the file icon's own
+height.
 
 TB/BT termini stack their file icon (and under-icon caption) below or
-above the station instead of beside it, so the reservation uses icon
-height + caption height rather than icon width.
+above the station instead of beside it, so the reservation covers the
+caption rather than icon width.
 """
-
-EXIT_CORRIDOR_ICON_CLEARANCE: float = CURVE_RADIUS
-"""Gap a flow-axis exit corridor keeps below a terminus icon hanging into
-the exit row of a vertical-flow (TB/BT) section.
-
-The exit port (and the horizontal corridor a route turns onto to leave
-the section) is clamped to at least the icon's drawn far edge plus this
-margin, so a route does not graze the file icon on its way out.  Sized
-to clear the bundle-offset spread of the lines on the corridor."""
 
 PORT_LABEL_MAX_DX: float = 120.0
 """Max horizontal distance for port-route label override.
@@ -852,13 +784,6 @@ def _check_constant_relations() -> None:
         SAME_COORD_TOLERANCE < OFFSET_STEP,
         f"SAME_COORD_TOLERANCE ({SAME_COORD_TOLERANCE}) must stay below "
         f"OFFSET_STEP ({OFFSET_STEP}) so offset slots are not merged",
-    )
-    # Bypass corners turn with CURVE_RADIUS each side; without 2*CURVE_RADIUS
-    # of vertical clearance the two corners overlap the channel.
-    require(
-        BYPASS_CLEARANCE >= 2 * CURVE_RADIUS,
-        f"BYPASS_CLEARANCE ({BYPASS_CLEARANCE}) must be >= 2*CURVE_RADIUS "
-        f"({2 * CURVE_RADIUS}) so bypass corners clear the channel",
     )
     # Nesting multiple bypass routes must step them apart by more than the
     # per-line offset, else stacked bypasses read as one bundle.

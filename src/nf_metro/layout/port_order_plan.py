@@ -103,8 +103,6 @@ from typing import Literal
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
-    CURVE_RADIUS,
-    INTER_ROW_HEADER_CLEARANCE,
     SAME_Y_TOLERANCE,
     SECTION_ROUTE_CLEARANCE,
     SECTION_X_PADDING,
@@ -117,6 +115,7 @@ from nf_metro.layout.geometry import (
     packed_section_visual_order,
     perpendicular_port_sides,
 )
+from nf_metro.layout.pass_metrics import active_curve_radius, inter_row_header_clearance
 from nf_metro.layout.routing.common import (
     ENTRY_SIDE_DIRECTION,
     EXIT_SIDE_DIRECTION,
@@ -151,8 +150,11 @@ _PARTING = 0.1
 """Lateral within which an entry's consumer counts as level with it."""
 _U_TURN_SPREAD = 0.75
 _REACH_STEP = 0.01
-_CORRIDOR_CLEAR = INTER_ROW_HEADER_CLEARANCE + CURVE_RADIUS
-"""How far a U-turn's traverse runs past the extreme of the band it rounds."""
+
+
+def _corridor_clear() -> float:
+    """How far a U-turn's traverse runs past the extreme of the band it rounds."""
+    return inter_row_header_clearance() + active_curve_radius()
 
 
 class ApproachKind(Enum):
@@ -795,13 +797,13 @@ class PortOrderBuilder:
         span = (min(a_s, a_e), max(a_s, a_e))
         step = graph_offset_step(graph)
         target_along = _box(target_box, travel)[:2]
-        descent_off = CURVE_RADIUS + step + SECTION_ROUTE_CLEARANCE
+        descent_off = active_curve_radius() + step + SECTION_ROUTE_CLEARANCE
         descent = (
             a_e - descent_off
             if abs(a_e - target_along[0]) < abs(a_e - target_along[1])
             else a_e + descent_off
         )
-        lead = a_s + (CURVE_RADIUS + step) * (1 if descent > a_s else -1)
+        lead = a_s + (active_curve_radius() + step) * (1 if descent > a_s else -1)
         lows, highs = [l_s, l_e], [l_s, l_e]
         face_lows, face_highs = [l_s, l_e], [l_s, l_e]
         others: list[_Box] = []
@@ -831,8 +833,8 @@ class PortOrderBuilder:
                 highs.append(box[3])
                 face_lows.append(face[0])
                 face_highs.append(face[1])
-        right_channel = max(highs) + _CORRIDOR_CLEAR
-        left_channel = min(lows) - _CORRIDOR_CLEAR
+        right_channel = max(highs) + _corridor_clear()
+        left_channel = min(lows) - _corridor_clear()
         face_high, face_low = max(face_highs), min(face_lows)
         connector = self.connector(entry_id, source_id)
         hop = {(e.source, e.line_id) for e in connector}

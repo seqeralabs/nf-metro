@@ -8,7 +8,6 @@ __all__ = [
     "logo_is_resolvable",
     "marker_corner_radius",
     "marker_fill_color",
-    "marker_stroke_color",
     "open_logo_image",
     "render_legend",
     "resolve_logo_file",
@@ -37,23 +36,27 @@ from nf_metro.parser.model import (
     MetroLine,
 )
 from nf_metro.render.constants import (
-    LEGEND_BORDER_RADIUS,
-    LEGEND_LINE_HEIGHT,
     LEGEND_MARKER_GAP,
     LEGEND_MARKER_PILL_RATIO,
     LEGEND_MARKER_RADIUS,
-    LEGEND_PADDING,
-    LEGEND_SWATCH_WIDTH,
     LEGEND_TEXT_GAP,
     LOGO_GAP,
     LOGO_SCALE_FACTOR,
     TEXT_VCENTER_DY,
     effective_line_color,
     line_style_kwargs,
+    readable_text_color,
 )
 from nf_metro.render.ns import adaptive_logo_mask_ids as _adaptive_logo_mask_ids
 from nf_metro.render.ns import ns as _ns
-from nf_metro.render.style import Theme
+from nf_metro.render.style import (
+    SWATCH_BULLET,
+    Theme,
+    color_pair,
+    line_color_pair,
+    line_paint_class,
+    ordinal_code,
+)
 from nf_metro.text_metrics import DEFAULT_TEXT_METRICS, TextRole, text_style
 
 
@@ -130,18 +133,13 @@ def logo_image_kwargs(path: str) -> dict[str, str | bool]:
 def marker_fill_color(fill: str, theme: Theme) -> str:
     """Resolve a marker fill keyword/colour to an SVG fill value.
 
-    ``open`` renders the theme's open-marker interior (falling back to the
-    background, or white on transparent themes); ``solid`` uses the default
-    station fill; anything else is taken as a literal colour, directive-
+    ``open`` renders the theme's knockout fill; ``solid`` uses the station
+    fill; anything else is taken as a literal colour, directive-
     authored text that is HTML-escaped here before it lands in an SVG
     attribute (a no-op on every legitimate CSS colour form).
     """
     if fill == MARKER_FILL_OPEN:
-        if theme.marker_open_fill:
-            return theme.marker_open_fill
-        if theme.background_color and theme.background_color != "none":
-            return theme.background_color
-        return "#ffffff"
+        return theme.knockout_fill
     if fill == MARKER_FILL_SOLID:
         return theme.station_fill
     return html.escape(fill)
@@ -154,15 +152,6 @@ def marker_corner_radius(shape: str, r: float) -> float:
     (``r``), giving circles, capsules and stadium-ended pills.
     """
     return 0.0 if shape == MARKER_SHAPE_SQUARE else r
-
-
-def marker_stroke_color(theme: Theme) -> str:
-    """Resolve the outline colour for marker glyphs and their swatches.
-
-    A dedicated light outline keeps dark-filled markers visible against a
-    dark background; an empty ``marker_stroke`` inherits ``station_stroke``.
-    """
-    return theme.marker_stroke or theme.station_stroke
 
 
 @dataclass
@@ -252,6 +241,7 @@ def _scale_logo_to_content(
 
 def _legend_metrics(
     graph: MetroGraph,
+    theme: Theme,
     rows: list[_LegendRow],
     logo_size: tuple[float, float] | None,
 ) -> tuple[float, float, float, float]:
@@ -260,7 +250,7 @@ def _legend_metrics(
     ``content_h`` is the inner height of the legend box: the taller of the
     text block and a (possibly enlarged) logo.
     """
-    line_height = LEGEND_LINE_HEIGHT
+    line_height = theme.legend_line_height
     line_block_h = len(rows) * line_height
     marker_block_h = (
         LEGEND_MARKER_GAP + len(graph.marker_legend) * line_height
@@ -298,8 +288,8 @@ def compute_legend_dimensions(
     if not rows:
         return (0.0, 0.0)
 
-    padding = LEGEND_PADDING
-    swatch_width = LEGEND_SWATCH_WIDTH
+    padding = theme.legend_padding
+    swatch_width = theme.legend_swatch_width
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
     labels = [row.label for row in rows]
@@ -310,7 +300,9 @@ def compute_legend_dimensions(
         for label in labels
     )
 
-    _text_h, content_height, logo_w, _logo_h = _legend_metrics(graph, rows, logo_size)
+    _text_h, content_height, logo_w, _logo_h = _legend_metrics(
+        graph, theme, rows, logo_size
+    )
     logo_gap = _logo_gap(graph) if logo_size else 0.0
 
     width = padding * 2 + logo_w + logo_gap + text_offset + max_text_width
@@ -333,15 +325,18 @@ def _render_swatch(
     constituent line as a stripe at a small vertical offset, so the swatch
     reads as a bundle of adjacent lines, each honouring its style.
     """
+    if theme.legend_swatch == SWATCH_BULLET:
+        _render_bullets(d, row, theme, x0, entry_y, swatch_width, inactive_line_ids)
+        return
     n = len(row.lines)
     if n == 1:
         offsets = [0.0]
     else:
-        spacing = min(theme.line_width, LEGEND_LINE_HEIGHT / (n + 1))
+        spacing = min(theme.line_width, theme.legend_line_height / (n + 1))
         offsets = [(i - (n - 1) / 2.0) * spacing for i in range(n)]
 
     for ml, dy in zip(row.lines, offsets):
-        dash_kw = line_style_kwargs(ml.style)
+        dash_kw = line_style_kwargs(ml.style, theme)
         d.append(
             draw.Line(
                 x0,
@@ -350,10 +345,72 @@ def _render_swatch(
                 entry_y + dy,
                 stroke=effective_line_color(ml, theme, inactive_line_ids),
                 stroke_width=theme.line_width,
-                stroke_linecap="round",
+                stroke_linecap=theme.line_cap,
                 **dash_kw,
+                **_swatch_paint_class(theme, ml, inactive_line_ids),
             )
         )
+
+
+_BULLET_DIAMETER = 0.85
+_BULLET_FONT = 0.6
+
+
+def _render_bullets(
+    d: draw.Drawing,
+    row: _LegendRow,
+    theme: Theme,
+    x0: float,
+    entry_y: float,
+    swatch_width: float,
+    inactive_line_ids: frozenset[str],
+) -> None:
+    """Draw a row as a disc per line in its colour, carrying the line's code;
+    discs that would overrun the swatch overlap to fit it."""
+    diameter = _BULLET_DIAMETER * theme.legend_line_height
+    n = len(row.lines)
+    step = diameter * 1.1
+    if n > 1 and (n - 1) * step + diameter > swatch_width:
+        step = max(swatch_width - diameter, 0.0) / (n - 1)
+    for i, ml in enumerate(row.lines):
+        muted = ml.id in inactive_line_ids
+        fill = effective_line_color(ml, theme, inactive_line_ids)
+        paint = line_paint_class(theme, ml, muted, "fill")
+        cx = x0 + diameter / 2 + i * step
+        d.append(
+            draw.Circle(
+                cx,
+                entry_y,
+                diameter / 2,
+                fill=fill,
+                **({"class_": paint} if paint else {}),
+            )
+        )
+        shades = (
+            color_pair(theme, "muted_line_color")
+            if muted
+            else line_color_pair(theme, ml)
+        )
+        d.append(
+            draw.Text(
+                ordinal_code(ml.palette_index + 1, theme.line_codes),
+                _BULLET_FONT * diameter,
+                cx,
+                entry_y,
+                fill=readable_text_color(*shades),
+                font_family=theme.label_font_family,
+                font_weight="bold",
+                text_anchor="middle",
+                dy=TEXT_VCENTER_DY,
+            )
+        )
+
+
+def _swatch_paint_class(
+    theme: Theme, line: MetroLine, inactive_line_ids: frozenset[str]
+) -> dict[str, str]:
+    paint = line_paint_class(theme, line, line.id in inactive_line_ids, "stroke")
+    return {"class_": paint} if paint else {}
 
 
 def render_legend(
@@ -387,30 +444,36 @@ def render_legend(
     if not rows:
         return
 
-    line_height = LEGEND_LINE_HEIGHT
-    padding = LEGEND_PADDING
-    swatch_width = LEGEND_SWATCH_WIDTH
+    line_height = theme.legend_line_height
+    padding = theme.legend_padding
+    swatch_width = theme.legend_swatch_width
     text_offset = swatch_width + LEGEND_TEXT_GAP
 
     text_block_h, content_height, scaled_w, scaled_h = _legend_metrics(
-        graph, rows, logo_size
+        graph, theme, rows, logo_size
     )
 
     legend_width, legend_height = compute_legend_dimensions(
         graph, theme, logo_size=logo_size, rows=rows
     )
 
-    # Background
+    frame: dict[str, object] = {}
+    if theme.legend_stroke and theme.legend_stroke_width:
+        frame = {
+            "stroke": theme.legend_stroke,
+            "stroke_width": theme.legend_stroke_width,
+        }
     d.append(
         draw.Rectangle(
             x,
             y,
             legend_width,
             legend_height,
-            rx=LEGEND_BORDER_RADIUS,
-            ry=LEGEND_BORDER_RADIUS,
-            fill=theme.legend_background,
+            rx=theme.legend_corner_radius,
+            ry=theme.legend_corner_radius,
+            fill=theme.legend_fill,
             class_=_ns("nf-metro-legend-bg"),
+            **frame,
         )
     )
 
@@ -523,9 +586,9 @@ def _render_marker_key(
     line_height: float,
 ) -> None:
     """Render the marker shape/fill key rows below the line legend."""
-    swatch_cx = left_x + LEGEND_SWATCH_WIDTH / 2
+    swatch_cx = left_x + theme.legend_swatch_width / 2
     r = LEGEND_MARKER_RADIUS
-    stroke = marker_stroke_color(theme)
+    stroke = theme.marker_stroke
     stroke_cls = _ns("nf-metro-marker-stroke")
     for i, entry in enumerate(graph.marker_legend):
         entry_y = top_y + i * line_height + line_height / 2

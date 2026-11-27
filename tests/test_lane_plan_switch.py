@@ -124,9 +124,7 @@ def _drawn(path: Path) -> _Drawn:
         try:
             source = prepare_graph(path.read_text(), source_dir=str(path.parent))
             seam_pins = dict(planners[-1].seam_sources) if planners else {}
-            observed = svg.build_observed_render_plan(
-                source, resolve_theme(None, source)
-            )
+            observed = svg.build_observed_render_plan(source, resolve_theme(source))
         except Exception:
             return _Drawn(None)
     if not settled:

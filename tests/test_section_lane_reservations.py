@@ -34,6 +34,7 @@ from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
     graph_offset_step,
 )
+from nf_metro.layout.pass_metrics import graph_layout_context
 from nf_metro.layout.routing.invariants import (
     distinct_offset_levels,
     max_interior_offset_gap,
@@ -127,7 +128,8 @@ def _lane_stacked_sections(graph) -> list[str]:
 
 def unridden_lanes(graph, offsets) -> list[tuple[str, str, float]]:
     """Lane levels a section's markers span that no line of the section rides."""
-    step = graph_offset_step(graph)
+    with graph_layout_context(graph):
+        step = graph_offset_step(graph)
     found: list[tuple[str, str, float]] = []
     for sec_id in _lane_stacked_sections(graph):
         section = graph.sections[sec_id]

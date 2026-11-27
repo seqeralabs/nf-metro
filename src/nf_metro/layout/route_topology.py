@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import NamedTuple
 
 from nf_metro.parser.model import MetroGraph
 from nf_metro.parser.route_topology import (
@@ -114,6 +115,31 @@ def convergence_entry_port_id(
         return convergence.entry_port_id if convergence is not None else None
 
     return convergence_junction_entry_ports(graph).get(junction_id)
+
+
+class ForkJoinStations(NamedTuple):
+    """Each station's distinct targets and sources, and the forks and joins
+    among them: the stations with two or more of either."""
+
+    targets: dict[str, set[str]]
+    sources: dict[str, set[str]]
+    forks: set[str]
+    joins: set[str]
+
+
+def fork_join_stations(graph: MetroGraph) -> ForkJoinStations:
+    """:class:`ForkJoinStations` over every edge of *graph*, port edges included."""
+    targets: defaultdict[str, set[str]] = defaultdict(set)
+    sources: defaultdict[str, set[str]] = defaultdict(set)
+    for edge in graph.edges:
+        targets[edge.source].add(edge.target)
+        sources[edge.target].add(edge.source)
+    return ForkJoinStations(
+        dict(targets),
+        dict(sources),
+        {sid for sid, ends in targets.items() if len(ends) > 1},
+        {sid for sid, ends in sources.items() if len(ends) > 1},
+    )
 
 
 def merge_fanout_junction_ids(

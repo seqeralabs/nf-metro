@@ -187,7 +187,7 @@ def test_a_settled_fan_out_publishes_the_plan_its_drawn_observation_accepted() -
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = svg.build_observed_render_plan(graph, resolve_theme(graph))
 
     assert observed.route_plan is not None
     assert observed.route_plan.accepted_corridor_cohort_plan is not None

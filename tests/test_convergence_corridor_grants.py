@@ -1238,7 +1238,7 @@ def _render(
             source_dir=str(path.parent),
             layout_options=layout_options,
         )
-        observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = svg.build_observed_render_plan(graph, resolve_theme(graph))
     return observed.route_plan, settled[-1].routes
 
 

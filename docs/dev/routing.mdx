@@ -149,6 +149,8 @@ A caller that wants the widening on one side only says which side, as `_corridor
 When several lines travel between the same pair of endpoints they form a **bundle**.
 Per-line offsets, computed by `compute_station_offsets` and applied through `_RoutingCtx.station_offsets`, fan the bundle out into parallel tracks so individual lines stay visually distinct.
 Handedness-aware offset propagation at each corner preserves bundle ordering across multi-corner paths, and the corner-radius helpers live in `routing/corners.py`.
+The base radius belongs to the render, not the engine: `active_curve_radius()` in `layout/pass_metrics.py` reads it from the metrics the map was laid out with (a theme's `curve_radius_ratio` times its line width, or 10 px unset, either scaled by `stroke_scale`), and every clearance that exists to make room for a corner (inter-row and bypass clearance, merge margins, minimum gaps and straights) has an accessor there derived from it.
+A routing entry point binds the radius of the graph it routes, so a caller outside the layout pass routes at the radius the graph was laid out with.
 The runtime guard `check_bundle_order_preserved`, in `routing/invariants.py`, catches any regression where a line crosses over its bundle-mates.
 
 Immediately before emission, the exit-turn planner removes slots for lines that do not leave a supported exit group.
@@ -164,7 +166,7 @@ This debug overlay makes the offset geometry visible, showing each line's parall
 ## Reserved inter-row corridors
 
 The gap between two stacked grid rows holds horizontal channels.
-A channel placed there normally derives its band from the two rows' bbox edges, keeping `INTER_ROW_EDGE_CLEARANCE` below the box above and `INTER_ROW_HEADER_CLEARANCE` above the next row's header badge, in `_center_inter_row_channel`.
+A channel placed there normally derives its band from the two rows' bbox edges, keeping `inter_row_edge_clearance()` below the box above and `inter_row_header_clearance()` above the next row's header badge, in `_center_inter_row_channel`.
 Those edges are only a proxy for the real obstruction.
 A section spanning the boundary, or one whose box sits outside the run's own reach, moves an edge without bounding the corridor.
 
@@ -206,11 +208,11 @@ Among these are the **endpoint guards**, which assert that a routed segment term
 - `check_merge_branches_meet_trunk` requires a merge feeder to land on its trunk's channel.
   It applies to merge junctions only.
 - `check_no_hanging_routes` is the general backstop.
-  **Every** route's two endpoints must each lie within `2 * CURVE_RADIUS` of a station, port or junction marker, or of another route it joins, such as a bundle mate, a branch onto a trunk or a peel-off.
+  **Every** route's two endpoints must each lie within two corner radii of a station, port or junction marker, or of another route it joins, such as a bundle mate, a branch onto a trunk or a peel-off.
   Rail-mode endpoints are skipped, because a rail stub terminates on its rail.
   This generalizes the merge-only check to any route family, and the family-specific checks remain as sharper diagnostics.
 
-Both checks allow `2 * CURVE_RADIUS` of slack, because they look for paths that end in open space.
+Both checks allow two corner radii of slack, because they look for paths that end in open space.
 A smaller gap can still draw a visible stub.
 `check_merge_feeders_land_on_trunk` therefore applies the tighter `COORD_TOLERANCE` limit in Tier C. Planned feeders consume their exact join during emission, and the corpus oracle holds every emitted path to the same final endpoint constraint.
 

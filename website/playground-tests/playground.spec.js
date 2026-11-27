@@ -145,10 +145,10 @@ test("brand dropdown writes the %%metro style directive and re-renders", async (
     .poll(async () => page.locator("#preview").innerHTML())
     .not.toBe(before);
 
-  await page.locator("#opt-theme").selectOption("nfcore");
+  await page.locator("#opt-theme").selectOption("default");
   await expect
     .poll(async () => page.evaluate(() => window.__nfMetro.getValue()))
-    .toContain("%%metro style: nfcore");
+    .not.toContain("%%metro style:");
 });
 
 test("brand dropdown syncs from the source style directive", async () => {
@@ -161,10 +161,10 @@ test("brand dropdown syncs from the source style directive", async () => {
 
   await page.evaluate(() =>
     window.__nfMetro.setValue(
-      "%%metro style: dark\n%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
+      "%%metro line: a | A | #f00\ngraph LR\n  n1[N1] -->|a| n2[N2]\n",
     ),
   );
-  await expect(page.locator("#opt-theme")).toHaveValue("nfcore");
+  await expect(page.locator("#opt-theme")).toHaveValue("default");
 });
 
 test("mode dropdown writes the %%metro mode directive and re-renders", async () => {

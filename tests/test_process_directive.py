@@ -6,9 +6,9 @@ import warnings
 import pytest
 
 from nf_metro.layout import compute_layout
+from nf_metro.manifest import MANIFEST_ELEMENT_ID, read_manifest
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.render import render_svg
-from nf_metro.render.manifest import MANIFEST_ELEMENT_ID, read_manifest
 from nf_metro.themes import THEMES
 
 _METADATA_BLOCK = re.compile(
@@ -178,7 +178,7 @@ def test_process_directive_does_not_change_visual_render():
         mapped = parse_metro_mermaid("%%metro process: trim | TRIMGALORE\n" + BASE)
     compute_layout(plain)
     compute_layout(mapped)
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     plain_svg = render_svg(plain, theme)
     mapped_svg = render_svg(mapped, theme)
 

@@ -25,14 +25,14 @@ from conftest import (
 
 from nf_metro.layout.routing.offsets import compute_station_offsets
 from nf_metro.live.mapping import stations_for_process
-from nf_metro.render.manifest import (
+from nf_metro.manifest import (
     MANIFEST_SCHEMA_VERSION,
     manifest_schema,
     match_node_ids,
     read_manifest,
 )
 from nf_metro.render.svg import render_svg, station_marker_box
-from nf_metro.themes import NFCORE_DARK_THEME
+from nf_metro.themes import DEFAULT_DARK_THEME
 
 # A small map with sections, multiple lines, and a process mapping so every
 # manifest field is exercised.
@@ -62,7 +62,7 @@ graph LR
 @pytest.fixture
 def mapped_svg() -> str:
     graph = parse_and_layout(MAPPED_TEXT)
-    return render_svg(graph, NFCORE_DARK_THEME)
+    return render_svg(graph, DEFAULT_DARK_THEME)
 
 
 def test_manifest_embedded_and_roundtrips(mapped_svg: str) -> None:
@@ -87,7 +87,7 @@ def test_no_manifest_opt_out_emits_drawn_map_only() -> None:
     """
     graph = parse_and_layout(MAPPED_TEXT)
     graph.embed_manifest = False
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
 
     ET.fromstring(svg)  # well-formed XML
     assert read_manifest(svg) is None
@@ -104,9 +104,9 @@ def test_no_manifest_drops_only_data_not_glyphs() -> None:
     ``data-node-*`` attributes.
     """
     graph = parse_and_layout(MAPPED_TEXT)
-    on = render_svg(graph, NFCORE_DARK_THEME)
+    on = render_svg(graph, DEFAULT_DARK_THEME)
     graph.embed_manifest = False
-    off = render_svg(graph, NFCORE_DARK_THEME)
+    off = render_svg(graph, DEFAULT_DARK_THEME)
 
     rects_on = on.count("<rect")
     rects_off = off.count("<rect")
@@ -126,7 +126,7 @@ def test_match_block_documents_semantics(mapped_svg: str) -> None:
 
 def test_nodes_coords_and_patterns_match_graph() -> None:
     graph = parse_and_layout(MAPPED_TEXT)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     manifest = read_manifest(svg)
 
     by_id = {n["id"]: n for n in manifest["nodes"]}
@@ -139,10 +139,10 @@ def test_nodes_coords_and_patterns_match_graph() -> None:
     offsets = compute_station_offsets(graph)
     for sid, entry in by_id.items():
         st = graph.stations[sid]
-        cx, cy, _, _, _ = station_marker_box(graph, NFCORE_DARK_THEME, st, offsets)
+        cx, cy, _, _, _ = station_marker_box(graph, DEFAULT_DARK_THEME, st, offsets)
         assert entry["x"] == round(cx, 1)
         assert entry["y"] == round(cy, 1)
-        assert entry["r"] == round(NFCORE_DARK_THEME.station_radius, 1)
+        assert entry["r"] == round(DEFAULT_DARK_THEME.station_radius, 1)
         assert entry["groups"] == graph.station_lines(sid)
         assert entry["patterns"] == graph.process_mapping.get(sid, [])
 
@@ -192,7 +192,7 @@ def test_manifest_arrays_follow_graph_declaration_order() -> None:
     ordering regression point straight at the offending derivation.
     """
     graph = parse_and_layout(MAPPED_TEXT)
-    manifest = read_manifest(render_svg(graph, NFCORE_DARK_THEME))
+    manifest = read_manifest(render_svg(graph, DEFAULT_DARK_THEME))
 
     expected_nodes = [
         sid for sid, st in graph.stations.items() if not st.is_port and not st.is_hidden
@@ -220,7 +220,7 @@ def test_coordinate_space_is_viewbox(mapped_svg: str) -> None:
 def test_matcher_mirrors_live_server() -> None:
     """match_node_ids reproduces stations_for_process exactly."""
     graph = parse_and_layout(MAPPED_TEXT)
-    manifest = read_manifest(render_svg(graph, NFCORE_DARK_THEME))
+    manifest = read_manifest(render_svg(graph, DEFAULT_DARK_THEME))
     process_names = [
         "NFCORE:PIPE:SAMPLESHEET",
         "TRIMGALORE",
@@ -236,8 +236,8 @@ def test_matcher_mirrors_live_server() -> None:
 
 def test_manifest_is_deterministic() -> None:
     graph = parse_and_layout(MAPPED_TEXT)
-    a = render_svg(graph, NFCORE_DARK_THEME)
-    b = render_svg(graph, NFCORE_DARK_THEME)
+    a = render_svg(graph, DEFAULT_DARK_THEME)
+    b = render_svg(graph, DEFAULT_DARK_THEME)
     assert read_manifest(a) == read_manifest(b)
 
 
@@ -251,7 +251,7 @@ def test_cdata_survives_bracket_sequence() -> None:
         "    b[B]\n"
         "    a -->|x| b\n"
     )
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     ET.fromstring(svg)  # must be well-formed XML
     parsed = read_manifest(svg)
     a = next(n for n in parsed["nodes"] if n["id"] == "a")
@@ -263,7 +263,7 @@ def test_corpus_manifest_roundtrips(fixture_id, path, is_nextflow) -> None:
     """Every gallery/topology fixture renders an SVG whose manifest reads back
     and whose node ids all appear as data-node-id handles."""
     graph = compute_corpus_layout(path, is_nextflow)
-    svg = render_svg(graph, NFCORE_DARK_THEME)
+    svg = render_svg(graph, DEFAULT_DARK_THEME)
     manifest = read_manifest(svg)
     assert manifest is not None
     jsonschema.validate(manifest, manifest_schema())

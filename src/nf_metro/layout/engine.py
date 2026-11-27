@@ -22,20 +22,14 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
-    CURVE_RADIUS,
     DESCENDER_CLEARANCE,
     EDGE_TO_BUNDLE_CLEARANCE,
-    FONT_HEIGHT,
     ICON_STACK_LABEL_CLEARANCE,
-    INTER_ROW_EDGE_CLEARANCE,
-    LABEL_OFFSET,
     LABEL_OVERLAP_TOL,
     MIN_Y_SPACING_FLOOR,
     SAME_COORD_TOLERANCE,
     SECTION_X_GAP,
-    SECTION_X_PADDING,
     SECTION_Y_GAP,
-    SECTION_Y_PADDING,
     X_OFFSET,
     X_SPACING,
     Y_OFFSET,
@@ -43,72 +37,51 @@ from nf_metro.layout.constants import (
     graph_offset_step,
 )
 from nf_metro.layout.geometry import lanes_run_along_x, perpendicular_port_sides
+from nf_metro.layout.pass_metrics import (
+    LayoutMetrics,
+    active_curve_radius,
+    active_metrics,
+    inter_row_edge_clearance,
+    label_height_approx,
+)
 
 if TYPE_CHECKING:
     from nf_metro.render.style import Theme
 from nf_metro.layout.layers import assign_layers
 from nf_metro.layout.ordering import assign_tracks
-from nf_metro.layout.phases._common import (  # noqa: F401
-    _bbox_cols_overlap,
-    _build_section_subgraph,
-    _canvas_width,
-    _classify_multi_station_ys,
-    _classify_section_station_ys,
-    _expand_bbox_for_y,
-    _fan_offsets,
-    _grid_group_section_ids,
+from nf_metro.layout.phases._common import (
     _grid_rows_top_to_bottom,
-    _max_stations_per_layer,
-    _route_crosses_section_boundary,
-    _row_contiguous_column_groups,
     _scoped_sections,
-    _section_bundle_lines,
-    _section_trunk_y,
     _snapshot_placement_refs,
-    _station_marker_bbox,
     continuation_track_predecessors,
-    first_vertical_leg_x,
-    is_loop_side_branch_station,
+    row_slot_spacing,
 )
-from nf_metro.layout.phases.balancing import (  # noqa: F401
-    _balance_direct_external_feeder_ys,
+from nf_metro.layout.phases.balancing import (
     _balance_section_content_around_trunk,
-    _compact_below_trunk_band,
     _fan_free_content_upward,
     _fan_source_inputs_upward,
     _recenter_loop_side_stations,
     _shift_and_propagate_loop_stations,
-    _shift_linear_consumer_chain,
-    _shift_sparse_loop_stations_to_clear_bundle,
     _snap_inter_section_port_pairs,
 )
-from nf_metro.layout.phases.bbox import (  # noqa: F401
-    _aggregate_bypass_spans,
+from nf_metro.layout.phases.bbox import (
     _fit_bboxes_to_content_top,
     _level_column_anchor_edges,
-    _lift_would_cause_uturn,
-    _loop_corner_x,
-    _min_section_bbox_top,
-    _predicted_bypass_bottom_in_row,
     _reserve_perp_port_edge_inset,
     _reserve_row_gap_for_top_padding,
-    _section_fit_top,
     _shrink_and_tighten_rows,
-    _shrink_bboxes_to_content_bottom,
     _snapshot_struct_heights_below_top,
-    _tighten_lower_rows_after_shrink,
     _top_align_side_entered_vertical_to_feeder,
     grow_section_bands_to_content,
     push_lower_rows_after_bbox_grow,
     refit_empty_section_tops_to_content,
     refit_tops_after_entry_resnap,
 )
-from nf_metro.layout.phases.canvas import (  # noqa: F401
+from nf_metro.layout.phases.canvas import (
     _renumber_sections_by_route,
     _shift_graph_into_canvas,
-    translate_graph,
 )
-from nf_metro.layout.phases.fan_bundles import (  # noqa: F401
+from nf_metro.layout.phases.fan_bundles import (
     _align_symfan_section_to_row_feeder,
     _apply_half_grid_2branch_symfan,
     _apply_half_grid_symmetric_diamonds,
@@ -116,182 +89,94 @@ from nf_metro.layout.phases.fan_bundles import (  # noqa: F401
     _carry_symmetric_branch_continuations,
     _center_lr_entry_ports_on_fork,
     _center_lr_exit_ports_on_join,
-    _convergence_source_ys,
-    _divergence_target_ys,
     _expand_orphaned_half_grid_stations,
-    _iter_symmetric_diamonds,
     _recenter_full_bundle_columns,
     _redistribute_fanout_siblings,
     _redistribute_full_bundle_columns,
-    _section_symfan_uses_half_grid,
 )
-from nf_metro.layout.phases.grid_snap import (  # noqa: F401
+from nf_metro.layout.phases.grid_snap import (
     _register_half_grid_reconvergence_branches,
     _snap_all_y_to_grid,
     _snap_canvas_y_to_grid,
 )
-from nf_metro.layout.phases.guards import (  # noqa: F401
-    _BISECTION_FIRST_VALID,
-    _FLOW_ALIGNED_SIDES,
-    _PASS_C_BISECTION_ORDER,
+from nf_metro.layout.phases.guards import (
     BackwardFlowError,
     FoldThresholdError,
     MixedEntryDirectionError,
     PhaseInvariantError,
     SettledRouteValidationError,
-    _bisection_should_run,
-    _ensure_routes,
     _guard_anchors_frozen_during_placement,
-    _guard_bypass_port_no_slot_gaps,
     _guard_bypass_v_flat_visible,
     _guard_centered_line_spread_balanced,
     _guard_converge_siblings_merge_locally,
-    _guard_convergence_shallow_feeder_concentric,
     _guard_coordinates_finite,
-    _guard_entry_approach_from_port_side,
-    _guard_entry_landing_no_station_backtrack,
-    _guard_entry_port_fed_only_by_ports,
-    _guard_exit_inherits_entry_bundle_order,
     _guard_explicit_grid_directions,
-    _guard_fan_bundles_coincide_or_separate,
-    _guard_fan_merge_no_partition_crossing,
-    _guard_fanout_junction_resolves_upstream,
-    _guard_fanout_junction_shares_exit_port_y,
-    _guard_fanout_tail_join,
-    _guard_feeder_exits_section_through_side,
     _guard_file_icon_no_name_label,
-    _guard_flow_exit_anchored_to_carrier,
     _guard_fold_relocated_flow_ports_face_connections,
     _guard_independent_components_disjoint,
-    _guard_inter_row_run_clearance,
-    _guard_inter_section_descent_edge_clearance,
-    _guard_inter_section_route_no_backtrack,
-    _guard_inter_section_route_no_full_width_backtrack,
-    _guard_inter_section_routes_in_row_band,
     _guard_interchange_bar_clears_non_members,
     _guard_interchange_label_clears_connector,
-    _guard_merge_port_approach_side,
-    _guard_merge_port_outgoing_side_preserved,
     _guard_multi_section_cell_packed,
-    _guard_no_artefactual_counter_flow,
-    _guard_no_coincident_station_coords,
     _guard_no_diagonal_strikes_horizontal_label,
-    _guard_no_distinct_line_fanout_crossing,
-    _guard_no_dogleg_crosses_exempt_trunk,
     _guard_no_label_overlap,
     _guard_no_line_crosses_file_icon,
-    _guard_no_line_crosses_non_consumer,
     _guard_no_line_strikes_label,
     _guard_no_mixed_entry_directions,
     _guard_no_negative_grid_columns,
-    _guard_no_opposing_line_overlap,
-    _guard_no_route_through_section,
     _guard_no_same_row_backward_feed,
-    _guard_no_split_same_line_fanout_descents,
-    _guard_no_stacked_elbow_graze,
-    _guard_no_station_overlap,
     _guard_no_wrapped_label_trunk_strike,
-    _guard_off_track_clear_of_anchor,
     _guard_off_track_consumer_on_trunk,
     _guard_off_track_input_column_stack,
     _guard_off_track_not_hub,
-    _guard_off_track_output_clears_non_producer,
-    _guard_partial_branch_offset_gaps,
-    _guard_perp_entry_boundary_consistent,
-    _guard_perp_entry_feed_not_collinear,
-    _guard_perp_exit_over_leadin_no_overdip,
     _guard_ports_on_boundaries,
-    _guard_post_convergence_trunk_continues,
     _guard_rail_above_label_band,
-    _guard_rail_connector_ports_no_stub,
     _guard_rail_one_station_per_column,
     _guard_rail_stations_seat_on_rails,
-    _guard_right_entry_corridor_descent_no_jog,
-    _guard_right_entry_drop_in_when_clear,
-    _guard_routes_enter_sections_at_ports,
-    _guard_row_gaps,
-    _guard_row_trunk_cy_consistent,
     _guard_section_bboxes_positive,
-    _guard_section_top_padding,
-    _guard_serpentine_no_backtrack,
     _guard_side_entered_vertical_top_not_below_feeder,
     _guard_single_trunk_off_track_step,
-    _guard_station_x_column_drift,
     _guard_stations_in_sections,
     _guard_symfan_entry_port_on_feeder_trunk,
     _guard_symmetric_diamond_branches_half_pitch,
     _guard_symmetric_diamond_branches_straddle_trunk,
     _guard_tall_anchor_stack_well_formed,
-    _guard_tb_exit_corner_column_order,
     _guard_tb_top_entry_drop_hugs_top,
-    _guard_terminus_icons_within_bbox,
-    _guard_topmost_row_top_entry_hugs_section,
-    _guard_trunk_bands_crossing_optimal,
-    _guard_trunk_continuation_drops_straight,
-    _guard_wrap_exit_anchored_to_carrier,
-    _inter_section_backtrack_legs,
     _port_anchor_snapshot,
-    _route_exit_side,
     _run_pass_c_guards,
-    _section_lacks_flow_aligned_port,
-    inter_section_route_backtrack_legs,
     iter_line_label_strikes,
     run_validate_guards,
 )
-from nf_metro.layout.phases.junctions import (  # noqa: F401
-    _junction_incoming_line_count,
-    _junction_outgoing_line_count,
+from nf_metro.layout.phases.junctions import (
     _position_junctions,
-    _required_junction_margin,
-    _resolve_source_section_id,
-    _resolve_source_xy,
 )
-from nf_metro.layout.phases.off_track import (  # noqa: F401
-    _align_phantom_pass_throughs,
-    _bump_off_track_clear_of_trunks,
+from nf_metro.layout.phases.off_track import (
     _compute_fork_join_gaps,
-    _insert_phantom_pass_throughs,
     _lift_off_track_stations,
     _line_crossed_file_icon_sinks,
     _off_track_anchor_of,
-    _off_track_groups,
-    _off_track_output_below,
-    _place_off_track_relative_to_anchors,
     _reanchor_off_track_to_consumer,
 )
-from nf_metro.layout.phases.planned_fans import (  # noqa: F401
+from nf_metro.layout.phases.planned_fans import (
     _apply_planned_fan_geometry,
     _apply_planned_fan_port_geometry,
     _fit_planned_fan_bboxes,
     _snapshot_planned_fan_centrelines,
     planned_fan_layout_section_ids,
 )
-from nf_metro.layout.phases.ports import (  # noqa: F401
+from nf_metro.layout.phases.ports import (
     _align_entry_ports,
     _align_exit_ports,
-    _align_lr_entry_port,
-    _align_lr_exit_port,
     _align_ports_to_downstream,
-    _align_tb_entry_port,
     _align_tb_section_bbox_bottoms,
-    _clamp_tb_entry_port,
-    _nudge_port_from_stations,
-    _propagate_through_junctions,
-    _push_ports_from_termini,
-    _push_termini_from_port,
     _realign_fold_lr_exit_ports,
     _reconcile_flow_exit_carrier_anchors,
-    _resolve_downstream_entry_y,
-    _resolve_tb_exit_y,
-    _set_port_x,
-    _set_port_y,
     _snap_grid_group_entry_ports,
     _snap_grid_group_exit_ports,
     _snap_sole_layer_stations_to_ports,
     _space_ports_from_termini,
     prune_settled_cross_column_perp_bridges,
 )
-from nf_metro.layout.phases.row_align import (  # noqa: F401
+from nf_metro.layout.phases.row_align import (
     _align_row_trunk_ys,
     _align_row_y_grids,
     _compact_row_content_to_bbox_top,
@@ -302,42 +187,24 @@ from nf_metro.layout.phases.row_align import (  # noqa: F401
     _top_align_row_bboxes_only,
     _top_align_row_sections,
 )
-from nf_metro.layout.phases.single_section import (  # noqa: F401
-    _adjust_lr_entry_inset,
-    _adjust_lr_exit_gap,
-    _adjust_lr_label_clearance,
-    _adjust_tb_entry_shifts,
-    _adjust_tb_labels,
-    _adjust_terminus_icon_clearance,
+from nf_metro.layout.phases.single_section import (
     _align_terminus_to_upstream,
-    _enforce_min_extent,
-    _has_horizontal_predecessor_section,
     _layout_single_section,
-    _mirror_primary,
-    _multiline_label_padding,
-    _multiline_track_spacing,
-    _normalize_min,
-    _resolve_station_collisions,
     _shift_lr_perp_entry_stations,
-    _terminus_icon_clearance,
-    _terminus_icon_clearance_vertical,
-    _terminus_icons_extend_forward,
-    _terminus_y_overhang,
+    reserve_fan_stagger_runway,
 )
 from nf_metro.layout.phases.snapshots import (
     capture_phase_snapshot,
     phase_snapshots_enabled,
 )
-from nf_metro.layout.phases.spacing import (  # noqa: F401
+from nf_metro.layout.phases.spacing import (
     _MAX_SPREAD_ITERS,
-    _SPREAD_SLACK,
     _bypass_label_obstacles,
     _label_clearance_issues,
     _reflowed_and_residual_overlaps,
     _reflowed_label_station_ids,
     _residual_label_overlaps,
     _spread_bump,
-    _struck_stations_and_collinear,
     _warn_if_pinned_x_spacing_crowds_labels,
 )
 from nf_metro.layout.routing.context import is_far_side_around_below_left_entry
@@ -387,8 +254,8 @@ def compute_min_y_spacing(
     ICON_STACK_LABEL_CLEARANCE``.  A terminus icon's two extents come from
     :func:`~nf_metro.layout.phases.single_section.terminus_cross_extents`
     (icon body, plus a stacked back page above and a caption below); a
-    labelled station's is ``LABEL_OFFSET + FONT_HEIGHT +
-    DESCENDER_CLEARANCE``.  We take the worst case across all candidate
+    labelled station's is the label offset, the label's line height and
+    ``DESCENDER_CLEARANCE``.  We take the worst case across all candidate
     pairs in every LR/RL section, then clamp to ``floor`` so a label-light
     graph stays at the default pitch.
 
@@ -402,11 +269,11 @@ def compute_min_y_spacing(
     The result is applied uniformly to the whole render -- the grid
     stays global, no per-section overrides.
     """
-    from nf_metro.layout.pass_metrics import active_font_scale
     from nf_metro.layout.phases.single_section import terminus_cross_extents
 
-    scale = active_font_scale()
-    label_extent = LABEL_OFFSET + FONT_HEIGHT * scale + DESCENDER_CLEARANCE
+    label_extent = (
+        active_metrics().label_offset + label_height_approx() + DESCENDER_CLEARANCE
+    )
     clearance = ICON_STACK_LABEL_CLEARANCE
 
     required = floor
@@ -466,7 +333,7 @@ def _far_side_wrap_left_clearances(graph: MetroGraph) -> dict[str, float]:
         offset_step = graph_offset_step(graph)
         clearance = (
             (n - 1) * offset_step
-            + CURVE_RADIUS
+            + active_curve_radius()
             + offset_step
             + EDGE_TO_BUNDLE_CLEARANCE
         )
@@ -482,8 +349,8 @@ def compute_layout(
     y_spacing: float | None = None,
     x_offset: float = X_OFFSET,
     y_offset: float = Y_OFFSET,
-    section_x_padding: float = SECTION_X_PADDING,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_x_padding: float | None = None,
+    section_y_padding: float | None = None,
     section_x_gap: float | None = None,
     section_y_gap: float | None = None,
     validate: bool = _VALIDATE_DEFAULT,
@@ -535,13 +402,22 @@ def compute_layout(
         section_y_gap = (
             graph.section_y_gap if graph.section_y_gap is not None else SECTION_Y_GAP
         )
+    if section_x_padding is not None:
+        graph.section_x_padding = section_x_padding
+    if section_y_padding is not None:
+        graph.section_y_padding = section_y_padding
+    from nf_metro.themes import resolve_theme
+
+    graph.layout_metrics = LayoutMetrics.of(graph, resolve_theme(graph))
+    section_x_padding = graph.layout_metrics.section_x_padding
+    section_y_padding = graph.layout_metrics.section_y_padding
 
     # Read the phase-snapshot enable flag once (issue #363) and stash it on
     # the graph so per-stage call sites can snapshot without signature churn.
     # Off by default: when unset, each _snap call is a single attribute read.
     graph._phase_snapshots_enabled = phase_snapshots_enabled()
 
-    from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
+    from nf_metro.layout.pass_metrics import graph_layout_context
 
     def _layout_pass(validate_pass: bool) -> None:
         _compute_layout_scaled(
@@ -557,10 +433,7 @@ def compute_layout(
             validate=validate_pass,
         )
 
-    with (
-        font_scale_context(graph.font_scale),
-        stroke_scale_context(graph.stroke_scale),
-    ):
+    with graph_layout_context(graph):
         # Topology-blind bypass insertion (parse time) can miss a line drawn
         # through a marker it doesn't consume; the geometric pass re-lays out
         # with bypass helpers for any such crossing it can cleanly fix.  Every
@@ -599,10 +472,9 @@ def compute_layout(
             from nf_metro.layout.routing.invariants import CurveInvariantError
             from nf_metro.render.section_header import SectionHeaderClashError
             from nf_metro.render.svg import build_render_plan
-            from nf_metro.themes import resolve_theme
 
             try:
-                build_render_plan(graph, validation_theme or resolve_theme(None, graph))
+                build_render_plan(graph, validation_theme or resolve_theme(graph))
             except (
                 CurveInvariantError,
                 FanRouteInvariantError,
@@ -1463,7 +1335,7 @@ def _layout_once(
                 topology,
                 x_spacing=x_spacing,
                 y_spacing=y_spacing,
-                minimum_runway=INTER_ROW_EDGE_CLEARANCE,
+                minimum_runway=inter_row_edge_clearance(),
             ),
         )
     else:
@@ -1528,6 +1400,7 @@ def _compute_flat_layout(
             x_offset + station.layer * x_spacing + layer_extra.get(station.layer, 0)
         )
         station.y = y_offset + track_rank[station.track] * y_spacing
+    reserve_fan_stagger_runway(graph, graph, None)
 
     _snap(graph, "flat")
 
@@ -1593,8 +1466,8 @@ def _compute_section_layout(
     y_spacing: float = Y_SPACING,
     x_offset: float = X_OFFSET,
     y_offset: float = Y_OFFSET,
-    section_x_padding: float = SECTION_X_PADDING,
-    section_y_padding: float = SECTION_Y_PADDING,
+    section_x_padding: float | None = None,
+    section_y_padding: float | None = None,
     section_x_gap: float = SECTION_X_GAP,
     section_y_gap: float = SECTION_Y_GAP,
     validate: bool = False,
@@ -1644,6 +1517,10 @@ def _compute_section_layout(
     label order: the content-top fit leaves a non-grid shift behind, and
     the canvas snap is what closes it out, so the snap has to come last.
     """
+    if section_x_padding is None:
+        section_x_padding = active_metrics().section_x_padding
+    if section_y_padding is None:
+        section_y_padding = active_metrics().section_y_padding
     from nf_metro.layout.section_placement import (
         _reflect_stacked_split_consumer_tracks,
         place_sections,
@@ -1696,6 +1573,13 @@ def _compute_section_layout(
 
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
+    for sec_id, sub in section_subgraphs.items():
+        reserve_fan_stagger_runway(
+            graph,
+            sub,
+            graph.sections[sec_id],
+            y_grid=row_slot_spacing(graph._row_y_grid_info, sec_id, y_spacing),
+        )
     _snap(graph, "1.2")
 
     # Stage 1.3: Place sections on the canvas

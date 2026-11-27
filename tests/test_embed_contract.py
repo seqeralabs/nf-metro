@@ -36,7 +36,7 @@ def rendered_html() -> str:
     graph = parse_metro_mermaid(text)
     graph.source_dir = str(RNASEQ_MMD.parent)
     compute_layout(graph)
-    return render_html(graph, THEMES["nfcore"])
+    return render_html(graph, THEMES["default"])
 
 
 @pytest.fixture(scope="module")
@@ -45,7 +45,7 @@ def rendered_svg() -> str:
     graph = parse_metro_mermaid(text)
     graph.source_dir = str(RNASEQ_MMD.parent)
     compute_layout(graph)
-    return render_svg(graph, THEMES["nfcore"])
+    return render_svg(graph, THEMES["default"])
 
 
 def test_driver_js_exists_and_importable():

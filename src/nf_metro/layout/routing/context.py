@@ -10,7 +10,6 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
-    BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     JUNCTION_MARGIN,
     SAME_Y_TOLERANCE,
@@ -23,11 +22,13 @@ from nf_metro.layout.geometry import (
     section_lane_sign,
     station_lane_coord,
 )
+from nf_metro.layout.pass_metrics import bypass_clearance
 from nf_metro.layout.route_topology import (
     convergence_junction_entry_ports,
     divergence_junction_exit_ports,
     divergence_junction_sources,
     fanout_junction_ids,
+    fork_join_stations,
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
@@ -52,6 +53,7 @@ from nf_metro.layout.routing.reversal import (
     detect_reversed_sections,
     tb_positive_fan_sections,
 )
+from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 from nf_metro.parser.model import (
     Edge,
     MetroGraph,
@@ -267,6 +269,10 @@ class _RoutingCtx:
     co_row_diagonal_groups: Mapping[_EdgeKey, CoRowDiagonalGroup] = field(
         default_factory=dict
     )
+    boundary_clearance_requirements: list[BoundaryClearanceRequirement] = field(
+        default_factory=list
+    )
+    """Room handlers asked settlement for, published with the route plan."""
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
@@ -339,7 +345,7 @@ def _classify_merge_edges(
                     graph,
                     pred_col,
                     tgt_col,
-                    BYPASS_CLEARANCE,
+                    bypass_clearance(),
                     src_row=pred_row,
                     cross_row=cross_row,
                     tgt_row=tgt_row,
@@ -438,14 +444,7 @@ def _build_routing_context(
             bottom_exit_junction_ports[divergence_id] = exit_port_id
     bottom_exit_junctions = set(bottom_exit_junction_ports)
 
-    # Fork/join stations
-    fork_targets: dict[str, set[str]] = defaultdict(set)
-    join_sources: dict[str, set[str]] = defaultdict(set)
-    for e in graph.edges:
-        fork_targets[e.source].add(e.target)
-        join_sources[e.target].add(e.source)
-    fork_stations = {sid for sid, tgts in fork_targets.items() if len(tgts) > 1}
-    join_stations = {sid for sid, srcs in join_sources.items() if len(srcs) > 1}
+    fork_join = fork_join_stations(graph)
 
     tb_sections = vertical_flow_sections(graph)
     reversed_sections = detect_reversed_sections(graph)
@@ -500,10 +499,10 @@ def _build_routing_context(
         bottom_exit_junctions=bottom_exit_junctions,
         bottom_exit_junction_ports=bottom_exit_junction_ports,
         offset_step=resolved_offset_step,
-        fork_stations=fork_stations,
-        join_stations=join_stations,
-        fork_targets=dict(fork_targets),
-        join_sources=dict(join_sources),
+        fork_stations=fork_join.forks,
+        join_stations=fork_join.joins,
+        fork_targets=fork_join.targets,
+        join_sources=fork_join.sources,
         tb_sections=tb_sections,
         reversed_sections=reversed_sections,
         positive_fan=positive_fan,
@@ -646,7 +645,13 @@ def _section_lane_frame(
     frame = AxisFrame.for_direction(
         section.direction, graph.x_spacing or 1.0, graph.y_spacing or 1.0
     )
-    fan = positive_fan if positive_fan is not None else tb_positive_fan_sections(graph)
+    if positive_fan is not None:
+        fan: set[str] = positive_fan
+    elif frame.secondary.name == "x":
+        fan = tb_positive_fan_sections(graph)
+    else:
+        # Only a vertical-flow section can be in the set.
+        fan = set()
     lane_sign = section_lane_sign(section, fan)
     if lane_sign != frame.secondary_sign:
         frame = replace(frame, secondary_sign=lane_sign)
@@ -1520,7 +1525,7 @@ def _fan_bypass_band(
             graph,
             src_col,
             tgt_col,
-            BYPASS_CLEARANCE,
+            bypass_clearance(),
             src_row=src_row,
             cross_row=tgt_row is not None and tgt_row != src_row,
             tgt_row=tgt_row,

@@ -89,7 +89,7 @@ def _tail_render(
     graph = prepare_graph(
         path.read_text(), source_dir=str(path.parent), layout_options=layout_options
     )
-    observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = svg.build_observed_render_plan(graph, resolve_theme(graph))
     assert len(tail_plans) == settle_calls >= 1
     return graph, observed, tuple(tail_plans)
 
@@ -714,7 +714,7 @@ def test_cross_column_overflow_at_narrow_spacing_renders_without_a_curve_abort()
             source_dir=str(path.parent),
             layout_options=CROSS_COLUMN_OVERFLOW_OPTIONS,
         )
-        svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+        svg.build_observed_render_plan(graph, resolve_theme(graph))
 
 
 def test_compact_convergence_seats_its_unordered_lanes_in_end_turn_order(
@@ -756,7 +756,7 @@ def test_granted_short_destination_cohort_is_seated_on_the_tail_observation(
     monkeypatch.setattr(svg, "observe_route_edges_centred", observe)
     path = ROOT / "examples/topologies/same_destination_short_overlap.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = svg.build_observed_render_plan(graph, resolve_theme(graph))
 
     drawn = {
         (route.edge.source, route.edge.target, route.line_id): _flat(route.points)
@@ -789,7 +789,7 @@ def test_packed_cell_aperture_grant_widens_its_column_boundary_once(
     path = ROOT / PACKED_CELL
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     drawn_width = svg.build_observed_render_plan(
-        graph, resolve_theme(None, graph)
+        graph, resolve_theme(graph)
     ).plan.svg_width
     direct_assembled_past_reference(monkeypatch)
     batches: list[
@@ -1016,7 +1016,7 @@ def test_a_discarded_aperture_observation_leaves_the_render_geometry(
     monkeypatch.setattr(svg, "_settle_render_geometry", settle)
     path = ROOT / relative_path
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = svg.build_observed_render_plan(graph, resolve_theme(graph))
 
     ((before, during, after),) = observed_states
     assert during[:2] != before[:2]

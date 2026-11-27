@@ -1,5 +1,5 @@
 ---
-title: "Theming"
+title: "Light and dark mode"
 description: One SVG that adapts to a light or dark viewer, and how to reuse the technique outside nf-metro.
 ---
 
@@ -10,6 +10,8 @@ An nf-metro SVG has no separate light and dark version, and nf-metro never re-re
 Every themeable color is baked into the file as a pair, and native CSS picks the right half at display time:
 
 ![Diagram: light-dark(#fff, #1a1a1a) resolves to #fff under a light color-scheme and to #1a1a1a under a dark one](assets/theming_resolution.svg)
+
+Which colors go into each pair is up to the theme; [Themes](/nf-metro/themes/) covers choosing one or writing your own.
 
 <Aside type="note" title="The short recipe">
 
@@ -62,6 +64,7 @@ A page embedding the SVG (the **host page**) can set `--my-bg` on a wrapper to o
 If it doesn't, the light/dark pair still runs.
 This layer is optional, because `light-dark()` plus `color-scheme` is the whole mechanism.
 nf-metro calls the properties it exposes this way **chrome**: background, title, labels, section boxes, and legend.
+[Chrome colors and host overrides](/nf-metro/themes/#chrome-colors-and-host-overrides) lists the custom property for each.
 Line and route colors carry meaning, and they stay fixed.
 
 ## Where `color-scheme` should live
@@ -73,7 +76,7 @@ An element that sets its own `color-scheme` therefore stops inheriting and start
 That matters once the SVG is embedded, because the host page and the SVG can disagree about who owns the decision.
 nf-metro has two modes, controlled by `self_color_scheme` on `render_svg` (`--no-self-color-scheme` on the CLI):
 
-**Standalone (the default).** The root `<svg>` declares its own `color-scheme` (`src/nf_metro/render/svg.py:2595-2597`):
+**Standalone (the default).** The root `<svg>` declares its own `color-scheme` (`_emit_render_plan` in `src/nf_metro/render/svg.py`):
 
 ```html
 <svg style="color-scheme: light dark"></svg>
@@ -83,7 +86,7 @@ nf-metro has two modes, controlled by `self_color_scheme` on `render_svg` (`--no
 That is the right behavior for a file opened on its own, or dropped into a page that has no opinion about theme.
 
 **Embedded in a page that already manages theme.** Passing `--no-self-color-scheme` omits that declaration, and the `<svg>` inherits `color-scheme` from its host instead.
-Every `<Metro>` embed on this docs site uses it (`website/src/lib/render-metro.mjs:277`).
+Every `<Metro>` embed on this docs site uses it (`renderMetroFile` in `website/src/lib/render-metro.mjs`).
 This site's theme picker sets `color-scheme` on `<html>`:
 
 ```css title="reset.css (Starlight)"
@@ -113,7 +116,7 @@ Both have to be right for an embedded map to stay theme-adaptive.
 
 <Aside type="tip" title="What this docs site itself passes">
 
-From `renderMetroFile` (`website/src/lib/render-metro.mjs:254-296`):
+From `renderMetroFile` in `website/src/lib/render-metro.mjs`:
 
 | Flag                     | `<Metro>` embed | OG image export |
 | ------------------------ | --------------- | --------------- |
@@ -152,8 +155,7 @@ They then follow the page's mode rather than the OS setting.
 
 <Aside type="note" title="One theme opts out of all of this on purpose">
 
-nf-metro ships one theme with no light/dark sibling at all: `light` (`THEME_MODES`, `src/nf_metro/themes/__init__.py`).
-For it, `mode_pair(theme)` returns `None`.
+nf-metro ships one theme whose palettes match: [`transparent`](/nf-metro/themes/#the-built-in-themes), whose file sets every color at the top level.
 Every `--nfm-*` fallback is a single baked value, no `light-dark()` appears anywhere, and `self_color_scheme` has nothing to do, because no `color-scheme` gets declared either way.
 The media query described earlier is the only adaptation such a theme gets.
 Choose it deliberately rather than by leaving `--theme` or `%%metro style:` unset.
@@ -219,7 +221,7 @@ Claiming the host's toggle drives it everywhere would not be accurate.
 <Aside type="note" title="A real example: the nf-core/rnaseq README map">
 
 [nf-core/rnaseq](https://github.com/nf-core/rnaseq) embeds its pipeline map the ordinary way, as `![...](docs/images/..._animated.svg)`, which GitHub renders as a plain `<img>`.
-Its map uses the paired `nfcore` theme with a light/dark logo pair, `self_color_scheme` left at its default, and no other flags.
+Its map uses the paired `default` theme with a light/dark logo pair, `self_color_scheme` left at its default, and no other flags.
 On the rendered page at GitHub that is enough: the whole map, not only the text, follows the GitHub light/dark setting ([source](https://github.com/nf-core/rnaseq/blob/dev/assets/metro_map.mmd)).
 
 </Aside>

@@ -13,7 +13,7 @@ from nf_metro.layout.labels import (
 )
 from nf_metro.layout.routing import route_edges
 from nf_metro.layout.routing.common import RoutedPath
-from nf_metro.layout.routing.core import _align_uncentered_siblings
+from nf_metro.layout.routing.postprocess import _align_uncentered_siblings, _FanRoom
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, Station
 
@@ -81,7 +81,7 @@ class TestAlignUncenteredSiblings:
         original_xs = {"a": 100.0, "b": 100.0, "c": 100.0, "d": 100.0}
 
         graph, routes, ox, moves = self._make_graph_and_routes(specs, original_xs)
-        _align_uncentered_siblings(routes, graph, ox, moves)
+        _align_uncentered_siblings(routes, graph, ox, moves, _FanRoom.of(graph))
 
         # Outlier d should be dragged to 120.0 (majority X)
         assert abs(moves["d"] - 120.0) < 0.5
@@ -103,7 +103,7 @@ class TestAlignUncenteredSiblings:
         graph, routes, ox, moves = self._make_graph_and_routes(specs, original_xs)
 
         moves_before = dict(moves)
-        _align_uncentered_siblings(routes, graph, ox, moves)
+        _align_uncentered_siblings(routes, graph, ox, moves, _FanRoom.of(graph))
 
         # No majority -> no settled positions change
         assert moves == moves_before
@@ -133,7 +133,7 @@ class TestAlignUncenteredSiblings:
         graph, routes, ox, moves = self._make_graph_and_routes(
             specs, original_xs, edge_pairs
         )
-        _align_uncentered_siblings(routes, graph, ox, moves)
+        _align_uncentered_siblings(routes, graph, ox, moves, _FanRoom.of(graph))
 
         # d and e should be dragged to 120.0
         assert abs(moves["d"] - 120.0) < 0.5

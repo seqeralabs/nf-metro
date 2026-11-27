@@ -27,7 +27,7 @@ import pytest
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.invariants import check_fan_merge_no_partition_crossing
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -50,7 +50,7 @@ def _gather_fixtures() -> list[Path]:
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -83,7 +83,7 @@ def test_checker_fires_on_transposed_vertical_lanes(name: str) -> None:
     lane sign the seam-free sections and the lane plan's port order avoid --
     reproduces the fork/merge crossing the invariant is meant to catch, proving
     the check is not vacuous."""
-    graph = parse_metro_mermaid((EXAMPLE_TOPOLOGIES / f"{name}.mmd").read_text())
+    graph = parse_metro_mermaid_file(EXAMPLE_TOPOLOGIES / f"{name}.mmd")
     compute_layout(graph)
     vertical = {
         sid for sid, sec in graph.sections.items() if sec.direction in ("TB", "BT")

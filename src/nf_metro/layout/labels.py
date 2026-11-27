@@ -11,7 +11,6 @@ __all__ = [
     "LabelPlacement",
     "active_font_scale",
     "find_label_overlaps",
-    "font_scale_context",
     "label_glyph_advance_width",
     "label_glyph_ink_bbox",
     "label_text_width",
@@ -28,11 +27,8 @@ from nf_metro.layout.constants import (
     COLLISION_MULTIPLIER,
     COORD_TOLERANCE_FINE,
     DESCENDER_CLEARANCE,
-    DIAGONAL_LABEL_OFFSET,
     DIAGONAL_SLOPE_RATIO,
-    FONT_HEIGHT,
     LABEL_BBOX_MARGIN,
-    LABEL_FONT_SIZE,
     LABEL_MARGIN,
     LABEL_NUDGE_MAX,
     LABEL_OFFSET,
@@ -54,7 +50,10 @@ from nf_metro.layout.geometry import (
 )
 from nf_metro.layout.pass_metrics import (
     active_font_scale,
-    font_scale_context,
+    active_metrics,
+    diagonal_label_offset,
+    label_font_size_approx,
+    label_height_approx,
     station_radius_approx,
     station_stroke_approx,
 )
@@ -73,7 +72,7 @@ def label_text_width(label: str, role: TextRole = TextRole.STATION_LABEL) -> flo
     A generous fixed-per-character budget for collision spacing; for the width
     the text actually draws at, use :func:`label_glyph_advance_width`.
     """
-    style = text_style(LABEL_FONT_SIZE * active_font_scale(), "bold")
+    style = text_style(label_font_size_approx(), "bold")
     return DEFAULT_TEXT_METRICS.reserve_width(label, style, role)
 
 
@@ -98,7 +97,7 @@ def tb_left_label_marker_pitch(
     right_min_offset = min(0.0, lane_sign * right_span)
     return (
         label_text_width(label)
-        + TB_LABEL_H_SPACING
+        + beside_label_gap()
         + TB_PILL_EDGE_OFFSET
         - right_min_offset
         + TB_PILL_EDGE_OFFSET
@@ -112,16 +111,16 @@ def label_glyph_advance_width(
 ) -> float:
     """Rendered pixel width of the widest line in a (possibly multi-line) label.
 
-    Uses the active deterministic metrics face at :data:`LABEL_FONT_SIZE`,
+    Uses the active deterministic metrics face at the theme's label size,
     scaled by the graph's font scale.
     """
-    style = text_style(LABEL_FONT_SIZE * active_font_scale(), "bold")
+    style = text_style(label_font_size_approx(), "bold")
     return DEFAULT_TEXT_METRICS.advance(label, style, role)
 
 
 def _label_text_height(label: str) -> float:
     """Pixel height of a (possibly multi-line) label."""
-    font_height = FONT_HEIGHT * active_font_scale()
+    font_height = label_height_approx()
     n = label.count("\n") + 1
     style = text_style(font_height, "bold")
     return DEFAULT_TEXT_METRICS.line_block_height(
@@ -413,7 +412,7 @@ def _label_ink_y_band(placement: LabelPlacement) -> tuple[float, float]:
     above block as ``[y - text_h, y]`` (the full height above the anchor) and
     so reads ~one line-height too high for a wrapped label.
     """
-    font_height = FONT_HEIGHT * active_font_scale()
+    font_height = label_height_approx()
     n = placement.text.count("\n") + 1
     line_spacing = DEFAULT_TEXT_METRICS.line_height(
         text_style(font_height, "bold"), TextRole.STATION_LABEL
@@ -442,7 +441,7 @@ def label_glyph_ink_bbox(
     """
     x0, y0, x1, y1 = _label_bbox(placement)
     if placement.angle or placement.dominant_baseline:
-        style = text_style(LABEL_FONT_SIZE * active_font_scale(), "bold")
+        style = text_style(label_font_size_approx(), "bold")
         ink_half = DEFAULT_TEXT_METRICS.ink_half_width(
             placement.text, style, TextRole.STATION_LABEL
         )
@@ -666,7 +665,7 @@ def _station_marker_boxes(
     Reuses the engine's pill geometry, which returns None for ports, hidden
     stations and junctions -- none of which render a marker to collide with.
     """
-    from nf_metro.layout.engine import _station_marker_bbox
+    from nf_metro.layout.phases._common import _station_marker_bbox
 
     return {
         sid: bbox
@@ -1503,6 +1502,12 @@ def _place_station_label(
     )
 
 
+def beside_label_gap() -> float:
+    """Gap between a vertical-flow station's pill and the label beside it,
+    widened by however far the active ``label_offset`` exceeds its default."""
+    return TB_LABEL_H_SPACING + max(0.0, active_metrics().label_offset - LABEL_OFFSET)
+
+
 def label_beside_pill(
     station: Station, pill_edge: float, *, left: bool
 ) -> LabelPlacement:
@@ -1514,7 +1519,7 @@ def label_beside_pill(
     return LabelPlacement(
         station_id=station.id,
         text=station.label,
-        x=pill_edge - TB_LABEL_H_SPACING if left else pill_edge + TB_LABEL_H_SPACING,
+        x=pill_edge - beside_label_gap() if left else pill_edge + beside_label_gap(),
         y=station.y,
         above=True,
         text_anchor="end" if left else "start",
@@ -1592,7 +1597,7 @@ def _place_angled_label(
             station_id=station.id,
             text=station.label,
             x=station.x,
-            y=station.y + min_off - ctx.label_offset - DIAGONAL_LABEL_OFFSET,
+            y=station.y + min_off - ctx.label_offset - diagonal_label_offset(),
             above=True,
             angle=-label_angle,
             text_anchor="start",
@@ -1602,7 +1607,7 @@ def _place_angled_label(
             station_id=station.id,
             text=station.label,
             x=station.x,
-            y=station.y + max_off + ctx.label_offset + DIAGONAL_LABEL_OFFSET,
+            y=station.y + max_off + ctx.label_offset + diagonal_label_offset(),
             above=False,
             angle=label_angle,
             text_anchor="start",
@@ -1785,7 +1790,7 @@ def _place_alternating_label(
 
 def place_labels(
     graph: MetroGraph,
-    label_offset: float = LABEL_OFFSET,
+    label_offset: float | None = None,
     station_offsets: dict[tuple[str, str], float] | None = None,
     icon_obstacles: list[tuple[float, float, float, float]] | None = None,
     routes: list["RoutedPath"] | None = None,
@@ -1815,6 +1820,8 @@ def place_labels(
     search probe) pass False so the engine sees the pre-lift geometry and the
     deliberate neighbour graze never trips the label-overlap guard.
     """
+    if label_offset is None:
+        label_offset = active_metrics().label_offset
     ctx, sorted_stations = _build_label_ctx(
         graph, label_offset, station_offsets, icon_obstacles, label_angle
     )
@@ -1868,7 +1875,7 @@ def _rail_panel_marker_extents(
     past that centre; clearing to the pill edge keeps the angled text off
     those markers.  Returns an empty map when the graph has no rail sections.
     """
-    from nf_metro.layout.engine import _station_marker_bbox
+    from nf_metro.layout.phases._common import _station_marker_bbox
 
     extents: dict[str, tuple[float, float]] = {}
     if not graph._rail_y:
@@ -2297,7 +2304,10 @@ def _avoid_diagonal_routes(
         else:
             min_off = max_off = 0.0
         if placement.above:
-            gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
+            gap = max(
+                (station.y + min_off) - placement.y,
+                active_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,
@@ -2306,7 +2316,10 @@ def _avoid_diagonal_routes(
                 above=False,
             )
         else:
-            gap = max(placement.y - (station.y + max_off), LABEL_OFFSET)
+            gap = max(
+                placement.y - (station.y + max_off),
+                active_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,
@@ -2384,7 +2397,10 @@ def _flip_labels_off_foreign_strikes(
             continue
         min_off, max_off = _pill_offsets(graph, station, station_offsets)
         if placement.above:
-            gap = max((station.y + min_off) - placement.y, LABEL_OFFSET)
+            gap = max(
+                (station.y + min_off) - placement.y,
+                active_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,
@@ -2393,7 +2409,10 @@ def _flip_labels_off_foreign_strikes(
                 above=False,
             )
         else:
-            gap = max(placement.y - (station.y + max_off), LABEL_OFFSET)
+            gap = max(
+                placement.y - (station.y + max_off),
+                active_metrics().label_offset,
+            )
             trial = LabelPlacement(
                 station_id=placement.station_id,
                 text=placement.text,

@@ -36,7 +36,6 @@ import yaml
 
 from nf_metro.parser.provenance import ConnectorEndpointRole, EffectiveDecision
 from nf_metro.parser.route_topology import build_route_topology_query
-from nf_metro.themes import resolve_style
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, Section
@@ -180,9 +179,7 @@ def build_info(
     :func:`rendered_section_numbers` for a graph that has not been laid out).
     A section that draws no badge reports ``None``.
 
-    ``style`` reports the theme name the map resolves to, which is the name
-    ``--theme`` accepts: an alias or an unrecognised value is reported as the
-    brand the render will actually use, not as authored.
+    ``style`` reports the map's ``%%metro style:`` as written.
     """
     real_sections = graph.real_sections
     topology_query = build_route_topology_query(graph)
@@ -314,7 +311,7 @@ def build_info(
     return {
         "title": graph.title or None,
         "caption": graph.caption or None,
-        "style": resolve_style(graph.style),
+        "style": graph.style,
         "warnings": list(warnings or []),
         "counts": {
             "stations": len(graph.stations),

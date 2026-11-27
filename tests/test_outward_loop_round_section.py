@@ -43,7 +43,7 @@ SHARED_PORT_FIXTURES = [
 def _render(path: Path):
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     plan = render_graph_result(
-        graph, resolve_theme(None, graph, "light"), RenderConfig()
+        graph, resolve_theme(graph, "light"), RenderConfig()
     ).plan
     return plan.graph, list(zip(plan.routes, plan.route_polylines, strict=True))
 

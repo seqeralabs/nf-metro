@@ -23,8 +23,10 @@ from nf_metro.layout.labels import (
     LabelPlacement,
     segment_strikes_label,
 )
-from nf_metro.layout.pass_metrics import font_scale_context
+from nf_metro.layout.pass_metrics import metrics_context
+from nf_metro.layout.routing.corners import corner_from_arc
 from nf_metro.manifest import read_manifest
+from nf_metro.render.path_geometry import flatten_commands, iter_path_commands
 
 if TYPE_CHECKING:
     from nf_metro.render.plan import RenderPlan
@@ -45,11 +47,11 @@ _FLUSH_TOL = 1.5
 _PITCH_MIN = OFFSET_STEP - 0.5
 
 # A chevron is placed on its line's drawn centreline exactly, so these bound
-# only this parser's flattening of the quadratic corners (a chord of
-# ``_Q_CHORDS`` strays well under a degree and a hundredth of a pixel).
+# only this parser's flattening of the rounded corners (a chord of
+# ``_CORNER_CHORDS`` strays well under a degree and a hundredth of a pixel).
 _CHEVRON_CENTRE_TOL = 0.5
 _CHEVRON_HEADING_COS = math.cos(math.radians(3.0))
-_Q_CHORDS = 64
+_CORNER_CHORDS = 64
 # Pen-lift overlap below this is float noise at a chevron that ends flush with
 # a bridge gap, not a chevron drawn into it.
 _GAP_OVERLAP_EPS = 1e-3
@@ -83,23 +85,15 @@ class _Label(NamedTuple):
 # chevrons (the optional directional markers) also carry ``data-line-id`` but
 # are not the route, so the route class substring gates them out.
 _ROUTE_CLASS = "metro-line-"
-_NUM = re.compile(r"-?\d+(?:\.\d+)?")
 _ELEMENT = re.compile(r"<(path|line)\b([^>]*?)/?>", re.DOTALL)
 _TEXT = re.compile(r"<text\b([^>]*?)>(.*?)</text>", re.DOTALL)
 _TSPAN = re.compile(r"<tspan\b[^>]*>(.*?)</tspan>", re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
-_PATH_CMD = re.compile(r"([MLQ])([^MLQ]*)")
 
 
 def _attr(attrs: str, name: str, default: str | None = None) -> str | None:
     match = re.search(rf'\b{name}="([^"]*)"', attrs)
     return match.group(1) if match else default
-
-
-def _iter_path_cmds(d: str) -> Iterator[tuple[str, list[float]]]:
-    """``(command, numbers)`` for each ``M``/``L``/``Q`` in a path's ``d``."""
-    for cmd, body in _PATH_CMD.findall(d):
-        yield cmd, [float(n) for n in _NUM.findall(body)]
 
 
 def _route_elements(svg: str) -> Iterator[tuple[str, list[tuple[str, list[float]]]]]:
@@ -118,7 +112,7 @@ def _route_elements(svg: str) -> Iterator[tuple[str, list[tuple[str, list[float]
             )
             yield line_id, [("M", [x1, y1]), ("L", [x2, y2])]
         else:
-            yield line_id, list(_iter_path_cmds(_attr(attrs, "d") or ""))
+            yield line_id, list(iter_path_commands(_attr(attrs, "d") or ""))
 
 
 def parse_route_polylines(
@@ -129,9 +123,9 @@ def parse_route_polylines(
     Returns ``(line_id, subpaths)`` per drawn route element, where each subpath
     is a list of ``(x, y)`` vertices.  A route splits into several subpaths at
     every ``M`` after the first, so a bridged edge's hop gap is a real break
-    rather than a phantom segment spanning it.  Each smoothing ``Q`` is
-    collapsed back to its corner (the control point), which is the exact
-    pre-smoothing vertex, so the polyline equals the logical routed path.
+    rather than a phantom segment spanning it.  Each rounded corner (a ``C``
+    arc) is collapsed back to the vertex where its tangents meet, which is the
+    exact pre-smoothing vertex, so the polyline equals the logical routed path.
     """
     routes: list[tuple[str, list[list[tuple[float, float]]]]] = []
     for line_id, commands in _route_elements(svg):
@@ -144,10 +138,17 @@ def parse_route_polylines(
                 current = [(nums[0], nums[1])]
             elif cmd == "L":
                 current.append((nums[0], nums[1]))
-            elif cmd == "Q":
+            elif cmd == "C":
                 if current:
-                    current.pop()
-                current.append((nums[0], nums[1]))
+                    start = current.pop()
+                    current.append(
+                        corner_from_arc(
+                            start,
+                            (nums[0], nums[1]),
+                            (nums[2], nums[3]),
+                            (nums[4], nums[5]),
+                        )
+                    )
         if current:
             subpaths.append(current)
         routes.append((line_id, subpaths))
@@ -286,7 +287,7 @@ def check_label_strikes(
             continue
         carried = set(node.get("groups", ()))
         scale = font_size / LABEL_FONT_SIZE
-        with font_scale_context(scale):
+        with metrics_context(font_scale=scale):
             for line_id, subpaths in routes:
                 if line_id in carried:
                     continue
@@ -497,8 +498,8 @@ _DIRECTION_CLASS = "metro-direction-"
 class StrokeTrace(NamedTuple):
     """One drawn route's painted centreline as straight chords.
 
-    ``chords`` are the inked pieces in drawing order, each quadratic corner
-    flattened into ``_Q_CHORDS`` of them; ``gaps`` are the pen lifts between
+    ``chords`` are the inked pieces in drawing order, each rounded corner
+    flattened into ``_CORNER_CHORDS`` of them; ``gaps`` are the pen lifts between
     subpaths (a bridged edge's hop gaps), which carry no ink.
     """
 
@@ -520,46 +521,18 @@ class DrawnChevron(NamedTuple):
     reach: float
 
 
-def _quad_point(a: _Point, c: _Point, b: _Point, t: float) -> _Point:
-    s = 1.0 - t
-    return (
-        s * s * a[0] + 2 * s * t * c[0] + t * t * b[0],
-        s * s * a[1] + 2 * s * t * c[1] + t * t * b[1],
-    )
-
-
 def parse_route_strokes(svg: str) -> list[StrokeTrace]:
     """Each drawn route's painted centreline, rounded corners included.
 
-    :func:`parse_route_polylines` folds every ``Q`` back onto its corner
+    :func:`parse_route_polylines` folds every corner arc back onto its corner
     vertex; this follows the curve the stroke paints instead, so a mark can be
     measured against the ink rather than the pre-smoothing polyline.
     """
     traces: list[StrokeTrace] = []
     for line_id, commands in _route_elements(svg):
-        chords: list[_Segment] = []
-        gaps: list[_Segment] = []
-        pen: _Point | None = None
-        for cmd, nums in commands:
-            if cmd == "M":
-                target = (nums[0], nums[1])
-                if pen is not None:
-                    gaps.append((pen, target))
-                pen = target
-            elif pen is None:
-                continue
-            elif cmd == "L":
-                target = (nums[0], nums[1])
-                chords.append((pen, target))
-                pen = target
-            else:
-                control, end = (nums[0], nums[1]), (nums[2], nums[3])
-                prev = pen
-                for k in range(1, _Q_CHORDS + 1):
-                    point = _quad_point(pen, control, end, k / _Q_CHORDS)
-                    chords.append((prev, point))
-                    prev = point
-                pen = end
+        subpaths = flatten_commands(commands, _CORNER_CHORDS)
+        chords = [chord for path in subpaths for chord in zip(path, path[1:])]
+        gaps = [(a[-1], b[0]) for a, b in zip(subpaths, subpaths[1:])]
         traces.append(StrokeTrace(line_id, chords, gaps))
     return traces
 
@@ -571,7 +544,7 @@ def parse_chevrons(svg: str) -> list[DrawnChevron]:
         cls = _attr(attrs, "class") or ""
         if tag != "path" or _DIRECTION_CLASS not in cls:
             continue
-        nums = [n for _, ns in _iter_path_cmds(_attr(attrs, "d") or "") for n in ns]
+        nums = [n for _, ns in iter_path_commands(_attr(attrs, "d") or "") for n in ns]
         if len(nums) != 6:
             continue
         w1x, w1y, ax, ay, w2x, w2y = nums

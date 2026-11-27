@@ -29,10 +29,10 @@ from typing import NamedTuple
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     NESTED_BEND_MAX_LANES,
     OFFSET_STEP,
 )
+from nf_metro.layout.pass_metrics import active_curve_radius
 from nf_metro.layout.routing.common import Direction, bundle_width
 
 # ---------------------------------------------------------------------------
@@ -98,7 +98,7 @@ def resolve_curve_radius_at(
     points: list[tuple[float, float]],
     desired_radii: list[float] | None,
     corner_idx: int,
-    default_radius: float = CURVE_RADIUS,
+    default_radius: float | None = None,
 ) -> float:
     """Resolve one corner radius from its adjacent segment budgets.
 
@@ -106,6 +106,8 @@ def resolve_curve_radius_at(
     ``points[1]``.  The allocation matches :func:`resolve_curve_radii` exactly,
     including the proportional budget shared by neighbouring corners.
     """
+    if default_radius is None:
+        default_radius = active_curve_radius()
     n_corners = len(points) - 2
     if corner_idx < 0 or corner_idx >= n_corners:
         raise IndexError("corner index out of range")
@@ -146,10 +148,57 @@ def resolve_curve_radius_at(
     return min(desired_r, max_len1, max_len2)
 
 
+def corner_radius_budget(
+    points: list[tuple[float, float]], desired_radii: list[float], corner_idx: int
+) -> float:
+    """The largest radius corner *corner_idx* can take that
+    :func:`resolve_curve_radius_at` leaves unclamped, its neighbours keeping
+    their *desired_radii*: each leg's length less the neighbouring corner's
+    share of it, or the whole leg at either end of the route."""
+    i = corner_idx + 1
+    len_in = math.dist(points[i - 1], points[i])
+    len_out = math.dist(points[i], points[i + 1])
+    prev_r = desired_radii[corner_idx - 1] if corner_idx > 0 else 0.0
+    next_r = desired_radii[corner_idx + 1] if i < len(points) - 2 else 0.0
+    return min(len_in - prev_r, len_out - next_r)
+
+
+def padded_curve_radii(
+    points: list[tuple[float, float]],
+    curve_radii: Iterable[float] | None,
+    base_radius: float | None = None,
+) -> list[float]:
+    """*curve_radii* for every corner of *points*, *base_radius* standing in
+    for any it lacks."""
+    if base_radius is None:
+        base_radius = active_curve_radius()
+    radii = list(curve_radii or [])
+    return radii + [base_radius] * (len(points) - 2 - len(radii))
+
+
+def largest_concentric_reference(
+    ceiling: float, lanes: Iterable[tuple[float, float]]
+) -> float | None:
+    """The largest reference radius, up to *ceiling*, that every lane fits.
+
+    Each lane is ``(budget, shift)``: it draws at the reference plus *shift*,
+    which must stay within its :func:`corner_radius_budget`. ``None`` when the
+    largest such reference would leave some lane's radius under
+    :data:`COORD_TOLERANCE_FINE`.
+    """
+    cap = math.inf
+    floor = -math.inf
+    for budget, shift in lanes:
+        cap = min(cap, budget - shift)
+        floor = max(floor, COORD_TOLERANCE_FINE - shift)
+    reference = min(ceiling, cap)
+    return None if reference < floor else reference
+
+
 def resolve_curve_radii(
     points: list[tuple[float, float]],
     desired_radii: list[float] | None,
-    default_radius: float = CURVE_RADIUS,
+    default_radius: float | None = None,
 ) -> list[float]:
     """Compute effective curve radii after segment-budget clamping.
 
@@ -177,6 +226,8 @@ def resolve_curve_radii(
     list of float
         Effective (clamped) radius for each corner.
     """
+    if default_radius is None:
+        default_radius = active_curve_radius()
     n_corners = len(points) - 2
     if n_corners <= 0:
         return []
@@ -194,7 +245,7 @@ def resolve_curve_radii(
 
 def desired_curve_radii(
     points: list[tuple[float, float]],
-    default_radius: float = CURVE_RADIUS,
+    default_radius: float,
 ) -> list[float]:
     """The radius each interior vertex of *points* asks for.
 
@@ -278,6 +329,103 @@ def curve_tangents(
     return tangents
 
 
+def corner_arc_controls(
+    before: tuple[float, float],
+    corner: tuple[float, float],
+    after: tuple[float, float],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Cubic control points that draw a rounded corner as a circular arc.
+
+    The arc leaves the incoming leg at *before* and rejoins the outgoing leg at
+    *after*, both a tangent arm from *corner*. A circular arc of deflection
+    ``phi`` drawn as one cubic puts each control point ``4/3 * tan(phi / 4)``
+    radii along its tangent, which is ``k = 4/3 * tan(phi / 4) / tan(phi / 2)``
+    of the tangent arm; the radial error is under 0.03% of the radius up to a
+    right angle, so concentric lanes drawn this way stay parallel through the
+    turn. With ``t = tan(phi / 4)`` the ratio is ``2/3 * (1 - t**2)``, so a
+    straight-through corner gets 2/3. A corner with a zero arm is a straight
+    run between its tangent points.
+    """
+    d_in = (corner[0] - before[0], corner[1] - before[1])
+    d_out = (after[0] - corner[0], after[1] - corner[1])
+    len_in = math.hypot(*d_in)
+    len_out = math.hypot(*d_out)
+    if len_in <= 0.0 or len_out <= 0.0:
+        return before, after
+    cos_phi = (d_in[0] * d_out[0] + d_in[1] * d_out[1]) / (len_in * len_out)
+    t = math.tan(math.acos(max(-1.0, min(1.0, cos_phi))) / 4)
+    k = 2.0 / 3.0 * (1.0 - t * t)
+    return (
+        (before[0] + d_in[0] * k, before[1] + d_in[1] * k),
+        (after[0] - d_out[0] * k, after[1] - d_out[1] * k),
+    )
+
+
+def cubic_point(
+    a: tuple[float, float],
+    c1: tuple[float, float],
+    c2: tuple[float, float],
+    b: tuple[float, float],
+    t: float,
+) -> tuple[float, float]:
+    """The point at *t* on the cubic Bezier from *a* to *b* with handles *c1*, *c2*."""
+    s = 1.0 - t
+    return (
+        s**3 * a[0] + 3 * s * s * t * c1[0] + 3 * s * t * t * c2[0] + t**3 * b[0],
+        s**3 * a[1] + 3 * s * s * t * c1[1] + 3 * s * t * t * c2[1] + t**3 * b[1],
+    )
+
+
+def cubic_tangent(
+    a: tuple[float, float],
+    c1: tuple[float, float],
+    c2: tuple[float, float],
+    b: tuple[float, float],
+    t: float,
+) -> tuple[float, float]:
+    """The (unnormalised) forward tangent at *t* of :func:`cubic_point`'s cubic."""
+    s = 1.0 - t
+    return (
+        s * s * (c1[0] - a[0]) + 2 * s * t * (c2[0] - c1[0]) + t * t * (b[0] - c2[0]),
+        s * s * (c1[1] - a[1]) + 2 * s * t * (c2[1] - c1[1]) + t * t * (b[1] - c2[1]),
+    )
+
+
+def flatten_cubic(
+    a: tuple[float, float],
+    c1: tuple[float, float],
+    c2: tuple[float, float],
+    b: tuple[float, float],
+    steps: int,
+) -> list[tuple[float, float]]:
+    """The *steps* points at ``k / steps`` (``k = 1 .. steps``) along the cubic
+    :func:`cubic_point` draws, ending on *b*."""
+    return [cubic_point(a, c1, c2, b, k / steps) for k in range(1, steps + 1)]
+
+
+def corner_from_arc(
+    before: tuple[float, float],
+    c1: tuple[float, float],
+    c2: tuple[float, float],
+    after: tuple[float, float],
+) -> tuple[float, float]:
+    """The corner vertex a drawn arc was built around.
+
+    Both handles sit the same fraction ``k`` of their leg from the tangent
+    points, so together they span ``k`` of the chord; dividing the first
+    handle's offset by ``k`` recovers the vertex, a straight-through corner
+    included. A zero-arm corner has no handle offset and is drawn straight, so
+    it folds to *before*.
+    """
+    d1 = (c1[0] - before[0], c1[1] - before[1])
+    chord = (after[0] - before[0], after[1] - before[1])
+    span = (d1[0] + after[0] - c2[0], d1[1] + after[1] - c2[1])
+    scale = (chord[0] * chord[0] + chord[1] * chord[1]) / max(
+        span[0] * chord[0] + span[1] * chord[1], 1e-12
+    )
+    return (before[0] + d1[0] * scale, before[1] + d1[1] * scale)
+
+
 def reversed_offset(offset: float, max_offset: float) -> float:
     """Flip a line's offset within a bundle.
 
@@ -293,7 +441,7 @@ def corner_radius(
     max_offset: float,
     *,
     outside: bool,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float,
 ) -> float:
     """Compute the concentric arc radius for one line at a corner.
 
@@ -331,7 +479,7 @@ def concentric_corner_radius(
     turn_in: tuple[float, float],
     turn_out: tuple[float, float],
     dx: float,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float,
     *,
     min_radius: float | None = None,
 ) -> float:
@@ -404,7 +552,7 @@ def concentric_corner_radius_at(
     corner: tuple[float, float],
     nxt: tuple[float, float],
     dx: float,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float,
     *,
     min_radius: float | None = None,
 ) -> float:
@@ -425,12 +573,45 @@ def concentric_corner_radius_at(
     )
 
 
+def turn_shift(
+    prev: tuple[float, float],
+    corner: tuple[float, float],
+    nxt: tuple[float, float],
+    displacement: tuple[float, float],
+) -> float:
+    """How much longer a line's tangent arm is than the reference line's for
+    the two to turn about one centre at a turn of any angle.
+
+    The generalisation of :func:`concentric_corner_radius` beyond 90 degrees.
+    A corner's radius here is its tangent arm, the distance from the vertex to
+    where the curve leaves each leg; for a circular turn of deflection ``phi``
+    that is ``R * tan(phi / 2)``. When a bundle turns wholesale, each line's
+    vertex sits on the turn's bisector, *displacement* from the reference
+    line's vertex, and the lines share a centre iff::
+
+        arm = reference_arm + displacement . (u_in - u_out) / 2
+
+    where ``u_in`` and ``u_out`` are the unit travel vectors into and out of
+    the corner (read from the line's own *prev* -> *corner* -> *nxt*, which
+    must both have length). The shift is positive for a line on the outside of
+    the turn. At 90 degrees this is the ``-dx * ux`` rule
+    :func:`concentric_corner_radius` applies.
+    """
+    in_len = math.dist(prev, corner)
+    out_len = math.dist(corner, nxt)
+    u_in = ((corner[0] - prev[0]) / in_len, (corner[1] - prev[1]) / in_len)
+    u_out = ((nxt[0] - corner[0]) / out_len, (nxt[1] - corner[1]) / out_len)
+    return (
+        displacement[0] * (u_in[0] - u_out[0]) + displacement[1] * (u_in[1] - u_out[1])
+    ) / 2
+
+
 def concentric_reference_radius_at(
     prev: tuple[float, float],
     corner: tuple[float, float],
     nxt: tuple[float, float],
     dx: float,
-    lane_radius: float = CURVE_RADIUS,
+    lane_radius: float,
 ) -> float:
     """Reference radius that gives one displaced lane *lane_radius*.
 
@@ -458,9 +639,15 @@ def widest_coincident_radius(radii: Iterable[float]) -> float:
     return max(radii)
 
 
+def shared_leg_radius(radius: float, leg: float, taken: float) -> float:
+    """*radius* cut to what a *leg* of that length leaves once the corner at its
+    other end takes *taken* of it, and never below zero."""
+    return min(radius, max(0.0, leg - taken))
+
+
 def reference_anchored_radius(
     signed_offset: float,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float,
     *,
     min_radius: float | None = None,
 ) -> float:
@@ -506,7 +693,7 @@ def reference_anchored_radius(
 
 def outer_lane_radius(
     n_lines: int,
-    base_radius: float = CURVE_RADIUS,
+    base_radius: float | None = None,
     offset_step: float = OFFSET_STEP,
 ) -> float:
     """Arc radius the widest lane of an *n_lines* concentric turn takes.
@@ -521,6 +708,8 @@ def outer_lane_radius(
     its concentric spacing intends.  A handler seating a corner column measures
     from here rather than from *base_radius*.
     """
+    if base_radius is None:
+        base_radius = active_curve_radius()
     return reference_anchored_radius(bundle_width(n_lines, offset_step), base_radius)
 
 
@@ -552,7 +741,6 @@ def l_shape_radii(
     n: int,
     vertical: Direction,
     offset_step: float = OFFSET_STEP,
-    base_radius: float = CURVE_RADIUS,
 ) -> tuple[float, float, float]:
     """Compute offset and radii for a standard inter-section L-shape.
 
@@ -573,8 +761,8 @@ def l_shape_radii(
         ``Direction.U`` if it goes upward.
     offset_step : float
         Spacing between adjacent lines in the bundle.
-    base_radius : float
-        Minimum curve radius (innermost line).
+
+    The innermost line turns at the active corner radius.
 
     Returns
     -------
@@ -602,6 +790,7 @@ def l_shape_radii(
     off = (n - 1 - i) * offset_step
     max_off = (n - 1) * offset_step
     delta = l_shape_stagger(i, n, vertical, offset_step)
+    base_radius = active_curve_radius()
 
     if vertical is Direction.D:
         # Corner 1 (CW):  rightmost = outside -> largest radius

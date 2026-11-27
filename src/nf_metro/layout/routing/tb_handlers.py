@@ -11,8 +11,6 @@ from typing import NamedTuple
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    DEFAULT_LINE_WIDTH,
-    MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     TB_PILL_EDGE_OFFSET,
 )
@@ -20,6 +18,7 @@ from nf_metro.layout.geometry import (
     AxisFrame,
     axis_split,
     diagonal_centreline,
+    diagonal_stagger,
     flow_entry_side,
     lanes_run_along_x,
     section_bbox_span,
@@ -28,6 +27,10 @@ from nf_metro.layout.geometry import (
     station_lane_coord,
 )
 from nf_metro.layout.labels import label_beside_pill, label_glyph_ink_bbox
+from nf_metro.layout.pass_metrics import (
+    active_metrics,
+    min_straight_edge,
+)
 from nf_metro.layout.routing.bundle import (
     build_tapered_bundle,
 )
@@ -38,6 +41,7 @@ from nf_metro.layout.routing.co_row import CoRowFeeder, DiagonalWindow, co_row_f
 from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
+    _compute_diagonal_placement,
     right_normal_axis_sign,
     trailing_perp_side,
     vertical_direction,
@@ -166,12 +170,12 @@ def _section_link_diagonal(
         src.y,
         tgt.y,
         ctx.diagonal_run,
-        MIN_STRAIGHT_EDGE,
-        MIN_STRAIGHT_EDGE,
+        min_straight_edge(),
+        min_straight_edge(),
         bias_to_source or edge.source in ctx.fork_stations,
         edge.target in ctx.join_stations and not bias_to_source,
     )
-    return sx, tx, DiagonalWindow(start, end, MIN_STRAIGHT_EDGE, MIN_STRAIGHT_EDGE)
+    return sx, tx, DiagonalWindow(start, end, min_straight_edge(), min_straight_edge())
 
 
 def section_link_co_row_feeder(
@@ -185,55 +189,6 @@ def section_link_co_row_feeder(
     if own is None:
         return None
     return co_row_feeder(edge, src, section.direction, own, (sx, tx))
-
-
-def _compute_diagonal_placement(
-    run_src: float,
-    run_tgt: float,
-    diagonal_run: float,
-    src_min_straight: float,
-    tgt_min_straight: float,
-    is_fork: bool,
-    is_join: bool,
-) -> tuple[float, float]:
-    """Compute diagonal start/end on the run axis.
-
-    Shared by ``_diagonal_window`` (horizontal run axis) and
-    ``_section_link_diagonal`` (vertical run axis).  The caller maps the
-    result back to (x, y) coordinates.
-
-    Returns (diag_start, diag_end) in run-axis coordinates.
-    """
-    delta = run_tgt - run_src
-    sign = 1.0 if delta > 0 else -1.0
-    half_diag = diagonal_run / 2
-
-    # Bias diagonal toward fork/join stations
-    if is_fork:
-        mid = run_src + sign * (src_min_straight + half_diag)
-    elif is_join:
-        mid = run_tgt - sign * (tgt_min_straight + half_diag)
-    else:
-        mid = (run_src + run_tgt) / 2
-
-    diag_start = mid - sign * half_diag
-    diag_end = mid + sign * half_diag
-
-    # Clamp to ensure minimum straight runs at endpoints
-    if sign > 0:
-        diag_start = max(diag_start, run_src + src_min_straight)
-        diag_end = min(diag_end, run_tgt - tgt_min_straight)
-        if diag_end < diag_start:
-            midpoint = (diag_start + diag_end) / 2
-            diag_start = diag_end = midpoint
-    else:
-        diag_start = min(diag_start, run_src - src_min_straight)
-        diag_end = max(diag_end, run_tgt + tgt_min_straight)
-        if diag_end > diag_start:
-            midpoint = (diag_start + diag_end) / 2
-            diag_start = diag_end = midpoint
-
-    return diag_start, diag_end
 
 
 def _route_tb_diagonal(
@@ -633,8 +588,8 @@ def _route_flow_side_lane_change(
     lateral = abs(tq - sq)
     if lateral < COORD_TOLERANCE:
         return None
-    spread = _diagonal_spread(len(line_ids), ctx.offset_step, ctx.diagonal_run, lateral)
-    end_straights = 2 * MIN_STRAIGHT_EDGE
+    spread = diagonal_stagger(len(line_ids), ctx.offset_step, ctx.diagonal_run, lateral)
+    end_straights = 2 * min_straight_edge()
     slack = abs(tp - sp) - ctx.diagonal_run - end_straights
     if slack < spread:
         return None
@@ -645,8 +600,8 @@ def _route_flow_side_lane_change(
         sp,
         tp,
         ctx.diagonal_run,
-        MIN_STRAIGHT_EDGE,
-        MIN_STRAIGHT_EDGE,
+        min_straight_edge(),
+        min_straight_edge(),
         is_fork=True,
         is_join=False,
     )
@@ -856,16 +811,6 @@ def _same_line_chain_route(
     ]
 
 
-def _diagonal_spread(n: int, step: float, run: float, lateral: float) -> float:
-    """Flow-axis room *n* parallel diagonals need to separate by *step*.
-
-    Each diagonal covers *run* along the flow axis and *lateral* across it;
-    translating the lines along the flow axis opens a *step* of perpendicular
-    clearance between neighbours at the cost of this much extra run.
-    """
-    return (n - 1) * step * (math.hypot(run, lateral) - run) / lateral
-
-
 _Box = tuple[float, float, float, float]
 
 
@@ -890,7 +835,7 @@ def _passed_station_footprints(
     graph = ctx.graph
     frame = _section_lane_frame(graph, section, ctx.positive_fan)
     lo, hi = sorted((src.y, tgt.y))
-    half_stroke = DEFAULT_LINE_WIDTH / 2
+    half_stroke = active_metrics().line_width / 2
     boxes: list[_Box] = []
     for sid in section.station_ids:
         st = graph.stations[sid]

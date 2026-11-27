@@ -20,7 +20,8 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph, resolve_theme
-from nf_metro.layout.constants import MIN_CORRIDOR_Y_OVERLAP, OFFSET_STEP
+from nf_metro.layout.constants import OFFSET_STEP
+from nf_metro.layout.pass_metrics import min_corridor_y_overlap
 from nf_metro.render.svg import build_observed_render_plan
 
 _FIXTURES = (
@@ -33,7 +34,7 @@ _FIXTURES = (
 _MIN_LANE_GAP = OFFSET_STEP - 1.0
 # Two vertical runs co-travel a corridor only past this much span overlap; also
 # the floor for a segment to count as a descent rather than an elbow.
-_MIN_SPAN_OVERLAP = MIN_CORRIDOR_Y_OVERLAP
+_MIN_SPAN_OVERLAP = min_corridor_y_overlap()
 
 
 def _root() -> Path:
@@ -66,7 +67,7 @@ def test_shared_junction_fan_keeps_distinct_descent_lanes(fixture):
 
     # The bug aborts here on the unfixed tree; reaching the assertions at all is
     # already the regression the fix repairs.
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
 
     legs = _descent_legs(observed)
     by_source: dict[str, list[tuple[str, str, tuple[float, float, float]]]] = {}

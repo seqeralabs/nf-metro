@@ -81,7 +81,7 @@ def test_guard_and_render_routes_dispatch_identically(fixture: str) -> None:
 
     guard_routes = _by_edge(_ensure_routes(graph, None))
 
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     render_offsets = compute_station_offsets(
         graph, offset_step=resolve_offset_step(graph.track_gap, theme.line_width)
     )

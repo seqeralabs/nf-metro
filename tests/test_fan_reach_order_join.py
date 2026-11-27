@@ -47,7 +47,7 @@ def _render(path: Path):
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         plan = render_graph_result(
-            graph, resolve_theme(None, graph, "light"), RenderConfig()
+            graph, resolve_theme(graph, "light"), RenderConfig()
         ).plan
     return graph, list(zip(plan.routes, plan.route_polylines))
 
@@ -252,7 +252,7 @@ def test_unfused_blocked_fan_keeps_its_peel_off_band(
     with warnings.catch_warnings(), curve_abort_softened():
         warnings.simplefilter("ignore")
         graph = prepare_graph(PEELOFF_FAN_MMD)
-        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
+        render_graph_result(graph, resolve_theme(graph, "light"), RenderConfig())
     assert found == []
 
 
@@ -269,4 +269,4 @@ def test_peeloff_fan_map_renders_without_a_curve_abort() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(PEELOFF_FAN_MMD)
-        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
+        render_graph_result(graph, resolve_theme(graph, "light"), RenderConfig())

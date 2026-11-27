@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-from nf_metro.api import render_string
+from nf_metro.api import RenderConfig, render_string
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from build_render_diff import (  # noqa: E402
@@ -40,7 +40,7 @@ _MUTED_RULE_PAIR_RE = re.compile(
 
 def _render_inactive_lines_svg() -> str:
     text = (EXAMPLES / "inactive_lines.mmd").read_text()
-    return render_string(text, self_color_scheme=False)
+    return render_string(text, config=RenderConfig(self_color_scheme=False))
 
 
 def _strip_muted_rule(svg_text: str) -> str:
@@ -83,7 +83,9 @@ def _assert_no_cross_panel_class_match(selector_side: str, class_side: str) -> N
 
 def _render_adaptive_logo_svg() -> str:
     text = (EXAMPLES / "sarek_metro.mmd").read_text()
-    return render_string(text, source_dir=str(EXAMPLES), self_color_scheme=False)
+    return render_string(
+        text, source_dir=str(EXAMPLES), config=RenderConfig(self_color_scheme=False)
+    )
 
 
 def test_url_referenced_ids_are_unique_across_inlined_panels(tmp_path):

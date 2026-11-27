@@ -26,7 +26,7 @@ The resulting file uses the Nextflow `flowchart TB` Mermaid syntax, which nf-met
 
 ## Direct rendering
 
-The quickest way to get a metro map is to convert and render in one step with the `--from-nextflow` flag.
+The quickest way to get a metro map is to convert and render in one step with the `--from nextflow` flag.
 The examples that follow show the unedited output.
 
 ### Flat pipeline (no subworkflows)
@@ -48,7 +48,7 @@ workflow {
 
 ```bash
 nextflow run flat_pipeline.nf -preview -with-dag dag.mmd
-nf-metro render dag.mmd -o pipeline.svg --from-nextflow
+nf-metro render dag.mmd -o pipeline.svg --from nextflow
 ```
 
 <Metro
@@ -59,6 +59,33 @@ nf-metro render dag.mmd -o pipeline.svg --from-nextflow
 
 With no subworkflows, everything lands in a single section and the converter assigns one `main` line following the longest path.
 Output rarely comes out tidier than this.
+
+### Separate lines for separate routes
+
+In the map above, FastQC and the trimming and alignment chain both reach MultiQC on the same `main` line.
+To give each route its own line, convert with `--lines graph`:
+
+```bash
+nf-metro convert dag.mmd -o pipeline.mmd --lines graph
+nf-metro render pipeline.mmd -o pipeline.svg
+```
+
+<Metro
+  src="tests/fixtures/nextflow/flat_pipeline.mmd"
+  fromNextflow
+  lines="graph"
+  mmd={false}
+/>
+
+The `main` line now runs along the longest chain of processes into the final process, and FastQC gets a line of its own into MultiQC.
+The converter picks the lines from the shape of the graph:
+
+- **`main`** is the longest chain into the final process with the most processes upstream. Ties go to the process with more direct inputs, then to the first by name.
+- **Every other chain** becomes its own line, longest first, named after its first process not already on a line.
+- **Colours** follow the default palette. Side lines never reuse the colour of `main`.
+
+`--lines graph` applies to single-section maps only.
+For a map of several sections, such as a pipeline whose processes sit in more than one subworkflow, the converter keeps the section lines described below and prints a warning.
 
 ### Pipeline with subworkflows
 
@@ -106,7 +133,7 @@ workflow {
 
 ```bash
 nextflow run with_subworkflows.nf -preview -with-dag dag.mmd
-nf-metro render dag.mmd -o pipeline.svg --from-nextflow
+nf-metro render dag.mmd -o pipeline.svg --from nextflow
 ```
 
 <Metro
@@ -145,7 +172,7 @@ workflow {
 
 ```bash
 nextflow run variant_calling.nf -preview -with-dag dag.mmd
-nf-metro render dag.mmd -o pipeline.svg --from-nextflow
+nf-metro render dag.mmd -o pipeline.svg --from nextflow
 ```
 
 <Metro
@@ -172,7 +199,6 @@ The converter produces this for the variant calling pipeline:
 ```metro playground="metro"
 %% [!mention title]
 %%metro title: Preprocess / Alignment / Variant Calling Pipeline
-%%metro style: nfcore
 %%metro line: main | Main | #2db572
 %% [!mention bypass]
 %%metro line: preprocess_reporting | Preprocess - Reporting | #0570b0
@@ -330,6 +356,7 @@ The converter:
 
 5. **Assigns metro lines.** The longest path gets the `main` line.
    Edges that skip sections get their own bypass lines, and dead-end processes get spur lines.
+   A single-section map can instead get a line per route with `--lines graph` (see [Separate lines for separate routes](#separate-lines-for-separate-routes)).
 
 6. **Cleans up labels.** `SCREAMING_SNAKE_CASE` becomes `Title Case`, and the converter abbreviates long names.
 
@@ -337,7 +364,6 @@ For this example, the result is:
 
 ```metro playground="metro"
 %%metro title: Pipeline
-%%metro style: nfcore
 %%metro line: main | Main | #2db572
 
 graph LR

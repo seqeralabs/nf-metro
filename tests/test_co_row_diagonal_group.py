@@ -65,7 +65,7 @@ def _render(text: str, source_dir: Path) -> tuple[RenderPlan, str]:
         warnings.simplefilter("ignore")
         graph = prepare_graph(text, source_dir=str(source_dir))
         result = render_graph_result(
-            graph, resolve_theme(None, graph, "light"), RenderConfig()
+            graph, resolve_theme(graph, "light"), RenderConfig()
         )
     return result.plan, result.content
 

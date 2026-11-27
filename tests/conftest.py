@@ -457,3 +457,19 @@ def diamond_graph() -> MetroGraph:
 def two_section_graph() -> MetroGraph:
     """Two sections with one inter-section edge, laid out."""
     return parse_and_layout(TWO_SECTION_TEXT)
+
+
+def render_with_downgrades(source: str) -> tuple[MetroGraph, str, list[str]]:
+    """Graph, SVG and permissive-guard downgrade messages of rendering *source*."""
+    from nf_metro.api import RenderConfig, prepare_graph, render_graph
+    from nf_metro.layout.phases.guards import PermissiveGuardWarning
+    from nf_metro.themes import THEMES
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        graph = prepare_graph(source)
+        svg = render_graph(graph, THEMES["default"], RenderConfig())
+    downgrades = [
+        str(w.message) for w in caught if issubclass(w.category, PermissiveGuardWarning)
+    ]
+    return graph, svg, downgrades

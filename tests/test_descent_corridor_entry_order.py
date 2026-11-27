@@ -42,7 +42,7 @@ def _render(
             layout_options=layout_options,
         )
         result = render_graph_result(
-            graph, resolve_theme(None, graph, "light"), RenderConfig()
+            graph, resolve_theme(graph, "light"), RenderConfig()
         )
     return graph, result.plan, result.content
 

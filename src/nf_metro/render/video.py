@@ -163,6 +163,8 @@ def write_animation(
         plan.routes,  # type: ignore[arg-type]
         plan.station_offsets,  # type: ignore[arg-type]
         plan.theme,  # type: ignore[arg-type]
+        route_polylines=plan.route_polylines,
+        route_curve_radii=plan.route_curve_radii,
     )
     if not timeline.dots:
         # Animated, but with nothing in motion: the loop would be one still

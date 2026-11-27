@@ -105,7 +105,7 @@ The two opening passes account for none of it, and `_settle_shared_opening_pivot
 
 `_landing_trunk_flank_conflict` sees 32 crowded, entirely unexcused pairs across 5 fixtures.
 `_settle_landing_trunk_flanks` clears every one, and every one sits at `endpoint - landing = 30` against a `clearance + curve_radius = 21` requirement.
-`MERGE_GAP_MIN = 50` holds that 9px of headroom, not fixture geometry.
+`merge_gap_min()`, 50 at the base radius, holds that 9px of headroom, not fixture geometry.
 Its three excuse predicates fire nowhere in the corpus.
 `test_every_corpus_convergence_is_planned_not_left_to_compatibility` in `tests/test_convergence_planner.py` is the live guard.
 It asserts the absence rather than any of the totals listed earlier.

@@ -18,6 +18,26 @@ gallery:
       how explicit directives can fine-tune placement.
 
   # ── Feature Showcase ───────────────────────────────────────────────────────
+  - id: rnaseq_london_tube
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "The rnaseq map under the built-in `london-tube` theme (`%%metro style: london-tube`):
+      track-weight tabs for stations on one line, a buffer-stop bar at every line end, bold capsules at
+      interchanges (or the standard's rings, with `interchange_glyph: ring`), bundled lines edge to
+      edge, unboxed sections and the TfL line colours, after TfL's Line Diagram and Colour Standards.
+      The [Themes page](/nf-metro/themes/#the-built-in-themes) shows every built-in theme, including
+      `nyc-subway`, `paris-metro`, `tokyo-metro` and `washington-metro`. Themes stack left to right
+      (`%%metro style: seqera, london-tube`) and can be
+      [user-defined YAML files](/nf-metro/themes/#writing-your-own-theme)."
+  - id: rnaseq_seqera
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "The rnaseq map under the built-in `seqera` theme (`%%metro style: seqera`): the brand
+      palette of Dark Brand text, Soft Green sections, Brand Green section badges and a
+      brand-led line colour order, in Inter. The same map follows the viewer's light or dark
+      mode."
   - id: directional_flow
     source_dir: examples
     category: Feature Showcase
@@ -68,6 +88,14 @@ gallery:
       trunk whose tilted names pack tighter than horizontal labels would, feeding a variant-calling
       section in the row below that fans out to three callers and back in -- the reserved vertical
       room keeps the hanging labels clear of the row beneath."
+  - id: wide_line_fans
+    source_dir: examples
+    category: Feature Showcase
+    description:
+      "Wide lines from a [user-defined theme file](/nf-metro/themes/#writing-your-own-theme)
+      (`line_width: 9`, `curve_radius_ratio: 2.0`, `track_gap: 0`): a deep six-line fan and a hub
+      fanning bundles of different drop keep every lane edge to edge, each corner turning about
+      its bundle's shared centre."
   - id: file_icons
     source_dir: examples
     category: Feature Showcase
@@ -587,9 +615,57 @@ gallery:
     category: Fan-out and Fan-in
     description:
       "Two sources share a column: Reads forks its QC line onto a branch station,
-      while Genome's Reference line runs on to Quantify. Genome sits clear of the lane
-      the QC branch peels into, so the Reference line never runs through the QC marker,
-      whichever of the two lines is declared first (#2192)."
+      while Genome's Reference line runs on to Quantify. Genome sits one row on the far
+      side of the trunk from the QC branch, so the Reference line never runs through the
+      QC marker or leaves an empty row, whichever of the two lines is declared first
+      (#2192, #2199)."
+  - id: source_vs_fed_fork_peel_lane
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The same fork one station down the trunk: Samples feeds Reads, which forks its QC
+      line onto a branch station, while Genome's Reference line runs on to Quantify.
+      Genome sits one row on the far side of the trunk from the QC branch, and the
+      Reference line takes the lane on that side where it joins at Quantify, so no line
+      crosses another (#2199)."
+  - id: source_vs_chain_fed_fork_peel_lane
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The same fork two stations down the trunk (Fetch, Samples, Reads): Genome's seat
+      and the Reference line's lane do not depend on how far down the trunk the fork
+      sits (#2199)."
+  - id: source_vs_fed_fork_peel_lane_compact
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The one-station-down fork with compact offsets, where each station packs its own
+      lanes: the Reference line still steps to the lane facing Genome's side at
+      Quantify, so it joins without crossing the trunk (#2199)."
+  - id: source_vs_fork_peel_lane_across_sections
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The one-station-down fork with the Reference line carried on with the trunk into
+      a Report section on the same row: the line keeps the lane facing Genome's side in
+      both sections, so it crosses the trunk neither at Quantify nor at the boundary
+      (#2199)."
+  - id: source_vs_terminal_peel_lane
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "The fork's QC branch ends beside the station where Genome's Reference line joins
+      the trunk: Genome sits one row on the far side of the trunk from the QC branch and
+      the Reference line joins Trim on the lane facing that side, so no line crosses
+      another (#2199)."
+  - id: root_fan_trunk_feeder_row
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "Two sources share a column: Reads feeds Trim, which adds the QC line, while Genome
+      runs straight to Report. Reads holds the trunk row through Trim, Align and Report,
+      with Genome one row above and the QC branch one row below, whichever source is
+      declared first (#2193)."
   - id: trunk_through_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in

@@ -5,47 +5,20 @@ The format, reader, matcher, and producer helpers live in the dependency-free
 distribution), whose vocabulary is tool-neutral: nodes, groups, regions.  This
 module is the thin nf-metro-specific adapter: it maps a laid-out
 :class:`~nf_metro.parser.model.MetroGraph` (stations, lines, sections, process
-mappings) onto that neutral vocabulary.  The standalone API is re-exported here
-so existing ``nf_metro.render.manifest`` imports keep working.
+mappings) onto that neutral vocabulary.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from nf_metro.manifest import (
-    MANIFEST_ELEMENT_ID,
-    MANIFEST_SCHEMA_VERSION,
-    build_manifest_data,
-    inject_manifest,
-    manifest_json,
-    manifest_metadata_svg,
-    manifest_schema,
-    match_node_ids,
-    matching_node_ids,
-    node_data_attrs,
-    overlay_svg,
-    read_manifest,
-)
+from nf_metro.manifest import build_manifest_data
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
 
-__all__ = [
-    "MANIFEST_SCHEMA_VERSION",
-    "MANIFEST_ELEMENT_ID",
-    "build_manifest",
-    "build_manifest_data",
-    "manifest_json",
-    "manifest_metadata_svg",
-    "manifest_schema",
-    "inject_manifest",
-    "overlay_svg",
-    "node_data_attrs",
-    "read_manifest",
-    "match_node_ids",
-    "matching_node_ids",
-]
+__all__ = ["build_manifest"]
 
 
 def build_manifest(
@@ -54,6 +27,7 @@ def build_manifest(
     width: int,
     height: int,
     station_radius: float,
+    line_colors: Mapping[str, str] | None = None,
     extra_node_data: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the manifest dict from the graph the renderer just laid out.
@@ -104,7 +78,11 @@ def build_manifest(
         height=height,
         nodes=nodes,
         groups=[
-            {"id": line.id, "label": line.display_name, "color": line.color}
+            {
+                "id": line.id,
+                "label": line.display_name,
+                "color": (line_colors or {}).get(line.id, line.color),
+            }
             for line in graph.lines.values()
         ],
         regions=[{"id": sid, "label": sec.name} for sid, sec in drawn_sections.items()],

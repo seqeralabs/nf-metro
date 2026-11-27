@@ -7,14 +7,8 @@ from collections.abc import Callable
 from functools import partial
 
 from nf_metro.layout.constants import (
-    BYPASS_CLEARANCE,
     COORD_TOLERANCE,
-    CURVE_RADIUS,
-    DIAGONAL_RUN,
     MIN_BUNDLE_EDGE_CLEARANCE,
-    MIN_INTER_SECTION_GAP,
-    MIN_STATION_FLAT_LENGTH,
-    MIN_STRAIGHT_EDGE,
     MIN_STRAIGHT_PORT,
     SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
@@ -26,7 +20,15 @@ from nf_metro.layout.geometry import (
     shift_section,
 )
 from nf_metro.layout.labels import label_text_width
-from nf_metro.layout.pass_metrics import font_scale_context, stroke_scale_context
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    active_metrics,
+    bypass_clearance,
+    graph_layout_context,
+    min_inter_section_gap,
+    min_station_flat_length,
+    min_straight_edge,
+)
 from nf_metro.layout.phases._common import (
     _bbox_cols_overlap,
     _column_contiguous_row_groups,
@@ -64,7 +66,7 @@ def _predicted_bypass_bottom_in_row(
     """Predict bypass U-route bottom Ys for edges anchored in *row*.
 
     Mirrors ``layout.routing.common.bypass_bottom_y`` for layout-time
-    prediction: returns ``{(lo, hi): max(intervening_bottoms) + BYPASS_CLEARANCE}``
+    prediction: returns ``{(lo, hi): max(intervening_bottoms) + bypass_clearance()}``
     for each edge whose endpoints (after walking junctions) resolve to
     same-row sections spanning more than one column with at least one
     intervening section.  Empty when *row* has no bypass-eligible edges.
@@ -120,7 +122,7 @@ def _predicted_bypass_bottom_in_row(
         intervening = [s for s in sections_in_row if lo < s.grid_col < hi]
         if not intervening:
             continue
-        bot = max(s.bbox_y + s.bbox_h for s in intervening) + BYPASS_CLEARANCE
+        bot = max(s.bbox_y + s.bbox_h for s in intervening) + bypass_clearance()
         if bot > per_span.get((lo, hi), 0.0):
             per_span[(lo, hi)] = bot
     return per_span
@@ -368,14 +370,18 @@ def _loop_corner_x(
     if abs(tx - sx) < 1e-6:
         return None
     sign = 1.0 if tx > sx else -1.0
-    src_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if a.is_port else MIN_STRAIGHT_EDGE
-    tgt_min = CURVE_RADIUS + MIN_STRAIGHT_PORT if b.is_port else MIN_STRAIGHT_EDGE
+    src_min = (
+        active_curve_radius() + MIN_STRAIGHT_PORT if a.is_port else min_straight_edge()
+    )
+    tgt_min = (
+        active_curve_radius() + MIN_STRAIGHT_PORT if b.is_port else min_straight_edge()
+    )
     # Label clearance at fork/join stations (per _route_diagonal).
     if a.id in fork_stations and a.label.strip():
         src_min = max(src_min, label_text_width(a.label) / 2)
     if b.id in join_stations and b.label.strip():
         tgt_min = max(tgt_min, label_text_width(b.label) / 2)
-    half_diag = DIAGONAL_RUN / 2
+    half_diag = active_metrics().diagonal_run / 2
     is_fork = a.id in fork_stations
     is_join = b.id in join_stations
     if is_fork:
@@ -583,13 +589,10 @@ def _predict_section_content_bottom(
         from nf_metro.layout.routing import compute_station_offsets
 
         offsets = compute_station_offsets(graph)
-    # The label-reach and marker-footprint metrics scale with the graph's font
-    # and stroke; bind both from the graph so the prediction is reproducible
-    # whether or not a layout-wide scale context is active at the call site.
-    with (
-        font_scale_context(graph.font_scale),
-        stroke_scale_context(graph.stroke_scale),
-    ):
+    # The label-reach and marker-footprint metrics follow the graph's theme and
+    # scales; bind them from the graph so the prediction is reproducible whether
+    # or not a layout-wide context is active at the call site.
+    with graph_layout_context(graph):
         content_bots = [
             graph.stations[sid].y
             + max(
@@ -602,7 +605,8 @@ def _predict_section_content_bottom(
                     ),
                     sid in fan_ids,
                 ),
-                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1],
+                _terminus_y_overhang(graph.stations[sid], section_dir, graph)[1]
+                + (section_y_padding if is_horizontal else 0.0),
                 angled_label_reach(
                     graph.stations[sid],
                     0.0 if sid in rail_above_ids else label_angle,
@@ -630,7 +634,7 @@ def _predict_section_content_bottom(
         for sid in section.station_ids
         if sid in graph.stations and graph.stations[sid].is_port
     ]
-    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    v_curve_clearance = active_curve_radius() + min_station_flat_length() / 2
     if bypass_max_ys:
         content_bot = max(content_bot, max(bypass_max_ys) + v_curve_clearance)
     if port_max_ys:
@@ -839,8 +843,10 @@ def _section_content_hug_top(
             ),
             # A vertical-flow terminus's file icon reaches above its marker
             # (a top-entering source), so the box must clear the icon, not
-            # just a padding band above the marker.
-            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[0],
+            # just a padding band above the marker.  A horizontal-flow
+            # terminus owes the padding plus any larger-than-default icon.
+            _terminus_y_overhang(graph.stations[sid], section_dir, graph)[0]
+            + (section_y_padding if is_horizontal else 0.0),
         )
 
     content_min_ys = [_content_min_y(sid) for sid in content_ids]
@@ -861,7 +867,7 @@ def _section_content_hug_top(
         for sid in section.station_ids
         if sid in graph.stations and graph.stations[sid].is_port
     ]
-    v_curve_clearance = CURVE_RADIUS + MIN_STATION_FLAT_LENGTH / 2
+    v_curve_clearance = active_curve_radius() + min_station_flat_length() / 2
     target = min(content_min_ys)
     if bypass_min_ys:
         target = min(target, min(bypass_min_ys) - v_curve_clearance)
@@ -947,7 +953,7 @@ def _column_neighbour_anchor_limit(
 
     A section already clear on that side of ``section`` and sharing vertical
     extent with it (headers included, since a badge protrudes above its box top)
-    keeps ``MIN_INTER_SECTION_GAP`` of routing corridor.  Inter-column gaps are
+    keeps ``min_inter_section_gap()`` of routing corridor.  Inter-column gaps are
     enforced per overlapping row band rather than per column, so the column's
     outermost box being clear says nothing about a row-mate further down.
     Infinite in the growth direction when that side is empty.
@@ -967,7 +973,7 @@ def _column_neighbour_anchor_limit(
             or top >= other.bbox_y + other.bbox_h
         ):
             continue
-        corridor = facing + MIN_INTER_SECTION_GAP * sign
+        corridor = facing + min_inter_section_gap() * sign
         limit = max(limit, corridor) if sign > 0 else min(limit, corridor)
     return limit
 

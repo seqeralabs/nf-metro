@@ -30,7 +30,7 @@ from nf_metro.layout.routing.invariants import (
     check_concentric_bundle_corners,
     check_no_split_same_line_fanout_descents,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = REPO_ROOT / "examples"
@@ -47,7 +47,7 @@ def _gather_fixtures() -> list[Path]:
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)

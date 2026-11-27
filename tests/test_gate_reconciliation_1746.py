@@ -250,16 +250,17 @@ def test_flow_exit_fed_junction_freezes_its_cross_member_source_turn() -> None:
 
 def test_source_turnout_animation_uses_the_same_concentric_radii() -> None:
     graph, offsets, routes = _routed("same_destination_short_overlap")
-    timeline = build_animation_timeline(graph, routes, offsets, THEMES["nfcore"])
+    timeline = build_animation_timeline(graph, routes, offsets, THEMES["default"])
     paths = {(d.line_id, d.track.d_attr) for d in timeline.dots}
 
     assert any(
-        line_id == "reads" and "L 192.00 124.00 Q 202.00 124.00 202.00 134.00" in path
+        line_id == "reads"
+        and "L 192.00 124.00 C 197.52 124.00 202.00 128.48 202.00 134.00" in path
         for line_id, path in paths
     )
     assert any(
         line_id == "assembly"
-        and "L 192.00 120.00 Q 206.00 120.00 206.00 134.00" in path
+        and "L 192.00 120.00 C 199.73 120.00 206.00 126.27 206.00 134.00" in path
         for line_id, path in paths
     )
 
@@ -282,7 +283,7 @@ def test_render_plan_reuses_one_materialized_turnout_geometry(
     )
     path = TOPOLOGIES / "same_destination_short_overlap.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
     captured = {}
     real_render_edges = render_svg._render_edges
 
@@ -392,8 +393,8 @@ def test_short_same_destination_overlap_settles_as_one_planned_cohort(
         baseline_target_y = graph.sections["target"].bbox_y
         source = graph.sections["source"]
         source_bottom = source.bbox_y + source.bbox_h
-        first = build_observed_render_plan(graph, resolve_theme(None, graph))
-        second = build_observed_render_plan(graph, resolve_theme(None, graph))
+        first = build_observed_render_plan(graph, resolve_theme(graph))
+        second = build_observed_render_plan(graph, resolve_theme(graph))
 
     (requirement,), (demand,) = measured[0]
 
@@ -570,7 +571,7 @@ def test_same_row_short_overlap_settles_every_route_system_owner(
             section_id: graph.sections[section_id].bbox_y
             for section_id in ("target", "second_target")
         }
-        observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+        observed = build_observed_render_plan(graph, resolve_theme(graph))
 
     requirements, demands = measured[0]
 
@@ -899,7 +900,7 @@ def test_route_system_owned_approach_tail_refuses_the_slot_move() -> None:
 def test_settled_destination_axis_lands_in_realised_reservation_band() -> None:
     path = TOPOLOGIES / "same_destination_short_overlap.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = build_observed_render_plan(graph, resolve_theme(graph))
     target_id = observed.plan.graph.sections["target"].entry_ports[0]
     route_rank, route = next(
         (rank, route)

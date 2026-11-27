@@ -38,13 +38,10 @@ from typing import Any, Literal, NamedTuple, Protocol
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
-    BYPASS_CLEARANCE,
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
     FLOW_ALIGNED_PORT_ADVICE,
-    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
     SAME_COORD_TOLERANCE,
     SAME_Y_TOLERANCE,
@@ -62,6 +59,11 @@ from nf_metro.layout.lane_plan import (
     entry_crossed_pairs,
     entry_crossing_lines,
     recorded_crossing_pairs,
+)
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    bypass_clearance,
+    min_corridor_y_overlap,
 )
 from nf_metro.layout.phase_state import GuardSpec
 from nf_metro.layout.route_plan import FanRouteEmitter
@@ -99,6 +101,7 @@ from nf_metro.layout.routing.common import (
     iter_port_peeloff_bundles,
     iter_same_destination_approach_bundles,
     iter_vertical_segments,
+    leg_key,
     merge_fanout_pivot_reference,
     opening_horizontal_vertical,
     opposing_entry_confluence_slots,
@@ -112,6 +115,7 @@ from nf_metro.layout.routing.common import (
     segments_properly_cross,
     tail_on_slot,
     trunk_segment_crossings,
+    turn_unit_vectors,
     vertical_direction,
     vertical_flow_sections,
 )
@@ -1231,7 +1235,7 @@ def check_orthogonal_turns_form_curves(
             requested = (
                 desired[k]
                 if desired and k < len(desired) and desired[k] is not None
-                else CURVE_RADIUS
+                else active_curve_radius()
             )
             floor = min(_ORTHOGONAL_TURN_FLOOR, requested)
             if eff < floor - _ORTHOGONAL_TURN_TOL:
@@ -1266,7 +1270,7 @@ class PlannedFanLandingRadiusViolation:
             f"landing corner at ({self.corner[0]:.0f}, {self.corner[1]:.0f}) "
             f"requests radius {self.requested:.1f} and resolves to "
             f"{self.effective:.1f}, despite having runway for the standard "
-            f"{CURVE_RADIUS:.1f}px curve"
+            f"{active_curve_radius():.1f}px curve"
         )
 
 
@@ -1309,25 +1313,25 @@ def check_planned_fan_landing_radius(
                 continue
             desired = list(
                 route.curve_radii
-                or [CURVE_RADIUS for _ in range(max(0, len(points) - 2))]
+                or [active_curve_radius() for _ in range(max(0, len(points) - 2))]
             )
             if landing_radius_index >= len(desired):
                 continue
             requested = desired[landing_radius_index]
-            desired[landing_radius_index] = CURVE_RADIUS
+            desired[landing_radius_index] = active_curve_radius()
             available = resolve_curve_radius_at(
                 points,
                 desired,
                 landing_radius_index,
             )
-            if available < CURVE_RADIUS - _ORTHOGONAL_TURN_TOL:
+            if available < active_curve_radius() - _ORTHOGONAL_TURN_TOL:
                 continue
             effective = resolve_curve_radii(points, route.curve_radii)[
                 landing_radius_index
             ]
             if (
-                requested >= CURVE_RADIUS - _ORTHOGONAL_TURN_TOL
-                and effective >= CURVE_RADIUS - _ORTHOGONAL_TURN_TOL
+                requested >= active_curve_radius() - _ORTHOGONAL_TURN_TOL
+                and effective >= active_curve_radius() - _ORTHOGONAL_TURN_TOL
             ):
                 continue
             violations.append(
@@ -1901,20 +1905,11 @@ def _lines_reaching_exit(
     separate run leaving it shares the name only: no stroke spans the section
     for the exit slot to keep, so the two ends are free to differ.
     """
-    reaching: set[str] = set()
-    for line_id in lines:
-        seen = {reference_id}
-        queue = [reference_id]
-        while queue:
-            current_id = queue.pop()
-            if current_id == exit_port_id:
-                reaching.add(line_id)
-                break
-            for edge in graph.edges_from(current_id):
-                if edge.line_id == line_id and edge.target not in seen:
-                    seen.add(edge.target)
-                    queue.append(edge.target)
-    return reaching
+    return {
+        line_id
+        for line_id in lines
+        if exit_port_id in graph.line_reach(line_id, (reference_id,))
+    }
 
 
 def _entry_order_reference(
@@ -2224,7 +2219,20 @@ class DiagonalOverlapViolation:
 
 
 _COLLINEAR_LATERAL_TOL = COORD_TOLERANCE
-_COLLINEAR_MIN_SPAN = 40.0
+_COLLINEAR_MIN_VISIBLE_SPAN = 20.0
+
+
+def _collinear_min_span() -> float:
+    """Overlap along a shared channel that two distinct lines may brush through.
+
+    Each end of an overlapping run is where a line turns onto or off it, and
+    each turn takes a curve radius of the run, so what a viewer sees stacked is
+    the span less two radii.  The threshold holds that visible length at
+    ``_COLLINEAR_MIN_VISIBLE_SPAN``; a radius below the base keeps the base
+    radius's 40px.
+    """
+    return max(40.0, _COLLINEAR_MIN_VISIBLE_SPAN + 2 * active_curve_radius())
+
 
 # A diagonal bundle's lines must keep a true perpendicular separation, not a
 # fixed-axis one whose perpendicular component degrades to zero as the diagonal
@@ -2261,7 +2269,7 @@ def _collinear_overlay_violations(
     final offset-applied axis-aligned segments, and flags any
     different-line pair whose channel coordinate coincides within
     ``_COLLINEAR_LATERAL_TOL`` and whose overlap along the axis exceeds
-    ``_COLLINEAR_MIN_SPAN``.  Overlaps that merely converge onto a shared
+    :func:`_collinear_min_span`.  Overlaps that merely converge onto a shared
     endpoint in ``endpoint_xy`` (a port for inter-section routes, any
     station for intra-section routes) are excused.
     """
@@ -2292,7 +2300,7 @@ def _collinear_overlay_violations(
                 continue
             olo, ohi = max(lo_a, lo_b), min(hi_a, hi_b)
             span = ohi - olo
-            if span <= _COLLINEAR_MIN_SPAN:
+            if span <= _collinear_min_span():
                 continue
             if _converges_at_shared_port(endpoint_xy, ea, eb, ax_a, c_a, olo, ohi):
                 continue
@@ -2324,7 +2332,7 @@ def _inter_section_collinear(
     final, offset-applied geometry: it flags pairs of DIFFERENT-line
     axis-aligned inter-section segments whose channel coordinate
     coincides within ``_COLLINEAR_LATERAL_TOL`` and whose overlap along
-    the axis exceeds ``_COLLINEAR_MIN_SPAN``.
+    the axis exceeds :func:`_collinear_min_span`.
 
     Legitimate cases are excluded: lines converging onto a shared
     endpoint port (an unavoidable single approach), tight parallel
@@ -2392,7 +2400,7 @@ def _converges_at_shared_port(
     single point), but a long co-run alongside the port is a real overlay:
     the convergence must collapse to the port, not run parallel-on-top for
     a meaningful length.  Excuse the overlap only when it reaches the port
-    marker AND extends no further than ``_COLLINEAR_MIN_SPAN`` from it.
+    marker AND extends no further than :func:`_collinear_min_span` from it.
     """
     tol = COORD_TOLERANCE + _COLLINEAR_LATERAL_TOL
     for pid in (set(edge_a) & set(edge_b)) & port_xy.keys():
@@ -2407,7 +2415,7 @@ def _converges_at_shared_port(
             continue
         # Distance the overlap reaches away from the port along the axis.
         reach = max(anchor - olo, ohi - anchor)
-        if reach <= _COLLINEAR_MIN_SPAN:
+        if reach <= _collinear_min_span():
             return True
     return False
 
@@ -2473,7 +2481,7 @@ def _diagonal_coincidence(seg_a: _Seg, seg_b: _Seg) -> tuple[float, float] | Non
     pb_lo, pb_hi = perp(bx1, by1), perp(bx2, by2)
     olo, ohi = max(0.0, min(tb_lo, tb_hi)), min(length, max(tb_lo, tb_hi))
     span = ohi - olo
-    if span <= _COLLINEAR_MIN_SPAN:
+    if span <= _collinear_min_span():
         return None
     if abs(tb_hi - tb_lo) < COORD_TOLERANCE:
         return None
@@ -2506,7 +2514,7 @@ def _diagonal_collinear(
     axis, so on a diagonal the perpendicular separation shrinks to
     ``OFFSET_STEP * sin(theta)`` and the lines fuse into one stroke.  This flags
     any different-line pair whose diagonals run near-parallel, overlap by more
-    than ``_COLLINEAR_MIN_SPAN``, and stay closer than ``_DIAGONAL_MIN_PERP_SEP``
+    than :func:`_collinear_min_span`, and stay closer than ``_DIAGONAL_MIN_PERP_SEP``
     apart without crossing.  Rail-section internal edges (rendered on explicit
     parallel rails) are excluded, matching the axis-aligned intra check.
     """
@@ -2672,7 +2680,7 @@ def check_no_same_line_parallel_descents(
     source or target endpoint, sit more than ``_COLLINEAR_LATERAL_TOL`` but
     no more than ``EDGE_TO_BUNDLE_CLEARANCE`` apart (a merged trunk falls
     below the floor; genuinely-distant corridors above the ceiling), and
-    overlap by more than ``_COLLINEAR_MIN_SPAN``.
+    overlap by more than :func:`_collinear_min_span`.
     """
     segs: list[tuple[str, tuple[str, str], float, float, float]] = []
     for rp in routes:
@@ -2701,7 +2709,7 @@ def check_no_same_line_parallel_descents(
                 continue
             olo, ohi = max(lo_a, lo_b), min(hi_a, hi_b)
             span = ohi - olo
-            if span <= _COLLINEAR_MIN_SPAN:
+            if span <= _collinear_min_span():
                 continue
             violations.append(
                 SameLineParallelRun(
@@ -2933,7 +2941,8 @@ def check_merge_fanout_pivots_shared(
 # A vertical riser this close outside a section edge reads as climbing the box;
 # a minimal side-exit lead-in (one curve radius off the port) lands exactly
 # here, whereas a deliberate descent channel is seated a further offset step out.
-_MIN_RISER_EDGE_CLEARANCE = CURVE_RADIUS + COORD_TOLERANCE
+def _min_riser_edge_clearance() -> float:
+    return active_curve_radius() + COORD_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -2990,7 +2999,7 @@ def _flanking_walls(
     right: _Flank | None = None
     for sec in sections:
         overlap = min(hi, sec.bbox_y + sec.bbox_h) - max(lo, sec.bbox_y)
-        if overlap <= CURVE_RADIUS:
+        if overlap <= active_curve_radius():
             continue
         right_edge = sec.bbox_x + sec.bbox_w
         if right_edge <= x + COORD_TOLERANCE and (left is None or right_edge > left[1]):
@@ -3009,7 +3018,7 @@ def check_no_riser_hugs_section_edge(
     """Return inter-section vertical risers hugging one wall of their gap.
 
     A vertical inter-section leg flanked by a section on *both* sides -- rising
-    in an inter-column gap -- must clear both walls by ``_MIN_RISER_EDGE_CLEARANCE``.
+    in an inter-column gap -- must clear both walls by ``_min_riser_edge_clearance()``.
     One that instead sits within that band of a wall climbs the outside of the
     box rather than the middle of the gap.
 
@@ -3059,7 +3068,7 @@ def check_no_riser_hugs_section_edge(
                 continue
             near = left if (x - left[1]) <= (right[1] - x) else right
             near_sec, near_edge, span = near
-            if abs(x - near_edge) >= _MIN_RISER_EDGE_CLEARANCE:
+            if abs(x - near_edge) >= _min_riser_edge_clearance():
                 continue
             violations.append(
                 RiserHugsSectionEdge(
@@ -3919,7 +3928,7 @@ def _exempt_dogleg_crossing_forced(
         # and exempt run never share a line.
         same_line=False,
         counter_running=counter_running,
-        curve_radius=CURVE_RADIUS,
+        curve_radius=active_curve_radius(),
     )
     band = inter_row_gap_band(graph, movable.y) if graph is not None else None
     lanes = exempt_dogleg_lanes(movable, exempt, separation=separation, band=band)
@@ -4175,7 +4184,7 @@ def check_stacked_elbow_clearance(
 
     Two vertical inter-section risers of different lines that merely *meet*
     at one elbow band - their Y spans overlap by less than
-    ``MIN_CORRIDOR_Y_OVERLAP`` - are not a parallel bundle: one is a deep
+    ``min_corridor_y_overlap()`` - are not a parallel bundle: one is a deep
     descent landing on a lane the other then leaves.  When such a pair sits
     within ``BUNDLE_TO_BUNDLE_CLEARANCE`` in X, the corners off the two risers
     overlap and graze.  They must instead be distributed across the gap as
@@ -4230,7 +4239,7 @@ def check_stacked_elbow_clearance(
             # Lower bound: the two risers must genuinely meet (a non-meeting
             # pair leaves a Y gap and so cannot graze); upper bound is the
             # parallel-run floor.
-            if not (COORD_TOLERANCE < overlap < MIN_CORRIDOR_Y_OVERLAP):
+            if not (COORD_TOLERANCE < overlap < min_corridor_y_overlap()):
                 continue
             violations.append(
                 StackedElbowGraze(
@@ -4652,7 +4661,7 @@ def concentric_corner_fans(
     edges reads as one fan at every corner it turns together, not just its first
     and last.  Each route's own exit-turn corner is excluded (anchored
     separately).  Only fans spanning two or more distinct lines -- the ones whose
-    innermost lane the ``CURVE_RADIUS`` floor governs -- are returned.
+    innermost lane the corner radius floor governs -- are returned.
 
     This is the single definition of "one concentric fan" shared by the
     re-anchoring pass that seats each innermost lane at the floor and the oracle
@@ -4737,16 +4746,16 @@ def concentric_corner_fans(
 
 @dataclass(frozen=True)
 class SubFloorBundleCorner:
-    """A concentric bundle fan seats its innermost lane off ``CURVE_RADIUS``.
+    """A concentric bundle fan seats its innermost lane off the corner radius.
 
     A bundle of ``n`` lines nesting one lane-step apart draws one radius set at
-    every 90-degree turn it makes together -- ``CURVE_RADIUS`` for the innermost
+    every 90-degree turn it makes together -- the corner radius for the innermost
     line of that turn, one step wider for each line further out -- and only
     reassigns which line is innermost as the turn direction flips.  Anchoring the
     fan's *reference* line rather than its *tightest* line at the floor shifts the
-    whole nest uniformly, seating the innermost lane off ``CURVE_RADIUS`` -- above
+    whole nest uniformly, seating the innermost lane off the corner radius -- above
     it when the reference line is interior, below it when the anchor is an inside
-    lane.  The innermost resolved radius must equal ``CURVE_RADIUS`` exactly.
+    lane.  The innermost resolved radius must equal the corner radius exactly.
 
     Runway-clamped corners (the resolved radius falls short of the route's
     declared radius because a short leg cannot fit it) are excluded: that shrink
@@ -4764,7 +4773,7 @@ class SubFloorBundleCorner:
             f"concentric fan {self.edge_source!r}->{self.edge_target!r} corner "
             f"{self.corner_index} draws radii {list(self.radii)}, seating its "
             f"innermost lane at {min(self.radii):.0f} rather than "
-            f"CURVE_RADIUS={CURVE_RADIUS:.0f}"
+            f"the corner radius {active_curve_radius():.0f}"
         )
 
 
@@ -4773,7 +4782,7 @@ def check_bundle_corner_radius_floor(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[SubFloorBundleCorner]:
-    """Return concentric bundle fans whose innermost lane is off ``CURVE_RADIUS``.
+    """Return concentric bundle fans whose innermost lane is off the corner radius.
 
     A corpus oracle over bundle radius sizing rather than a render guard: an
     off-floor arc renders without aborting (a pinch or slack, not undrawable
@@ -4784,7 +4793,7 @@ def check_bundle_corner_radius_floor(
     an arc centre (see :func:`concentric_corner_fans`), so a bundle whose true
     innermost lane lives on a sibling edge is judged whole rather than as a
     per-edge fragment.  Every such fan must seat its innermost lane at
-    ``CURVE_RADIUS`` exactly.
+    the corner radius exactly.
     """
     violations: list[SubFloorBundleCorner] = []
     for fan in concentric_corner_fans(routes, offsets):
@@ -4800,7 +4809,7 @@ def check_bundle_corner_radius_floor(
             declared_radius = (
                 declared[index]
                 if declared is not None and index < len(declared)
-                else CURVE_RADIUS
+                else active_curve_radius()
             )
             # A corner drawing short of its declared radius is runway-clamped, a
             # geometric limit rather than a sizing choice this oracle governs.
@@ -4811,7 +4820,7 @@ def check_bundle_corner_radius_floor(
         if runway_clamped or not members:
             continue
         innermost = min(radius for _observation, radius in members)
-        if abs(innermost - CURVE_RADIUS) <= COORD_TOLERANCE:
+        if abs(innermost - active_curve_radius()) <= COORD_TOLERANCE:
             continue
         witness = min(members, key=lambda member: member[1])[0]
         radii = tuple(sorted(round(radius, 1) for _observation, radius in members))
@@ -5029,37 +5038,47 @@ def check_coincident_corner_radii(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
 ) -> list[CoincidentCornerRadiusViolation]:
-    """Return same-line turns shared by two routes that resolve to unequal radii.
+    """Return same-line turns shared by two routes that draw as two corners.
 
-    Classifies every axis-aligned turn on the *final* offset-applied geometry
-    and buckets it by ``(line, vertex)``.  Concentrically nested bundle-mates sit
+    Classifies every turn on the *final* offset-applied geometry and buckets it
+    by ``(line, vertex)``.  Concentrically nested bundle-mates sit
     ``OFFSET_STEP`` apart in separate buckets; only legs sharing the vertex
-    within a pixel land together, and those are one stroke, so their resolved
-    (segment-clamped) radii must match.  A disagreement is a doubled corner.
+    within a pixel land together, and those are one stroke.  At a right-angle
+    turn their resolved (segment-clamped) radii must match.  A diagonal turn is
+    bucketed by each leg's direction too, and its legs sharing that leg must
+    meet it where their curves leave it, one radius past (or before) the
+    vertex, at one point.  A disagreement is a doubled corner.
     """
     buckets: dict[
-        tuple[str, int, int], list[tuple[RoutedPath, tuple[float, float], float]]
+        tuple[object, ...], list[tuple[RoutedPath, tuple[float, float], float, float]]
     ] = defaultdict(list)
     for r in routes:
         pts = apply_route_offsets(r, offsets)
         if len(pts) < 3:
             continue
         radii = _resolved_corner_radii(r, pts)
-        for k in range(1, len(pts) - 1):
-            if k - 1 >= len(radii) or not is_orthogonal_turn(
-                pts[k - 1], pts[k], pts[k + 1]
-            ):
+        for k in range(1, min(len(pts) - 1, len(radii) + 1)):
+            prev, corner, nxt = pts[k - 1], pts[k], pts[k + 1]
+            at = (r.line_id, round(corner[0]), round(corner[1]))
+            arm = radii[k - 1]
+            if is_orthogonal_turn(prev, corner, nxt):
+                buckets[at].append((r, corner, arm, arm))
                 continue
-            key = (r.line_id, round(pts[k][0]), round(pts[k][1]))
-            buckets[key].append((r, pts[k], radii[k - 1]))
+            units = turn_unit_vectors(prev, corner, nxt)
+            if units is None:
+                continue
+            u_in, u_out = units
+            for side, leg, sign in (("in", u_in, -1.0), ("out", u_out, 1.0)):
+                meets = corner[0] * leg[0] + corner[1] * leg[1] + sign * arm
+                buckets[(*at, side, leg_key(leg))].append((r, corner, arm, meets))
 
     violations: list[CoincidentCornerRadiusViolation] = []
     for members in buckets.values():
         if len(members) < 2:
             continue
-        lo = min(members, key=lambda m: m[2])
-        hi = max(members, key=lambda m: m[2])
-        if hi[2] - lo[2] > COORD_TOLERANCE:
+        lo = min(members, key=lambda m: m[3])
+        hi = max(members, key=lambda m: m[3])
+        if hi[3] - lo[3] > COORD_TOLERANCE:
             violations.append(
                 CoincidentCornerRadiusViolation(
                     line_id=lo[0].line_id,
@@ -5198,7 +5217,8 @@ def _segment_unit(
 # of slack covers the branch's turn-in arc and per-line bundle offsets; a real
 # desync between the branch drop level and the trunk channel is an order of
 # magnitude larger.
-_MERGE_BRANCH_HANG_TOL = 2 * CURVE_RADIUS
+def _merge_branch_hang_tol() -> float:
+    return 2 * active_curve_radius()
 
 
 @dataclass
@@ -5466,7 +5486,7 @@ def check_merge_feeders_land_on_trunk(
 
     * **At a marker** -- the merge junction or the entry port.  A marker is
       line-agnostic while the arriving stroke rides its own bundle lane, so a
-      terminus within :data:`_MERGE_BRANCH_HANG_TOL` of one counts as arrived.
+      terminus within :func:`_merge_branch_hang_tol` of one counts as arrived.
     * **On a sibling's path** -- the trunk it converges onto.  Here the slack is
       :data:`COORD_TOLERANCE`, because the point of converging is that the two
       lines become one stroke; a terminus a bundle offset off the trunk's
@@ -5488,7 +5508,7 @@ def check_merge_feeders_land_on_trunk(
             if edge.source not in junction_ids:
                 continue
             end = pts[-1]
-            if min(math.dist(end, m) for m in markers) <= _MERGE_BRANCH_HANG_TOL:
+            if min(math.dist(end, m) for m in markers) <= _merge_branch_hang_tol():
                 continue
             gap = min(
                 (
@@ -5522,7 +5542,7 @@ def check_merge_branches_meet_trunk(
     entry-port successor.  Each feeder route must terminate where it joins the
     converging structure: a branch lands on the trunk's channel, the trunk
     reaches the entry port.  A feeder whose endpoint is farther than
-    :data:`_MERGE_BRANCH_HANG_TOL` from every sibling feeder's path, the merge
+    :func:`_merge_branch_hang_tol` from every sibling feeder's path, the merge
     junction, and the entry port is a stub hanging in open space -- the
     symptom of the branch drop level disagreeing with the trunk's real channel.
     """
@@ -5543,7 +5563,7 @@ def check_merge_branches_meet_trunk(
                 default=float("inf"),
             )
             gap = min(d_merge, d_entry, d_sibling)
-            if gap > _MERGE_BRANCH_HANG_TOL:
+            if gap > _merge_branch_hang_tol():
                 violations.append(
                     MergeBranchHang(
                         merge_id=merge_id,
@@ -5562,7 +5582,8 @@ def check_merge_branches_meet_trunk(
 # corner radii of slack covers the endpoint's turn-in arc and the per-line
 # bundle offset that fans it off the marker; a genuine hang (a desynced drop
 # level, a stub that never reaches its trunk) is an order of magnitude larger.
-_HANGING_ROUTE_TOL = 2 * CURVE_RADIUS
+def _hanging_route_tol() -> float:
+    return 2 * active_curve_radius()
 
 
 @dataclass(frozen=True)
@@ -5572,7 +5593,7 @@ class HangingRoute:
     Every route must begin and end on a real anchor: a station, port, or
     junction marker, or a point on another route it legitimately joins (a
     bundle mate, a branch onto a trunk, a peel-off).  An endpoint farther than
-    :data:`_HANGING_ROUTE_TOL` from all of those is a stub hanging in open
+    :func:`_hanging_route_tol` from all of those is a stub hanging in open
     space -- the universal symptom underneath the family-specific endpoint
     desyncs (merge branches, rail stubs).  ``which`` names the offending end
     (``"source"`` or ``"target"``); ``gap`` is the distance to the nearest
@@ -5609,9 +5630,10 @@ def check_no_hanging_routes(
     The general backstop for the hanging-path defect class: it asserts the
     property every family-specific endpoint guard encodes locally -- that a
     routed segment terminates at a real anchor -- once, over every route.  An
-    endpoint is anchored when it lies within :data:`_HANGING_ROUTE_TOL` of a
-    station/port/junction marker (all live in ``graph.stations``, including
-    terminus/file-icon hosts) or of any *other* route's rendered path (the
+    endpoint is anchored when it lies within :func:`_hanging_route_tol` of a
+    station/port/junction's lanes as drawn (:func:`drawn_lane_span`; all live in
+    ``graph.stations``, including terminus/file-icon hosts) or of any *other*
+    route's rendered path (the
     join point of a bundle mate, a branch onto its trunk, or a peel-off).
 
     Rail-mode endpoints are skipped: a rail stub terminates on its rail rather
@@ -5625,7 +5647,15 @@ def check_no_hanging_routes(
         if routes_to_check is not None
         else None
     )
-    anchor_xy = [(st.x, st.y) for st in graph.stations.values()]
+    from nf_metro.layout.routing.offsets import drawn_lane_span
+
+    rail_anchors = [
+        drawn_lane_span(graph, st, offsets)
+        for st in graph.stations.values()
+        if graph.station_is_rail(st.id)
+    ]
+    own_spans: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
+    other_anchors: list[tuple[tuple[float, float], tuple[float, float]]] | None = None
     rendered = [(r, apply_route_offsets(r, offsets)) for r in routes]
     polylines = [(r, pts) for r, pts in rendered if len(pts) >= 2]
 
@@ -5637,11 +5667,27 @@ def check_no_hanging_routes(
         for which, end, node in ends:
             if graph.station_is_rail(node):
                 continue
+            own = graph.stations.get(node)
+            if own is not None:
+                own_span = own_spans.get(node)
+                if own_span is None:
+                    own_span = own_spans[node] = drawn_lane_span(graph, own, offsets)
+                if point_to_polyline_distance(end, own_span) <= _hanging_route_tol():
+                    continue
+            if other_anchors is None:
+                other_anchors = [
+                    drawn_lane_span(graph, st, offsets)
+                    for st in graph.stations.values()
+                    if not graph.station_is_rail(st.id)
+                ]
             d_marker = min(
-                (((end[0] - x) ** 2 + (end[1] - y) ** 2) ** 0.5 for x, y in anchor_xy),
+                (
+                    point_to_polyline_distance(end, anchor)
+                    for anchor in (*rail_anchors, *other_anchors)
+                ),
                 default=float("inf"),
             )
-            if d_marker <= _HANGING_ROUTE_TOL:
+            if d_marker <= _hanging_route_tol():
                 continue
             d_join = min(
                 (
@@ -5651,7 +5697,7 @@ def check_no_hanging_routes(
                 ),
                 default=float("inf"),
             )
-            if d_join <= _HANGING_ROUTE_TOL:
+            if d_join <= _hanging_route_tol():
                 continue
             violations.append(
                 HangingRoute(
@@ -6306,7 +6352,7 @@ def check_fan_opening_geometry(
                 )
             )
             continue
-        requested = CURVE_RADIUS
+        requested = active_curve_radius()
         if route.fan_route_emitter is not None:
             requested = max(
                 requested, context.entry_runways.get(route.edge.source, 0.0)
@@ -6371,7 +6417,7 @@ def check_fan_opening_geometry(
                 continue
             for corner_index in (1, 2):
                 radius = shape.radii[corner_index - 1]
-                if radius < CURVE_RADIUS - COORD_TOLERANCE_FINE:
+                if radius < active_curve_radius() - COORD_TOLERANCE_FINE:
                     violations.append(
                         StarvedTurnViolation(
                             shape.route.edge.source,
@@ -6379,7 +6425,7 @@ def check_fan_opening_geometry(
                             shape.route.line_id,
                             shape.points[corner_index],
                             radius,
-                            CURVE_RADIUS,
+                            active_curve_radius(),
                         )
                     )
     return violations
@@ -6679,7 +6725,12 @@ def check_exit_row_bypass_no_early_upstep(
         src_y = src_station.y
         exclude = {sid for sid in (src_sec.id, tgt_sec.id) if sid is not None}
         if _h_segment_crosses_other_section(
-            graph, src_station.x, tgt_station.x, src_y, exclude, margin=BYPASS_CLEARANCE
+            graph,
+            src_station.x,
+            tgt_station.x,
+            src_y,
+            exclude,
+            margin=bypass_clearance(),
         ):
             continue
         lo, hi = (
@@ -6848,7 +6899,7 @@ def check_opposing_gap_channel_clearance(
                 if adown is bdown or a.line_id == b.line_id:
                     continue
                 overlap = min(ahi, bhi) - max(alo, blo)
-                if overlap <= MIN_CORRIDOR_Y_OVERLAP:
+                if overlap <= min_corridor_y_overlap():
                     continue
                 if abs(xa - xb) >= BUNDLE_TO_BUNDLE_CLEARANCE - COORD_TOLERANCE:
                     continue
@@ -7019,7 +7070,7 @@ class LooseDestinationTail:
 def check_peeloff_concentric(
     graph: MetroGraph,
     routes: list[RoutedPath],
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
     landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[PeeloffBundleCrossing | LooseDestinationTail]:
     """Return peel-off bundles that do not nest into one band at a LEFT entry port.
@@ -7032,6 +7083,8 @@ def check_peeloff_concentric(
     the standard layout path rather than by repair here.  A port in
     *landing_orders* owes the band in the order the plan lands it.
     """
+    if curve_radius is None:
+        curve_radius = active_curve_radius()
     step = graph_offset_step(graph)
     out: list[PeeloffBundleCrossing | LooseDestinationTail] = []
     checked: set[tuple[str, int, int, int]] = set()
@@ -7259,7 +7312,7 @@ def render_curve_violations(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
     *,
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
     landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[tuple[str, Sequence[_HasMessage]]]:
     """Every render-time curve check, labelled, with the violations it finds.
@@ -7268,6 +7321,8 @@ def render_curve_violations(
     render.  *landing_orders* holds the landing order the routes' plan decided
     for each port it lands whole.
     """
+    if curve_radius is None:
+        curve_radius = active_curve_radius()
     return [
         (
             "bundle order (line crosses its bundle-mate)",
@@ -7384,7 +7439,7 @@ def assert_render_curve_invariants(
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
     *,
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
     landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Raise :class:`CurveInvariantError` if the final render routes are defective.
@@ -7421,6 +7476,8 @@ def assert_render_curve_invariants(
     (:func:`~nf_metro.layout.routing.landing_deal.planned_landing_orders` of
     the plan that emitted *routes*).
     """
+    if curve_radius is None:
+        curve_radius = active_curve_radius()
     named_checks = render_curve_violations(
         graph,
         routes,
@@ -7703,7 +7760,7 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
             "whose bundle sizes tightly for a reason nothing here models would "
             "abort rather than render imperfectly. Restricted to the cross-edge "
             "fans of corners that turn together and share an arc centre -- the "
-            "sets whose innermost lane must seat at CURVE_RADIUS -- with "
+            "sets whose innermost lane must seat at the corner radius -- with "
             "runway-clamped corners excluded."
         ),
     ),

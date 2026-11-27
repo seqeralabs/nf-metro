@@ -150,7 +150,7 @@ def _claim_overhangs(path: Path) -> dict[tuple[int, int], tuple[float, str]] | N
         ):
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-            observed = build_observed_render_plan(graph, resolve_theme(None, graph))
+            observed = build_observed_render_plan(graph, resolve_theme(graph))
     except Exception:  # noqa: BLE001 - erroring fixtures have their own tests
         return None
 
@@ -210,7 +210,7 @@ def test_realised_gap_claims_are_drawn_in_their_reserved_band(path: Path) -> Non
         ):
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-            build_observed_render_plan(graph, resolve_theme(None, graph))
+            build_observed_render_plan(graph, resolve_theme(graph))
         return
     violations = _out_of_band_claims(path)
     if violations is None:

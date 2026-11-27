@@ -50,6 +50,7 @@ from nf_metro.layout.routing import (
     route_edges,
 )
 from nf_metro.layout.routing.invariants import CurveInvariantError
+from nf_metro.manifest import read_manifest
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, Port, Section, Station
 from nf_metro.parser.provenance import (
@@ -64,7 +65,6 @@ from nf_metro.parser.route_topology import (
     RouteTopologyQuery,
     build_route_topology_query,
 )
-from nf_metro.render.manifest import read_manifest
 from nf_metro.render.plan import freeze_render_value
 from nf_metro.render.svg import build_render_plan, emit_render_plan
 
@@ -1073,7 +1073,7 @@ def test_observer_toggle_is_exactly_render_neutral() -> None:
     assert freeze_render_value(observation.routes) == freeze_render_value(plain_routes)
 
     def render(graph):
-        plan = build_render_plan(graph, resolve_theme(None, graph))
+        plan = build_render_plan(graph, resolve_theme(graph))
         svg = emit_render_plan(plan)
         return (
             freeze_render_value(plan),

@@ -246,7 +246,7 @@ def _render_under_coverage(corpus: list[tuple[Path, bool]]):
     )
     from nf_metro.parser.mermaid import parse_metro_mermaid
     from nf_metro.render.svg import render_svg
-    from nf_metro.themes import THEMES
+    from nf_metro.themes import resolve_theme
 
     observed: set[str] = set()
     routed_without_offsets: set[str] = set()
@@ -259,7 +259,7 @@ def _render_under_coverage(corpus: list[tuple[Path, bool]]):
                 text = convert_nextflow_dag(text)
             graph = parse_metro_mermaid(text)
             compute_layout(graph)
-            theme = THEMES[graph.style if graph.style in THEMES else "nfcore"]
+            theme = resolve_theme(graph)
             render_svg(graph, theme)
             if ctx in OBSERVATION_PROBES:
                 observe_route_edges(

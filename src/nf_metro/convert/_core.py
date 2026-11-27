@@ -1,10 +1,10 @@
-"""Convert Nextflow -with-dag mermaid output to nf-metro .mmd format.
+"""Format-neutral back end shared by the workflow-DAG converters.
 
-Nextflow's ``-with-dag file.mmd`` produces a ``flowchart TB`` mermaid graph
-with channel sources, operator nodes, and process nodes organized into
-subworkflow subgraphs. This module parses that format, drops non-process
-nodes, reconnects edges, maps subworkflows to sections, detects bypass
-lines, and emits a ``graph LR`` nf-metro .mmd file.
+Each front end (``nextflow``, ``snakemake``) parses its tool's export into a
+:class:`ParsedDag` and picks the nodes worth keeping as stations;
+:func:`dag_to_mmd` does the rest: reconnects edges around dropped nodes,
+breaks cycles, maps groups to sections, assigns main/bypass/spur lines, and
+emits a ``graph LR`` nf-metro ``.mmd`` file.
 """
 
 from __future__ import annotations
@@ -14,10 +14,12 @@ import warnings
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from itertools import pairwise
+from typing import Literal, get_args
 
 import networkx as nx
 
-from nf_metro.graph_views import directed_graph
+from nf_metro.graph_views import directed_graph, longest_path_layers
 
 # ---------------------------------------------------------------------------
 # Colour palette for auto-generated metro lines
@@ -48,10 +50,10 @@ travels with the converted file without changing what it renders.
 
 
 class FeedbackEdgesDroppedWarning(UserWarning):
-    """Warns that converting a cyclic Nextflow DAG had to remove edges.
+    """Warns that converting a cyclic workflow DAG had to remove edges.
 
-    nf-metro's layout engine requires an acyclic graph, so a pipeline whose
-    process graph loops cannot be converted edge-for-edge. The converter
+    nf-metro's layout engine requires an acyclic graph, so a workflow whose
+    step graph loops cannot be converted edge-for-edge. The converter
     removes a deterministic set of back edges; this warning names them, so the
     loop is reported to the caller instead of vanishing.
 
@@ -64,22 +66,31 @@ class FeedbackEdgesDroppedWarning(UserWarning):
         self.connections = connections
 
 
+class ExperimentalInputWarning(UserWarning):
+    """Warns that the input format's converter is experimental.
+
+    Its output may change between releases, and complex workflows are likely
+    to need hand-editing of the converted ``.mmd``.
+    """
+
+
 # ---------------------------------------------------------------------------
-# Internal data model for the Nextflow DAG
+# Format-neutral intermediate DAG, filled by each front end
 # ---------------------------------------------------------------------------
 @dataclass
-class _NfNode:
-    """A node parsed from the Nextflow mermaid DAG."""
+class DagNode:
+    """A node parsed from a workflow manager's DAG export."""
 
     id: str
     label: str
-    shape: str  # "stadium" (process), "square" (value/channel), "circle" (operator)
+    shape: str  # set by the front end, e.g. Nextflow "stadium" for a process
     subgraph: str | None = None  # named subgraph, None if outside or in " "
+    display: str | None = None  # station label as-is; unset humanises ``label``
 
 
 @dataclass
-class _NfSubgraph:
-    """A subgraph parsed from the Nextflow mermaid DAG."""
+class DagGroup:
+    """A named node group, such as a Nextflow subworkflow, that becomes a section."""
 
     full_name: str  # e.g. "NFCORE_RNASEQ:RNASEQ:PREPROCESS"
     short_name: str  # e.g. "PREPROCESS" (from [SHORT_NAME])
@@ -87,145 +98,12 @@ class _NfSubgraph:
 
 
 @dataclass
-class _ParsedDag:
-    """Intermediate representation of a parsed Nextflow DAG."""
+class ParsedDag:
+    """Intermediate representation of a parsed workflow DAG."""
 
-    nodes: dict[str, _NfNode] = field(default_factory=dict)
+    nodes: dict[str, DagNode] = field(default_factory=dict)
     edges: list[tuple[str, str]] = field(default_factory=list)
-    subgraphs: dict[str, _NfSubgraph] = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# Regex patterns for Nextflow mermaid format
-# ---------------------------------------------------------------------------
-
-# subgraph "FULL_NAME [SHORT_NAME]" or subgraph " "
-_NF_SUBGRAPH = re.compile(
-    r'^subgraph\s+"([^"]+)"'
-    r"(?:\s*\[([^\]]+)\])?\s*$"
-)
-
-# Also handle unquoted: subgraph " "
-_NF_SUBGRAPH_SPACE = re.compile(r'^subgraph\s+" "\s*$')
-
-# Stadium node: v1(["LABEL"]) or v1([LABEL]).
-# Nextflow <= 22 emitted quoted labels; 23+ emits unquoted ones.
-_NF_STADIUM = re.compile(r'^(v\d+)\(\["?([^"\]]*?)"?\]\)\s*$')
-
-# Square bracket node: v1["LABEL"] or v1[LABEL] (same quoting drift).
-_NF_SQUARE = re.compile(r'^(v\d+)\["?([^"\]]*?)"?\]\s*$')
-
-# Circle node: v1(( )) or v1(( label ))
-_NF_CIRCLE = re.compile(r"^(v\d+)\(\(\s*(.*?)\s*\)\)\s*$")
-
-# Edge: v1 --> v2
-_NF_EDGE = re.compile(r"^(v\d+)\s*-->\s*(v\d+)\s*$")
-
-# flowchart header
-_NF_FLOWCHART = re.compile(r"^flowchart\s+", re.IGNORECASE)
-
-
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
-def _parse_nextflow_mermaid(text: str) -> _ParsedDag:
-    """Parse a Nextflow ``-with-dag`` mermaid file into an intermediate DAG."""
-    dag = _ParsedDag()
-    lines = text.strip().split("\n")
-
-    current_subgraph: str | None = None  # key into dag.subgraphs, or None
-    subgraph_counter = 0
-
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        # flowchart header
-        if _NF_FLOWCHART.match(line):
-            continue
-
-        # subgraph end
-        if line == "end":
-            current_subgraph = None
-            continue
-
-        # subgraph start (quoted)
-        m = _NF_SUBGRAPH.match(line)
-        if m:
-            full_name = m.group(1).strip()
-            # Extract short name from "FULL [SHORT]" pattern
-            short_name = m.group(2).strip() if m.group(2) else full_name
-            # Also try extracting from the full_name itself if it has [SHORT]
-            bracket_m = re.search(r"\[([^\]]+)\]", full_name)
-            if bracket_m:
-                short_name = bracket_m.group(1).strip()
-                full_name = full_name[: bracket_m.start()].strip()
-
-            # Skip space-only subgraphs (channel containers)
-            if not full_name.strip() or full_name.strip() == " ":
-                current_subgraph = None
-                continue
-
-            sg_key = f"sg_{subgraph_counter}"
-            subgraph_counter += 1
-            dag.subgraphs[sg_key] = _NfSubgraph(
-                full_name=full_name, short_name=short_name
-            )
-            current_subgraph = sg_key
-            continue
-
-        # Also match subgraph " " (space-only, no bracket content)
-        if _NF_SUBGRAPH_SPACE.match(line):
-            current_subgraph = None
-            continue
-
-        # Stadium node (process)
-        m = _NF_STADIUM.match(line)
-        if m:
-            node = _NfNode(id=m.group(1), label=m.group(2), shape="stadium")
-            if current_subgraph:
-                node.subgraph = current_subgraph
-                dag.subgraphs[current_subgraph].node_ids.append(node.id)
-            dag.nodes[node.id] = node
-            continue
-
-        # Square bracket node (value/channel)
-        m = _NF_SQUARE.match(line)
-        if m:
-            node = _NfNode(id=m.group(1), label=m.group(2), shape="square")
-            if current_subgraph:
-                node.subgraph = current_subgraph
-            dag.nodes[node.id] = node
-            continue
-
-        # Circle node (operator)
-        m = _NF_CIRCLE.match(line)
-        if m:
-            node = _NfNode(id=m.group(1), label=m.group(2), shape="circle")
-            if current_subgraph:
-                node.subgraph = current_subgraph
-            dag.nodes[node.id] = node
-            continue
-
-        # Edge
-        m = _NF_EDGE.match(line)
-        if m:
-            dag.edges.append((m.group(1), m.group(2)))
-            continue
-
-    return dag
-
-
-def process_node_labels(text: str) -> list[str]:
-    """Labels of the process nodes in a Nextflow ``-with-dag`` flowchart.
-
-    Nextflow renders processes as stadium nodes; channel and operator nodes are
-    excluded. Deduplicated and sorted. Used by the live-progress check-mapping
-    linter to learn which processes a pipeline actually runs.
-    """
-    dag = _parse_nextflow_mermaid(text)
-    return sorted({n.label for n in dag.nodes.values() if n.shape == "stadium"})
+    subgraphs: dict[str, DagGroup] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -235,10 +113,10 @@ def process_node_labels(text: str) -> list[str]:
 class _Reconnection:
     """Edges stitched through dropped nodes, and the self-loops that leaves.
 
-    ``edges`` is the process-to-process graph every later pass consumes.
+    ``edges`` is the kept-node graph every later pass consumes.
     ``self_loops`` holds the ``(node, node)`` pairs the stitching cannot
-    express: a process that reaches itself through channel or operator nodes.
-    They are returned rather than dropped, so a single-process feedback round
+    express: a kept node that reaches itself through dropped nodes.
+    They are returned rather than dropped, so a single-node feedback round
     is reported instead of disappearing.
     """
 
@@ -329,7 +207,7 @@ def _break_cycles(nodes: set[str], edges: list[tuple[str, str]]) -> _CycleBreak:
 # ---------------------------------------------------------------------------
 @dataclass
 class _SectionAssignment:
-    """Mapping of kept process nodes to sections.
+    """Mapping of kept nodes to sections.
 
     The three fields are mutually consistent views of the same grouping:
     ``node_section[nid]`` is the section key for node ``nid``, ``names[key]``
@@ -343,12 +221,12 @@ class _SectionAssignment:
 
 
 def _assign_sections(
-    kept_ids: set[str], dag: _ParsedDag, title: str
+    kept_ids: set[str], dag: ParsedDag, title: str
 ) -> _SectionAssignment:
-    """Group kept process nodes into sections.
+    """Group kept nodes into sections.
 
-    Processes inside a named subgraph are assigned to that subgraph's section.
-    Processes outside any subgraph go into a synthesised section: ``__pipeline``
+    Nodes inside a named subgraph are assigned to that subgraph's section.
+    Nodes outside any subgraph go into a synthesised section: ``__pipeline``
     (named after the title) when there are no subgraphs at all, otherwise
     ``__reporting``.
     """
@@ -394,7 +272,7 @@ def _unit(sections: _SectionAssignment, nid: str, split_secs: set[str]) -> str:
 def _unit_graph(
     sections: _SectionAssignment, edges: list[tuple[str, str]], split_secs: set[str]
 ) -> nx.DiGraph[str]:
-    """Graph of whole sections plus the individual processes of ``split_secs``.
+    """Graph of whole sections plus the individual nodes of ``split_secs``.
 
     Edge weight ``w`` is 1 where the edge crosses a section boundary, else 0.
     """
@@ -447,18 +325,18 @@ def _flow_depths(graph: nx.DiGraph[str], latest: bool) -> dict[str, int]:
 
 
 def _split_cyclic_sections(
-    sections: _SectionAssignment, edges: list[tuple[str, str]], dag: _ParsedDag
+    sections: _SectionAssignment, edges: list[tuple[str, str]], dag: ParsedDag
 ) -> _SectionAssignment:
     """Split sections that form a cycle into acyclic groups by flow depth.
 
-    Unassigned processes share one section, and Nextflow flattens a parent
+    Unassigned nodes share one section, and Nextflow flattens a parent
     subworkflow's own processes into a subgraph beside its children's, so a
     section can run both before and after another one. Sections are split
     outermost first: the unassigned section, then subgraphs by nesting depth
     of their full name, each tier only where a cycle remains. Sections not on
     a cycle stay whole.
 
-    A split section's processes are grouped by flow depth, the longest path
+    A split section's nodes are grouped by flow depth, the longest path
     counting one per section boundary crossed, so every inter-section edge
     strictly increases depth and the result is acyclic. Earliest and latest
     depths are both valid; whichever yields fewer groups is used. A split
@@ -605,6 +483,10 @@ def _topological_order(
 _MAX_LABEL_LEN = 16
 
 
+def _display_label(node: DagNode) -> str:
+    return node.display or _humanize_label(node.label)
+
+
 def _humanize_label(name: str, abbreviate: bool = True) -> str:
     """Convert UPPER_SNAKE_CASE to Title Case, optionally abbreviating.
 
@@ -627,7 +509,7 @@ def _humanize_label(name: str, abbreviate: bool = True) -> str:
 
 
 def _sanitize_id(name: str) -> str:
-    """Convert a process/section name to a valid nf-metro station ID.
+    """Convert a node or section name to a valid nf-metro station ID.
 
     Lowercase, replace non-alphanumeric with underscore.
     """
@@ -649,11 +531,11 @@ def _allocate_unique_id(name: str, used: set[str], fallback: str) -> str:
 def _allocate_station_ids(
     section_order: list[str],
     section_node_order: dict[str, list[str]],
-    nodes: dict[str, _NfNode],
+    nodes: dict[str, DagNode],
 ) -> dict[str, str]:
-    """Assign a unique station ID to every kept Nextflow node.
+    """Assign a unique station ID to every kept node.
 
-    Two `_NfNode`s can share a label (e.g. `SAMTOOLS_SORT` reused across
+    Two `DagNode`s can share a label (e.g. `SAMTOOLS_SORT` reused across
     several subworkflows). Sanitising the label alone collapses them onto
     one station ID, producing duplicate declarations and self-loop edges
     that crash layout. Walk sections in topological order and suffix
@@ -676,15 +558,47 @@ class _LineAssignment:
 
     ``main`` carries adjacent flow; ``bypass_lines`` keys a ``(src_sec,
     tgt_sec)`` section pair to its ``(id, name, color)``; ``spur`` (when
-    present) carries dead-end branches. ``edge_line`` maps every emitted edge
-    to its line id; its insertion order (intra-section, adjacent, bypass, then
-    spur edges) is the emission order.
+    present) carries dead-end branches; ``side`` lists the further lines a
+    front end planned (see :data:`LinePlan`). ``edge_line`` maps every emitted
+    edge to its line id. Intra-section edges are emitted in their section's
+    order; inter-section edges in ``edge_line``'s insertion order.
     """
 
     main: tuple[str, str, str]
     spur: tuple[str, str, str] | None
     bypass_lines: dict[tuple[str, str], tuple[str, str, str]]
     edge_line: dict[tuple[str, str], str]
+    side: list[tuple[str, str, str]] = field(default_factory=list)
+
+
+LineMode = Literal["graph", "sections"]
+"""How a converter draws lines.
+
+``graph`` plans them from the graph's shape with :func:`branch_line_planner`,
+in a one-section map only; ``sections`` derives ``main``, ``spur`` and
+``bypass`` lines from the sections.
+"""
+
+LINE_MODES: tuple[LineMode, ...] = get_args(LineMode)
+
+
+LinePlan = list[tuple[tuple[str, str, str], list[tuple[str, str]]]]
+"""Lines a front end draws itself: each ``(id, name, colour)`` with its edges.
+
+The first line is the trunk. Every edge must be on exactly one line.
+"""
+
+
+def _planned_lines(plan: LinePlan) -> _LineAssignment:
+    (main, _) = plan[0]
+    edge_line = {edge: line[0] for line, line_edges in plan for edge in line_edges}
+    return _LineAssignment(
+        main=main,
+        spur=None,
+        bypass_lines={},
+        edge_line=edge_line,
+        side=[line for line, _ in plan[1:]],
+    )
 
 
 def _assign_lines(
@@ -698,7 +612,7 @@ def _assign_lines(
 ) -> _LineAssignment:
     """Build metro lines and map each edge to its line.
 
-    Dead-end processes (mid-pipeline processes with no successors, excluding
+    Dead-end nodes (mid-pipeline nodes with no successors, excluding
     the last section) branch off onto a ``spur`` line. Inter-section edges
     spanning two or more sections become per-pair ``bypass`` lines; adjacent
     inter-section edges stay on ``main``.
@@ -809,7 +723,7 @@ def _emit_mmd(
     intra_edges: dict[str, list[tuple[str, str]]],
     lines: _LineAssignment,
     station_ids: dict[str, str],
-    nodes: dict[str, _NfNode],
+    nodes: dict[str, DagNode],
     dropped_feedback: list[tuple[str, str]] | None = None,
 ) -> str:
     """Assemble the nf-metro ``.mmd`` text from the resolved layout.
@@ -823,12 +737,13 @@ def _emit_mmd(
 
     out: list[str] = []
     out.append(f"%%metro title: {title}")
-    out.append("%%metro style: dark")
     out.append("%%metro line_order: span")
     out.append(f"%%metro line: {main_line_id} | {main_line_name} | {main_color}")
     if lines.spur:
         spur_id, spur_name, spur_color = lines.spur
         out.append(f"%%metro line: {spur_id} | {spur_name} | {spur_color}")
+    for lid, lname, lcolor in lines.side:
+        out.append(f"%%metro line: {lid} | {lname} | {lcolor}")
     for (_src_sec, _tgt_sec), (lid, lname, lcolor) in sorted(
         lines.bypass_lines.items(), key=lambda x: x[1][0]
     ):
@@ -846,7 +761,7 @@ def _emit_mmd(
         out.append(f"    subgraph {sec_id} [{display}]")
 
         for nid in ordered_nodes:
-            label = _humanize_label(nodes[nid].label)
+            label = _display_label(nodes[nid])
             out.append(f"        {station_ids[nid]}([{label}])")
 
         sec_edges = intra_edges.get(sec_key, [])
@@ -873,7 +788,7 @@ def _emit_mmd(
         out.extend(f"    {line}" for line in FEEDBACK_COMMENT_HEADER)
 
         def describe(node: str) -> str:
-            return f"{station_ids[node]} ({_humanize_label(nodes[node].label)})"
+            return f"{station_ids[node]} ({_display_label(nodes[node])})"
 
         for src, tgt in dropped_feedback:
             out.append(f"    %%   {_format_feedback_pair(src, tgt, describe)}")
@@ -886,8 +801,8 @@ def _format_feedback_pair(
 ) -> str:
     """Render one removed connection, naming a self-loop as such.
 
-    ``describe(node) -> describe(node)`` reads as though two processes were
-    involved, so a process that feeds itself is spelled out instead.
+    ``describe(node) -> describe(node)`` reads as though two nodes were
+    involved, so a node that feeds itself is spelled out instead.
     """
     if source == target:
         return f"{describe(source)} -> itself"
@@ -895,12 +810,12 @@ def _format_feedback_pair(
 
 
 def _warn_feedback_edges_dropped(
-    dropped: list[tuple[str, str]], nodes: dict[str, _NfNode]
+    dropped: list[tuple[str, str]], nodes: dict[str, DagNode]
 ) -> None:
-    """Report the back edges removed to make the process graph acyclic."""
+    """Report the back edges removed to make the kept graph acyclic."""
 
     def describe(node: str) -> str:
-        return _humanize_label(nodes[node].label)
+        return _display_label(nodes[node])
 
     connections = tuple(
         _format_feedback_pair(src, tgt, describe) for src, tgt in dropped
@@ -913,40 +828,116 @@ def _warn_feedback_edges_dropped(
             "%% comment block.",
             connections,
         ),
-        stacklevel=3,
+        stacklevel=4,
     )
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-def convert_nextflow_dag(text: str, title: str = "") -> str:
-    """Convert a Nextflow ``-with-dag`` mermaid file to nf-metro ``.mmd`` format.
+def _longest_path(
+    graph: nx.DiGraph[str],
+    key: Callable[[str], tuple[str, str]],
+    end: str | None = None,
+) -> list[str]:
+    """The longest path in *graph*, ending at *end* if given, ties by *key*."""
+    layers = longest_path_layers(graph, sorted(graph, key=key))
+    if end is None:
+        end = min(layers, key=lambda n: (-layers[n], key(n)))
+    path = [end]
+    while preds := [
+        p for p in graph.predecessors(path[-1]) if layers[p] == layers[path[-1]] - 1
+    ]:
+        path.append(min(preds, key=key))
+    return path[::-1]
 
-    Parameters
-    ----------
-    text:
-        Contents of a ``.mmd`` file produced by ``nextflow -with-dag file.mmd``.
-    title:
-        Optional pipeline title. If empty, inferred from subgraph names.
 
-    Returns
-    -------
-    str
-        nf-metro ``.mmd`` text ready for ``nf-metro render``.
+def branch_line_planner(
+    nodes: dict[str, DagNode], edges: list[tuple[str, str]]
+) -> LinePlan:
+    """Plan lines from the graph's shape rather than from its sections.
+
+    The trunk, ``main``, is the longest chain into the main sink: the sink with
+    the most upstream nodes, ties going to the one with more direct inputs,
+    then to the first by label. Each remaining chain, longest first, becomes
+    its own line, named after its first node not already on a line, or after
+    its last node when every node is. Side lines cycle through the palette
+    after the trunk's colour, which they never reuse. Ties break on node
+    labels, then ids, so the plan does not depend on hash order.
+    """
+    if not edges:
+        return []
+
+    def key(nid: str) -> tuple[str, str]:
+        return nodes[nid].label, nid
+
+    graph = directed_graph(sorted({n for edge in edges for n in edge}), edges)
+    sink = min(
+        (n for n in graph if graph.out_degree(n) == 0),
+        key=lambda n: (-len(nx.ancestors(graph, n)), -graph.in_degree(n), key(n)),
+    )
+    trunk = _longest_path(graph, key, sink)
+    lines: LinePlan = [(("main", "Main", LINE_COLORS[0]), list(pairwise(trunk)))]
+    used_ids = {"main"}
+    on_line = set(trunk)
+    while True:
+        graph.remove_edges_from(lines[-1][1])
+        graph.remove_nodes_from(list(nx.isolates(graph)))
+        if not graph:
+            return lines
+        path = _longest_path(graph, key)
+        first = next((n for n in path if n not in on_line), path[-1])
+        line_id = _allocate_unique_id(nodes[first].label, used_ids, "line")
+        color = LINE_COLORS[1 + (len(lines) - 1) % (len(LINE_COLORS) - 1)]
+        lines.append(
+            ((line_id, _display_label(nodes[first]), color), list(pairwise(path)))
+        )
+        on_line.update(path)
+
+
+LinePlanner = Callable[[dict[str, DagNode], list[tuple[str, str]]], LinePlan]
+"""A ``plan_lines`` hook for :func:`dag_to_mmd`: the nodes and edges to a plan."""
+
+
+def line_planner(lines: LineMode) -> LinePlanner | None:
+    """The ``plan_lines`` hook for *lines*, or ``None`` for section lines.
+
+    Raises
+    ------
+    ValueError
+        When *lines* is not one of :data:`LINE_MODES`.
+    """
+    if lines not in LINE_MODES:
+        raise ValueError(
+            f"unknown line mode {lines!r}; expected one of {', '.join(LINE_MODES)}"
+        )
+    return branch_line_planner if lines == "graph" else None
+
+
+def dag_to_mmd(
+    dag: ParsedDag,
+    kept_ids: set[str],
+    title: str = "",
+    plan_lines: LinePlanner | None = None,
+) -> str:
+    """Convert a parsed DAG to nf-metro ``.mmd`` text, keeping only *kept_ids*.
+
+    Edges that ran through dropped nodes are reconnected between the kept
+    nodes they linked. Kept nodes inside a named group become that group's
+    section; the rest share one synthesised section.
+
+    *plan_lines*, when given, receives the nodes and the final acyclic edges
+    and returns the map's lines, such as :func:`branch_line_planner`. It
+    applies to a one-section map only. Without it, when it plans none, or in a
+    map of several sections, edges go on ``main`` with ``spur`` and ``bypass``
+    lines derived from the sections.
 
     Warns
     -----
     FeedbackEdgesDroppedWarning
-        When the pipeline's process graph loops. nf-metro's layout engine
-        requires a DAG, so a deterministic set of back edges is removed; the
-        warning and a trailing ``%%`` comment block in the output both name
-        them.
+        When the kept graph loops. nf-metro's layout engine requires a DAG, so
+        a deterministic set of back edges is removed; the warning and a
+        trailing ``%%`` comment block in the output both name them.
+    UserWarning
+        When *plan_lines* is given for a map of several sections.
     """
-    dag = _parse_nextflow_mermaid(text)
-
-    # Keep process (stadium) nodes, drop everything else
-    kept_ids = {nid for nid, node in dag.nodes.items() if node.shape == "stadium"}
     if not kept_ids:
         return "%%metro title: Empty Pipeline\n\ngraph LR\n"
 
@@ -963,14 +954,32 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
     )
 
     intra_edges, inter_edges = _classify_edges(edges, sections.node_section)
-    lines = _assign_lines(
-        kept_ids,
-        edges,
-        intra_edges,
-        inter_edges,
-        sections.node_section,
-        sections.names,
-        section_order,
+    if plan_lines and len(sections.names) > 1:
+        # Planned lines across several sections cross or abort in the layout
+        # engine.
+        warnings.warn(
+            "Lines are planned from the graph's shape only in a one-section "
+            f"map; this map has {len(sections.names)} sections, so its lines "
+            "come from them.",
+            stacklevel=4,
+        )
+        plan_lines = None
+    plan = plan_lines(dag.nodes, edges) if plan_lines else []
+    planned = [edge for _, line_edges in plan for edge in line_edges]
+    if plan and (len(planned) != len(set(planned)) or set(planned) != set(edges)):
+        raise ValueError("plan_lines must put every edge on exactly one line")
+    lines = (
+        _planned_lines(plan)
+        if plan
+        else _assign_lines(
+            kept_ids,
+            edges,
+            intra_edges,
+            inter_edges,
+            sections.node_section,
+            sections.names,
+            section_order,
+        )
     )
 
     section_node_order = _order_section_nodes(sections.nodes, edges)
@@ -993,9 +1002,3 @@ def convert_nextflow_dag(text: str, title: str = "") -> str:
         dag.nodes,
         dropped_feedback,
     )
-
-
-def is_nextflow_dag(text: str) -> bool:
-    """Check whether text looks like a Nextflow ``-with-dag`` mermaid file."""
-    stripped = text.strip()
-    return stripped.startswith("flowchart ")

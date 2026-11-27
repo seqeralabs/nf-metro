@@ -155,12 +155,21 @@ def measure_boundary_clearance_requirements(
     for requirement in requirements:
         negative = [graph.sections[item] for item in requirement.negative_section_ids]
         positive = [graph.sections[item] for item in requirement.positive_section_ids]
+        anchor = (
+            graph.stations[requirement.positive_anchor_id]
+            if requirement.positive_anchor_id
+            else None
+        )
         if requirement.axis is SettlementAxis.ROW:
             negative_edge = max(item.bbox_y + item.bbox_h for item in negative)
-            positive_edge = min(item.bbox_y for item in positive)
+            positive_edge = (
+                min(item.bbox_y for item in positive) if anchor is None else anchor.y
+            )
         else:
             negative_edge = max(item.bbox_x + item.bbox_w for item in negative)
-            positive_edge = min(item.bbox_x for item in positive)
+            positive_edge = (
+                min(item.bbox_x for item in positive) if anchor is None else anchor.x
+            )
         deficit = requirement.required - measured_distance(negative_edge, positive_edge)
         if deficit <= SAME_COORD_TOLERANCE:
             continue

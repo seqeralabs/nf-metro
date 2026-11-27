@@ -1,0 +1,28 @@
+%%metro title: Hub Fanning Bundles Of Mixed Drop
+%%metro line: a | A | #e41a1c
+%%metro line: b | B | #377eb8
+%%metro line: c | C | #4daf4a
+%%metro line: d | D | #984ea3
+%%metro line: e | E | #ff7f00
+%%metro line: f | F | #a65628
+%%metro line: g | G | #f781bf
+graph LR
+    subgraph s1 [S1]
+        %%metro direction: LR
+        src[Source]
+        hub[Hub]
+        t0[Trunk]
+        t1[Near]
+        t2[Mid]
+        t3[Far]
+        sink[Sink]
+        src -->|a,b,c,d,e,f,g| hub
+        hub -->|e| t0
+        hub -->|a,b| t1
+        hub -->|c,d| t2
+        hub -->|f,g| t3
+        t0 -->|e| sink
+        t1 -->|a,b| sink
+        t2 -->|c,d| sink
+        t3 -->|f,g| sink
+    end

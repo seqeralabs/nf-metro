@@ -15,25 +15,229 @@ history.
 
 ## [Unreleased]
 
+---
+
+## [3.0.0] — 2026-11-25
+
+### Breaking changes
+
+- `rich`, `rich-click` and `pyyaml` are core dependencies, for the colourful
+  help and errors and the YAML output of `render` and `info`. A recipe or
+  lockfile that lists nf-metro's dependencies by hand must add them.
+- `jsonschema` is a core dependency, and the `validate` extra is gone:
+  `pip install nf-metro` brings everything `nf-metro validate-svg` and theme
+  files need, and `pip install "nf-metro[validate]"` no longer names an extra.
+- The `nfcore` theme is renamed `default`, with no alias. It is the base
+  every stack starts from, so a map drops `%%metro style: nfcore` and writes
+  only the themes it adds (`london-tube`, not `nfcore, london-tube`). A map
+  that still names `nfcore` warns and renders with `default`, which looks the
+  same; `--theme nfcore` exits with an error. The action's `theme` input
+  and the pre-commit hook's `--theme` default to `default`. Python: `NFCORE_LIGHT_THEME` and
+  `NFCORE_DARK_THEME` are `DEFAULT_LIGHT_THEME` and `DEFAULT_DARK_THEME`.
+- Theme names: the `light` theme is `transparent`; the `dark` and `light`
+  aliases and the mode-suffixed names (`nfcore-light`, `nfcore-dark`,
+  `seqera-light`, `seqera-dark`) are gone, so `%%metro style:`, `--theme`
+  and `theme=` take only `default`, `seqera`, `london-tube`, `transparent`
+  and theme files. Pick the palette with `--mode` or `%%metro mode:`. A map
+  with no style has `MetroGraph.style == "default"`. A map that pinned a dark
+  palette with `%%metro style: dark` now writes `%%metro mode: dark`;
+  without it the map follows the viewer's light or dark preference.
+- An unknown theme name passed to `--theme`, a per-output `theme=` or the
+  Python API raises `ThemeError` (an `NfMetroError` and `ValueError`) instead
+  of falling back to `default`. In a `%%metro style:` directive it warns and
+  the map keeps `default`. Both messages name what replaces a retired name
+  (`nfcore`, `dark`, `nfcore-light`, ...). `nf-metro info` reports a map's
+  style as written.
+- Theme fields renamed: `background_color` to `background_fill`,
+  `legend_background` to `legend_fill`, `animation_ball_color` to
+  `animation_ball_fill`, `bridge_glyph` to `bridge_lines`, the file-icon
+  fields `terminus_width`, `terminus_height`, `terminus_fold_size`,
+  `terminus_fill`, `terminus_stroke`, `terminus_stroke_width`,
+  `terminus_corner_radius` and `terminus_font_size` to `icon_*`,
+  `terminus_font_color` to `icon_text_color`, and `directional_marker_size`,
+  `directional_marker_spacing`, `directional_marker_opacity` and
+  `directional_marker_color` to `chevron_size`, `chevron_spacing`,
+  `chevron_opacity` and `chevron_color`.
+- `label_halo_color` and `marker_open_fill` merge into `knockout_fill`, which
+  colors label halos and `open` markers. `Theme.name` and `Theme.brand` are
+  gone.
+- `Theme` is a frozen dataclass; derive a variant with `dataclasses.replace`.
+  A resolved theme's empty derived colors are filled in, so
+  `marker_stroke`, `icon_fill`, `icon_stroke`, `section_badge_fill` and
+  `section_badge_text_color` read as the station colors they take, and
+  `knockout_fill` as the background (white on a transparent canvas).
+- Python API: `resolve_theme(graph, mode=None)` replaces
+  `resolve_theme(theme, graph, mode)`; bind a caller's stack first with
+  `themes.bound_stack(graph, theme)`. `THEME_MODES`, `mode_pair`,
+  `resolve_style` and `LIGHT_THEME` are gone (`TRANSPARENT_THEME` replaces the
+  last). `route_edges`, `route_edges_centred`, `observe_route_edges` and
+  `observe_route_edges_centred` take no `diagonal_run` argument; set the
+  `diagonal_run` option instead. `render.constants.line_style_kwargs` takes the
+  theme its dash patterns come from.
+- `serve-multi` lays out and renders every posted map with its `--theme`
+  stack, layout options included; a posted map's `%%metro style:` is ignored.
+  `live.server.serve_multi` and `RunRegistry` take a `ResolvedTheme`.
+- A section whose ID starts with `_` is a hidden section: it keeps its grid
+  cell but draws no box, title or number badge. An existing map with such an
+  ID loses that section's box.
+- `nf-metro render` takes `--from nextflow|snakemake`, the spelling `convert`
+  already uses. `--from-nextflow` is gone, as are the `from_nextflow` argument
+  of `prepare_graph` and `render_string` (pass `input_format="nextflow"`) and the
+  `from_nextflow` key of a `render-many` job (use `"from": "nextflow"`).
+- `nf-metro render` prints the paths it wrote as YAML on stdout (version,
+  inputs, outputs) instead of a one-line summary; summaries and warnings go to
+  stderr. A script that parsed the old line must read the YAML.
+- `render_string` takes its render options only through `config=RenderConfig(...)`.
+  The flat `output_format`, `debug`, `responsive`, `embed_font`,
+  `text_to_paths`, `svg_class_prefix`, `inject_dark_mode_css`, `chrome_css`,
+  `self_color_scheme`, `bare`, `embed_basename` and `inactive_line_ids`
+  keyword arguments are gone.
+- The GitHub Action's `theme` input and the pre-commit hook no longer pass
+  `--theme default`. A map's own `%%metro style:` now applies in CI and in the
+  hook; set the `theme` input or hook `args` to replace it for every run.
+- `nf_metro.render` no longer re-exports the manifest API, and
+  `nf_metro.render.manifest` holds only `build_manifest`. Import `read_manifest`,
+  `match_node_ids`, `manifest_schema` and the rest from `nf_metro.manifest`.
+  `nf_metro.render.constants` no longer re-exports `CANVAS_ORIGIN_MARGIN`,
+  `ICON_INTER_GAP`, `RAIL_KNOB_RADIUS_RATIO` or `TERMINUS_WIDTH`; they live in
+  `nf_metro.layout.constants`.
+- `nf_metro.layout.engine` and `nf_metro.layout.routing.core` export only what
+  they define. Private helpers they used to re-export are imported from the
+  `layout.phases` and `layout.routing` modules that define them.
+
 ### Added
 
+- Theme stacks and theme files (#2195): `%%metro style:`, `--theme` and a
+  per-output `theme=` take a comma-separated list of built-in names and YAML
+  theme files, merged left to right over the `default` base. A theme file sets
+  any field of the theme schema for both palettes and colors per light/dark
+  palette, extends other themes, and sets look-related layout options in a
+  `layout:` block, which sits below `%%metro` directives and CLI flags. Every
+  built-in theme is itself such a file. See the Themes page.
+- Themes can set station and section shapes: tab-and-ring station glyphs in
+  multiples of the line width, section outline width, dash and corners,
+  number badges, title case and tracking, and a legend frame.
+- `curve_radius_ratio` (#2190) sets the corner radius as a multiple of the
+  theme's line width, measured at the line centre, as a `%%metro` directive,
+  a `--curve-radius-ratio` flag or a theme's `layout:` block. The
+  `london-tube` theme sets 3.5, the Line Diagram Standard's three line widths
+  to the inside edge of the line, so its corners bend at 14 px on its 4 px
+  lines. The clearances tied to a corner grow with the radius.
+  Radii far from the default can still hit layout failures on some
+  topologies.
+- `terminus_glyph` theme setting for a line end shared by several lines:
+  `nub` (the default square box), `bar` (a track-weight buffer-stop bar
+  across the bundle) or `ring`.
+- Station colors that differ between a theme's palettes follow the viewer's
+  light or dark mode on capsules, interchange rings and bar line ends, muted
+  lines included.
+- Theme files are validated against a JSON Schema generated from the theme
+  definition and shipped as `nf_metro/themes/theme.schema.json`. Editors using
+  the YAML language server complete and check theme files once pointed at it;
+  the built-in themes do. Sizes may not differ between palettes, non-finite
+  numbers are refused, and font families, weights and dash patterns are held
+  to what CSS needs.
+- Theme fields for values that were fixed: section badge fill, digit colour
+  and size; dashed and dotted dash patterns; `line_cap`; `bridge_gap`; caption
+  colour (light/dark aware) and size; watermark colour; file-icon banner fill
+  and text colour; legend padding, row height and swatch width; group caption
+  rule width and opacity; `canvas_padding`; `title_font_weight`;
+  `animation_ball_opacity`. Each defaults to the value it replaces.
+- `section_x_padding`, `section_y_padding`, `label_offset` and `diagonal_run`
+  options, each a `%%metro` directive, a CLI flag and a theme `layout:` option;
+  `directional` can be set by a theme too.
+- `london-tube` built-in theme: a schematic transit look after the geometry of
+  TfL's Line Diagram Standard, with track-weight station tabs, terminus bars,
+  bold capsules at interchanges, bundled lines edge to edge, station names in
+  TfL Corporate Blue, the TfL Colour Standard's line colours and a 30% grey for
+  inactive lines. `interchange_glyph: ring` over it gives the standard's
+  interchange rings and bridged chains instead.
+- `nyc-subway`, `paris-metro`, `tokyo-metro` and `washington-metro` built-in
+  themes, each after its operator's published map and colour standards: the
+  Vignelli diagram's solid stop dots and route bullets with the MTA's route
+  colours; the IDFM plan's line-ringed dots, capsules and numbered line discs;
+  Tokyo Metro's station-number markers; and WMATA's ringed dots on thick lines.
+  The Themes page shows every built-in theme on one sample map.
+- `line_colors` theme setting: a list of colours the map's lines take in the
+  order they are declared, set for both palettes or per palette under
+  `light:`/`dark:`. A line whose two palette colours differ follows the
+  viewer's mode in an SVG. An empty list keeps the map's own colours. Lines
+  past the end of the list get generated colours, each as distinct as
+  possible from those in use and readable against the background.
+- Station glyphs `dot` (one line) and `dots` (one on each line of an
+  interchange), sized by `dot_diameter`, `dot_ring_width` and `dot_ring`, and
+  `numbered`, a station-number marker of the section's code and the
+  station's place along its flow, sized by `number_marker_diameter`. A `ring`
+  line end draws the `dots` or `numbered` interchange glyph when the theme uses
+  one.
+- `legend_swatch: bullet` draws each legend line as a disc in its colour
+  carrying a code (`line_codes: letters` or `numbers`), and
+  `section_codes: letters` letters the section badges.
+- A theme's or map's `label_offset` also widens the gap between a
+  vertical-flow station and the label beside it.
+- Experimental Snakemake input: `nf-metro render --from snakemake` and
+  `nf-metro convert` turn `snakemake --rulegraph` or `--dag` output (DOT or
+  mermaid-js) into a metro map. `nf-metro convert` detects the input format,
+  or takes `--from nextflow|snakemake`. Lines follow the rule graph: a
+  `main` trunk into the final rule, and a line for each other chain of rules.
+  From Python, pass `input_format="snakemake"` to `render_string` or
+  `prepare_graph`.
+- `nf-metro convert --lines graph|sections` chooses how a converted map's
+  lines are drawn. `graph` gives each route through a single-section map its
+  own line; `sections` builds them from the sections. A map of several
+  sections keeps its section lines and warns. Nextflow keeps `sections` by
+  default and Snakemake uses `graph`.
 - `%%metro number: 0` hides a section's number badge and starts its title where
   the badge would have been. Automatic numbering skips such a section, so the
   remaining sections number from 1 as if it were absent (#2058).
 - Hidden sections: a subgraph whose ID starts with `_` keeps its grid cell
   but draws no box, title or number badge, mirroring hidden stations. Use it
-  to place stations independently without a visible section. Existing maps
-  with a `_`-prefixed section ID lose that section's box.
+  to place stations independently without a visible section.
 - `%%metro output:` paths take per-output render overrides after a `|`:
   `animate`, `mode=`, `theme=`, `scale=`, and `raster_width=`. One
   `nf-metro render` pass now writes a static SVG, an animated SVG, and a
   light/dark PNG pair with no CLI flags, which is what the nf-core pipeline
-  template needs from the GitHub Action and pre-commit hook. `mode` and
-  `theme` are baked at serialize time, so those four files still cost two
-  layout runs, not four.
+  template needs from the GitHub Action and pre-commit hook. `mode` is
+  baked at serialize time, so those four files cost two layout runs, not
+  four.
 
 ### Changed
 
+- `stroke_scale` scales the corner radius along with the line, so a coarsened
+  map keeps its proportions (`stroke_scale: 1.6` bends at 16 px instead of
+  10 px).
+- A merge feeder leaving the same column as its merge trunk, on the same line,
+  descends in the trunk's own channel rather than a few pixels beside it.
+- A merge feeder's straight landing run that passes beneath a box from an
+  earlier row now runs a full inter-row clearance below it, the rows below
+  moving down to make room, rather than grazing or cutting its bottom edge.
+- Parallel lines turning together through any angle, not only 90 degrees,
+  now turn about one shared centre, and rounded corners draw as circular arcs
+  (cubic Bézier circle approximations) where they were quadratic curves. A
+  bundle keeps its lines touching through the whole turn instead of opening a
+  thin seam between them. Every rounded corner redraws very slightly fuller,
+  and outer lines of diagonal bundle turns take wider curves.
+- Animated dots ride the drawn strokes: each dot turns about a corner with its
+  lane's own radius, so dots keep to their lines through concentric turns and
+  source turnouts. Animation timing is measured on the unrounded geometry.
+- Layout reserves room for a theme's own station radius and outline, label
+  size and line height, file-icon size, line width and chevron size, and the
+  canvas margin grows for a theme drawing wider lines or larger chevrons than
+  any built-in. `seqera` (14px labels, 2px outlines) and `transparent` (6px
+  stations, 14px labels, 2px outlines) lay out with the room their own sizes
+  need.
+- A graph keeps the metrics it was laid out with: drawing a layout in another
+  theme (`render_svg(prepare_graph(text), theme)`) keeps its geometry and
+  takes only the other theme's colors and glyphs.
+- `transparent` bakes the requested mode's logo variant (`%%metro logo:
+light.png | dark.png`) in a PNG.
+- The title lines up with a thick section outline's outer edge;
+  `london-tube`'s 1.5px outline moves its title 0.25px left.
+- Layout measures file icons and their captions with the theme the map
+  renders with, including `--theme` and a per-output `theme=`, rather than
+  the map's own style or `default`. A map rendered with a theme whose icons or
+  captions are larger gets room for them on every side of their section,
+  including a stacked `files:` icon's back page and the caption under it.
 - The interactive HTML page's chrome (header, side panel, buttons, tooltips,
   embed dialog) and the copyable inline-HTML snippet now follow the map's mode
   instead of always being dark. `--mode` or `%%metro mode:` fixes both light
@@ -62,9 +266,56 @@ history.
   in that map into a warning, so some maps that used to draw with a warning
   now abort and name the defect
   ([#2123](https://github.com/seqeralabs/nf-metro/issues/2123)).
+- The Theming docs page is split in two: Themes (built-in themes, stacks,
+  theme files and the field reference) and Light and dark mode (how one SVG
+  adapts to the viewer). `/theming` redirects to Themes.
 
 ### Fixed
 
+- Fanned bundles stay concentric at wide lines (#2209): from a line width of
+  5, lanes leaving a hub opened gaps at their corners and outer lanes
+  distorted, and some wide-line maps aborted. Each diagonal is spread by its
+  own steepness, and the layout reserves the room a hub's fanned lanes need
+  along the flow. One line turning onto or off a hub's shared leg from several
+  edges draws one corner instead of a doubled stroke, and a diagonal too short
+  for both of its corners at the base radius splits between them and keeps its
+  bundle concentric.
+- Under `diamond_style: symmetric`, a two-way diamond or two-branch fan in a
+  row whose bundles widen the row pitch sits half that pitch either side of
+  its trunk, on the grid the rest of the row uses, instead of half the base
+  `y_spacing`, which pinched its branches together.
+- A source whose line runs past a branch station on its way to a later station
+  of the same trunk keeps that line clear of the branch when the fork has
+  stations before it on the trunk, and so does a source whose line joins the
+  trunk beside the station a branch ends at. The source sits on the far side
+  of the trunk from the branch, in the nearest row clear of the stations in
+  its column and along its run, and its line joins the bundle on the outer
+  lane of that side instead of crossing the trunk to reach it, keeping that
+  side when it carries on into a section beside it. This holds in a section
+  that several lines enter too, whose entering lines keep their order, unless
+  the pass that re-slots perpendicular lines at a multi-feeder merge port moves
+  a line of the entering bundle outside the pinned line, which the contender
+  then crosses. The
+  line takes that lane only along the source's own run, so another run of the
+  same line, including one entering the section, keeps its place. A source with
+  runs to several stations of the trunk keeps the run that joins first on its
+  own row and lays each later one a clear row further out, so its runs neither
+  cross the trunk nor each other, while its lines bound for the same station
+  stay together in one bundle. A helper bowing the line around a
+  station it skips leaves the source where it was, and on a top-to-bottom or
+  bottom-to-top section stays on the source's side of the station it skips.
+  Where no row lies beyond every branch it passes, the source sits where any
+  other source would
+  ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
+- An off-track input steps further out until it clears an on-track station in
+  its own column, as it does for stations downstream of it
+  ([#2199](https://github.com/seqeralabs/nf-metro/issues/2199)).
+- A source that feeds a station adding a second line stays on that station's
+  row when other sources share its column. The other sources sit one row to
+  either side and the added line's branch one row off, whichever source is
+  declared first, instead of the trunk's first station dropping a row and the
+  branch landing two rows down
+  ([#2193](https://github.com/seqeralabs/nf-metro/issues/2193)).
 - Two source stations in one column no longer put an unrelated line through a
   branch station. When one source sends a line off onto its own branch, the
   other source sits clear of the lane that branch takes, whichever line is
@@ -133,6 +384,13 @@ history.
   That feeder's exit run was drawn straight through the branch's marker
   (and any file icon after it); the branch now peels below the exit rows
   (#2175).
+- A junction fan wider than its junction's margin from the wall no longer
+  launches its lead-in inside the section it leaves (`london-tube` aborted on
+  a five-line fan out of one exit), and a route starting on a one-line
+  station's drawn lane is no longer reported as hanging in open space when the
+  lane sits more than two corner radii off the station's centre.
+
+---
 
 ## [2.1.0] — 2026-09-15
 

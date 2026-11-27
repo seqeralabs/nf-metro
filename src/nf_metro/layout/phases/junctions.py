@@ -11,22 +11,6 @@ from nf_metro.parser.model import LineSpread, MetroGraph, PortSide, Station
 from nf_metro.parser.route_topology import build_route_topology_query
 
 
-def _required_junction_margin(n: int) -> float:
-    """Margin needed so an n-line fan's leftmost lead-in clears the source.
-
-    For an n-line concentric fan-out the per-line ``fan_delta`` stagger
-    and per-line ``r_wrap`` curve radius cancel exactly: every line's
-    first-corner curve start lands at ``junction.x``.  The required
-    clearance therefore depends only on the lead-in length immediately
-    before the curve (``CURVE_RADIUS``), not on the fan width.
-
-    Returns ``JUNCTION_MARGIN`` directly: the baseline already exceeds the
-    curve-start clearance at any fan width.
-    """
-    del n
-    return JUNCTION_MARGIN
-
-
 def _drops_down_the_junction_column(
     graph: MetroGraph, jid: str, exit_port_id: str | None
 ) -> bool:
@@ -87,16 +71,6 @@ def _flow_side_junction_margin(
     if not _drops_down_the_junction_column(graph, jid, exit_port_id):
         return baseline
     return max(baseline, EDGE_TO_BUNDLE_CLEARANCE)
-
-
-def _junction_outgoing_line_count(graph: MetroGraph, jid: str) -> int:
-    """Return the number of distinct line_ids fanning out of *jid*."""
-    return len({e.line_id for e in graph.edges_from(jid)}) or 1
-
-
-def _junction_incoming_line_count(graph: MetroGraph, jid: str) -> int:
-    """Return the number of distinct line_ids merging into *jid*."""
-    return len({e.line_id for e in graph.edges_to(jid)}) or 1
 
 
 def reanchor_junctions(graph: MetroGraph) -> None:
@@ -212,7 +186,6 @@ def _junction_positions(graph: MetroGraph) -> dict[str, tuple[float, float]]:
                     [at(pred)[0] for pred in predecessors],
                     (entry_port.x, entry_port.y),
                     entry_side=entry_port_obj.side,
-                    n=_junction_incoming_line_count(graph, jid),
                 )
                 continue
 
@@ -239,9 +212,7 @@ def _junction_positions(graph: MetroGraph) -> dict[str, tuple[float, float]]:
                 entry_port_xs.append(successor.x)
 
         if exit_port_x is not None and exit_port_y is not None and entry_port_xs:
-            margin = _required_junction_margin(
-                _junction_outgoing_line_count(graph, jid)
-            )
+            margin = JUNCTION_MARGIN
             exit_port_obj = graph.ports.get(exit_port_id) if exit_port_id else None
             if exit_port_obj and exit_port_obj.side in (PortSide.TOP, PortSide.BOTTOM):
                 positions[jid] = (
@@ -271,7 +242,6 @@ def _merge_junction_position(
     predecessor_xs: list[float],
     entry_port: tuple[float, float],
     entry_side: PortSide | None = None,
-    n: int = 1,
 ) -> tuple[float, float]:
     """Where a merge junction stands on the lead-in its entry port receives.
 
@@ -282,10 +252,9 @@ def _merge_junction_position(
     junction shares the port's X and stands a margin back along Y.  Seating a
     merge for a perpendicular port on the horizontal instead puts the shared
     segment along the section's top or bottom edge rather than in the inter-row
-    gap the feeders reserve.  *n* is the number of distinct lines merging at the
-    junction; passing 1 falls back to the baseline margin.
+    gap the feeders reserve.
     """
-    margin = _required_junction_margin(n)
+    margin = JUNCTION_MARGIN
     entry_x, entry_y = entry_port
     if entry_side in (PortSide.TOP, PortSide.BOTTOM):
         return entry_x, entry_y + (-margin if entry_side is PortSide.TOP else margin)
@@ -364,9 +333,7 @@ def _resolve_source_xy(
         # Mirror _position_junctions: the resolved junction X must match
         # what _position_junctions would write so that downstream
         # alignment passes consuming this helper see the same coordinate.
-        margin = _required_junction_margin(
-            _junction_outgoing_line_count(graph, edge_source)
-        )
+        margin = JUNCTION_MARGIN
         if exit_port_obj.side == PortSide.BOTTOM:
             return exit_st.x, exit_st.y + margin
         elif exit_port_obj.side in (PortSide.RIGHT, PortSide.LEFT):

@@ -7,10 +7,10 @@ import pytest
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
     OFFSET_STEP,
 )
 from nf_metro.layout.engine import compute_layout
+from nf_metro.layout.pass_metrics import min_corridor_y_overlap
 from nf_metro.layout.routing import compute_station_offsets, route_edges
 from nf_metro.layout.routing.common import apply_route_offsets, gap_lo_for_x
 from nf_metro.layout.routing.invariants import check_opposing_gap_channel_clearance
@@ -67,7 +67,7 @@ def test_opposing_gap_bundles_are_separated(fixture: str) -> None:
         for down_route, down_x, down_lo, down_hi, _down in downward
         for up_route, up_x, up_lo, up_hi, _up in upward
         if down_route.line_id != up_route.line_id
-        and min(down_hi, up_hi) - max(down_lo, up_lo) > MIN_CORRIDOR_Y_OVERLAP
+        and min(down_hi, up_hi) - max(down_lo, up_lo) > min_corridor_y_overlap()
     ]
     assert separations
     assert min(separations) >= (BUNDLE_TO_BUNDLE_CLEARANCE - 0.1)

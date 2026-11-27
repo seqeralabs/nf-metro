@@ -113,7 +113,7 @@ def _plan(path: Path, options: dict[str, object]) -> RenderPlan:
             layout_options=options or None,
             source_dir=str(path.parent),
         )
-        return build_render_plan(graph, resolve_theme(None, graph))
+        return build_render_plan(graph, resolve_theme(graph))
 
 
 def _drawn(plan: RenderPlan, route: Any) -> list[tuple[float, float]]:

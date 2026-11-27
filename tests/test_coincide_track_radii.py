@@ -56,7 +56,7 @@ from nf_metro.layout.routing.normalize import (
     _set_vchannel_x,
     _VChannel,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import Edge
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -237,7 +237,7 @@ def _touched_corner_mismatches(
     monkeypatch.setattr(RoutedPath, "record_concentric_corner", record_spy)
     monkeypatch.setattr(normalize, "_set_vchannel_x", vspy)
     monkeypatch.setattr(normalize, "_set_htrunk_y", hspy)
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -294,7 +294,11 @@ def test_set_vchannel_x_rederives_flanking_corners_from_waypoints() -> None:
     assert route.points[2] == (55.0, 100.0)
     expected = [
         concentric_corner_radius_at(
-            route.points[i], route.points[i + 1], route.points[i + 2], 0.0
+            route.points[i],
+            route.points[i + 1],
+            route.points[i + 2],
+            0.0,
+            base_radius=CURVE_RADIUS,
         )
         for i in (0, 1)
     ]
@@ -426,7 +430,7 @@ def test_named_coincide_fixtures_snap_at_least_one_corner(
         touched.append(ch)
 
     monkeypatch.setattr(normalize, "_set_vchannel_x", spy)
-    graph = parse_metro_mermaid((EXAMPLES / fixture).read_text())
+    graph = parse_metro_mermaid_file(EXAMPLES / fixture)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     route_edges(graph, station_offsets=offsets)

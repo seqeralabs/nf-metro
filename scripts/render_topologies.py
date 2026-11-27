@@ -88,7 +88,7 @@ def render_file(
         text = mmd_path.read_text()
         graph = prepare_graph(
             text,
-            from_nextflow=is_nextflow,
+            input_format="nextflow" if is_nextflow else None,
             layout_options=layout_options,
             source_dir=str(mmd_path.resolve().parent),
         )
@@ -97,7 +97,7 @@ def render_file(
     except Exception as e:
         return name, [f"PARSE ERROR: {e}"]
 
-    theme = resolve_theme(None, graph)
+    theme = resolve_theme(graph)
 
     try:
         # chrome_css=False bakes concrete colors: a rasteriser cannot parse the

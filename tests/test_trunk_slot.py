@@ -49,6 +49,7 @@ def _route_corpus(fixture):
     if is_nextflow:
         text = convert_nextflow_dag(text)
     graph = parse_metro_mermaid(text)
+    graph.source_dir = str(path.parent)
     compute_layout(graph, validate=False)
     offsets = compute_station_offsets(graph)
     return graph, route_edges(graph, station_offsets=offsets)

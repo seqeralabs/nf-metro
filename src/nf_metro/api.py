@@ -18,7 +18,10 @@ import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from nf_metro.convert import InputFormat
 
 from nf_metro.errors import EmptyGraphError, UnknownInactiveLineError
 from nf_metro.layout import PhaseInvariantError, compute_layout
@@ -43,16 +46,15 @@ from nf_metro.text_metrics import (
     metrics_face_context,
     metrics_face_for_portability,
 )
-from nf_metro.themes import resolve_theme
+from nf_metro.themes import ResolvedTheme, bound_stack, resolve_theme
+from nf_metro.themes.stack import THEMEABLE_LAYOUT_OPTIONS
 
 
 @dataclass
 class RenderConfig:
     """Render-side options that control SVG/HTML output format and appearance.
 
-    Pass as ``config=RenderConfig(...)`` to :func:`render_string` instead of
-    the individual keyword arguments.  When *config* is supplied to
-    ``render_string``, the matching flat keyword arguments are ignored.
+    Pass as ``config=RenderConfig(...)`` to :func:`render_string`.
     """
 
     output_format: Literal["svg", "html"] = "svg"
@@ -106,6 +108,16 @@ def apply_layout_overrides(graph: MetroGraph, opts: Mapping[str, object]) -> Non
             setattr(graph, opt.target_attr, value)
             if opt.name == "line_order" and is_line_order(value):
                 graph.layout_provenance.record_caller_line_order(value)
+
+
+def apply_theme_layout(graph: MetroGraph, resolved: ResolvedTheme) -> None:
+    """Write the theme's layout options the map's directives left unset.
+
+    Explicit caller options are applied afterwards and win over both.
+    """
+    for name, value in resolved.layout.items():
+        if name not in graph.directive_options:
+            setattr(graph, THEMEABLE_LAYOUT_OPTIONS[name].target_attr, value)
 
 
 @dataclass(frozen=True)
@@ -214,7 +226,7 @@ def _resolve_commitment_options(
 def _parse_source(
     text: str,
     *,
-    from_nextflow: bool = False,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     layout_options: Mapping[str, object] | None = None,
@@ -225,7 +237,7 @@ def _parse_source(
     Runs the grammar, directives, and pre-layout inference, applying the
     parse-time half of the option cascade (``fold_threshold``,
     ``auto_process``, ``process_scope``, ``line_order`` provenance,
-    ``line_spread``) and the ``--from-nextflow`` conversion, but never
+    ``line_spread``) and the *input_format* conversion (``--from``), but never
     :func:`~nf_metro.layout.compute_layout`.
 
     Hand the result to :func:`prepare_graph` to finish the job (there, as
@@ -233,10 +245,10 @@ def _parse_source(
     """
     opts = _resolve_commitment_options(layout_options, layout_commitments)
 
-    if from_nextflow:
-        from nf_metro.convert import convert_nextflow_dag
+    if input_format is not None:
+        from nf_metro.convert import convert_dag
 
-        text = convert_nextflow_dag(text, title=title or "")
+        text = convert_dag(text, input_format, title=title or "")
 
     fold = opts.get("fold_threshold")
     auto_process = opts.get("auto_process")
@@ -260,7 +272,7 @@ def _parse_source(
 def _prepare_graph_state(
     text: str | MetroGraph,
     *,
-    from_nextflow: bool = False,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     logo: str | None = None,
@@ -270,6 +282,7 @@ def _prepare_graph_state(
     bare: bool = False,
     output_format: Literal["svg", "html"] = "svg",
     layout_commitments: LayoutCommitmentOverlay | None = None,
+    theme: str | None = None,
 ) -> MetroGraph:
     """Run the production preparation cascade up to the layout boundary.
 
@@ -288,7 +301,7 @@ def _prepare_graph_state(
     else:
         graph = _parse_source(
             text,
-            from_nextflow=from_nextflow,
+            input_format=input_format,
             title=title,
             line_spread=line_spread,
             layout_options=layout_options,
@@ -301,10 +314,12 @@ def _prepare_graph_state(
             "recognised"
         )
 
+    if source_dir:
+        graph.source_dir = source_dir
+    apply_theme_layout(graph, bound_stack(graph, theme))
     apply_layout_overrides(graph, opts)
 
     if source_dir:
-        graph.source_dir = source_dir
         for attr in MetroGraph.LOGO_PATH_FIELDS:
             raw: str = getattr(graph, attr)
             if not raw:
@@ -350,7 +365,7 @@ def _prepare_graph_state(
 def prepare_graph(
     text: str | MetroGraph,
     *,
-    from_nextflow: bool = False,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     logo: str | None = None,
@@ -360,12 +375,13 @@ def prepare_graph(
     bare: bool = False,
     output_format: Literal["svg", "html"] = "svg",
     metrics_face: MetricsFace = MetricsFace.FALLBACK,
+    theme: str | None = None,
 ) -> MetroGraph:
     """Parse *text*, apply option overrides, and compute the layout in place.
 
     *text* is the map's text, or an already-parsed graph, for a caller that
     needs the same source laid out more than once (e.g. an SVG and an HTML
-    output of one map) without re-reading or re-parsing it: ``from_nextflow``,
+    output of one map) without re-reading or re-parsing it: ``input_format``,
     ``line_spread``, and the parse-time layout options have already been
     consumed by that parse and are ignored here, and ``layout_commitments``
     is rejected outright (it can only apply during parsing). Layout settles
@@ -379,6 +395,11 @@ def prepare_graph(
     title and standalone logo the render will draw. HTML output always draws
     that band regardless of ``bare``, and its embedded SVG forces the legend
     off, so a configured logo is always standalone there.
+
+    ``theme`` is the render's theme stack when the caller picks one (the CLI's
+    ``--theme``); without it the map's ``%%metro style:`` applies. Layout
+    options the stack sets fill those the map's directives leave unset, and
+    ``layout_options`` override both.
 
     Returns the settled graph.
 
@@ -429,7 +450,7 @@ def prepare_graph(
     """
     graph = _prepare_graph_state(
         text,
-        from_nextflow=from_nextflow,
+        input_format=input_format,
         title=title,
         line_spread=line_spread,
         logo=logo,
@@ -438,6 +459,7 @@ def prepare_graph(
         source_dir=source_dir,
         bare=bare,
         output_format=output_format,
+        theme=theme,
     )
 
     with metrics_face_context(metrics_face):
@@ -462,25 +484,13 @@ def render_string(
     config: RenderConfig | None = None,
     theme: str | None = None,
     mode: str | None = None,
-    output_format: Literal["svg", "html"] = "svg",
-    from_nextflow: bool = False,
+    input_format: InputFormat | None = None,
     title: str | None = None,
     line_spread: str | None = None,
     logo: str | None = None,
     legend: str | None = None,
     layout_options: Mapping[str, object] | None = None,
     source_dir: str = "",
-    debug: bool = False,
-    responsive: bool = False,
-    embed_font: bool = False,
-    text_to_paths: bool = False,
-    svg_class_prefix: str = "",
-    inject_dark_mode_css: bool = True,
-    chrome_css: bool = True,
-    self_color_scheme: bool = True,
-    bare: bool = False,
-    embed_basename: str = "metro_map.html",
-    inactive_line_ids: frozenset[str] | None = None,
 ) -> str:
     """Render *text* to an SVG (default) or interactive HTML string.
 
@@ -493,19 +503,13 @@ def render_string(
     its ``%%metro logo:`` paths resolve; a caller rendering file text must pass
     it or those paths only resolve when the process cwd happens to match.
 
-    *config* groups all render-side options into a :class:`RenderConfig` bundle.
-    When supplied, the individual render-side keyword arguments (``output_format``,
-    ``debug``, ``responsive``, ``embed_font``, ``text_to_paths``,
-    ``svg_class_prefix``, ``inject_dark_mode_css``, ``chrome_css``,
-    ``self_color_scheme``, ``bare``, ``embed_basename``, ``inactive_line_ids``)
-    are ignored in favour of *config*, and passing any of them with a non-default
-    value alongside *config* warns. Pass one or the other, not both.
-
-    *self_color_scheme* — when ``True`` (default) the root ``<svg>`` element
-    declares ``color-scheme: light dark`` so ``light-dark()`` custom properties
-    resolve against the viewer's OS preference. Set ``False`` when inlining the
-    SVG into a host page that owns the color-scheme (matches ``--no-self-color-scheme``
-    on the CLI).
+    *config* is a :class:`RenderConfig` carrying every render-side option
+    (output format, ``debug``, ``responsive``, ``embed_font``, and so on). Its
+    ``self_color_scheme`` (default ``True``) makes the root ``<svg>`` declare
+    ``color-scheme: light dark`` so ``light-dark()`` custom properties resolve
+    against the viewer's OS preference; set it ``False`` when inlining the SVG
+    into a host page that owns the color-scheme (the CLI's
+    ``--no-self-color-scheme``).
 
     Raises everything :func:`prepare_graph` documents, plus three render-only
     cases from the draw step (:func:`render_graph`):
@@ -538,38 +542,10 @@ def render_string(
       settlement's reasoning and its code have come apart, which leaves no
       geometry worth a best-effort draw.
     """
-    flat = RenderConfig(
-        output_format=output_format,
-        debug=debug,
-        responsive=responsive,
-        embed_font=embed_font,
-        text_to_paths=text_to_paths,
-        svg_class_prefix=svg_class_prefix,
-        inject_dark_mode_css=inject_dark_mode_css,
-        chrome_css=chrome_css,
-        self_color_scheme=self_color_scheme,
-        baked_mode=(mode or "").strip() or None,
-        bare=bare,
-        embed_basename=embed_basename,
-        inactive_line_ids=inactive_line_ids,
-    )
-    if config is not None:
-        defaults = RenderConfig()
-        shadowed = sorted(
-            name
-            for name, value in vars(flat).items()
-            if value != getattr(defaults, name)
-        )
-        if shadowed:
-            warnings.warn(
-                f"render_string: config= supersedes the flat render kwargs; "
-                f"ignoring {shadowed}",
-                stacklevel=2,
-            )
-    effective_cfg = config or flat
+    effective_cfg = config or RenderConfig(baked_mode=(mode or "").strip() or None)
     graph = prepare_graph(
         text,
-        from_nextflow=from_nextflow,
+        input_format=input_format,
         title=title,
         line_spread=line_spread,
         logo=logo,
@@ -579,8 +555,9 @@ def render_string(
         bare=effective_cfg.bare,
         output_format=effective_cfg.output_format,
         metrics_face=effective_cfg.metrics_face,
+        theme=theme,
     )
-    if config is None and flat.baked_mode is None:
-        flat.baked_mode = graph.mode.strip() or None
-    theme_obj = resolve_theme(theme, graph, mode=mode)
+    if config is None and effective_cfg.baked_mode is None:
+        effective_cfg.baked_mode = graph.mode.strip() or None
+    theme_obj = resolve_theme(graph, mode=mode)
     return render_graph(graph, theme_obj, effective_cfg)

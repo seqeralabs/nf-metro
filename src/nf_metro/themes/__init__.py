@@ -1,115 +1,240 @@
-"""Theme definitions for metro maps.
+"""Built-in themes and theme resolution.
 
-Brand and mode are orthogonal axes. ``THEMES`` is the flat by-name registry
-(every brand and every concrete variant, for ``--theme``/``style:`` lookup).
-``THEME_MODES`` groups brands into their ``{light, dark}`` pairs so a brand can
-be resolved against an independently chosen mode, and so the renderer can emit
-both palettes from a single render.
+Every built-in theme is a YAML file in this package, in the same format as a
+user's theme file. A ``%%metro style:`` or ``--theme`` value is a stack of
+theme names and files (a single name is a stack of one), resolved by
+:func:`resolve_stack` to a :class:`ResolvedTheme` carrying the light theme, the
+dark theme, and the stack's layout options. See :mod:`nf_metro.themes.stack`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from functools import lru_cache
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from nf_metro.render.style import Theme
-from nf_metro.themes.light import LIGHT_THEME
-from nf_metro.themes.nfcore import NFCORE_DARK_THEME, NFCORE_LIGHT_THEME
-from nf_metro.themes.seqera import SEQERA_DARK_THEME, SEQERA_LIGHT_THEME
+from nf_metro.themes.stack import (
+    DARK,
+    LIGHT,
+    MODES,
+    ResolvedTheme,
+    ThemeError,
+    ThemeLayer,
+    is_theme_file_entry,
+    load_theme_file,
+    merge_layers,
+    split_stack,
+)
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph
 
-# ``dark`` names a mode, not a brand, but it is both an accepted
-# ``%%metro style:`` value and ``MetroGraph.style``'s default, so every map
-# without a style directive arrives here; map it onto the nfcore brand.
-_STYLE_THEME_ALIASES = {"dark": "nfcore"}
+#: The theme every stack starts from, and the look of a map with no style.
+BASE_THEME = "default"
 
-# Mode used when a single concrete palette must be baked and none was chosen
-# (e.g. PNG raster). Applies equally to every brand - no brand is intrinsically
-# light or dark. SVG output carries both palettes and adapts at view time, so
-# this only governs raster/standalone fallback.
-DEFAULT_MODE = "dark"
+#: Mode baked when none is chosen (e.g. PNG export). SVG output carries both
+#: palettes and adapts at view time, so this governs only a baked render.
+DEFAULT_MODE = DARK
 
-# Brand -> mode -> Theme. The renderer reads a resolved theme's ``brand`` here to
-# recover both mode palettes for ``light-dark()`` emission; the resolver reads it
-# to combine a brand with an independently chosen mode.
-THEME_MODES: dict[str, dict[str, Theme]] = {
-    "nfcore": {"dark": NFCORE_DARK_THEME, "light": NFCORE_LIGHT_THEME},
-    "seqera": {"dark": SEQERA_DARK_THEME, "light": SEQERA_LIGHT_THEME},
+_BUILTIN_DIR = Path(__file__).parent
+_BUILTIN_FILES = {
+    "default": "default.yaml",
+    "seqera": "seqera.yaml",
+    "london-tube": "london_tube.yaml",
+    "nyc-subway": "nyc_subway.yaml",
+    "paris-metro": "paris_metro.yaml",
+    "tokyo-metro": "tokyo_metro.yaml",
+    "washington-metro": "washington_metro.yaml",
+    "transparent": "transparent.yaml",
 }
 
-# Flat by-name registry for direct ``--theme`` / ``style:`` selection. Bare brand
-# names resolve to the brand at ``DEFAULT_MODE``; the suffixed names pin a mode.
-THEMES = {
-    "nfcore": THEME_MODES["nfcore"][DEFAULT_MODE],
-    "nfcore-light": NFCORE_LIGHT_THEME,
-    "nfcore-dark": NFCORE_DARK_THEME,
-    "seqera": THEME_MODES["seqera"][DEFAULT_MODE],
-    "seqera-light": SEQERA_LIGHT_THEME,
-    "seqera-dark": SEQERA_DARK_THEME,
-    "light": LIGHT_THEME,
+#: Every built-in theme name.
+STYLE_NAMES = frozenset(_BUILTIN_FILES)
+
+
+@lru_cache(maxsize=None)
+def _builtin(name: str) -> ThemeLayer:
+    return load_theme_file(_BUILTIN_DIR / _BUILTIN_FILES[name], validate=False)
+
+
+#: Names earlier releases accepted, and what replaces each.
+_RENAMED_STYLES = {
+    "nfcore": "use 'default'",
+    "nfcore-light": "use 'default' with '--mode light' or '%%metro mode: light'",
+    "nfcore-dark": "use 'default' with '--mode dark' or '%%metro mode: dark'",
+    "seqera-light": "use 'seqera' with '--mode light' or '%%metro mode: light'",
+    "seqera-dark": "use 'seqera' with '--mode dark' or '%%metro mode: dark'",
+    "dark": "it is a mode: use '--mode dark' or '%%metro mode: dark'",
+    "light": "use 'transparent' for the transparent theme, or '--mode light' "
+    "or '%%metro mode: light' for a light palette",
 }
 
 
-# Accepted ``%%metro style:`` values.
-STYLE_NAMES = frozenset(THEMES) | frozenset(_STYLE_THEME_ALIASES)
+def renamed_style_hint(value: str) -> str:
+    """What replaces each retired name in the stack *value*, or ``""``."""
+    hints = [
+        f"{entry.strip()!r} is no longer a theme name: "
+        f"{_RENAMED_STYLES[entry.strip().lower()]}"
+        for entry in value.split(",")
+        if entry.strip().lower() in _RENAMED_STYLES
+    ]
+    return "; ".join(hints)
 
 
-def resolve_style(style: str) -> str:
-    """Return the theme name a ``%%metro style:`` value selects.
+def _builtin_name(entry: str) -> str:
+    name = entry.strip().lower()
+    if name not in _BUILTIN_FILES:
+        hint = renamed_style_hint(entry)
+        raise ThemeError(
+            f"unknown theme {entry!r}; expected one of "
+            + ", ".join(sorted(STYLE_NAMES))
+            + ", or a .yaml theme file"
+            + (f" ({hint})" if hint else "")
+        )
+    return name
 
-    Resolves the alias map and the fallback :func:`resolve_theme` applies to a
-    name no registered theme matches, so a caller can report the brand a map
-    will actually render with rather than the raw directive value.
+
+def _file_path(entry: str, base_dir: Path) -> Path:
+    path = Path(entry).expanduser()
+    return (path if path.is_absolute() else base_dir / path).resolve()
+
+
+def check_stack(
+    value: str, base_dir: Path | str = "", *, must_exist: bool = False
+) -> list[str]:
+    """Return the entries of a stack, raising :class:`ThemeError` on a bad one.
+
+    Every built-in name is checked. Theme file entries are checked only for
+    their suffix unless *must_exist*, which also loads and validates each file
+    (relative to *base_dir*, the working directory when empty). Entries are
+    checked left to right, so the first bad one is the one reported.
     """
-    name = style.strip().lower()
-    name = _STYLE_THEME_ALIASES.get(name, name)
-    return name if name in THEMES else "nfcore"
+    entries = split_stack(value)
+    if not entries:
+        raise ThemeError("empty theme stack")
+    root = Path(base_dir) if base_dir else Path.cwd()
+    for entry in entries:
+        if not is_theme_file_entry(entry):
+            _builtin_name(entry)
+        elif must_exist:
+            load_theme_file(_file_path(entry, root))
+    return entries
 
 
-def resolve_theme(
-    theme: str | None, graph: MetroGraph, mode: str | None = None
-) -> Theme:
-    """Resolve a concrete theme from independent brand and mode axes.
+def anchor_stack(value: str, base_dir: Path | str) -> str:
+    """*value* with each relative theme file made absolute against *base_dir*."""
+    root = Path(base_dir)
+    return ", ".join(
+        str(_file_path(entry, root)) if is_theme_file_entry(entry) else entry
+        for entry in check_stack(value)
+    )
 
-    Brand comes from the explicit ``theme`` name or the graph's style, and
-    both go through the same alias map, so a name works identically whichever
-    plane supplied it. Mode comes from the explicit argument, the graph
-    directive, or ``DEFAULT_MODE``.
+
+def _expand(entry: str, base_dir: Path, seen: tuple[Path, ...]) -> list[ThemeLayer]:
+    """An entry's layers in stack order, its ``extends`` first.
+
+    A theme file's ``extends`` entries resolve against that file's folder.
     """
-    brand = resolve_style(theme if theme is not None else graph.style)
+    if not is_theme_file_entry(entry):
+        return [_builtin(_builtin_name(entry))]
+    path = _file_path(entry, base_dir)
+    if path in seen:
+        chain = " -> ".join(str(p) for p in (*seen, path))
+        raise ThemeError(f"theme files extend each other in a cycle: {chain}")
+    layer = load_theme_file(path)
+    layers: list[ThemeLayer] = []
+    for base in layer.extends:
+        layers += _expand(base, path.parent, (*seen, path))
+    return [*layers, layer]
 
-    resolved_mode = (mode or graph.mode).strip().lower() or DEFAULT_MODE
-    family = THEME_MODES.get(brand)
-    if family and resolved_mode in family:
-        return family[resolved_mode]
 
-    return THEMES.get(brand, THEMES["nfcore"])
+def resolve_stack(value: str, base_dir: Path | str = "") -> ResolvedTheme:
+    """Resolve a stack of theme names and files, laid over :data:`BASE_THEME`.
 
-
-def mode_pair(theme: Theme) -> tuple[Theme, Theme] | None:
-    """Return ``(light_theme, dark_theme)`` for *theme*'s brand family.
-
-    ``None`` when the theme has no registered light/dark family (e.g. the
-    transparent ``light`` theme), so callers fall back to a single palette.
+    Relative theme file entries resolve against *base_dir* (the working
+    directory when empty). The result is shared by every resolution of the
+    same stack whose files have the same content.
     """
-    family = THEME_MODES.get(theme.brand)
-    if family is None or "light" not in family or "dark" not in family:
-        return None
-    return family["light"], family["dark"]
+    root = Path(base_dir) if base_dir else Path.cwd()
+    layers: list[ThemeLayer] = []
+    names: list[str] = []
+    for entry in check_stack(value):
+        layers += _expand(entry, root, ())
+        names.append(entry if is_theme_file_entry(entry) else _builtin_name(entry))
+    return _merge_cached(tuple(layers), ", ".join(names))
+
+
+@lru_cache(maxsize=128)
+def _merge_cached(layers: tuple[ThemeLayer, ...], name: str) -> ResolvedTheme:
+    return merge_layers([_builtin(BASE_THEME), *layers], name=name)
+
+
+def bound_stack(graph: MetroGraph, theme: str | None = None) -> ResolvedTheme:
+    """The stack *graph* lays out and renders with, bound on the graph.
+
+    A caller's *theme*, its files relative to the working directory, binds in
+    place of any earlier stack. Without one the bound stack stays, and an
+    unbound graph binds its ``%%metro style:``, its files relative to the
+    map's folder.
+    """
+    if theme is not None:
+        graph.resolved_theme = resolve_stack(theme)
+    elif graph.resolved_theme is None:
+        graph.resolved_theme = resolve_stack(graph.style, graph.source_dir)
+    return graph.resolved_theme
+
+
+def resolve_mode(mode: str | None, graph: MetroGraph) -> str:
+    """The mode to bake: explicit, else the graph's ``%%metro mode:``, else default."""
+    return (mode or graph.mode).strip().lower() or DEFAULT_MODE
+
+
+def resolve_theme(graph: MetroGraph, mode: str | None = None) -> Theme:
+    """The theme *graph*'s bound stack bakes in *mode* (see :func:`resolve_mode`)."""
+    return bound_stack(graph).for_mode(resolve_mode(mode, graph))
+
+
+# Concrete themes for callers without a graph, resolved on first use.
+_NAMED_THEMES = {
+    "DEFAULT_LIGHT_THEME": ("default", LIGHT),
+    "DEFAULT_DARK_THEME": ("default", DARK),
+    "SEQERA_LIGHT_THEME": ("seqera", LIGHT),
+    "SEQERA_DARK_THEME": ("seqera", DARK),
+    "TRANSPARENT_THEME": ("transparent", DEFAULT_MODE),
+}
+
+
+def __getattr__(name: str) -> Any:  # noqa: ANN401
+    """``THEMES``, every built-in at :data:`DEFAULT_MODE`, and the named themes."""
+    if name == "THEMES":
+        return {n: resolve_stack(n).for_mode(DEFAULT_MODE) for n in sorted(STYLE_NAMES)}
+    if name in _NAMED_THEMES:
+        stack, mode = _NAMED_THEMES[name]
+        return resolve_stack(stack).for_mode(mode)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
-    "THEMES",
-    "STYLE_NAMES",
-    "THEME_MODES",
+    "BASE_THEME",
+    "DARK",
     "DEFAULT_MODE",
-    "resolve_style",
+    "LIGHT",
+    "MODES",
+    "STYLE_NAMES",
+    "renamed_style_hint",
+    "THEMES",
+    "ResolvedTheme",
+    "ThemeError",
+    "anchor_stack",
+    "bound_stack",
+    "check_stack",
+    "resolve_mode",
+    "resolve_stack",
     "resolve_theme",
-    "mode_pair",
-    "LIGHT_THEME",
-    "NFCORE_LIGHT_THEME",
-    "NFCORE_DARK_THEME",
+    "DEFAULT_LIGHT_THEME",
+    "DEFAULT_DARK_THEME",
     "SEQERA_LIGHT_THEME",
     "SEQERA_DARK_THEME",
+    "TRANSPARENT_THEME",
 ]

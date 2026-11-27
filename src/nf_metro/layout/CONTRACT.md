@@ -357,7 +357,10 @@ in pipeline order.
 - **Postcondition**: For every section with real stations, the section
   subgraph (returned via `section_subgraphs[sec_id]`) has every real
   station assigned a local `(x, y)`, a `layer`, and a `track`. Section
-  `bbox_x/y/w/h` reflect the local content extent.
+  `bbox_x/y/w/h` reflect the local content extent, and `Section.lane_ends`
+  holds the lines pinned to an end of the section's lane order (read by the
+  offsets phase that re-slots them), and `Section.lane_end_seeds` maps each
+  such line to the contenders that set its pin.
 - **Invariants preserved**: Ports (`is_port=True`) are not positioned.
   Inter-section edges in `graph.edges` are untouched. Junctions are not
   positioned.
@@ -368,20 +371,31 @@ in pipeline order.
   translates them into global coordinates, it does not re-lay them out.
 
 ### Stage 1.2: align row Y grids
-- **Purpose**: Snap station Ys to a shared row-wide grid so same-row
-  same-direction sections agree on grid pitch and slot count.
-- **Helper**: `_align_row_y_grids` (`phases/row_align.py`).
+- **Purpose**: Share one Y grid across same-row, same-direction sections,
+  then make room for every fanned diagonal's stagger.
+- **Helpers**: `_align_row_y_grids` (`phases/row_align.py`), then
+  `reserve_fan_stagger_runway` (`phases/single_section.py`) per section.
 - **Precondition**: Stage 1.1 complete; sections still in local
   coordinates; section subgraphs available.
 - **Postcondition**: Within each `(grid_row, direction)` group, all
-  multi-station layers share one Y grid. Bbox `w/h` unchanged from
-  Stage 1.1 (only station Ys shift). `graph._row_y_grid_info` stores
-  grid metadata for the debug overlay.
+  multi-station layers share one Y grid. Every in-section diagonal edge
+  spans, along the flow axis, at least both endpoint straights, the diagonal
+  run and `(N - 1) * pitch * tan(phi_max / 2)`, where `N` is the number of
+  distinct lines in the spread group (see `spread_groups`: by hub and
+  heading on lanes-along-Y sections, per bundle otherwise) and `phi_max` is
+  that group's steepest deflection, its drop taken as the Stage 6.4 Y-lattice
+  snap can at most make it (`fan_stagger_needs`, `phases/fan_stagger.py`).
+  Each shortfall opens just before the edge's downstream station, in whole
+  `y_spacing` steps along a vertical flow, and the bbox flow-axis size grows
+  by the same amount. `graph._row_y_grid_info` stores grid metadata for the
+  debug overlay.
 - **Invariants preserved**: Isolated stations (sole layer occupants
-  with off-grid Y) keep original Y - hub centering survives. Section
-  bbox dimensions unchanged.
+  with off-grid Y) keep original Y - hub centering survives. Bbox
+  cross-axis size and station cross-axis positions unchanged by the
+  stagger reservation.
 - **Related tests**: `test_row_trunk_marker_cy_consistent`,
-  `test_all_stations_snap_to_grid`.
+  `test_all_stations_snap_to_grid`, `tests/test_fan_stagger_runway.py`,
+  `test_hub_fanning_bundles_of_mixed_drop_stay_concentric`.
 - **Lifecycle:** invariant - the shared per-row Y grid holds at the
   final boundary (re-asserted by Stage 6.4's grid snap).
 
@@ -1167,7 +1181,11 @@ in pipeline order.
 - **Helper**: `_recenter_loop_side_stations` (`phases/balancing.py`).
 - **Precondition**: All Y phases done; routing geometry derivable.
 - **Postcondition**: Loop side stations sit at the visual centre of
-  their horizontal loop run.
+  their horizontal loop run, or as near it as leaves both fanned diagonals
+  their `fan_stagger_needs` room, measured to each neighbour's settled X.
+  Routing's bubble centring keeps the same bound on every station it moves,
+  its column-alignment drag included: one pass in a fixed order, each move
+  seated against the moves before it.
 - **Invariants preserved**: Station Y. Pure-side-branch classification
   is strict (see `test_loop_recenter_only_for_pure_side_branches`).
 - **Related tests**: `test_fan_station_centered_on_loop`,
@@ -1198,7 +1216,7 @@ in pipeline order.
 - **Postcondition**: No LR/RL TOP/BOTTOM port's outermost drawn lane sits
   within `PERP_PORT_EDGE_INSET` of its section's left or right edge
   (`port_bundle_edge_reach`, as on the Y axis); adjacent columns still keep
-  `MIN_INTER_SECTION_GAP`.
+  `min_inter_section_gap()`.
 - **Invariants preserved**: Station coords; every port's own edge
   anchoring (LEFT/RIGHT ports move with the edge they are pinned to); the
   lane plan record (a column re-enforce translates whole columns, which
@@ -1234,7 +1252,7 @@ in pipeline order.
   grid rows in one column whose sections' content stations nearest that
   side share an X, every section shares the run's outermost edge on that
   side, except one held short by a neighbour overlapping its own row band
-  (which keeps `MIN_INTER_SECTION_GAP` of inter-column corridor). Members
+  (which keeps `min_inter_section_gap()` of inter-column corridor). Members
   of a packed cell are out of scope: they sit side-by-side along X inside
   one cell, so no common vertical edge exists. Two kinds of section break a
   run: a rail-flagged one, because `_retrofit_section_rails_phase`
@@ -1451,8 +1469,9 @@ in pipeline order.
   centreline. Under `diamond_style='symmetric'`, a planned two-way fan keeps
   mirrored half-pitch lanes around that centreline even when topology identifies
   one branch as the unique continuation. For unsupported legacy fans, compact
-  each clean 2-way fork-join diamond (`_iter_symmetric_diamonds`) onto half-pitch
-  offsets `trunk_y +/- 0.5 * y_spacing`, so the diamond reads as a tight
+  each clean 2-way fork-join diamond (`_iter_symmetric_diamonds`) onto
+  half-pitch offsets, half the section's row pitch (`_section_row_pitch`)
+  either side of the trunk, so the diamond reads as a tight
   one-grid-unit bubble rather than straddling the trunk at full pitch
   (as tall as a 3-way fan with an empty trunk row between its branches).
   Per-diamond, so a diamond compacts even when it shares a section with a
@@ -1877,10 +1896,13 @@ They are design evidence, not part of this specification.
   before its own earlier translations would be stale.
   `measure_row_gap_clearance` (`layout/phases/bbox.py`) states the row-axis
   box-clearance demands. Convergence planning can publish a column-axis
-  `BoundaryClearanceRequirement` when a landing pair lacks runway, and
-  `measure_boundary_clearance_requirements` re-measures it against live box
-  edges. `measure_drawn_corridor_clearance` states any positive-side
-  containment owed by the strict post-grant ledger. The demand vocabulary is
+  `BoundaryClearanceRequirement` when a landing pair lacks runway, a merge
+  feeder's L-shaped landing publishes a row-axis one, anchored on its entry
+  port, for each earlier-row box it passes beneath short of
+  `inter_row_edge_clearance`, and `measure_boundary_clearance_requirements`
+  re-measures each against live box edges (or the anchor station).
+  `measure_drawn_corridor_clearance` states any positive-side containment owed
+  by the strict post-grant ledger. The demand vocabulary is
   `layout/settlement_demand.py`, held apart from settlement so a layout phase
   can state a demand without importing the routing stack the ledger is built on.
   Rail layouts raise no clearance demand: their row pitch comes from the
@@ -1918,7 +1940,7 @@ They are design evidence, not part of this specification.
   last leg stops at a station of some box has entered that box just as surely, so
   `RouteReservation.landing_section_ids` names it and
   `_row_region_measurement` / `_column_region_measurement` drop it from both
-  sides. Without that, an entry lead-in is charged `INTER_ROW_HEADER_CLEARANCE`
+  sides. Without that, an entry lead-in is charged `inter_row_header_clearance()`
   off the header of the very box it is arriving at, which nothing can satisfy:
   the leg's own endpoint is inside the box, so no widening of the boundary brings
   it into band, and settlement spends real height chasing a demand that cannot
@@ -2003,7 +2025,7 @@ They are design evidence, not part of this specification.
   filed lanes states a boundary wide enough for one stroke where two are drawn,
   and the second is left wherever the narrow gap forced it -- in
   `examples/topologies/merge_around_below_leftmost.mmd`, a merge trunk's return
-  leg 14px below a box edge that asks `INTER_ROW_EDGE_CLEARANCE` of it, ungated
+  leg 14px below a box edge that asks `inter_row_edge_clearance()` of it, ungated
   because it carries no claim.
 - **Postcondition**: No boundary still owes what it was measured for. For a
   clearance demand that is one count, re-measured on the settled geometry by
@@ -2142,7 +2164,7 @@ They are design evidence, not part of this specification.
   polylines. A section box contributes its edge only over the corridor's declared
   longitudinal interval. A header contributes its drawn keepout only where that
   keepout overlaps the same interval and protrudes toward the corridor. The
-  effective clearance is `INTER_ROW_EDGE_CLEARANCE` for horizontal box edges,
+  effective clearance is `inter_row_edge_clearance()` for horizontal box edges,
   `EDGE_TO_BUNDLE_CLEARANCE` for vertical box edges, and
   `SECTION_HEADER_ROUTE_CLEARANCE` for header ink. The corridor-normalisation
   pass seats movable canvas runs inside the corresponding box-edge band. Planned
@@ -2486,7 +2508,7 @@ from consuming reserved corridor clearance.
 
 `SECTION_HEADER_PROTRUSION` above a box top is the prospective band the layout
 reserves for that box's caption, and `section_header_top` states it. Gap routing
-is charged against it (`section_header_safe_cap`, `INTER_ROW_HEADER_CLEARANCE`)
+is charged against it (`section_header_safe_cap`, `inter_row_header_clearance()`)
 before any caption has a position: the caption is picked from the routed
 polylines it has to avoid, so routing against the final caption would require a
 route-place-route fixpoint. What that prospective reservation buys is that the

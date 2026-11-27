@@ -50,7 +50,7 @@ def _render(
             layout_options=layout_options,
         )
         result = render_graph_result(
-            graph, resolve_theme(None, graph, "light"), RenderConfig()
+            graph, resolve_theme(graph, "light"), RenderConfig()
         )
     return graph, result.plan
 
@@ -133,6 +133,6 @@ def test_member_yields_only_a_lane_a_plan_states_as_its_trunk(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        render_graph_result(graph, resolve_theme(None, graph, "light"), RenderConfig())
+        render_graph_result(graph, resolve_theme(graph, "light"), RenderConfig())
     assert coincident
     assert yielded_to == trunk_lines

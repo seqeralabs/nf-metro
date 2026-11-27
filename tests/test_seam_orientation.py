@@ -36,7 +36,7 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import MetroGraph, Port, PortSide
 
 
@@ -290,7 +290,7 @@ def _seam_verdicts(path_str: str):
     path = Path(path_str)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        graph = parse_metro_mermaid(path.read_text(), max_station_columns=15)
+        graph = parse_metro_mermaid_file(path, max_station_columns=15)
         compute_layout(graph)
     tb_sections = {sid for sid, s in graph.sections.items() if s.direction == "TB"}
     reversed_secs = detect_reversed_sections(graph)

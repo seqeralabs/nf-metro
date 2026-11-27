@@ -14,6 +14,21 @@ from nf_metro.parser.mermaid import parse_metro_mermaid, parse_metro_mermaid_fil
 from nf_metro.parser.model import is_bypass_v
 
 
+def _layout_helper(name):
+    """The function *name* as defined in whichever ``layout`` module owns it."""
+    import sys
+
+    import nf_metro.layout.engine  # noqa: F401  (loads every layout module)
+
+    for modname, mod in list(sys.modules.items()):
+        obj = (
+            getattr(mod, name, None) if modname.startswith("nf_metro.layout") else None
+        )
+        if callable(obj) and getattr(obj, "__module__", None) == modname:
+            return obj
+    raise AttributeError(f"no layout module defines {name!r}")
+
+
 def _patch_layout_helper(monkeypatch, name, replacement):
     """Rebind a layout helper everywhere it is bound for call-time lookup.
 
@@ -26,9 +41,7 @@ def _patch_layout_helper(monkeypatch, name, replacement):
     """
     import sys
 
-    from nf_metro.layout import engine
-
-    original = getattr(engine, name)
+    original = _layout_helper(name)
     patched = []
     for modname, mod in list(sys.modules.items()):
         if not modname.startswith("nf_metro.layout"):
@@ -1024,7 +1037,7 @@ def test_is_diamond_fanout():
 
 def test_lift_would_cause_uturn_skips_when_feeders_below_anchor():
     """A trunk candidate with all-below feeders should NOT be lifted."""
-    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.layout.phases.bbox import _lift_would_cause_uturn
     from nf_metro.parser.model import Edge, MetroGraph, Station
 
     g = MetroGraph()
@@ -1040,7 +1053,7 @@ def test_lift_would_cause_uturn_skips_when_feeders_below_anchor():
 
 def test_lift_would_cause_uturn_allows_when_feeder_above():
     """When at least one feeder sits above anchor_y, lifting is safe."""
-    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.layout.phases.bbox import _lift_would_cause_uturn
     from nf_metro.parser.model import Edge, MetroGraph, Station
 
     g = MetroGraph()
@@ -1056,7 +1069,7 @@ def test_lift_would_cause_uturn_allows_when_feeder_above():
 
 def test_lift_would_cause_uturn_ignores_single_feeder():
     """A single external feeder is not enough to flag a U-turn."""
-    from nf_metro.layout.engine import _lift_would_cause_uturn
+    from nf_metro.layout.phases.bbox import _lift_would_cause_uturn
     from nf_metro.parser.model import Edge, MetroGraph, Station
 
     g = MetroGraph()
@@ -1983,9 +1996,9 @@ class TestPassCBisection:
     def test_overlap_localises_to_phase(
         self, monkeypatch, corruption_helper, expected_phase
     ):
-        from nf_metro.layout import engine
+        from nf_metro.layout import PhaseInvariantError
 
-        original = getattr(engine, corruption_helper)
+        original = _layout_helper(corruption_helper)
 
         def corrupt(graph, *args, **kwargs):
             result = original(graph, *args, **kwargs)
@@ -2002,7 +2015,7 @@ class TestPassCBisection:
         _patch_layout_helper(monkeypatch, corruption_helper, corrupt)
 
         graph = parse_metro_mermaid(self._MMD)
-        with pytest.raises(engine.PhaseInvariantError) as excinfo:
+        with pytest.raises(PhaseInvariantError) as excinfo:
             compute_layout(graph, validate=True)
 
         msg = str(excinfo.value)
@@ -2137,20 +2150,20 @@ class TestPassCBisection:
         skip the guard at the preceding checkpoint and run it at the
         threshold.
         """
-        from nf_metro.layout import engine
+        from nf_metro.layout.phases import guards
 
-        assert first_valid in engine._PASS_C_BISECTION_ORDER, (
+        assert first_valid in guards._PASS_C_BISECTION_ORDER, (
             f"Threshold {first_valid!r} not a known Pass C checkpoint"
         )
-        assert engine._BISECTION_FIRST_VALID[guard_name] == first_valid
+        assert guards._BISECTION_FIRST_VALID[guard_name] == first_valid
 
-        idx = engine._PASS_C_BISECTION_ORDER.index(first_valid)
-        assert engine._bisection_should_run(guard_name, first_valid) is True
+        idx = guards._PASS_C_BISECTION_ORDER.index(first_valid)
+        assert guards._bisection_should_run(guard_name, first_valid) is True
         if idx > 0:
-            prev_phase = engine._PASS_C_BISECTION_ORDER[idx - 1]
-            assert engine._bisection_should_run(guard_name, prev_phase) is False
+            prev_phase = guards._PASS_C_BISECTION_ORDER[idx - 1]
+            assert guards._bisection_should_run(guard_name, prev_phase) is False
         # Final-block phase is not in _PASS_C_BISECTION_ORDER; guard always runs.
-        assert engine._bisection_should_run(guard_name, "after final") is True
+        assert guards._bisection_should_run(guard_name, "after final") is True
 
 
 def test_bundles_in_gap_dedupes_fanout_to_multiple_columns():
@@ -2594,7 +2607,6 @@ def test_cross_col_top_entry_port_on_boundary():
     """
     mmd = """\
 %%metro title: Cross-Column Top Entry
-%%metro style: dark
 %%metro line: l1 | Line 1 | #0570b0
 
 graph LR
@@ -2658,7 +2670,6 @@ def test_cross_col_top_entry_channel_clears_title_band():
 
     mmd = """\
 %%metro title: Cross-Column Top Entry
-%%metro style: dark
 %%metro line: l1 | Line 1 | #0570b0
 
 graph LR

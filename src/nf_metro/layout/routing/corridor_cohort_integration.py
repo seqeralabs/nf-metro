@@ -22,11 +22,11 @@ from typing import NamedTuple
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
     COORD_TOLERANCE,
-    CURVE_RADIUS,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import cotravelling_lane_clearance, spans_share_corridor
 from nf_metro.layout.lane_plan import recorded_crossing_pairs
+from nf_metro.layout.pass_metrics import active_curve_radius
 from nf_metro.layout.route_plan import (
     BindingKind,
     CanvasMove,
@@ -277,7 +277,7 @@ class CorridorCohortLedger:
     eligible_member_ids: frozenset[str]
     ambiguous_endpoint_cohort_ids: frozenset[str]
     offset_step: float
-    curve_radius: float = CURVE_RADIUS
+    curve_radius: float = field(default_factory=active_curve_radius)
     forced_crossings: frozenset[tuple[tuple[str, str, str], tuple[str, str, str]]] = (
         frozenset()
     )
@@ -516,7 +516,7 @@ def build_corridor_cohort_ledger(
     prior_plan: RoutePlan,
     *,
     station_offsets: Mapping[tuple[str, str], float],
-    curve_radius: float = CURVE_RADIUS,
+    curve_radius: float | None = None,
 ) -> CorridorCohortLedger:
     """Freeze coordinate-free cohort intent from one prior semantic ledger."""
     del station_offsets
@@ -768,7 +768,7 @@ def build_corridor_cohort_ledger(
         ambiguous_endpoint_cohort_ids=ambiguous
         | frozenset(ambiguous_path_rank_cohorts),
         offset_step=graph_offset_step(graph),
-        curve_radius=curve_radius,
+        curve_radius=active_curve_radius() if curve_radius is None else curve_radius,
         forced_crossings=_forced_loop_crossings(graph) | recorded_crossing_pairs(graph),
     )
 

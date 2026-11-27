@@ -33,6 +33,7 @@ from nf_metro.layout.lane_plan import (
     planned_offsets,
     recorded_lane_plan,
 )
+from nf_metro.layout.phases._common import _station_bundle_offset_span
 from nf_metro.layout.port_order_plan import Approach, port_travel
 from nf_metro.layout.routing.common import (
     bypass_bottom_y,
@@ -42,11 +43,13 @@ from nf_metro.layout.routing.common import (
 from nf_metro.layout.routing.context import (
     _has_intervening_sections,
     _resolve_section_colrow,
+    _section_lane_frame,
 )
 from nf_metro.parser.model import (
     Edge,
     LineSpread,
     MetroGraph,
+    Section,
     Station,
 )
 
@@ -343,3 +346,84 @@ def _port_fed_through_merge_junction(graph: MetroGraph, port_id: str) -> bool:
     """
     merges = merge_junction_ids(graph)
     return any(edge.source in merges for edge in graph.edges_to(port_id))
+
+
+def _station_lane_frame(
+    graph: MetroGraph, station: Station, positive_fan: set[str] | None
+) -> AxisFrame | None:
+    section: Section | None = (
+        graph.sections.get(station.section_id) if station.section_id else None
+    )
+    return (
+        None if section is None else _section_lane_frame(graph, section, positive_fan)
+    )
+
+
+def drawn_bundle_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: Mapping[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
+) -> tuple[float, float]:
+    """Min/max of a station's per-line offsets *as drawn*.
+
+    The stored offsets are positive; the section's lane sign
+    (:func:`_section_lane_frame`) turns them into the side its lines are drawn
+    on, so a vertical-flow section plots as the rotation of a horizontal one
+    (matching :func:`_tb_x_offset`).  Spanning the marker over the drawn offsets
+    keeps it centred on the lines that actually pass through the station, so a
+    one-line or off-trunk-subset station does not leave its glyph beside its own
+    track.
+    """
+    if not graph.station_lines(station.id):
+        return 0.0, 0.0
+    raw_min, raw_max = _station_bundle_offset_span(graph, station.id, station_offsets)
+    sign = _drawn_lane_sign(graph, station, positive_fan)
+    return min(sign * raw_min, sign * raw_max), max(sign * raw_min, sign * raw_max)
+
+
+def _drawn_lane_sign(
+    graph: MetroGraph, station: Station, positive_fan: set[str] | None
+) -> float:
+    frame = _station_lane_frame(graph, station, positive_fan)
+    return 1.0 if frame is None else frame.secondary_sign
+
+
+def drawn_line_offsets(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: Mapping[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
+) -> dict[str, float]:
+    """Each line's offset across a station *as drawn*, keyed by line id: the
+    per-line counterpart of :func:`drawn_bundle_span`."""
+    sign = _drawn_lane_sign(graph, station, positive_fan)
+    return {
+        lid: sign * station_offsets.get((station.id, lid), 0.0)
+        for lid in graph.station_lines(station.id)
+    }
+
+
+def drawn_lane_span(
+    graph: MetroGraph,
+    station: Station,
+    station_offsets: Mapping[tuple[str, str], float],
+    positive_fan: set[str] | None = None,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """The segment across its flow that a station's lanes are drawn along.
+
+    Its ends are the outermost lanes through the station as the renderer draws
+    them, the spine of the marker it centres on them, so a route ending on any
+    of the station's lanes ends on this segment.  A rail station spans the
+    rails it uses; a lane-less station is its own point.
+    """
+    if station.rail_top_y is not None and station.rail_bottom_y is not None:
+        used = station.rail_used_ys or [station.y]
+        return (station.x, min(used)), (station.x, max(used))
+    if graph.station_is_rail(station.id):
+        return (station.x, station.y), (station.x, station.y)
+    lo, hi = drawn_bundle_span(graph, station, station_offsets, positive_fan)
+    frame = _station_lane_frame(graph, station, positive_fan)
+    if frame is not None and frame.secondary.name == "x":
+        return (station.x + lo, station.y), (station.x + hi, station.y)
+    return (station.x, station.y + lo), (station.x, station.y + hi)

@@ -10,18 +10,10 @@ import html
 from typing import TYPE_CHECKING
 
 from nf_metro.layout.constants import (
-    CANVAS_ORIGIN_MARGIN as CANVAS_ORIGIN_MARGIN,  # re-export
-)
-from nf_metro.layout.constants import (
-    CURVE_RADIUS,
     ICON_CAPTION_GAP,
     SECTION_HEADER_ROUTE_CLEARANCE,
 )
-from nf_metro.layout.constants import ICON_INTER_GAP as ICON_INTER_GAP  # re-export
-from nf_metro.layout.constants import (
-    RAIL_KNOB_RADIUS_RATIO as RAIL_KNOB_RADIUS_RATIO,  # re-export
-)
-from nf_metro.layout.constants import TERMINUS_WIDTH as TERMINUS_WIDTH  # re-export
+from nf_metro.render.palette import contrast_ratio, line_color
 
 if TYPE_CHECKING:
     from nf_metro.parser.model import MetroGraph, MetroLine
@@ -79,20 +71,12 @@ LEGEND_MARKER_PILL_RATIO: float = 1.7
 MARKER_PILL_LENGTH_RATIO: float = 4.0
 """Length of a ``pill`` marker along the line, as a multiple of the station radius."""
 
-# RAIL_KNOB_RADIUS_RATIO is re-exported from layout.constants (see top imports):
-# label placement and the renderer share one knob-radius ratio.
-
 RAIL_LINK_HALF_WIDTH_RATIO: float = 0.7
 """Rail-interchange connector bar half-width, as a multiple of the station radius."""
 
 # ---------------------------------------------------------------------------
 # SVG drawing
 # ---------------------------------------------------------------------------
-SVG_CURVE_RADIUS: float = CURVE_RADIUS
-"""Default corner radius for edge path smoothing.
-
-Derived from the layout CURVE_RADIUS so routing and rendering agree."""
-
 SECTION_NUM_CIRCLE_R_LARGE: int = 11
 """Radius of the section number circle background."""
 
@@ -140,8 +124,6 @@ pixel-level measurement across CairoSVG and Chromium renderers."""
 ICON_STATION_GAP: float = 6.0
 """Gap between terminus station pill and file icon."""
 
-# ICON_INTER_GAP is imported from layout.constants (re-exported for render use)
-
 ICON_BBOX_MARGIN: float = 2.0
 """Margin around icon bounding box for clamping."""
 
@@ -157,11 +139,6 @@ ICON_NAME_FONT_SCALE: float = 0.6
 # ---------------------------------------------------------------------------
 # Animation
 # ---------------------------------------------------------------------------
-ANIMATION_CURVE_RADIUS: float = CURVE_RADIUS
-"""Default curve radius for animation motion paths.
-
-Derived from the layout CURVE_RADIUS for consistency."""
-
 MIN_ANIMATION_DURATION: float = 2.0
 """Minimum duration in seconds for ball animation."""
 
@@ -269,10 +246,11 @@ def effective_line_color(
     """Stroke colour for a line, muted to grey when the line is inactive.
 
     An inactive line resolves to ``theme.muted_line_color`` at every stroke
-    site (edge, chevron, legend swatch); every other line keeps its own colour,
-    falling back to :data:`FALLBACK_LINE_COLOR` when it has none. *active_color*,
+    site (edge, chevron, legend swatch); every other line takes its pick from
+    the theme's ``line_colors``, else its own colour, falling back to
+    :data:`FALLBACK_LINE_COLOR` when there is no line. *active_color*,
     when given, is the colour for an *active* line, taking priority over the
-    line's own (the chevron site passes ``theme.directional_marker_color`` so a
+    line's own (the chevron site passes ``theme.chevron_color`` so a
     themed marker colour wins); an inactive line mutes regardless.
 
     The line's own colour is directive-authored text that lands verbatim in
@@ -283,7 +261,9 @@ def effective_line_color(
         return theme.muted_line_color
     if active_color:
         return active_color
-    return html.escape(line.color) if line is not None else FALLBACK_LINE_COLOR
+    if line is None:
+        return FALLBACK_LINE_COLOR
+    return html.escape(line_color(theme, line))
 
 
 def station_is_muted(
@@ -478,9 +458,20 @@ STROKE_DASHARRAY: dict[str, str] = {
 """SVG stroke-dasharray values for non-solid line styles."""
 
 
-def line_style_kwargs(style: str) -> dict[str, str]:
+def line_style_kwargs(style: str, theme: Theme) -> dict[str, str]:
     """Return extra SVG kwargs for a metro line style (dashed/dotted)."""
-    dasharray = STROKE_DASHARRAY.get(style)
+    dasharray = {
+        "dashed": theme.dashed_dasharray,
+        "dotted": theme.dotted_dasharray,
+    }.get(style, "")
     if dasharray:
         return {"stroke_dasharray": dasharray}
     return {}
+
+
+def readable_text_color(*backgrounds: str) -> str:
+    """Black or white, whichever keeps the higher worst-case WCAG contrast
+    against every one of *backgrounds*."""
+    on_black = min(contrast_ratio(bg, "#000000") for bg in backgrounds)
+    on_white = min(contrast_ratio(bg, "#ffffff") for bg in backgrounds)
+    return "#000000" if on_black > on_white else "#ffffff"

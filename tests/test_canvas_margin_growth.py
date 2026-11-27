@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import prepare_graph
+from nf_metro.layout.constants import CANVAS_ORIGIN_MARGIN
 from nf_metro.parser.model import MetroGraph, PermissiveGuardWarning
-from nf_metro.render.constants import CANVAS_ORIGIN_MARGIN
 from nf_metro.render.svg import RenderPlan, build_render_plan
 from nf_metro.themes import resolve_theme
 
@@ -55,7 +55,7 @@ def _plan(
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         plan = build_render_plan(
-            graph, resolve_theme(None, graph), legend_position=legend_position
+            graph, resolve_theme(graph), legend_position=legend_position
         )
     downgraded = [
         item for item in caught if issubclass(item.category, PermissiveGuardWarning)

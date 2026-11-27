@@ -55,7 +55,7 @@ def _plan(
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         offsets = compute_station_offsets(graph)
         plan = render_graph_result(
-            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+            graph, resolve_theme(graph, mode=None), RenderConfig()
         ).plan
     return graph, offsets, plan
 

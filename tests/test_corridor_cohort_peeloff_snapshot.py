@@ -429,7 +429,7 @@ def test_feeds_of_one_line_into_a_perpendicular_entry_share_its_lane(
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         plan = render_graph_result(
-            graph, resolve_theme(None, graph, mode=None), RenderConfig()
+            graph, resolve_theme(graph, mode=None), RenderConfig()
         ).plan
     legs = {
         route.edge.source: route.points[-2][1]
@@ -604,7 +604,7 @@ def test_free_confluence_descent_reads_the_freeze_ownership(
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         plan = render_graph_result(
-            graph, resolve_theme(None, graph, "light"), RenderConfig()
+            graph, resolve_theme(graph, "light"), RenderConfig()
         ).plan
     [drawn] = [
         polyline

@@ -19,6 +19,8 @@ Covers:
   unequal resolved radii.
 * Meaningfulness: a hand-planted radius mismatch at a coincident corner is
   caught, so the corpus check is not vacuous.
+* Diagonal turns: same-line diagonals joining (or leaving) one leg at one
+  vertex meet that leg at a single point.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from nf_metro.layout.routing import compute_station_offsets, route_edges_centred
 from nf_metro.layout.routing.corners import resolve_curve_radii
 from nf_metro.layout.routing.invariants import check_coincident_corner_radii
 from nf_metro.layout.routing.normalize import _unify_coincident_corner_radii
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = REPO_ROOT / "tests" / "fixtures" / "topologies"
@@ -60,7 +62,7 @@ def _gather_fixtures() -> list[Path]:
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges_centred(graph, station_offsets=offsets)
@@ -127,6 +129,30 @@ def test_check_reports_unequal_radii_at_shared_turn() -> None:
     assert not check_coincident_corner_radii(graph, matched, {})
 
 
+def _climb_onto_shared_flat(source: str, drop: float, radii: list[float]):
+    """A same-line route climbing a diagonal onto a flat that turns at (100, 100)."""
+    route = _make_route(source, "x", radii[0])
+    route.points = [(0.0, 100.0 + drop), (70.0, 100.0 + drop), (100.0, 100.0)]
+    route.points.append((200.0, 100.0))
+    route.curve_radii = radii
+    return route
+
+
+def test_check_reports_fused_diagonal_turns_meeting_their_flat_apart() -> None:
+    """Diagonals of different steepness joining one flat at one vertex must
+    meet it at one point; a lone leg at the base radius beside a bundled
+    leg's wider one draws two corners."""
+    from nf_metro.parser.model import MetroGraph
+
+    graph = MetroGraph()
+    lone = _climb_onto_shared_flat("lone", 300.0, [10.0, 10.0])
+    bundled = _climb_onto_shared_flat("bundled", 60.0, [10.0, 13.8])
+    assert check_coincident_corner_radii(graph, [lone, bundled], {})
+
+    lone.curve_radii = [10.0, 13.8]
+    assert not check_coincident_corner_radii(graph, [lone, bundled], {})
+
+
 def test_unify_uses_widest_radius_all_shared_legs_can_resolve() -> None:
     """A short lead limits the common radius instead of drawing a double arc."""
     from nf_metro.parser.model import MetroGraph
@@ -152,15 +178,12 @@ def test_unify_uses_widest_radius_all_shared_legs_can_resolve() -> None:
 
 
 def test_unify_refreshes_a_shared_route_after_changing_one_corner() -> None:
-    """Chained corners on one route settle to a fixpoint within a single call.
+    """Chained coincident corners on one route agree in a single call.
 
     ``shared`` carries two coincident turns 30px apart, so its two corners
     compete for one segment budget: equalising the near corner against ``wide``
-    changes what the far corner can draw against ``peer``.  The far corner's
-    bucket is visited first, so reaching agreement takes more than one sweep
-    over the buckets.  A repeat call must therefore be inert -- if it still
-    moves a radius, the first call returned before the buckets stopped
-    influencing each other and the emitted arcs are a doubled corner apart.
+    changes what the far corner can draw against ``peer``.  A repeat call is
+    inert; a radius it still moved would draw the arcs a doubled corner apart.
     """
     shared = _make_route("shared", "x", 22.0)
     shared.points = [

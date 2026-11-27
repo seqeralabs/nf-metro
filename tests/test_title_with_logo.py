@@ -88,7 +88,7 @@ def _render(
     )
     result = render_graph_result(
         graph,
-        resolve_theme(None, graph),
+        resolve_theme(graph),
         RenderConfig(output_format=output_format),
     )
     svg = result.content
@@ -358,7 +358,7 @@ def _placed_geometry(
             section.bbox_y + section.bbox_h,
         )
     plan = render_graph_result(
-        graph, resolve_theme(None, graph), RenderConfig(output_format=output_format)
+        graph, resolve_theme(graph), RenderConfig(output_format=output_format)
     ).plan
     for index, polyline in enumerate(plan.route_polylines):
         geometry[f"route:{index}"] = tuple(v for point in polyline for v in point)

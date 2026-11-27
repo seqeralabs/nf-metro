@@ -413,7 +413,7 @@ Gates with an un-exercised arm:
 
 ## `corners.py`
 
-9/11 gates fully exercised.
+15/17 gates fully exercised.
 
 Gates with an un-exercised arm:
 
@@ -1227,12 +1227,12 @@ Gates with an un-exercised arm:
 
 | Line | Gate | Un-exercised arm(s) | Triage |
 | ---: | --- | --- | --- |
-| 56 | `if st is None:` | `->L57` | **defensive** -- _line_rail_y is only ever called with a real station id (on_rail.id, edge.source/target, or a sibling edge endpoint), all of which exist in graph.stations - the route loop pre-filters None endpoints at the src/tgt guard. The None arm is a contract guard no render-path call reaches. |
-| 64 | `if line_id in section_rails:` | `->L67` | **defensive** -- The whole-graph rail connector routes port-to-port edges through _line_rail_y, exercising the in-rails arm. The fall-through (a port carrying a line absent from its own section's rail map) cannot occur: a port carries only lines its section's stations carry, all present in per_line_y. Defensive fallback. |
-| 75 | `if line_id in served and len(st.rail_used_ys) == len(served):` | `->L77` | **defensive** -- Reached only for a non-port spanning station, whose rail_used_ys is station_lines_ordered filtered to the section's per_line_y - itself built from the same _section_lines_in_order. So a served line is always in per_line_y (lengths match) and _line_rail_y is only called with a line the touching edge carries (always served). The fall-through return st.y is a defensive fallback no render-path call reaches. |
-| 131 | `if sib_rails:` | `->L136` | **defensive** -- _off_track_drop_order is only called for an off-track elbow edge that exists in graph.edges, so the feeder<->consumer set it scans always contains at least that edge; the empty-sib_rails arm (skip the mirror-corner reversal) is a contract guard no render-path call reaches. |
-| 259 | `if exit_port.side is not PortSide.RIGHT or entry_port.side is not PortSide.LEFT:` | `->L260` | **defensive** -- Whole-graph rail mode stacks sections vertically and resolve.py always sides an inter-section edge as a RIGHT exit feeding a LEFT entry, so the early-return arm (an unmodelled side pairing) is a structural fallback no rail topology reaches. |
-| 358 | `if conn is not None:` | `->L354` | **defensive** -- Skips the straight-rail fallback when _route_inter_section_connector handled a port-to-port bundle. The connector returns a route for every whole-graph rail inter-section edge (always a RIGHT exit feeding a LEFT entry), so the None arm (fall through to straight-rail routing) is a structural fallback no rail topology reaches. |
+| 59 | `if st is None:` | `->L60` | **defensive** -- _line_rail_y is only ever called with a real station id (on_rail.id, edge.source/target, or a sibling edge endpoint), all of which exist in graph.stations - the route loop pre-filters None endpoints at the src/tgt guard. The None arm is a contract guard no render-path call reaches. |
+| 67 | `if line_id in section_rails:` | `->L70` | **defensive** -- The whole-graph rail connector routes port-to-port edges through _line_rail_y, exercising the in-rails arm. The fall-through (a port carrying a line absent from its own section's rail map) cannot occur: a port carries only lines its section's stations carry, all present in per_line_y. Defensive fallback. |
+| 78 | `if line_id in served and len(st.rail_used_ys) == len(served):` | `->L80` | **defensive** -- Reached only for a non-port spanning station, whose rail_used_ys is station_lines_ordered filtered to the section's per_line_y - itself built from the same _section_lines_in_order. So a served line is always in per_line_y (lengths match) and _line_rail_y is only called with a line the touching edge carries (always served). The fall-through return st.y is a defensive fallback no render-path call reaches. |
+| 134 | `if sib_rails:` | `->L139` | **defensive** -- _off_track_drop_order is only called for an off-track elbow edge that exists in graph.edges, so the feeder<->consumer set it scans always contains at least that edge; the empty-sib_rails arm (skip the mirror-corner reversal) is a contract guard no render-path call reaches. |
+| 260 | `if exit_port.side is not PortSide.RIGHT or entry_port.side is not PortSide.LEFT:` | `->L261` | **defensive** -- Whole-graph rail mode stacks sections vertically and resolve.py always sides an inter-section edge as a RIGHT exit feeding a LEFT entry, so the early-return arm (an unmodelled side pairing) is a structural fallback no rail topology reaches. |
+| 359 | `if conn is not None:` | `->L355` | **defensive** -- Skips the straight-rail fallback when _route_inter_section_connector handled a port-to-port bundle. The connector returns a route for every whole-graph rail inter-section edge (always a RIGHT exit feeding a LEFT entry), so the None arm (fall through to straight-rail routing) is a structural fallback no rail topology reaches. |
 
 ## `reserved_bands.py`
 

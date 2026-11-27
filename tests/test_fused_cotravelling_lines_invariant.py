@@ -54,7 +54,7 @@ from nf_metro.layout.routing.invariants import (
     _routes_crossings,
     check_no_fused_cotravelling_lines,
 )
-from nf_metro.parser.mermaid import parse_metro_mermaid
+from nf_metro.parser.mermaid import parse_metro_mermaid_file
 from nf_metro.parser.model import Edge, MetroGraph
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -123,7 +123,7 @@ EXEMPT_FUSED_PAIRS: frozenset[_ExemptPair] = frozenset()
 
 
 def _route(path: Path):
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     routes = route_edges(graph, station_offsets=offsets)
@@ -157,7 +157,7 @@ def _settled(path: Path, monkeypatch: pytest.MonkeyPatch):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        build_observed_render_plan(graph, resolve_theme(None, graph))
+        build_observed_render_plan(graph, resolve_theme(graph))
     assert final, "the render chokepoint never ran the check"
     return final[0]
 
@@ -288,7 +288,7 @@ def _unreported_fused_pairs(path: Path) -> set[tuple[str, str, str, float, float
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-            build_observed_render_plan(graph, resolve_theme(None, graph))
+            build_observed_render_plan(graph, resolve_theme(graph))
     except Exception:  # noqa: BLE001 - the check ran before any abort
         pass
     finally:
@@ -331,7 +331,7 @@ def test_independently_planned_trunks_keep_the_nesting_step() -> None:
     ``report`` and ``sheets`` each converge under a plan of their own and run
     together on both axes."""
     path = REPO_ROOT / "examples" / "topologies" / "exit_run_three_drop_columns.mmd"
-    graph = parse_metro_mermaid(path.read_text())
+    graph = parse_metro_mermaid_file(path)
     compute_layout(graph)
     offsets = compute_station_offsets(graph)
     observed = observe_route_edges(graph, station_offsets=offsets)
@@ -356,7 +356,7 @@ def test_seed_15_preserves_its_stable_render_exception() -> None:
 
     # seed_15's render aborts on two lines sharing one channel (#2041).
     with pytest.raises(invariants.CurveInvariantError, match="collinear overlay"):
-        build_observed_render_plan(graph, resolve_theme(None, graph))
+        build_observed_render_plan(graph, resolve_theme(graph))
 
 
 # seed_41 aborts in its convergence plan; test_hash_seed_determinism.py pins
@@ -474,7 +474,7 @@ def test_analytic_candidate_segments_match_the_plan_mover(
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-                build_observed_render_plan(graph, resolve_theme(None, graph))
+                build_observed_render_plan(graph, resolve_theme(graph))
         except Exception:  # noqa: BLE001 - invalid fixtures may abort after scoring
             pass
 
@@ -600,7 +600,7 @@ def test_inter_row_corridor_seats_its_shared_destination_pair_together(
         warnings.simplefilter("ignore")
         graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
         graph.strict = True
-        build_observed_render_plan(graph, resolve_theme(None, graph))
+        build_observed_render_plan(graph, resolve_theme(graph))
 
     graph, routes, offsets, _violations = _settled(path, monkeypatch)
     step = graph_offset_step(graph)

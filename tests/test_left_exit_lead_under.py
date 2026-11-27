@@ -66,9 +66,7 @@ def landing():
         warnings.simplefilter("ignore")
         patch.setattr(handlers, "_left_exit_lead_under", spy)
         graph = prepare_graph(FIXTURE.read_text(), source_dir=str(FIXTURE.parent))
-        render_graph_result(
-            graph, resolve_theme(None, graph, mode=None), RenderConfig()
-        )
+        render_graph_result(graph, resolve_theme(graph, mode=None), RenderConfig())
     f, pos_n, corner_x, channel_y, boxes, src_x = calls[-1]
     for sid, (x, y, w, h) in boxes.items():
         section = f.graph.sections[sid]

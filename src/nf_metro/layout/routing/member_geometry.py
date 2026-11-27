@@ -16,9 +16,7 @@ from typing import TYPE_CHECKING, TypeVar
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
     COORD_TOLERANCE_FINE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    MIN_CORRIDOR_Y_OVERLAP,
 )
 from nf_metro.layout.geometry import (
     cotravelling_lane_clearance,
@@ -30,6 +28,10 @@ from nf_metro.layout.geometry import (
     spans_share_corridor,
 )
 from nf_metro.layout.lane_plan import recorded_lane_plan
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    min_corridor_y_overlap,
+)
 from nf_metro.layout.route_plan import (
     ConvergenceDisposition,
     ConvergencePlan,
@@ -98,7 +100,6 @@ from nf_metro.layout.routing.landing_deal import (
     landing_orders_of,
 )
 from nf_metro.layout.routing.normalize import (
-    CrossEdgeNesting,
     _align_merge_fed_confluence_to_band,
     _bundle_divergent_distinct_traverses,
     _bundle_same_destination_tails,
@@ -111,7 +112,6 @@ from nf_metro.layout.routing.normalize import (
     _materialize_trunk_slots,
     _reanchor_concentric_corner_fans,
     _reconcile_port_peeloff_risers,
-    _rederive_semantic_end_corners,
     _reseat_concentric_flanking,
     _segment_claim_band,
     _segment_corridor_band,
@@ -120,6 +120,7 @@ from nf_metro.layout.routing.normalize import (
     _set_vchannel_x,
     _settle_entry_wrap_leadouts,
     _settle_same_destination_approach_bundles,
+    _size_concentric_cohorts,
     _stagger_convergent_distinct_lines,
     _unify_coincident_corner_radii,
     _VChannel,
@@ -1952,7 +1953,9 @@ def _seat_channel(channel: _VChannel, coordinate: float) -> None:
         if offset is not None and base_radius is not None:
             return offset, base_radius
         reference = (
-            radii[radius_index] if 0 <= radius_index < len(radii) else CURVE_RADIUS
+            radii[radius_index]
+            if 0 <= radius_index < len(radii)
+            else active_curve_radius()
         )
         return 0.0, reference
 
@@ -2151,7 +2154,7 @@ def _claim_clearance(
     if same_line and _claim_source_compatible(item, claim):
         return 0.0
     overlap = min(channel.y_hi, claim.y_hi) - max(channel.y_lo, claim.y_lo)
-    if overlap <= MIN_CORRIDOR_Y_OVERLAP:
+    if overlap <= min_corridor_y_overlap():
         return 0.0
     return cotravelling_lane_clearance(
         same_line=same_line,
@@ -2405,7 +2408,7 @@ def _carry_seated_run(
     the re-derivation anchors on, with no further displacement to apply.
     """
     radii = route.curve_radii
-    reference_in = reference_out = CURVE_RADIUS
+    reference_in = reference_out = active_curve_radius()
     if radii is not None:
         if 0 <= rank - 1 < len(radii):
             reference_in = radii[rank - 1]
@@ -3168,18 +3171,18 @@ def build_member_geometry_execution(
         for route, axis_id, segment_rank in deferred_exit_turn_ownership:
             route.exit_turn_axis_id = axis_id
             route.exit_turn_segment_rank = segment_rank
-        _rederive_semantic_end_corners(
+        _size_concentric_cohorts(
             normalization_population,
             ctx.curve_radius,
             ctx.station_offsets or {},
+            ctx.offset_step,
             respect_owned_corners=False,
-            cross_edge=CrossEdgeNesting(ctx.offset_step),
         )
         _plan_source_turnouts(normalization_population, graph, ctx.curve_radius)
         # The freeze is the last word on an owned route's radii, and a
         # post-emission pass skips a frozen or owned route, so the concentric
         # fans a per-corner reference seated off the floor have to be
-        # re-anchored to CURVE_RADIUS here, before the plan captures them.
+        # re-anchored to the corner radius here, before the plan captures them.
         _reanchor_concentric_corner_fans(
             normalization_population,
             ctx.station_offsets or {},
@@ -3726,18 +3729,14 @@ def _size_patched_corners(
         # _plan_source_turnouts only ever sets a turnout, and the freeze runs it
         # on fresh templates that carry none.
         sized.source_turnout = None
-    immutable_copy_ids = frozenset(
-        id(sized)
-        for route, sized in zip(population, copies, strict=True)
-        if id(route) not in mutable_route_ids
-    )
-    cross_edge_families = _rederive_semantic_end_corners(
+    _size_concentric_cohorts(
         copies,
         curve_radius,
         station_offsets,
+        offset_step,
         respect_owned_corners=False,
-        cross_edge=CrossEdgeNesting(offset_step, immutable_copy_ids),
     )
+    cross_edge_families: list[list[tuple[RoutedPath, int]]] = []
     _plan_source_turnouts(copies, graph, curve_radius)
     _reanchor_concentric_corner_fans(copies, station_offsets, curve_radius)
     _unify_coincident_corner_radii(

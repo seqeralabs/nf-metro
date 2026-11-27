@@ -314,7 +314,7 @@ def test_tied_feeders_compile_onto_distinct_entry_slots(
     assert not captured.kept_drawn
 
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    observed = svg.build_observed_render_plan(graph, resolve_theme(None, graph))
+    observed = svg.build_observed_render_plan(graph, resolve_theme(graph))
     slots: dict[str, dict[str, set[float]]] = {}
     for route in observed.plan.routes:
         port = observed.plan.graph.ports.get(route.edge.target)

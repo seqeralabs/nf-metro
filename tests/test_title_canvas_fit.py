@@ -36,7 +36,7 @@ TITLE_FIXTURES = (
 
 def _plan(path: Path) -> RenderPlan:
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    return build_render_plan(graph, resolve_theme(None, graph))
+    return build_render_plan(graph, resolve_theme(graph))
 
 
 def _title_right_edge(plan: RenderPlan) -> float:

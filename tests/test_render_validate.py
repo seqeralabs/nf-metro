@@ -21,10 +21,10 @@ from pathlib import Path
 import pytest
 
 from nf_metro.layout.engine import compute_layout
+from nf_metro.manifest import read_manifest
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render import build_render_plan, emit_render_plan, validate_render
-from nf_metro.render.manifest import read_manifest
 from nf_metro.render.validate import (
     CHEVRON_OFF_STROKE,
     LABEL_STRIKE,
@@ -62,7 +62,7 @@ def _layout(rel_name: str) -> MetroGraph:
 @lru_cache(maxsize=None)
 def _render(rel_name: str) -> str:
     graph = _layout(rel_name)
-    theme_name = graph.style if graph.style in THEMES else "nfcore"
+    theme_name = graph.style if graph.style in THEMES else "default"
     plan = build_render_plan(graph, THEMES[theme_name])
     _PLANS[rel_name] = plan
     return emit_render_plan(plan)
@@ -144,13 +144,14 @@ def test_carried_line_overlap_is_exempt() -> None:
     assert not validate_render(over)
 
 
-# Line ``a`` runs right, rounds a corner down through (55, 5), and lifts the pen
-# across a bridge gap from y=100 to y=120.
+# Line ``a`` runs right, rounds a quarter-circle corner down through its
+# midpoint, and lifts the pen across a bridge gap from y=100 to y=120.
 _CHEVRON_ROUTE = (
-    '<path d="M0,0 L40,0 Q60,0,60,20 L60,100 M60,120 L60,200" '
+    '<path d="M0,0 L40,0 C51.0457,0,60,8.9543,60,20 L60,100 M60,120 L60,200" '
     'class="metro-line-a" data-line-id="a" />'
 )
 _DIAGONAL = (0.5**0.5, 0.5**0.5)
+_CORNER_MID = (40 + 20 * 0.5**0.5, 20 - 20 * 0.5**0.5)
 
 
 def _chevron_svg(
@@ -176,7 +177,7 @@ def _chevron_svg(
     ("centre", "heading"),
     [
         ((20.0, 0.0), (1.0, 0.0)),
-        ((55.0, 5.0), _DIAGONAL),
+        (_CORNER_MID, _DIAGONAL),
         ((60.0, 94.0), (0.0, 1.0)),
     ],
     ids=["straight-run", "on-rounded-corner", "clear-of-gap"],
@@ -192,7 +193,7 @@ def test_chevron_on_its_drawn_stroke_is_clean(
     ("centre", "heading", "line_id", "problem"),
     [
         ((55.0, 0.0), (1.0, 0.0), "a", "off its line's drawn stroke"),
-        ((55.0, 5.0), (1.0, 0.0), "a", "off its line's drawn tangent"),
+        (_CORNER_MID, (1.0, 0.0), "a", "off its line's drawn tangent"),
         ((20.0, 0.0), (-1.0, 0.0), "a", "off its line's drawn tangent"),
         ((60.0, 97.0), (0.0, 1.0), "a", "bridge gap"),
         ((20.0, 0.0), (1.0, 0.0), "b", "no drawn stroke of its line"),
@@ -237,9 +238,9 @@ def test_no_manifest_yields_no_findings() -> None:
 
 
 def test_parser_collapses_smoothing_curve_to_its_corner() -> None:
-    """A ``Q`` smoothing arc is read back as its sharp corner (control point)."""
+    """A rounded corner is read back as the sharp corner its legs meet at."""
     svg = (
-        '<path d="M0,0 L40,0 Q50,0,50,10 L50,50" '
+        '<path d="M0,0 L40,0 C45.5228,0,50,4.4772,50,10 L50,50" '
         'class="metro-line-x" data-line-id="x" />'
     )
     (line_id, subpaths) = parse_route_polylines(svg)[0]

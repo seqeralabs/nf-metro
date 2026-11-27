@@ -1,0 +1,25 @@
+---
+title: DAG
+---
+flowchart TB
+	id0[all]
+	id1[multiqc]
+	id2[fastqc]
+	id3[sort_bam]
+	id4[align]
+	id5[trim_reads]
+	id6[index_bam]
+	style id0 fill:#D9A157,stroke-width:2px,color:#333333
+	style id1 fill:#57D97C,stroke-width:2px,color:#333333
+	style id2 fill:#C6D957,stroke-width:2px,color:#333333
+	style id3 fill:#57D9C6,stroke-width:2px,color:#333333
+	style id4 fill:#D95757,stroke-width:2px,color:#333333
+	style id5 fill:#57A1D9,stroke-width:2px,color:#333333
+	style id6 fill:#7CD957,stroke-width:2px,color:#333333
+	id1 --> id0
+	id6 --> id0
+	id3 --> id1
+	id2 --> id1
+	id4 --> id3
+	id5 --> id4
+	id3 --> id6

@@ -16,20 +16,15 @@ from collections.abc import Callable, Iterator
 
 from nf_metro.layout.constants import (
     BUNDLE_TO_BUNDLE_CLEARANCE,
-    CURVE_RADIUS,
     EDGE_TO_BUNDLE_CLEARANCE,
-    MERGE_GAP_MIN,
-    MIN_INTER_SECTION_GAP,
     MIN_INTER_SECTION_ROW_GAP,
     MIN_PORT_STATION_GAP,
-    MIN_STATION_FLAT_LENGTH,
     OFFSET_STEP,
     PLACEMENT_X_GAP,
     PLACEMENT_Y_GAP,
     PORT_MIN_GAP,
     SAME_COORD_TOLERANCE,
     SECTION_HEADER_PROTRUSION,
-    SECTION_X_PADDING,
     graph_offset_step,
 )
 from nf_metro.layout.geometry import (
@@ -42,6 +37,13 @@ from nf_metro.layout.geometry import (
     section_column_span,
     section_row_span,
     shift_section,
+)
+from nf_metro.layout.pass_metrics import (
+    active_curve_radius,
+    active_metrics,
+    merge_gap_min,
+    min_inter_section_gap,
+    min_station_flat_length,
 )
 from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.layout.routing.common import (
@@ -292,7 +294,7 @@ def _effective_section_width(section: Section) -> float:
     inflating the column; Stage 1.5 of compute_layout absorbs the leftward
     overhang via a global x_offset bump.
     """
-    return section.bbox_x + section.bbox_w + SECTION_X_PADDING
+    return section.bbox_x + section.bbox_w + active_metrics().section_x_padding
 
 
 def _scoped_cell_packs(
@@ -701,8 +703,8 @@ def _wrap_bundle_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     (LEFT/RIGHT) entry port wraps through the inter-row gap as a
     horizontal run (see ``_route_left_entry_wrap``).  To keep that run
     clear of both bounding obstacles it needs a band of
-    ``INTER_ROW_EDGE_CLEARANCE`` below the upper bbox bottom, the bundle
-    span, and ``INTER_ROW_HEADER_CLEARANCE`` above the lower row (clearing
+    ``inter_row_edge_clearance()`` below the upper bbox bottom, the bundle
+    span, and ``inter_row_header_clearance()`` above the lower row (clearing
     its header badge, not just the bbox edge); a narrow gap squeezes the
     bundle flush against a box.  Returns, per adjacent
     ``(upper_row, lower_row)`` pair, the required bbox-to-bbox gap so the
@@ -834,8 +836,8 @@ def _merge_trunk_row_minimums(graph: MetroGraph) -> dict[tuple[int, int], float]
     bypass channel routes in the inter-row gap *above* the bottom row (see
     ``bypass_bottom_y``).  That channel is a horizontal run spanning the
     trunk's columns, so -- like an inter-row wrap bundle -- it needs
-    ``INTER_ROW_EDGE_CLEARANCE`` below the upper row's bbox, the bundle span,
-    and ``INTER_ROW_HEADER_CLEARANCE`` above the bottom row's header.  Unlike a
+    ``inter_row_edge_clearance()`` below the upper row's bbox, the bundle span,
+    and ``inter_row_header_clearance()`` above the bottom row's header.  Unlike a
     wrap, the bottom-row target need not share a column with the upper-row
     sections the channel crosses, so the column-overlap test that gates header
     widening misses this gap; the reservation here makes the placement pass
@@ -903,7 +905,7 @@ def _inter_row_routing_minimums(graph: MetroGraph) -> dict[tuple[int, int], floa
             through_band
             + BUNDLE_TO_BUNDLE_CLEARANCE
             + max(over_top_lines - 1, 0) * offset_step
-            + CURVE_RADIUS
+            + active_curve_radius()
         )
         minimums[gap] = max(minimums.get(gap, 0.0), stacked)
     return minimums
@@ -1199,7 +1201,7 @@ def _min_gap_for_bundles(
     (:data:`BUNDLE_TO_BUNDLE_CLEARANCE`).
 
     For an empty list, returns 0 (no gap requirement from routing; the
-    caller's static :data:`MIN_INTER_SECTION_GAP` floor still applies).
+    caller's ``min_inter_section_gap()`` floor applies on its own).
     """
     if not bundle_line_counts:
         return 0.0
@@ -1358,7 +1360,7 @@ def _column_pair_min_gap(
     pack_for_section: dict[str, tuple[str, ...]],
     merge_routing_pairs: set[tuple[int, int]],
     runway_reservation_pairs: set[tuple[int, int]],
-    min_gap: float = MIN_INTER_SECTION_GAP,
+    min_gap: float | None = None,
 ) -> tuple[float, list[int]]:
     """Minimum inter-section gap needed between columns ``col`` and ``col+1``.
 
@@ -1369,18 +1371,21 @@ def _column_pair_min_gap(
 
     Principled bundle width: A + Σ bundle_widths + (count-1)*B + A.  For a
     single bundle of one line this collapses to 2*A; with the default A=16 px
-    that's 32 px, smaller than the static MIN_INTER_SECTION_GAP=40 px so
+    that's 32 px, smaller than the :func:`min_inter_section_gap` floor (40 px at
+    the base radius), so
     single-line gaps are NOT widened past the standard layout column gap.
     Multi-line or multi-bundle corridors deterministically claim only the
     horizontal space their visual width actually occupies.
     """
+    if min_gap is None:
+        min_gap = min_inter_section_gap()
     gap = (col, col + 1)
     bundles = _bundles_in_gap(graph, col_assign, *gap, pack_for_section)
     offset_step = graph_offset_step(graph)
     bundle_min = _min_gap_for_bundles(bundles, offset_step=offset_step)
     effective_min = max(min_gap, bundle_min)
     if gap in merge_routing_pairs:
-        effective_min = max(effective_min, MERGE_GAP_MIN)
+        effective_min = max(effective_min, merge_gap_min())
     if gap in runway_reservation_pairs:
         # A handler owning a fixed channel one curve runway farther into the gap
         # than the symmetric A/B allocation -- a merge-around descent, or a
@@ -1390,7 +1395,7 @@ def _column_pair_min_gap(
         # rounds at full radius.
         effective_min = max(
             effective_min,
-            bundle_min + CURVE_RADIUS,
+            bundle_min + active_curve_radius(),
         )
     return effective_min, bundles
 
@@ -1484,20 +1489,22 @@ def _enforce_min_column_gaps(
     col_assign: dict[str, int],
     min_col: int,
     max_col: int,
-    min_gap: float = MIN_INTER_SECTION_GAP,
+    min_gap: float | None = None,
     requested_gap: float | None = None,
 ) -> None:
     """Shift columns rightward so adjacent section bboxes have enough room.
 
     For each adjacent column pair, computes the minimum gap needed to
     accommodate the routing bundle (based on line count) and the static
-    floor (MIN_INTER_SECTION_GAP).  If the physical gap is too narrow,
+    floor (min_inter_section_gap()).  If the physical gap is too narrow,
     columns are shifted rightward.  Warns when the gap had to be widened
     beyond the user's requested value.
 
     Operates in ``offset_x`` space (Stage 1.3, before global coordinates
     settle), so extents include ``offset_x`` and the shift adds to it.
     """
+    if min_gap is None:
+        min_gap = min_inter_section_gap()
     if max_col <= min_col:
         return
 
@@ -1546,7 +1553,7 @@ def reenforce_column_gaps(graph: MetroGraph) -> None:
         col_assign,
         min_col,
         max_col,
-        min_gap=MIN_INTER_SECTION_GAP,
+        min_gap=min_inter_section_gap(),
         right_extent=lambda s: s.bbox_x + s.bbox_w,
         left_extent=lambda s: s.bbox_x,
         shift=lambda s, dx: shift_section(graph, s, dx=dx),
@@ -1738,7 +1745,7 @@ def position_ports(section: Section, graph: MetroGraph) -> None:
             for sid in internal_ids
             if sid in graph.stations
         ):
-            exit_gap = max(exit_gap, MIN_STATION_FLAT_LENGTH)
+            exit_gap = max(exit_gap, min_station_flat_length())
         exit_target_y = trailing_y + flow * exit_gap
         entry_target_y = leading_y - flow * MIN_PORT_STATION_GAP
         for pid in exit_set:

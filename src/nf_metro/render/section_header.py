@@ -50,7 +50,9 @@ took rather than a fixed band above ``bbox_y``.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
@@ -135,10 +137,46 @@ class _Scored(NamedTuple):
     placement: SectionHeaderPlacement
 
 
+class HeaderLettering(NamedTuple):
+    """How a theme sets section titles: in capitals, and with extra tracking."""
+
+    uppercase: bool = False
+    letter_spacing: float = 0.0
+
+
+_HEADER_LETTERING: ContextVar[HeaderLettering] = ContextVar(
+    "nf_metro_header_lettering", default=HeaderLettering()
+)
+
+
+@contextmanager
+def header_lettering_context(lettering: HeaderLettering) -> Iterator[None]:
+    """Measure section titles as the render's theme draws them."""
+    token = _HEADER_LETTERING.set(lettering)
+    try:
+        yield
+    finally:
+        _HEADER_LETTERING.reset(token)
+
+
 def estimate_section_label_width(name: str, font_size: float) -> float:
-    """Estimate the rendered width of a section title in pixels."""
+    """Estimate the rendered width of a section title in pixels.
+
+    Under a theme that draws titles in capitals or with letter spacing, the
+    title is measured as drawn: in capitals, by the wider of the reservation
+    policy and the face's per-glyph advances, plus the tracking after every
+    letter.
+    """
     style = text_style(font_size, "bold")
-    return DEFAULT_TEXT_METRICS.reserve_width(name, style, TextRole.SECTION_HEADER)
+    lettering = _HEADER_LETTERING.get()
+    if lettering == HeaderLettering():
+        return DEFAULT_TEXT_METRICS.reserve_width(name, style, TextRole.SECTION_HEADER)
+    text = name.upper() if lettering.uppercase else name
+    width = max(
+        DEFAULT_TEXT_METRICS.reserve_width(text, style, TextRole.SECTION_HEADER),
+        DEFAULT_TEXT_METRICS.advance(text, style, TextRole.SECTION_HEADER),
+    )
+    return width + lettering.letter_spacing * len(text)
 
 
 def _widest_label_line(lines: Sequence[str], font_size: float) -> str:
@@ -604,6 +642,7 @@ def resolve_section_header_placement(
     label_font_size: float,
     polylines: list[Polyline] | None = None,
     title_font_size: float | None = None,
+    badges: bool = True,
 ) -> SectionHeaderPlacement:
     """Pick a clash-free position for ``section``'s header (see module docstring).
 
@@ -613,9 +652,10 @@ def resolve_section_header_placement(
     default above-left position is returned (used only where routes are not yet
     available).  ``title_font_size`` sizes the map title's clearance band for an
     ``above``/``nudge`` header wrapping upward; omit it for an untitled map or
-    when the caller doesn't know the theme yet."""
+    when the caller doesn't know the theme yet.  ``badges`` False (a theme
+    without number badges) lays every header out as an unnumbered one."""
     circle_r = SECTION_NUM_CIRCLE_R_LARGE
-    badge_r = circle_r if section.has_badge else 0.0
+    badge_r = circle_r if badges and section.has_badge else 0.0
     num_y = SECTION_NUM_Y_OFFSET
     gap = SECTION_HEADER_SIDE_GAP
 
@@ -724,11 +764,12 @@ def resolve_all_section_headers(
     label_font_size: float,
     polylines: list[Polyline],
     title_font_size: float | None = None,
+    badges: bool = True,
 ) -> dict[str, SectionHeaderPlacement]:
     """Resolve every drawn section's header placement once, keyed by section id."""
     return {
         section.id: resolve_section_header_placement(
-            graph, section, label_font_size, polylines, title_font_size
+            graph, section, label_font_size, polylines, title_font_size, badges
         )
         for section in graph.sections.values()
         if section.is_drawn_box

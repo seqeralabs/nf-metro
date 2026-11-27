@@ -22,9 +22,10 @@ from pathlib import Path
 import pytest
 
 from nf_metro.api import RenderConfig, prepare_graph, render_graph_result
-from nf_metro.layout.constants import COORD_TOLERANCE, INTER_ROW_HEADER_CLEARANCE
+from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.geometry import segment_intersects_bbox
 from nf_metro.layout.lane_plan import recorded_lane_plan
+from nf_metro.layout.pass_metrics import inter_row_header_clearance
 from nf_metro.layout.port_order_plan import SideRule, port_travel
 from nf_metro.layout.routing.common import (
     right_normal_axis_sign,
@@ -53,7 +54,7 @@ INSET = 2.0
 def _render(path: Path):
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
     plan = render_graph_result(
-        graph, resolve_theme(None, graph, "light"), RenderConfig()
+        graph, resolve_theme(graph, "light"), RenderConfig()
     ).plan
     drawn = list(zip(plan.routes, plan.route_polylines, strict=True))
     _RECORDS[path] = recorded_lane_plan(graph)
@@ -196,7 +197,7 @@ def test_a_branch_back_across_the_exit_row_clears_the_header_badges(
         if not traverse:
             continue
         checked += 1
-        assert max(traverse) <= row_top - INTER_ROW_HEADER_CLEARANCE, (
+        assert max(traverse) <= row_top - inter_row_header_clearance(), (
             route.line_id,
             line,
         )

@@ -330,7 +330,7 @@ def test_spanning_station_draws_one_circle_per_used_rail_plus_connector():
     from nf_metro.themes import THEMES
 
     graph = _rail_graph()
-    svg = render_svg(graph, THEMES["nfcore"])
+    svg = render_svg(graph, THEMES["default"])
 
     spanning = [
         st
@@ -412,7 +412,7 @@ def test_blank_terminus_renders_bar_and_icon_not_interchange():
     from nf_metro.themes import THEMES
 
     graph = _rail_graph()
-    svg = render_svg(graph, THEMES["nfcore"])
+    svg = render_svg(graph, THEMES["default"])
 
     blank_termini = [
         st
@@ -667,7 +667,6 @@ def test_stacked_rail_section_bbox_contains_hanging_labels():
 
     src = (
         "%%metro title: t\n"
-        "%%metro style: dark\n"
         "%%metro line_spread: rails\n"
         "%%metro label_angle: 45\n"
         "%%metro line: a | A | #2db572\n"
@@ -707,7 +706,7 @@ def test_rail_mode_off_by_default_leaves_graph_unchanged():
     g1 = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g1.line_spread is LineSpread.BUNDLE
     compute_layout(g1)
-    svg1 = render_svg(g1, THEMES["nfcore"])
+    svg1 = render_svg(g1, THEMES["default"])
 
     # No station should carry a rail span when rail mode is off.
     assert all(
@@ -717,7 +716,7 @@ def test_rail_mode_off_by_default_leaves_graph_unchanged():
     g2 = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     g2.line_spread = LineSpread.BUNDLE  # explicit no-op
     compute_layout(g2)
-    svg2 = render_svg(g2, THEMES["nfcore"])
+    svg2 = render_svg(g2, THEMES["default"])
 
     assert svg1 == svg2
 
@@ -846,7 +845,7 @@ def test_no_rail_directive_default_off_byte_identical():
     g = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g.has_rail_sections is False
     compute_layout(g)
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     # No rail span leaks into a normal graph.
     assert all(
         s.rail_top_y is None and s.rail_bottom_y is None for s in g.stations.values()
@@ -967,7 +966,7 @@ def test_angled_rail_labels_render_rotated():
 
     g = _rail_graph()
     assert g.label_angle == 45.0
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     assert "rotate(45" in svg, "expected rotated label transforms in the SVG"
 
 
@@ -980,7 +979,7 @@ def test_label_angle_default_off_byte_identical():
     g = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g.label_angle is None
     compute_layout(g)
-    svg = render_svg(g, THEMES["nfcore"])
+    svg = render_svg(g, THEMES["default"])
     assert "rotate(45" not in svg
     assert "rotate(" not in svg
 
@@ -1086,7 +1085,7 @@ def test_interchange_link_uses_station_fill_not_dark_stroke():
     from nf_metro.themes import THEMES
 
     graph = _rail_graph()
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     svg = render_svg(graph, theme)
 
     spanning = [
@@ -1126,12 +1125,12 @@ def test_legend_combo_default_off_byte_identical():
     g = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     assert g.legend_combos == []
     compute_layout(g)
-    svg1 = render_svg(g, THEMES["nfcore"])
+    svg1 = render_svg(g, THEMES["default"])
 
     g2 = parse_metro_mermaid_file(EXAMPLES / "rnaseq_auto.mmd")
     g2.legend_combos = []  # explicit no-op
     compute_layout(g2)
-    svg2 = render_svg(g2, THEMES["nfcore"])
+    svg2 = render_svg(g2, THEMES["default"])
     assert svg1 == svg2
 
 
@@ -1210,7 +1209,7 @@ def test_rail_above_labels_do_not_overlap_section_above():
     compute_layout(graph)
     # render_svg grows section bboxes to fit labels; a missing above-band shows
     # up here as the panel box climbing into the section above it.
-    render_svg(graph, THEMES["nfcore"])
+    render_svg(graph, THEMES["default"])
     overlaps = check_section_overlap(graph)
     assert not overlaps, f"section boxes overlap after label growth: {overlaps}"
 
@@ -1254,7 +1253,7 @@ def test_spanning_rail_station_marker_tints_interchange():
     assert interchange.marker is not None
     assert interchange.marker.fill == "#1f4e79"
 
-    svg = render_svg(graph, THEMES["nfcore"])
+    svg = render_svg(graph, THEMES["default"])
 
     marked = _knob_fills_for_station(svg, "interchange")
     assert marked, "interchange must draw rail knobs"
@@ -1262,7 +1261,7 @@ def test_spanning_rail_station_marker_tints_interchange():
         f"coloured marker must tint the interchange knobs, got {marked}"
     )
 
-    default_fill = THEMES["nfcore"].station_fill
+    default_fill = THEMES["default"].station_fill
     unmarked = _knob_fills_for_station(svg, "src")
     assert unmarked and all(fill == default_fill for fill in unmarked), (
         f"unmarked spanning station must keep the default fill, got {unmarked}"
@@ -1486,7 +1485,7 @@ def test_rail_station_markers_seat_on_their_rails():
     compute_layout(graph, validate=True)
     rails = _section_line_rails(graph)
 
-    svg = render_svg(graph, THEMES["nfcore"])
+    svg = render_svg(graph, THEMES["default"])
     root = ET.fromstring(svg)
 
     tol = 1.0
@@ -1531,7 +1530,7 @@ def test_single_rail_marker_glyph_seats_on_its_rail():
     assert haplo.rail_top_y is None and haplo.rail_bottom_y is None
     rail_y = haplo.y
 
-    svg = render_svg(graph, THEMES["nfcore"])
+    svg = render_svg(graph, THEMES["default"])
     root = ET.fromstring(svg)
 
     glyph_cy = None
@@ -1582,7 +1581,7 @@ def test_coloured_subset_interchange_knobs_seat_on_spanned_rails():
     assert hub.marker is not None and hub.marker.fill == "#1f4e79"
     spanned = sorted([graph.stations["src_a"].y, graph.stations["src_c"].y])
 
-    svg = render_svg(graph, THEMES["nfcore"])
+    svg = render_svg(graph, THEMES["default"])
     knob_cys = sorted(
         float(el.attrib["cy"])
         for el in _rail_elements_for_station(svg, "hub", "nf-metro-rail-knob")
@@ -1603,7 +1602,7 @@ def test_coloured_spanning_interchange_has_light_outline():
     from nf_metro.render import render_svg
     from nf_metro.themes import THEMES
 
-    theme = THEMES["nfcore"]
+    theme = THEMES["default"]
     graph = parse_metro_mermaid(RAIL_MARKER_SUBSET_MMD.read_text())
     compute_layout(graph)
 

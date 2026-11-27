@@ -11,7 +11,8 @@ Each option targets a field on :class:`~nf_metro.parser.model.MetroGraph` of
 the same name (or :attr:`LayoutOption.attr`): the directive writes that field
 during parsing, an explicitly-set CLI flag overwrites it afterwards, and the
 layout engine and renderer read it. Precedence is uniform: CLI flag (when set)
-> ``%%metro`` directive > built-in default.
+> ``%%metro`` directive > the theme's ``layout:`` block (for the options
+:data:`nf_metro.themes.stack.THEMEABLE_LAYOUT_OPTIONS` lists) > built-in default.
 """
 
 from __future__ import annotations
@@ -23,6 +24,11 @@ from typing import Any, Literal, TypeGuard
 
 # Returned by :func:`coerce` in place of a value when the payload is unusable.
 INVALID = object()
+
+#: The two display modes a theme renders in.
+LIGHT = "light"
+DARK = "dark"
+MODES = (LIGHT, DARK)
 
 OptionKind = Literal["float", "int", "bool", "choice", "str"]
 NumberSign = Literal["any", "nonneg", "positive"]
@@ -66,6 +72,24 @@ class LayoutOption:
     def cli_flag(self) -> str:
         """Long CLI flag for this option (kebab-cased ``name``)."""
         return "--" + self.name.replace("_", "-")
+
+    def json_schema(self) -> dict[str, Any]:
+        """The JSON Schema of this option's value in a theme file."""
+        schema: dict[str, Any] = {"description": self.help}
+        if self.kind == "choice":
+            schema["enum"] = list(self.choices)
+        else:
+            schema["type"] = _JSON_TYPES[self.kind]
+        if self.sign == "nonneg":
+            schema["minimum"] = 0
+        elif self.sign == "positive":
+            schema["exclusiveMinimum"] = 0
+        if self.max_val is not None:
+            schema["maximum"] = self.max_val
+        return schema
+
+
+_JSON_TYPES = {"bool": "boolean", "int": "integer", "float": "number", "str": "string"}
 
 
 def coerce(opt: LayoutOption, raw: str) -> tuple[Any, str]:
@@ -177,6 +201,18 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         help="Vertical gap between sections.",
     ),
     LayoutOption(
+        name="section_x_padding",
+        kind="float",
+        sign="nonneg",
+        help="Space between a section's box and its stations along x.",
+    ),
+    LayoutOption(
+        name="section_y_padding",
+        kind="float",
+        sign="nonneg",
+        help="Space between a section's box and its stations along y.",
+    ),
+    LayoutOption(
         name="track_gap",
         kind="float",
         sign="nonneg",
@@ -223,6 +259,24 @@ LAYOUT_OPTIONS: tuple[LayoutOption, ...] = (
         kind="float",
         sign="any",
         help="Station label angle in degrees (0 = horizontal).",
+    ),
+    LayoutOption(
+        name="label_offset",
+        kind="float",
+        sign="nonneg",
+        help="Gap between a station marker and its label.",
+    ),
+    LayoutOption(
+        name="diagonal_run",
+        kind="float",
+        sign="positive",
+        help="Length of the 45-degree transition between two tracks.",
+    ),
+    LayoutOption(
+        name="curve_radius_ratio",
+        kind="float",
+        sign="positive",
+        help="Corner radius at the line centre, in multiples of the line width.",
     ),
     LayoutOption(
         name="font_scale",

@@ -59,7 +59,7 @@ def _settled(
         warnings.simplefilter("ignore")
         mp.setattr(svg, "_settle_render_geometry", settle)
         source = prepare_graph(text, source_dir=str(path.parent))
-        svg.build_observed_render_plan(source, resolve_theme(None, source))
+        svg.build_observed_render_plan(source, resolve_theme(source))
     drawn, last = settled[-1]
     return source, drawn, list(last.routes)
 

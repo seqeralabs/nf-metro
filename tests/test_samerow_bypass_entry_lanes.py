@@ -61,7 +61,7 @@ Point = tuple[float, float]
 def _drawn_routes(fixture: str):  # noqa: ANN202
     path = TOPOLOGIES / f"{fixture}.mmd"
     graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
-    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
+    plan = build_render_plan(graph, resolve_theme(graph, "light"))
     return graph, list(zip(plan.routes, plan.route_polylines))
 
 
@@ -334,7 +334,7 @@ graph LR
 
 def _inline_routes(text: str):  # noqa: ANN202
     graph = prepare_graph(text)
-    plan = build_render_plan(graph, resolve_theme("nfcore", graph, "light"))
+    plan = build_render_plan(graph, resolve_theme(graph, "light"))
     return graph, {
         (route.edge.source, route.edge.target, route.line_id): list(points)
         for route, points in zip(plan.routes, plan.route_polylines)
