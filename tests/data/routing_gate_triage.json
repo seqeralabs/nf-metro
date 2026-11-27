@@ -2000,11 +2000,11 @@
     "status": "defensive"
   },
   "co_row.py::if not _meets_a_neighbour(feeders, windows, others, flow, tolerance):::#1": {
-    "note": "Witnessed only by `examples/topologies/co_row_feeders_shared_diagonal.mmd`, whose station `s0n0` the grid-snap half-pitch tie rule seats on its exit port's row instead of the row the arm needs; under validation `_guard_station_bundle_contiguous_at_fan_port` rejects that layout. Reachable; open until that tie-rule conflict is resolved.",
+    "note": "shared_co_row_window keeps a group's window unmoved when it meets no neighbouring diagonal. Reachable: pinned with no neighbours by test_far_side_line_diving_first_adopts_the_nearest_source_window and with a clear neighbour by test_neighbour_diagonal_outside_the_shared_window_is_left_alone. The one swept map that plans a group, `tests/fixtures/co_column_feeders_shared_diagonal_bt.mmd`, meets a neighbouring diagonal and slides past it, so it takes the other arm.",
     "status": "needs-review"
   },
   "intra_handlers.py::if group is not None:::#1": {
-    "note": "Witnessed only by `examples/topologies/co_row_feeders_shared_diagonal.mmd`, whose station `s0n0` the grid-snap half-pitch tie rule seats on its exit port's row instead of the row the arm needs; under validation `_guard_station_bundle_contiguous_at_fan_port` rejects that layout. Reachable; open until that tie-rule conflict is resolved.",
+    "note": "_route_diagonal draws an LR co-row feeder at its planned group's window. The one swept map that plans a group, `tests/fixtures/co_column_feeders_shared_diagonal_bt.mmd`, is BT and is drawn by `tb_handlers`; no swept LR map plans one, and a search of 6500 small LR maps that keep one path per line found none. Open: whether an LR map reaches the arm without a line taking two paths.",
     "status": "needs-review"
   },
   "exit_turns.py::elif wrap_kind is _LeftEntryRoute.BAND_HOP:::#1": {

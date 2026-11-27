@@ -5,6 +5,14 @@ line on the far side of the drop dives first it crosses its neighbour's
 straight, and the neighbour crosses it back on the target row.  The group must
 dive together instead, and a group whose lanes never cross twice must render
 exactly as its members would alone.
+
+``co_row_feeders_shared_diagonal.mmd`` is the LR witness of the drawn result:
+green and orange leave ``stats`` on two bypass helpers round ``BAM_ALIGN`` and
+climb into the exit port that BAM_ALIGN's own lines reach on the row above.
+They climb as one bundle, so the map plans no group.
+``co_column_feeders_shared_diagonal_bt.mmd`` is the witness of the group
+planner: its feeders reach one top exit from distinct sources, and only the
+planned group keeps them on one diagonal.
 """
 
 from __future__ import annotations
@@ -120,6 +128,8 @@ def test_feeders_of_one_exit_port_never_cross_twice(path: Path) -> None:
 
 
 def test_co_row_feeders_turn_together() -> None:
+    """Two lines bypassing ``BAM_ALIGN`` from ``stats`` climb on one diagonal
+    without crossing."""
     plan, _svg = _render(SHARED_DIAGONAL.read_text(), SHARED_DIAGONAL.parent)
     feeders = [
         points
@@ -319,13 +329,12 @@ def _heading(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
 
 
-@pytest.mark.parametrize(
-    "path", [SHARED_DIAGONAL, SHARED_DIAGONAL_BT], ids=lambda path: path.stem
-)
 def test_shared_diagonal_keeps_the_end_spacing_of_its_lanes(
-    monkeypatch: pytest.MonkeyPatch, path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    plan, groups = _render_with_groups(monkeypatch, path)
+    """A planned group's lanes keep the spacing they have at either end of the
+    diagonal they share."""
+    plan, groups = _render_with_groups(monkeypatch, SHARED_DIAGONAL_BT)
     assert groups
     drawn = {
         (route.edge.source, route.edge.target, route.line_id): points

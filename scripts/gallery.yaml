@@ -1432,10 +1432,10 @@ gallery:
     source_dir: examples/topologies
     category: Bypass Routing
     description:
-      Red bypasses BAM_ALIGN on stats' row while blue leaves stats on the same
-      row, and both climb into one exit port. The two feeders rise on one
-      shared diagonal instead of each picking its own, so blue does not climb
-      first, cross red, and get crossed back.
+      Green and orange leave stats and bypass BAM_ALIGN on stats' row, then
+      climb into the exit port that red and blue reach from BAM_ALIGN on the
+      row above. The two climbing lines rise as one bundle on one shared
+      diagonal, so neither crosses the other.
   - id: bypass_label_rake_left
     source_dir: examples/topologies
     category: Bypass Routing

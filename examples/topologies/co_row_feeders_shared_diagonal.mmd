@@ -2,6 +2,7 @@
 %%metro line: l0 | Red | #e6194b
 %%metro line: l1 | Green | #3cb44b
 %%metro line: l2 | Blue | #4363d8
+%%metro line: l3 | Orange | #f58231
 
 graph LR
     subgraph sec0 [Quant]
@@ -12,7 +13,7 @@ graph LR
     subgraph sec1 [Export]
         s1n0[sort_filter]
         s1n1[report]
-        s1n0 -->|l0,l2| s1n1
+        s1n0 -->|l0,l1,l2,l3| s1n1
     end
-    s0n1 -->|l0,l1| s1n0
-    s0n0 -->|l0,l2| s1n0
+    s0n1 -->|l0,l2| s1n0
+    s0n0 -->|l1,l3| s1n0
