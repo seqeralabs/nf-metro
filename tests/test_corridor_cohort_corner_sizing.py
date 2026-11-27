@@ -157,14 +157,12 @@ def test_moved_landing_corner_nests_concentrically_with_its_mate(
 def test_unpatched_mate_in_a_moved_corner_cohort_is_resized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The patch moves the junction-fed l1 and l2 descents into sec3's left
-    entry, re-forming the landing cohort the exit-fed l0, l3 and l4 leads turn
-    in.  None of those leads is allocated, so each takes a radius-only patch:
-    its points stay put, its landing corner re-nests around the moved ones."""
+    """The patch moves sec1's l3 lead into sec3's right entry, re-forming the
+    landing cohort the junction-fed l0 lead turns in.  That lead is not
+    allocated, so it takes a radius-only patch: its points stay put, its
+    landing corner re-nests inside the moved one."""
     mate_radii = {
-        ("sec2__exit_right_2", "sec3__entry_left_6", "l0"): (14.0, 22.0),
-        ("sec2__exit_right_2", "sec3__entry_left_6", "l3"): (18.0, 18.0),
-        ("sec2__exit_right_2", "sec3__entry_left_6", "l4"): (10.0, 26.0),
+        ("__junction_9", "sec3__entry_right_5", "l0"): (14.0, 10.0),
     }
     compiles = _compiles(
         monkeypatch, "tests/data/corridor_cohort_witnesses/unpatched_mates_resized.mmd"

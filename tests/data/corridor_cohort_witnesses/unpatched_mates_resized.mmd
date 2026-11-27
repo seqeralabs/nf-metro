@@ -1,86 +1,67 @@
-%%metro title: Fuzz 8500877
-%%metro style: seqera
-%%metro line: l0 | Assemble | #e6194b
-%%metro line: l1 | Polish_Gather | #3cb44b
-%%metro line: l2 | Bam | #4363d8
-%%metro line: l3 | Markdup_Call_Normalize | #f58231
-%%metro line: l4 | Stats | #911eb4
+%%metro title: Fuzz 8401796
+%%metro line: l0 | Annotate_Trim | #e6194b
+%%metro line: l1 | Export_Normalize | #3cb44b
+%%metro line: l2 | Pca | #4363d8
+%%metro line: l3 | Index_Normalize | #f58231
 
 graph LR
-    subgraph sec0 [Annotate 0]
-        s0n0[ASSEMBLE_NORMALIZE_SORT]
-        s0n1[cluster_bin]
-        s0n0 -->|l0| s0n1
-        s0n0 -->|l1| s0n1
-        s0n0 -->|l2| s0n1
-        s0n0 -->|l3| s0n1
-        s0n0 -->|l4| s0n1
+    subgraph sec0 [Stats_Fastqc 0]
+        %%metro exit: right | l0, l1, l2
+        s0n0[export]
+        s0n1[classify]
+        s0n2[merge_quant_classify]
+        s0n0 -->|l1,l2| s0n1
+        s0n1 -->|l1,l2| s0n2
     end
-    subgraph sec1 [Index 1]
-        s1n0[polish_classify]
-        s1n1[cluster_bin]
-        s1n2[normalize_gather]
-        s1n3[export]
-        s1n0 -->|l0| s1n1
+    subgraph sec1 [Classify 1]
+        s1n0[call_vcf_gather]
+        s1n1[dedup]
+        s1n2[merge_classify]
+        s1n3[assemble_filter]
+        s1n0 -->|l0,l2| s1n2
         s1n0 -->|l1| s1n1
-        s1n0 -->|l3| s1n1
-        s1n1 -->|l0| s1n2
-        s1n1 -->|l3| s1n2
-        s1n2 -->|l0| s1n3
-        s1n2 -->|l3| s1n3
-        s1n2 -->|l4| s1n3
-        s1n1 -->|l1| s1n3
+        s1n1 -->|l1| s1n2
+        s1n2 -->|l1,l2,l3| s1n3
     end
-    subgraph sec2 [Count 2]
+    subgraph sec2 [Stats 2]
+        s2n0[stats]
+        s2n1[gather]
+        s2n2[summarise]
+        s2n4[classify]
+        s2n0 -->|l1| s2n1
+        s2n1 -->|l1| s2n2
+        s2n2 -->|l1| s2n4
+    end
+    subgraph sec3 [Dedup 3]
+        s3n0[filter]
+        s3n1[stats]
+        s3n2[trim]
+        s3n3[BAM_MERGE]
+        s3n0 -->|l0| s3n2
+        s3n2 -->|l0,l1,l2| s3n3
+        s3n0 -->|l1,l2| s3n1
+        s3n1 -->|l1| s3n3
+        s3n1 -->|l2| s3n2
+    end
+    subgraph sec4 [Gather_Polish 4]
         %%metro direction: TB
-        s2n0[vcf]
-        s2n1[MARKDUP_TRIM]
-        s2n2[report_filter_filter]
-        s2n4[trim]
-        s2n0 -->|l0| s2n2
-        s2n0 -->|l0| s2n2
-        s2n1 -->|l4| s2n2
-        s2n2 -->|l4| s2n4
+        s4n0[bin_call]
+        s4n1[trim_markdup]
+        s4n2[trim_cluster_count]
+        s4n3[assemble]
+        s4n0 -->|l0,l1,l3| s4n1
+        s4n1 -->|l0| s4n3
+        s4n1 -->|l1,l3| s4n2
+        s4n2 -->|l1,l2| s4n3
+        s4n0 -->|l2| s4n2
     end
-    subgraph sec3 [Pca_Bin 3]
-        s3n0[CLASSIFY_MERGE_BAM]
-        s3n1[bin]
-        s3n2[INDEX_CLASSIFY]
-        s3n0 -->|l0| s3n1
-        s3n0 -->|l2| s3n1
-        s3n1 -->|l0| s3n2
-        s3n1 -->|l1| s3n2
-        s3n1 -->|l2| s3n2
-        s3n1 -->|l2| s3n2
-        s3n0 -->|l2| s3n2
-        s3n0 -->|l3| s3n2
-        s3n0 -->|l4| s3n2
-    end
-    subgraph sec4 [Summarise_Index 4]
-        s4n0[index_trim_pca]
-        s4n1[markdup]
-        s4n0 -->|l0| s4n1
-        s4n0 -->|l1| s4n1
-        s4n0 -->|l1| s4n1
-        s4n0 -->|l3| s4n1
-        s4n0 -->|l3| s4n1
-        s4n0 -->|l4| s4n1
-    end
-    s0n1 -->|l0| s1n0
-    s0n1 -->|l1| s1n0
-    s0n1 -->|l3| s1n0
-    s1n3 -->|l0| s2n0
-    s1n3 -->|l3| s2n0
-    s2n2 -->|l0| s3n0
-    s3n2 -->|l0| s4n0
-    s3n2 -->|l1| s4n0
-    s3n2 -->|l3| s4n0
-    s3n2 -->|l3| s4n0
-    s3n2 -->|l4| s4n0
-    s1n3 -->|l1| s3n1
-    s0n1 -->|l2| s3n0
-    s2n0 -->|l3| s3n0
-    s0n0 -->|l3| s4n0
-    s0n1 -->|l4| s1n2
-    s1n3 -->|l4| s2n1
-    s2n4 -->|l4| s3n0
+    s0n2 -->|l0| s3n0
+    s3n3 -->|l0,l1,l2,l3| s4n0
+    s0n2 -->|l0,l1,l2| s1n0
+    s1n3 -->|l1| s2n0
+    s2n4 -->|l1| s3n0
+    s0n0 -->|l1| s3n2
+    s3n3 -->|l1| s4n3
+    s1n3 -->|l2| s2n2
+    s2n2 -->|l2| s3n0
+    s1n3 -->|l3| s3n3
