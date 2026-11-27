@@ -171,6 +171,7 @@ def _laid_out(path: Path) -> _Run:
             graph = parse_metro_mermaid(path.read_text())
         except Exception:
             return run
+        graph.source_dir = str(path.parent)
         try:
             engine_module.compute_layout(graph)
         except Exception:
