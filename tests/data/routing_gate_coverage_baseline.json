@@ -448,7 +448,6 @@
   "corridor_cohorts.py::for interval in problem.forbidden_intervals:::#1",
   "corridor_cohorts.py::for pair_orders in (::#1",
   "corridor_cohorts.py::if (::#1",
-  "corridor_cohorts.py::if _q(equality.delta) == 0:::#1",
   "corridor_cohorts.py::if abs(::#1",
   "corridor_cohorts.py::if after not in successors[before]:::#1",
   "corridor_cohorts.py::if after_feasible:::#1",
