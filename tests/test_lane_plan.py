@@ -108,6 +108,7 @@ ROTATION_FIXTURES = [
     FIXTURES / "regressions" / "approach_order_multi_line_feeder.mmd",
     FIXTURES / "regressions" / "approach_order_carry_sandwich.mmd",
     ROOT / "tests" / "data" / "canvas_placement" / "f8401678.mmd",
+    TOPOLOGIES / "peeloff_extra_line_consumer.mmd",
 ]
 
 
