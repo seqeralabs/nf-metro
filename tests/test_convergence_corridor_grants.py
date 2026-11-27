@@ -794,8 +794,62 @@ def test_reapplying_a_granted_execution_fails_on_its_stale_frame() -> None:
         apply_convergence_corridor_grants(applied, requests, grants)
 
 
+def _off_run_opening_fixture():
+    """``merge_pullaway``'s grant fixture with one opening end off the central run.
+
+    Both feeders open on the trunk's first column, so the one rising from below
+    is moved, with its opening column, join and feeder endpoint, 6px back along
+    the trunk: its opening end then stands before the run, where no proximity
+    to the central run can find it and only the recipe names it.
+    """
+    graph, ctx, execution, _targets, _requests = _requests_for(
+        str(ROOT / _MERGE_PULLAWAY)
+    )
+    (plan,) = _eligible_plans_by_owner(execution).values()
+    axis = plan.trunk_axis
+    run_start = min(axis.extent_start, axis.extent_end)
+    landing = next(
+        item
+        for item in plan.landings
+        if item.join_point[0] > run_start + COORD_TOLERANCE
+    )
+    assert landing.opening_turn_segment is not None
+    assert landing.opening_turn_coordinate is not None
+    back = -6.0
+
+    def moved(point: tuple[float, float]) -> tuple[float, float]:
+        return (point[0] + back, point[1])
+
+    start, end = landing.opening_turn_segment
+    shifted = replace(
+        landing,
+        join_point=moved(landing.join_point),
+        opening_turn_coordinate=landing.opening_turn_coordinate + back,
+        opening_turn_segment=(moved(start), moved(end)),
+    )
+    plan = replace(
+        plan,
+        landings=tuple(shifted if item is landing else item for item in plan.landings),
+        endpoint_ownership=tuple(
+            replace(item, endpoint=moved(item.endpoint))
+            if item.member_id == landing.member_id
+            and item.role is ConvergenceEndpointRole.FEEDER
+            else item
+            for item in plan.endpoint_ownership
+        ),
+    )
+    plans = tuple(plan if item.id == plan.id else item for item in execution.plans)
+    execution = replace(
+        execution,
+        plans=plans,
+        query=convergences._query(plans, execution.query._edge_order),
+    )
+    _targets, requests = convergence_corridor_requests(plans, graph, ctx)
+    return execution, tuple(_unbounded(request) for request in requests)
+
+
 def test_opening_end_off_the_central_run_moves_with_its_landing() -> None:
-    execution, requests = _grant_fixture(_MERGE_PULLAWAY)
+    execution, requests = _off_run_opening_fixture()
     (request,) = requests
     plan = _plans_by_owner(execution)[request.variable.owner_id]
     axis = plan.trunk_axis
