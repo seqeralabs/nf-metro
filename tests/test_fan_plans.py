@@ -3036,11 +3036,10 @@ def test_a_line_handed_back_along_a_run_holds_one_lane(s3_direction: str) -> Non
     assert len({lanes[(n, "lower")] for n in ("n3_0", "n3_1", "n3_2")}) == 1
 
 
-def test_every_plan_seats_a_handed_back_line_on_one_lane(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """On the unedited map no plan owns ``s3``, so its carriers reach no
-    geometry; every plan that seats them still gives ``lower`` one lane."""
+def _carriers_of_every_plan(
+    monkeypatch: pytest.MonkeyPatch, path: Path
+) -> list[dict[str, dict[str, int]]]:
+    """Each fan plan's carrier slots on *path*, owning geometry or not."""
     seated: list[dict[str, dict[str, int]]] = []
     offset_carriers = fan_plans._offset_carriers
 
@@ -3055,13 +3054,41 @@ def test_every_plan_seats_a_handed_back_line_on_one_lane(
         return carriers
 
     monkeypatch.setattr(fan_plans, "_offset_carriers", record)
-    graph = parse_metro_mermaid(SAME_DESTINATION_VERTICAL_CONVERGENCE.read_text())
-    compute_layout(graph)
+    compute_layout(parse_metro_mermaid(path.read_text()))
+    return seated
 
-    runs = [plan for plan in seated if {"n3_1", "n3_2"} <= plan.keys()]
+
+def test_every_plan_seats_a_handed_back_line_on_one_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the unedited map no plan owns ``s3``, so its carriers reach no
+    geometry; every plan that seats them still gives ``lower`` one lane."""
+    plans = _carriers_of_every_plan(monkeypatch, SAME_DESTINATION_VERTICAL_CONVERGENCE)
+
+    runs = [plan for plan in plans if {"n3_1", "n3_2"} <= plan.keys()]
     assert runs
     for plan in runs:
         assert plan["n3_1"]["lower"] == plan["n3_2"]["lower"]
+
+
+def test_a_line_that_rejoins_a_run_by_its_own_path_keeps_that_paths_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``l3`` stops at FASTQC, whose run carries ``l0`` on to bin_index, and
+    reaches bin_index along its own path from pca through vcf.  The plan
+    whose run is FASTQC to bin_index does not hand ``l3`` FASTQC's lane, so
+    every plan seats ``l3`` at bin_index where its own path brings it."""
+    plans = _carriers_of_every_plan(
+        monkeypatch,
+        ROOT / "tests" / "data" / "fan_carriers" / "line_rejoining_by_its_own_path.mmd",
+    )
+
+    seated = [plan for plan in plans if "s2n3" in plan]
+    assert len(seated) >= 2
+    assert any(
+        plan["s2n2"]["l3"] != plan["s2n3"]["l3"] for plan in seated if "s2n2" in plan
+    )
+    assert len({plan["s2n3"]["l3"] for plan in seated}) == 1
 
 
 def test_a_line_that_leaves_for_another_row_packs_where_it_starts_again() -> None:
