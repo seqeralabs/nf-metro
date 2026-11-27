@@ -1500,6 +1500,15 @@ def _next_carriers_on_run(
     return found
 
 
+def _hands_back(
+    graph: MetroGraph, upstream_id: str, station_id: str, line_id: str
+) -> bool:
+    """Whether *line_id* stops at *upstream_id* and starts again at *station_id*."""
+    return not any(
+        edge.line_id == line_id for edge in graph.edges_from(upstream_id)
+    ) and not any(edge.line_id == line_id for edge in graph.edges_to(station_id))
+
+
 def _run_consistent_slots(
     graph: MetroGraph,
     offset_line_order: Sequence[str],
@@ -1508,13 +1517,16 @@ def _run_consistent_slots(
     """Unsigned frame lane of each fan line at each carrier.
 
     A carrier whose runs arrive from exactly one upstream carrier keeps that
-    carrier's lane for every line run between them, so a line holds one lane
-    along its run.  Its other lines take the lowest free lanes from its first
-    frame lane, in frame order; a lane a departed line held stays empty rather
-    than letting a later line slide sideways into it mid-straight.  A chain
-    head, or a join fed by several carriers, packs its lines on consecutive
-    lanes from its first frame lane; where that disagrees with a feeder along
-    one run, the lane plan refuses the run.
+    carrier's lane for every line run between them, and for a line the
+    upstream carrier hands over and this one takes back (it leaves the one by
+    no edge and reaches the other by none), so a line holds one lane along its
+    run even where another name carries the run between.  Its other lines take
+    the lowest free lanes from its first frame lane, in frame order; a lane a
+    departed line held stays empty rather than letting a later line slide
+    sideways into it mid-straight.  A chain head, or a join fed by several
+    carriers, packs its lines on consecutive lanes from its first frame lane;
+    where that disagrees with a feeder along one run, the lane plan refuses the
+    run.
     """
     rank = {line_id: index for index, line_id in enumerate(offset_line_order)}
     feeds: dict[str, list[tuple[str, str]]] = defaultdict(list)
@@ -1543,15 +1555,18 @@ def _run_consistent_slots(
     for station_id in order:
         lines = sorted(carriers[station_id], key=rank.__getitem__)
         sources = {source for source, _ in feeds[station_id]}
-        inherited = (
-            {
-                line_id: slots[source][line_id]
-                for source, line_id in feeds[station_id]
-                if source in slots
+        inherited: dict[str, int] = {}
+        if len(sources) == 1:
+            (source,) = sources
+            upstream = slots.get(source, {})
+            inherited = {
+                line_id: upstream[line_id]
+                for _source, line_id in feeds[station_id]
+                if line_id in upstream
             }
-            if len(sources) == 1
-            else {}
-        )
+            for line_id in carriers[station_id].intersection(upstream):
+                if _hands_back(graph, source, station_id, line_id):
+                    inherited[line_id] = upstream[line_id]
         lane = rank[lines[0]]
         if not inherited:
             slots[station_id] = {

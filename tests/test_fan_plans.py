@@ -2980,6 +2980,56 @@ def test_a_fan_line_holds_one_slot_along_each_run() -> None:
     assert {lid: downstream[lid] for lid in upstream} == upstream
 
 
+def _forked_source_convergence() -> str:
+    """``same_destination_vertical_convergence`` with a leaf forked off ``n0_1``.
+
+    The leaf makes ``n0_1`` a fan fork whose plan owns ``s3``'s level run, on
+    which ``lower`` hands over to ``upper`` at ``n3_1`` and ``upper`` hands back
+    to ``lower`` at ``n3_2``: ``lower`` meets the run twice with ``upper``
+    between.
+    """
+    text = (
+        ROOT / "examples" / "topologies" / "same_destination_vertical_convergence.mmd"
+    ).read_text()
+    anchor = "        n0_0 -->|scaffold| n0_1\n"
+    assert anchor in text
+    return text.replace(
+        anchor, anchor + "        leaf[Leaf]\n        n0_1 -->|scaffold| leaf\n"
+    )
+
+
+def test_a_carrier_keeps_its_upstream_carriers_lane_for_a_line_handed_back() -> None:
+    graph = parse_metro_mermaid(_forked_source_convergence())
+    carriers = {
+        "n3_0": frozenset({"scaffold", "lower"}),
+        "n3_1": frozenset({"upper", "lower"}),
+        "n3_2": frozenset({"upper", "lower"}),
+    }
+
+    slots = fan_plans._run_consistent_slots(
+        graph,
+        ("scaffold", "obstacle_feed", "obstacle", "upper", "feeder", "lower"),
+        carriers,
+    )
+
+    assert slots["n3_0"] == {"scaffold": 0, "lower": 1}
+    assert slots["n3_1"] == slots["n3_2"] == {"lower": 1, "upper": 3}
+
+
+def test_a_line_handed_back_along_a_run_holds_one_lane() -> None:
+    graph = parse_metro_mermaid(_forked_source_convergence())
+    compute_layout(graph)
+    carriers = {
+        carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+        for carrier in plan.offset_carriers
+    }
+    assert {carriers[n]["lower"] for n in ("n3_0", "n3_1", "n3_2")} == {1}
+    lanes = recorded_lane_plan(graph).tracks.lanes
+    assert len({lanes[(n, "lower")] for n in ("n3_0", "n3_1", "n3_2")}) == 1
+
+
 @pytest.mark.parametrize("holder_ahead", [True, False])
 def test_a_departing_name_takes_the_side_its_next_meeting_leaves_free(
     holder_ahead: bool,
