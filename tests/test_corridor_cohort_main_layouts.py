@@ -341,9 +341,8 @@ def test_tied_feeders_compile_onto_distinct_entry_slots(
                 raises=FinalConvergenceFeasibilityError,
                 strict=True,
                 reason=(
-                    "aborts on main too: at the doubled corner radius line a's "
-                    "opposing fan arms from fsa2 and fsb2 have no separable "
-                    "opening channel"
+                    "at the doubled corner radius line a's opposing fan arms "
+                    "from fsa2 and fsb2 have no separable opening channel"
                 ),
             ),
         ),
