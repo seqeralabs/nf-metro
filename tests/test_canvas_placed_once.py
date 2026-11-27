@@ -197,32 +197,7 @@ def _assert_moving_commutes_with_settling(
     assert [key for key in expected if abs(after[key] - expected[key]) > 1e-6] == []
 
 
-# A label beside a station on its section's vertical midpoint picks its side by
-# ``station.y < y_mid`` (``labels._trial_cost``), and these midpoints tie to
-# within one binary digit, which the move rounds the other way.
-_LABEL_MIDPOINT_TIES = frozenset(
-    {
-        "tests/fixtures/curve_invariant_repros/inter_row_corridor_overflow.mmd",
-        "tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd",
-        "tests/fixtures/regressions/riboseq_row_trunk_subrun.mmd",
-    }
-)
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        pytest.param(
-            name,
-            marks=pytest.mark.xfail(
-                strict=True, reason="label side tie at the section midpoint"
-            ),
-        )
-        if name in _LABEL_MIDPOINT_TIES
-        else name
-        for name in SLIDING_MAPS
-    ],
-)
+@pytest.mark.parametrize("name", SLIDING_MAPS)
 def test_a_sliding_map_settles_the_same_wherever_it_is_laid_out(
     name: str,
 ) -> None:
