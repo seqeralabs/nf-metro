@@ -170,7 +170,8 @@ the run) that it reaches wholly from the contenders that set the pin
 (``Section.lane_end_seeds``): there it takes the lane one past the lowest (a
 negative pin) or highest lane the piece's other lines hold, pieces sharing a
 node taken together, the furthest-out pin outermost and lines pinned as far in
-the order of their lanes.  The run's stations then hold no lane none of its
+the order of their lanes; pieces with no other lines take lanes from 0 in that
+order.  The run's stations then hold no lane none of its
 lines rides: the lanes between their outermost close up in order about its
 lowest pinned or end-pinned lane (else its lowest), lanes beyond them keeping
 their distance, where that moves no pinned or end-pinned lane: a line a
@@ -1931,7 +1932,8 @@ class _Tracks:
         (``Section.lane_end_seeds``).  Pieces sharing a node form a cluster:
         its pinned lines step past the lowest (a negative pin) or highest lane
         the cluster's other lines hold, the furthest-out pin outermost and lines
-        pinned as far keeping the order of the lanes they were filled on.
+        pinned as far keeping the order of the lanes they were filled on.  A
+        cluster with no other lines takes lanes from 0 in that same order.
         """
         graph = self.graph
         section = graph.sections[run.sec.id]
@@ -1961,9 +1963,12 @@ class _Tracks:
                 for m in graph.station_lines(n)
                 if m not in pinned
             ]
-            if not others:
-                continue
-            for toward, edge in ((-1, min(others)), (1, max(others))):
+            if others:
+                edges = ((-1, min(others)), (1, max(others)))
+            else:
+                below = sum(1 for lid in pinned if ends[lid] < 0)
+                edges = ((-1, below), (1, below - 1))
+            for toward, edge in edges:
                 stack = sorted(
                     (lid for lid in pinned if ends[lid] * toward > 0),
                     key=lambda lid: (abs(ends[lid]), toward * lanes[lid], lid),

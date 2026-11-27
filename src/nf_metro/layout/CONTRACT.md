@@ -1634,7 +1634,8 @@ through the record's draw accessors (`planned_offsets` in
   (`layout/fan_ordering.py`) in their section flow's frame.  A run seats the
   lines Stage 1.1 pins to a lane end (`Section.lane_ends`,
   `Section.lane_end_seeds`, decided by `ordering.peel_lane_ends`) past the
-  other lanes of each piece of the line its contenders reach.  `start_layout`,
+  other lanes of each piece of the line its contenders reach, or from lane 0
+  in pin order where the piece carries no other line.  `start_layout`,
   called at the top of `_layout_once`, clears the previous layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
   packs as they stand at the close of Stage 6.12, the last stage that moves a
