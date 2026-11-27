@@ -1235,7 +1235,15 @@ in pipeline order.
   stations (`_section_occupants`) is final on the curated and 8k corpora but
   not by construction: Stage 6.17 re-materialises those stations after the
   seal, and nothing yet stops that re-apply moving a station into or out of
-  a mirrored slot the expansion read.
+  a mirrored slot the expansion read.  The expansion's frame anchor
+  (`_section_lr_port_anchor_y`) is final relative to its section, except
+  where the section has no LR/RL entry and the anchor is an LR/RL exit port
+  that Stage 6.16's TB-entry clamp (`_clamp_tb_entry_port`) later pulls onto
+  the topmost station feeding a downstream TB section's entry.  There the
+  seat reads an interim anchor, and the row a lone half-pitch station is
+  seated onto follows that interim value (witness
+  `tests/data/orphan_expansion_anchor/w2_00263.mmd`, held as a strict xfail
+  by `test_the_orphan_expansion_reads_a_final_anchor`).
 - **Postcondition**: Loop side stations sit at the visual centre of their
   horizontal loop run, or as near it as leaves both fanned diagonals their
   `fan_stagger_needs` room, measured to each neighbour's settled X.

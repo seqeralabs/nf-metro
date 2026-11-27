@@ -1409,14 +1409,19 @@ def _side_entered_vertical_feeder_pairs(
 
 
 def _section_lr_port_anchor_y(graph: MetroGraph, section: Section) -> float | None:
-    """The section's frozen trunk anchor: its LR/RL entry port Y, or the
-    exit port Y when there is no LR/RL entry port.
+    """The section's trunk anchor: its LR/RL entry port Y, or the exit port
+    Y when there is no LR/RL entry port.
 
     Unlike :func:`_section_trunk_y` (which reads an internal station's
-    current Y), this returns a port station's Y -- a frozen inter-section
-    anchor held fixed through content placement -- so content phases can
-    centre on the trunk without depending on mutable station positions.
-    Returns ``None`` when the section has no LR/RL port.
+    current Y), this returns a port station's Y, an inter-section anchor
+    content placement does not move, so content phases can centre on the
+    trunk without depending on mutable station positions.  An entry port
+    keeps its place relative to its section for the rest of the layout; an
+    exit port does not where Stage 6.16's TB-entry clamp
+    (``_clamp_tb_entry_port``) later pulls it onto the topmost station
+    feeding a downstream TB section's entry, so a reader before that stage
+    sees an interim value there.  Returns ``None`` when the section has no
+    LR/RL port.
     """
     for ports in (section.entry_ports, section.exit_ports):
         for pid in ports:
