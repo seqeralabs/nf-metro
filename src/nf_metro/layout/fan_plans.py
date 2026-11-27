@@ -1391,7 +1391,13 @@ def _offset_carriers(
     upstream_carriers: Sequence[FanOffsetCarrier],
     offset_sign: int,
 ) -> tuple[FanOffsetCarrier, ...]:
-    """Freeze stations whose fan-line permutation is structurally shared."""
+    """Freeze stations whose fan-line permutation is structurally shared.
+
+    A station two branches meet at shares their permutation only where they
+    also share a neighbour there; branches that merely cross at a station
+    pack their lines from different first lanes, which would give one line
+    two slots along a straight run.
+    """
     if not offset_line_order:
         return ()
 
@@ -1420,13 +1426,18 @@ def _offset_carriers(
     branch_incidence: dict[str, dict[int, set[str]]] = defaultdict(
         lambda: defaultdict(set)
     )
+    neighbours: dict[str, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
     for branch in branches:
         for path in branch.resolved_paths:
             for edge in path:
                 branch_incidence[edge.source][branch.rank].add(edge.line_id)
                 branch_incidence[edge.target][branch.rank].add(edge.line_id)
+                neighbours[edge.source][branch.rank].add(edge.target)
+                neighbours[edge.target][branch.rank].add(edge.source)
     for station_id, by_branch in branch_incidence.items():
-        if len(by_branch) < 2 and not _seats_a_retag(graph, station_id):
+        ends = list(neighbours[station_id].values())
+        shared = any(a & b for i, a in enumerate(ends) for b in ends[i + 1 :])
+        if not shared and not _seats_a_retag(graph, station_id):
             continue
         add_station(
             station_id,

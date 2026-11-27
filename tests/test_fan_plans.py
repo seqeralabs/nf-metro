@@ -35,6 +35,7 @@ from nf_metro.layout.fan_plans import (
 )
 from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.labels import place_labels
+from nf_metro.layout.lane_plan import recorded_lane_plan
 from nf_metro.layout.phases.guards import (
     PhaseInvariantError,
     _guard_planned_fan_frame_realised,
@@ -2847,3 +2848,81 @@ def test_lane_seat_keys_number_seats_in_landing_order() -> None:
         fan_lane_offsets(("a", "b"), 10.0, "a", (0, 0))
     with pytest.raises(ValueError, match="do not cover every branch"):
         fan_lane_offsets(("a", "b"), 10.0, "a", (0,))
+
+
+CROSSING_BRANCHES = (
+    ROOT / "tests" / "data" / "fan_carriers" / "crossing_branches_at_entry.mmd"
+)
+
+
+def _branch(rank: int, *edges: tuple[str, str, str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        rank=rank,
+        resolved_paths=(
+            tuple(
+                SimpleNamespace(source=s, target=t, line_id=lid) for s, t, lid in edges
+            ),
+        ),
+    )
+
+
+def _carrier_ids(branches: list[SimpleNamespace]) -> set[str]:
+    graph = parse_metro_mermaid(
+        "%%metro line: x | X | #ff0000\n"
+        "%%metro line: y | Y | #0000ff\n"
+        "graph LR\n"
+        "    a -->|x,y| b\n"
+        "    p -->|x,y| m\n    m -->|x,y| q\n"
+        "    r -->|x,y| s\n"
+    )
+    carriers = fan_plans._offset_carriers(
+        graph,
+        branches=branches,
+        offset_line_order=("x", "y"),
+        shared_paths=(),
+        shared_station_ids=(),
+        upstream_carriers=(),
+        offset_sign=1,
+    )
+    return {carrier.station_id for carrier in carriers}
+
+
+def test_branches_sharing_a_neighbour_at_a_station_make_it_a_carrier() -> None:
+    assert _carrier_ids([_branch(0, ("a", "b", "x")), _branch(1, ("a", "b", "y"))]) == {
+        "a",
+        "b",
+    }
+
+
+def test_branches_only_crossing_at_a_station_leave_it_free() -> None:
+    assert (
+        _carrier_ids(
+            [
+                _branch(0, ("p", "m", "x"), ("m", "q", "x")),
+                _branch(1, ("r", "m", "y"), ("m", "s", "y")),
+            ]
+        )
+        == set()
+    )
+
+
+def test_crossing_branches_hold_distinct_lanes_at_the_entry_they_cross() -> None:
+    """Qc's spur and Parent's parent_child only cross at Child's entry: the
+    entry carries no fan slot, the hand-overs at Fastqc and Align keep theirs,
+    and the two lines hold distinct lanes there."""
+    graph = parse_metro_mermaid(CROSSING_BRANCHES.read_text())
+    compute_layout(graph, validate=True)
+    carriers = {
+        carrier.station_id: {slot.line_id: slot.slot for slot in carrier.assignments}
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+        for carrier in plan.offset_carriers
+    }
+    assert "child__entry_left_5" not in carriers
+    assert carriers["fastqc"] == {"main": 0, "spur": 1}
+    assert carriers["align"] == {"main": 0, "parent_child": 1}
+    lanes = recorded_lane_plan(graph).tracks.lanes
+    assert (
+        lanes[("child__entry_left_5", "spur")]
+        != lanes[("child__entry_left_5", "parent_child")]
+    )

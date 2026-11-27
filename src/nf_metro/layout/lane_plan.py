@@ -142,9 +142,10 @@ exit's order where both reach one entry.
 into a part from an earlier part of its run keeps that lane, a run whose lines
 are one node's whole bundle keeps that node's lanes, and a line riding a
 seam-pinned entry of the run its entry lane, unless a carrier's slot differs
-(pins).  A line none of those fixes that leaves the run by an exit whose
-connector runs straight across a straight seam to an entry where a fan plan's
-carrier slot fixes it takes the exit lane landing on that slot (a *fan seam*),
+or a line it conflicts with holds that lane (pins).  A line none of those
+fixes that leaves the run by an exit whose connector runs straight across a
+straight seam to an entry where a fan plan's carrier slot fixes it takes the
+exit lane landing on that slot (a *fan seam*),
 where its exits agree on one such lane and no fixed line holds it.  The other
 lines take lanes in run order: one past the highest lane of an earlier line
 they coexist with; with none, the lane of an earlier
@@ -1802,19 +1803,24 @@ class _Tracks:
         pins = self._part_pins(run, fixed)
         for lid, lane in pins.items():
             fixed.setdefault(lid, lane)
-        for n in members:
-            for lid, lane in self.seam_lanes.get(n, {}).items():
-                if fixed.get(lid, lane) == lane:
-                    fixed[lid] = pins[lid] = lane
-        fan_seamed = self._fan_seam_pins(members, fixed)
-        for lid, lane in fan_seamed.items():
-            fixed[lid] = pins[lid] = lane
         conflict = partial(
             self._conflict,
             spans=self._spans(sec.id, members, run.present),
             section_id=sec.id,
             nodes=members,
         )
+        for n in members:
+            for lid, lane in self.seam_lanes.get(n, {}).items():
+                if fixed.get(lid, lane) == lane and not any(
+                    k == lane and m != lid and conflict(lid, m)
+                    for m, k in fixed.items()
+                ):
+                    fixed[lid] = pins[lid] = lane
+                else:
+                    self.seam_sources.pop((n, lid), None)
+        fan_seamed = self._fan_seam_pins(members, fixed)
+        for lid, lane in fan_seamed.items():
+            fixed[lid] = pins[lid] = lane
         if pins and chains:
             lanes = self._fill_bundled(
                 run, order, section_order, fixed, pins, mates, conflict
