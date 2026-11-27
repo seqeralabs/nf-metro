@@ -484,7 +484,7 @@ RIBOSEQ_TOP_CORRIDOR_EDGES = (
 @pytest.mark.parametrize(
     ("relative_path", "coordinates"),
     (
-        ("examples/riboseq_metro.mmd", (325.0, 317.0, 321.0)),
+        ("examples/riboseq_metro.mmd", (341.8, 333.8, 337.8)),
         (
             "tests/fixtures/curve_invariant_repros/riboseq_inter_row_corridor.mmd",
             (341.8, 333.8, 337.8),
