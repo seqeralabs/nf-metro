@@ -734,6 +734,12 @@ class MetroGraph:
     # (``_snap_all_y_to_grid``) skips them rather than dragging them onto the row
     # group's grid origin, which a rowspan neighbour can leave fractional.
     symfan_trunk_station_ids: set[str] = field(default_factory=set, repr=False)
+    # Cross-phase channel: flow-side exit port IDs Stage 3.1
+    # (``_position_ports_on_boundary``) placed on their downstream bundle Y.
+    # Stage 6.4's grid snap reads it: rounding such an exit onto its own
+    # section's grid breaks the level run into its consumer by up to half a
+    # pitch, which is too short for a full-radius S.
+    downstream_anchored_exit_ids: set[str] = field(default_factory=set, repr=False)
     # Sections whose content Stage 4.8a dropped to reserve a side-entered
     # vertical consumer's entry clearance.  Their box top stayed put while the
     # content moved, so Stage 6.16 folds them into its top-refit set.

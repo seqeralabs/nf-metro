@@ -24,6 +24,7 @@ from nf_metro.layout.phases.fan_bundles import (
 )
 from nf_metro.layout.phases.junctions import _position_junctions, junction_anchor_port
 from nf_metro.layout.phases.ports import _set_port_y
+from nf_metro.layout.section_placement import _find_downstream_bundle_y
 from nf_metro.parser.model import MetroGraph, PortSide
 
 
@@ -48,12 +49,18 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
        nearest ``origin + n * pitch``, bounded by half a pitch so
        adjacency cannot flip.
 
-    Two exclusions preserve deliberate non-grid Ys:
+    Three exclusions preserve deliberate non-grid Ys:
 
     * LR/RL exit ports on TB-direction sections were placed by
       ``_resolve_tb_exit_y`` at the receiving section's entry-port Y
       (in a different row).  Snapping them to the TB's own row grid
       reintroduces the kink the alignment removed.
+    * LR/RL exit ports on horizontal-flow sections that Stage 3.1 seated on
+      their downstream bundle Y and that still line up with it.  Rounding one
+      onto its own section's grid breaks the level run into the consumer by up
+      to half a pitch, which is shorter than a full-radius S.  Such an exit
+      still takes part in tie-breaking, and once every group has snapped it
+      takes its bundle's settled Y.
     * Stations that act as a convergence point for two or more inbound
       sources at different Ys (fan-in midpoint) carry geometric meaning
       that snapping destroys.
@@ -102,6 +109,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     trunk_followers = _centreline_trunk_followers(
         graph, divergence_targets, convergence_sources
     )
+    held_exits = _exits_level_with_their_bundle(graph)
     groups: dict[object, tuple[float, list[str]]] = {}
     grouped_ids: set[str] = set()
     require_phase_field(graph, "_row_y_grid_info")
@@ -115,7 +123,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
             groups[("solo", sec.id)] = (y_spacing, [sec.id])
 
     for pitch, sec_ids in groups.values():
-        _snap_group_to_grid(graph, pitch, sec_ids, convergence_sources)
+        _snap_group_to_grid(graph, pitch, sec_ids, convergence_sources, held_exits)
 
     section_pitch = {
         sec_id: pitch for pitch, sec_ids in groups.values() for sec_id in sec_ids
@@ -123,6 +131,34 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     _restore_convergence_midpoints(graph, convergence_sources, section_pitch)
     _restore_divergence_midpoints(graph, divergence_targets, trunk_followers)
     _register_half_grid_entry_fan_ports(graph, entry_fan_ports)
+    for pid in sorted(held_exits):
+        section = graph.sections[graph.ports[pid].section_id]
+        anchor = _find_downstream_bundle_y(pid, section, graph)
+        if anchor is not None:
+            _set_port_y(graph, pid, anchor)
+
+
+def _exits_level_with_their_bundle(graph: MetroGraph) -> frozenset[str]:
+    """Downstream-anchored flow-side exit ports still level with that bundle.
+
+    Read before any group snaps, because the bundle's own section may snap
+    first.  A vertical-flow section's side exits are left out: they are placed
+    by ``_resolve_tb_exit_y`` and never snapped.
+    """
+    require_phase_field(graph, "downstream_anchored_exit_ids")
+    held: set[str] = set()
+    for pid in graph.downstream_anchored_exit_ids:
+        port = graph.ports.get(pid)
+        station = graph.stations.get(pid)
+        if port is None or station is None:
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or not lanes_run_along_y(section.direction):
+            continue
+        anchor = _find_downstream_bundle_y(pid, section, graph)
+        if anchor is not None and abs(anchor - station.y) <= COORD_TOLERANCE_FINE:
+            held.add(pid)
+    return frozenset(held)
 
 
 def _register_half_grid_reconvergence_branches(graph: MetroGraph) -> None:
@@ -309,8 +345,12 @@ def _snap_group_to_grid(
     pitch: float,
     sec_ids: list[str],
     convergence_sources: dict[str, list[str]],
+    held_exits: frozenset[str],
 ) -> None:
-    """Snap one row-group's stations and LEFT/RIGHT ports to its shared grid."""
+    """Snap one row-group's stations and LEFT/RIGHT ports to its shared grid.
+
+    Ports in *held_exits* count toward tie-breaking but keep their Y.
+    """
     half = pitch / 2.0
     origin_info = _group_grid_origin(graph, sec_ids, pitch)
     if origin_info is None:
@@ -335,7 +375,8 @@ def _snap_group_to_grid(
         st = graph.stations[sid]
         target = _slot_snap(st.y, origin_r, pitch, half, tie_directions.get(sid, _UP))
         if is_port:
-            _set_port_y(graph, sid, target)
+            if sid not in held_exits:
+                _set_port_y(graph, sid, target)
             continue
         slots = column_slots.setdefault(round(st.x, 3), set())
         if round(target, 3) in slots:

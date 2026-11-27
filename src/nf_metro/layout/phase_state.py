@@ -170,6 +170,17 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
         ),
         run_condition_attr="center_ports",
     ),
+    "downstream_anchored_exit_ids": PhaseFieldSpec(
+        name="downstream_anchored_exit_ids",
+        writer_stage="3.1",
+        reader_stages=("6.4",),
+        enforcement=FieldEnforcement.REQUIRE_WRITER,
+        why=(
+            "flow-side exit ports Stage 3.1 seated on their downstream bundle Y; "
+            "Stage 6.4's grid snap keeps one still level with that bundle on it "
+            "rather than rounding it onto its own section's grid"
+        ),
+    ),
     "_consumers_grid_snapped": PhaseFieldSpec(
         name="_consumers_grid_snapped",
         writer_stage="6.4",

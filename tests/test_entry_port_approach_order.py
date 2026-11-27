@@ -125,8 +125,9 @@ def test_junction_feeder_lanes_are_not_narrowed(
 
 
 def test_coincident_corner_cohort_is_drawn_as_planned() -> None:
-    """Corners a cohort patch moves are sized with the same coincident-radius
-    unification the freeze applies, so the drawn radii are the planned ones."""
+    """Zone 2's exit runs level into Zone 3 while junction 6's m0 and m1 rise
+    beside it into the same entry; the corridor-cohort patch that moves those
+    two risers is drawn exactly as planned, every owned point and sized radius."""
     path = REGRESSIONS / "approach_order_coincident_corners.mmd"
 
     assert cohort_shadow_oracle.shadow_failure(path) is None

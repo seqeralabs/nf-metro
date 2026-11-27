@@ -280,6 +280,10 @@ pass:
   read by the Stage 6.4 grid snap, which must skip these source/trunk stations
   so they stay on the symfan's local frame instead of snapping to a rowspan
   neighbour's fractional row-grid origin.
+- `graph.downstream_anchored_exit_ids` - written by Stage 3.1
+  (`_position_ports_on_boundary`) with the flow-side exit ports it seated on
+  their downstream bundle Y; read by the Stage 6.4 grid snap, which holds such
+  an exit on that bundle's settled Y while it still lines up with it.
 - `graph._consumers_grid_snapped` - set right after the Stage 6.4 snap; the
   Stage 6.6 off-track reanchor carries its own always-on guard on it.
 
@@ -491,7 +495,9 @@ in pipeline order.
 - **Precondition**: Section bboxes in global coords (Stage 2.1).
 - **Postcondition**: Every port station's `(x, y)` lies on the bbox
   edge corresponding to its side, within `GUARD_TOLERANCE`. Ports
-  start at the bbox-edge midpoint for their side.
+  start at the bbox-edge midpoint for their side. A LEFT/RIGHT exit
+  seated on its downstream bundle Y is listed in
+  `graph.downstream_anchored_exit_ids`.
 - **Invariants preserved**: Real station coords, section bboxes,
   junctions.
 - **Validate guard after**: `_guard_ports_on_boundaries`.
@@ -944,7 +950,9 @@ in pipeline order.
   its unbranched trunk to the branch midpoint. This keeps the complete
   centreline straight. A restored station joins
   `graph.half_grid_station_ids` if it sits half a pitch from the branch
-  grid.
+  grid. A horizontal-flow exit in `graph.downstream_anchored_exit_ids`
+  that still lines up with its downstream bundle is not rounded: it
+  votes in tie-breaking, then takes that bundle's settled Y.
 - **Helper**: `_snap_all_y_to_grid`, with
   `_restore_convergence_midpoints` / `_restore_divergence_midpoints`
   and `_centreline_trunk_followers` (`phases/fan_bundles.py`) for the
@@ -952,8 +960,9 @@ in pipeline order.
 - **Precondition**: All semantic Y shifts done. If Stage 6.3 ran,
   `graph.half_grid_station_ids` is populated.
 - **Postcondition**: Every station and port Y is a grid slot of the
-  per-section / per-row pitch (except marked half-grid stations). A
-  symmetric diamond's fork hub, join and trunk run share one Y.
+  per-section / per-row pitch (except marked half-grid stations and
+  exits held level with their downstream bundle). A symmetric
+  diamond's fork hub, join and trunk run share one Y.
 - **Invariants preserved**: X coordinates (tested by
   `test_grid_snap_does_not_mutate_x`). Half-grid station Ys.
 - **Related tests**: `test_all_stations_snap_to_grid`,

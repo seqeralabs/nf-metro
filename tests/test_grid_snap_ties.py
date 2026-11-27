@@ -50,7 +50,7 @@ def _offsets(pitch: float) -> tuple[float, ...]:
     return (*(round(k * pitch, 1) for k in OFFSET_PITCHES), *OFFSETS_PX)
 
 
-_SnapCall = tuple[MetroGraph, float, list[str], dict[str, list[str]]]
+_SnapCall = tuple[MetroGraph, float, list[str], dict[str, list[str]], frozenset[str]]
 
 
 def _group_snap_calls(text: str, source_dir: Path = EXAMPLES) -> list[_SnapCall]:
@@ -58,9 +58,9 @@ def _group_snap_calls(text: str, source_dir: Path = EXAMPLES) -> list[_SnapCall]
     calls: list[_SnapCall] = []
     original = grid_snap._snap_group_to_grid
 
-    def record(graph, pitch, sec_ids, convergence_sources):
-        calls.append(deepcopy((graph, pitch, sec_ids, convergence_sources)))
-        original(graph, pitch, sec_ids, convergence_sources)
+    def record(graph, pitch, sec_ids, convergence_sources, held_exits):
+        calls.append(deepcopy((graph, pitch, sec_ids, convergence_sources, held_exits)))
+        original(graph, pitch, sec_ids, convergence_sources, held_exits)
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(grid_snap, "_snap_group_to_grid", record)
@@ -92,9 +92,11 @@ def _tied_ids(graph: MetroGraph, sec_ids: list[str], pitch: float) -> set[str]:
 
 
 def _snapped(call: _SnapCall, dy: float) -> dict[str, float]:
-    graph, pitch, sec_ids, convergence_sources = deepcopy(call)
+    graph, pitch, sec_ids, convergence_sources, held_exits = deepcopy(call)
     translate_graph(graph, 0.0, dy)
-    grid_snap._snap_group_to_grid(graph, pitch, sec_ids, convergence_sources)
+    grid_snap._snap_group_to_grid(
+        graph, pitch, sec_ids, convergence_sources, held_exits
+    )
     return {
         sid: graph.stations[sid].y - dy for sid in _group_station_ids(graph, sec_ids)
     }
@@ -141,7 +143,7 @@ def _tied_fans(graph: MetroGraph, tied: set[str]) -> list[list[str]]:
 @pytest.mark.parametrize("fixture", TIED_FIXTURES)
 def test_tied_fan_moves_as_one(fixture: str) -> None:
     for call in _tied_calls(fixture):
-        graph, pitch, sec_ids, _ = call
+        graph, pitch, sec_ids, *_ = call
         before = {
             sid: graph.stations[sid].y for sid in _group_station_ids(graph, sec_ids)
         }
@@ -175,7 +177,7 @@ graph LR
 def test_tied_two_branch_fan_keeps_its_spacing() -> None:
     """Both branches midway between slots snap the same way, one pitch apart."""
     (call,) = [c for c in _group_snap_calls(FAN) if "s" in c[2]]
-    graph, _pitch, sec_ids, _ = call
+    graph, _pitch, sec_ids, *_ = call
     pitch = 40.0
     trunk = 100.0
     for sid in ("src", "hub", "join", "sink"):
@@ -183,7 +185,7 @@ def test_tied_two_branch_fan_keeps_its_spacing() -> None:
     graph.stations["up"].y = trunk - pitch / 2.0
     graph.stations["down"].y = trunk + pitch / 2.0
     graph.stations["down"].x = graph.stations["up"].x
-    frozen = (graph, pitch, sec_ids, {})
+    frozen = (graph, pitch, sec_ids, {}, frozenset())
     for dy in (0.0, *_offsets(pitch)):
         snapped = _snapped(frozen, dy)
         spacing = snapped["down"] - snapped["up"]
@@ -195,12 +197,12 @@ TB_EXIT = Path(__file__).parent / "fixtures" / "tb_exit_terminal_on_carrier.mmd"
 
 
 def _reflected(call: _SnapCall) -> _SnapCall:
-    graph, pitch, sec_ids, convergence_sources = deepcopy(call)
+    graph, pitch, sec_ids, convergence_sources, held_exits = deepcopy(call)
     for st in graph.stations.values():
         st.y = -st.y
     for port in graph.ports.values():
         port.y = -port.y
-    return graph, pitch, sec_ids, convergence_sources
+    return graph, pitch, sec_ids, convergence_sources, held_exits
 
 
 @pytest.mark.parametrize("reflect", [False, True], ids=["as-drawn", "reflected"])
@@ -242,7 +244,7 @@ def _draft_off_lane_call() -> _SnapCall:
 
 
 def _level_run_vote(call: _SnapCall, component: list[str]) -> int:
-    graph, pitch, sec_ids, _ = call
+    graph, pitch, sec_ids, *_ = call
     group_ids = set(_group_station_ids(graph, sec_ids))
     return grid_snap._level_run_direction(
         graph, component, group_ids, _tied_ids(graph, sec_ids, pitch)

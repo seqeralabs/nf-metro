@@ -1796,7 +1796,10 @@ def _position_ports_on_boundary(
         if free_axis == "y" and port is not None and not port.is_entry:
             anchor = _find_downstream_bundle_y(pid, section, graph)
         if anchor is None:
+            graph.downstream_anchored_exit_ids.discard(pid)
             anchor = _find_connected_internal_coord(pid, section, graph, free_axis)
+        else:
+            graph.downstream_anchored_exit_ids.add(pid)
         if free_axis == "y":
             default = section.bbox_y + section.bbox_h / 2
         else:
