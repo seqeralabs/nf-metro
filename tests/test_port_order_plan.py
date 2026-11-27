@@ -186,6 +186,7 @@ ALLOWED_IMPORTS = {
             ("nf_metro.parser.model", "Section"),
             ("nf_metro.layout.constants", "COORD_TOLERANCE"),
             ("nf_metro.layout.geometry", "lanes_run_along_y"),
+            ("nf_metro.layout.geometry", "section_lanes_follow_line_priority"),
             ("nf_metro.layout.port_order_plan", "PortOrder"),
             ("nf_metro.layout.port_order_plan", "merge_orders"),
             ("nf_metro.layout.port_order_plan", "approach_source"),
