@@ -1,55 +1,37 @@
-%%metro title: Fuzz 8403670
-%%metro line: l0 | Pca | #e6194b
-%%metro line: l1 | Assemble_Bam | #3cb44b
-%%metro line: l2 | Trim | #4363d8
+%%metro title: Same-destination short overlap tails
+%%metro line: l0 | Zero | #e6194b
+%%metro line: l1 | One | #3cb44b
+%%metro line: l2 | Two | #4363d8
+%%metro grid: top | 0,0
+%%metro grid: src | 0,1
+%%metro grid: target | 1,1
+%%metro grid: sink | 2,1
 
 graph LR
-    subgraph sec0 [Markdup_Pca_Export 0]
-        %%metro direction: TB
-        s0n0[dedup]
-        s0n1[CLASSIFY_PCA]
-        s0n2[fastqc]
-        s0n3[CALL]
-        s0n1 -->|l0| s0n2
-        s0n2 -->|l0| s0n3
-        s0n0 -->|l2| s0n3
+    subgraph top [Top]
+        t[T]
     end
-    subgraph sec1 [Call_Quant 1]
-        %%metro entry: bottom | l0
-        s1n0[fastqc_dedup_markdup]
-        s1n1[markdup]
-        s1n0 -->|l0| s1n1
+    subgraph src [Source]
+        a[A]
     end
-    subgraph sec2 [Assemble 2]
-        s2n1[bin_call]
-        s2n2[merge_call]
-        s2n1 -->|l0| s2n2
+    subgraph target [Target]
+        b[B]
+        c[C]
+        d[D]
+        e[E]
+        f[F]
+        b -->|l1,l2| c
+        c -->|l1,l2| d
+        d -->|l2| e
+        e -->|l2| f
     end
-    subgraph sec3 [Call_Trim 3]
-        s3n0[pca]
-        s3n1[normalize]
-        s3n2[trim_count]
-        s3n3[normalize_merge]
-        s3n4[FILTER]
-        s3n0 -->|l1| s3n1
-        s3n1 -->|l1| s3n2
-        s3n2 -->|l1,l2| s3n3
-        s3n3 -->|l1| s3n4
-        s3n0 -->|l2| s3n2
+    subgraph sink [Sink]
+        %%metro direction: RL
+        z[Z]
+        w[W]
+        z -->|l1,l2| w
     end
-    subgraph sec4 [Report 4]
-        s4n0[call]
-        s4n1[bam]
-        s4n2[vcf_merge]
-        s4n3[fastqc]
-        s4n0 -->|l0,l2| s4n2
-        s4n2 -->|l0,l2| s4n3
-        s4n0 -->|l1| s4n1
-        s4n1 -->|l1| s4n2
-    end
-    s0n3 -->|l0| s1n0
-    s1n1 -->|l0| s4n0
-    s1n0 -->|l0| s2n1
-    s3n4 -->|l1| s4n0
-    s0n3 -->|l2| s3n0
-    s3n3 -->|l2| s4n0
+    t -->|l0| b
+    a -->|l1,l2| b
+    d -->|l1| z
+    f -->|l2| z

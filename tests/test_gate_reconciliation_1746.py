@@ -340,7 +340,7 @@ def test_invalid_drawable_turnout_shape_raises_project_invariant() -> None:
 
 def test_short_same_destination_overlap_is_refused_atomically() -> None:
     graph, offsets, routes = _routed(SHORT_OVERLAP_TAILS)
-    destination = _destination_routes(graph, routes, "sec4")
+    destination = _destination_routes(graph, routes)
     tails = {
         line_id: port_peeloff_tail(route) for line_id, route in destination.items()
     }
