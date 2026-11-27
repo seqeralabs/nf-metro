@@ -2980,7 +2980,12 @@ def test_a_fan_line_holds_one_slot_along_each_run() -> None:
     assert {lid: downstream[lid] for lid in upstream} == upstream
 
 
-def _forked_source_convergence() -> str:
+SAME_DESTINATION_VERTICAL_CONVERGENCE = (
+    ROOT / "examples" / "topologies" / "same_destination_vertical_convergence.mmd"
+)
+
+
+def _forked_source_convergence(s3_direction: str = "LR") -> str:
     """``same_destination_vertical_convergence`` with a leaf forked off ``n0_1``.
 
     The leaf makes ``n0_1`` a fan fork whose plan owns ``s3``'s level run, on
@@ -2988,11 +2993,11 @@ def _forked_source_convergence() -> str:
     to ``lower`` at ``n3_2``: ``lower`` meets the run twice with ``upper``
     between.
     """
-    text = (
-        ROOT / "examples" / "topologies" / "same_destination_vertical_convergence.mmd"
-    ).read_text()
+    text = SAME_DESTINATION_VERTICAL_CONVERGENCE.read_text()
     anchor = "        n0_0 -->|scaffold| n0_1\n"
-    assert anchor in text
+    header = "    subgraph s3 [Lower feeder]\n"
+    assert anchor in text and header in text
+    text = text.replace(header, f"{header}        %%metro direction: {s3_direction}\n")
     return text.replace(
         anchor, anchor + "        leaf[Leaf]\n        n0_1 -->|scaffold| leaf\n"
     )
@@ -3016,8 +3021,9 @@ def test_a_carrier_keeps_its_upstream_carriers_lane_for_a_line_handed_back() -> 
     assert slots["n3_1"] == slots["n3_2"] == {"lower": 1, "upper": 3}
 
 
-def test_a_line_handed_back_along_a_run_holds_one_lane() -> None:
-    graph = parse_metro_mermaid(_forked_source_convergence())
+@pytest.mark.parametrize("s3_direction", ["LR", "RL", "TB", "BT"])
+def test_a_line_handed_back_along_a_run_holds_one_lane(s3_direction: str) -> None:
+    graph = parse_metro_mermaid(_forked_source_convergence(s3_direction))
     compute_layout(graph)
     carriers = {
         carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
@@ -3028,6 +3034,54 @@ def test_a_line_handed_back_along_a_run_holds_one_lane() -> None:
     assert {carriers[n]["lower"] for n in ("n3_0", "n3_1", "n3_2")} == {1}
     lanes = recorded_lane_plan(graph).tracks.lanes
     assert len({lanes[(n, "lower")] for n in ("n3_0", "n3_1", "n3_2")}) == 1
+
+
+def test_every_plan_seats_a_handed_back_line_on_one_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the unedited map no plan owns ``s3``, so its carriers reach no
+    geometry; every plan that seats them still gives ``lower`` one lane."""
+    seated: list[dict[str, dict[str, int]]] = []
+    offset_carriers = fan_plans._offset_carriers
+
+    def record(*args, **kwargs):  # type: ignore[no-untyped-def]
+        carriers = offset_carriers(*args, **kwargs)
+        seated.append(
+            {
+                carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
+                for carrier in carriers
+            }
+        )
+        return carriers
+
+    monkeypatch.setattr(fan_plans, "_offset_carriers", record)
+    graph = parse_metro_mermaid(SAME_DESTINATION_VERTICAL_CONVERGENCE.read_text())
+    compute_layout(graph)
+
+    runs = [plan for plan in seated if {"n3_1", "n3_2"} <= plan.keys()]
+    assert runs
+    for plan in runs:
+        assert plan["n3_1"]["lower"] == plan["n3_2"]["lower"]
+
+
+def test_a_line_that_leaves_for_another_row_packs_where_it_starts_again() -> None:
+    """``l2`` leaves Sec 1's entry for N1.2's row, so at N1.3 it starts a path
+    of its own: it packs beside ``l4`` instead of holding its entry lane and
+    leaving an empty lane in N1.3's marker."""
+    graph = parse_metro_mermaid(
+        (
+            ROOT / "examples" / "topologies" / "fanout_line_reused_nonadjacent_leg.mmd"
+        ).read_text()
+    )
+    compute_layout(graph)
+    carriers = {
+        carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+        for carrier in plan.offset_carriers
+    }
+    assert carriers["s1__entry_left_2"]["l2"] == 2
+    assert carriers["n1_3"] == {"l4": 0, "l2": 1}
 
 
 @pytest.mark.parametrize("holder_ahead", [True, False])
