@@ -2011,10 +2011,6 @@
     "note": "Witnessed only by `tests/data/gate_witnesses/f8500449.mmd`, which aborts with a non-concentric bundle corner at `__junction_7 -> sec2__entry_left_5` once the grid-snap half-pitch tie rule moves its stations. Reachable; open until that tie-rule conflict is resolved.",
     "status": "needs-review"
   },
-  "exit_turns.py::if assignment.planned_family_id is RouteFamilyId.BOTTOM_EXIT_JUNCTION:::#1": {
-    "note": "Witnessed only by `tests/fixtures/regressions/approach_order_draft_off_lane.mmd`, which aborts with defective bundle curves once the grid-snap half-pitch tie rule moves its stations. Reachable; open until that tie-rule conflict is resolved.",
-    "status": "needs-review"
-  },
   "exit_turns.py::elif wrap_kind is _LeftEntryRoute.BAND_HOP:::#1": {
     "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
     "status": "needs-review"
@@ -2045,6 +2041,30 @@
   },
   "inter_section_handlers.py::if source.id not in members:::#1": {
     "note": "Witnessed only by `tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd`, and only with its title band shaping layout. Laid out against a canvas top at y=0 (the post-layout title-band lift), it lays out like its untitled form and aborts in member-geometry validation (`bypass-left-entry owned segment 1 geometry changed`) before reaching this arm. Reachable; needs a witness that renders.",
+    "status": "needs-review"
+  },
+  "inter_section_handlers.py::if not straight_drop:::#1": {
+    "note": "Witnessed only by `tests/data/gate_witnesses/f8401189.mmd`. Since main's #2192 source-row seat (`ordering.py`) merged under the lane plan, that map aborts earlier (exit-turn plan: port-peeloff reconciliation changed planned exit-turn geometry) and no longer reaches this arm. Reachable; open until the #2192 merge conflicts (S6 on #2094) are resolved or a rendering witness is found.",
+    "status": "needs-review"
+  },
+  "tb_handlers.py::if cleared is not None:::#1": {
+    "note": "Witnessed only by `tests/data/gate_witnesses/f8401189.mmd`. Since main's #2192 source-row seat (`ordering.py`) merged under the lane plan, that map aborts earlier (exit-turn plan: port-peeloff reconciliation changed planned exit-turn geometry) and no longer reaches this arm. Reachable; open until the #2192 merge conflicts (S6 on #2094) are resolved or a rendering witness is found.",
+    "status": "needs-review"
+  },
+  "tb_handlers.py::for lane in sorted(candidates, key=preference):::#1": {
+    "note": "Witnessed only by `tests/data/gate_witnesses/f8401189.mmd`. Since main's #2192 source-row seat (`ordering.py`) merged under the lane plan, that map aborts earlier (exit-turn plan: port-peeloff reconciliation changed planned exit-turn geometry) and no longer reaches this arm. Reachable; open until the #2192 merge conflicts (S6 on #2094) are resolved or a rendering witness is found.",
+    "status": "needs-review"
+  },
+  "tb_handlers.py::if not inside[0] <= lane <= inside[1]:::#1": {
+    "note": "Witnessed only by `tests/data/gate_witnesses/f8401189.mmd`. Since main's #2192 source-row seat (`ordering.py`) merged under the lane plan, that map aborts earlier (exit-turn plan: port-peeloff reconciliation changed planned exit-turn geometry) and no longer reaches this arm. Reachable; open until the #2192 merge conflicts (S6 on #2094) are resolved or a rendering witness is found.",
+    "status": "needs-review"
+  },
+  "tb_handlers.py::if min(abs(lane - tgt_lane), abs(lane - src_lane)) < COORD_TOLERANCE:::#1": {
+    "note": "Witnessed only by `tests/data/gate_witnesses/f8401189.mmd`. Since main's #2192 source-row seat (`ordering.py`) merged under the lane plan, that map aborts earlier (exit-turn plan: port-peeloff reconciliation changed planned exit-turn geometry) and no longer reaches this arm. Reachable; open until the #2192 merge conflicts (S6 on #2094) are resolved or a rendering witness is found.",
+    "status": "needs-review"
+  },
+  "normalize.py::if not trunk_depths_contiguous(trunk_ys, n, step):::#1": {
+    "note": "Witnessed only by `tests/data/gate_witnesses/f8400987.mmd` within the gate corpus (outside it, `tests/fixtures/hash_seed_determinism/seed_15.mmd` and `regressions/cohort_grant_beside_seated_runs.mmd` still reach it). Since main's #2192 source-row seat (`ordering.py`) merged under the lane plan, f8400987 no longer reaches it. Reachable; open until the #2192 merge conflicts (S6 on #2094) are resolved.",
     "status": "needs-review"
   }
 }
