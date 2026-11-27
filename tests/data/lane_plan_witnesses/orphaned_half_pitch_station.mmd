@@ -1,0 +1,37 @@
+%%metro title: Fuzz 8500465
+%%metro line: l0 | Assemble_Fastqc | #e6194b
+%%metro line: l1 | Sort | #3cb44b
+%%metro line: l2 | Trim_Bin_Classify | #4363d8
+%%metro grid: sec0 | 0,0
+%%metro grid: sec2 | 1,1
+%%metro grid: sec3 | 1,0
+
+graph LR
+    subgraph sec0 [Export_Trim_Merge 0]
+        %%metro exit: left | l1
+        s0n0[pca_pca_polish]
+    end
+    subgraph sec2 [Quant_Dedup 2]
+        s2n0[vcf_assemble_merge]
+        s2n1[summarise_fastqc_markdup]
+        s2n0 -->|l1| s2n1
+        s2n0 -->|l2| s2n1
+        s2n0 -->|l2| s2n1
+    end
+    subgraph sec3 [Align_Qc 3]
+        s3n0[polish_annotate_qc]
+        s3n1[bin_vcf]
+        s3n2[summarise_pca]
+        s3n3[bam_gather]
+        s3n0 -->|l0| s3n1
+        s3n0 -->|l1| s3n1
+        s3n0 -->|l2| s3n1
+        s3n1 -->|l0| s3n3
+        s3n1 -->|l2| s3n3
+        s3n1 -->|l1| s3n2
+        s3n2 -->|l1| s3n3
+    end
+    s2n1 -->|l0| s3n0
+    s2n1 -->|l1| s3n0
+    s2n1 -->|l2| s3n0
+    s0n0 -->|l1| s3n3

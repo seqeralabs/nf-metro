@@ -6174,7 +6174,7 @@ def test_fanout_junction_shares_exit_port_y(fixture):
 
     ``_position_junctions`` places such a junction at ``exit_port.y`` so the
     bundle runs straight from the exit into the junction.  Late settling
-    stages (e.g. Stage 6.14 ``_shift_and_propagate_loop_stations``) can move
+    stages (e.g. Stage 6.14 ``push_lower_rows_after_bbox_grow``) can move
     the exit port after junctions were last positioned; if junctions are not
     re-anchored the junction is stranded above/below the port, forcing the
     fanned routes to dip to the stale junction Y and back (#386:
@@ -8600,7 +8600,7 @@ def test_loop_column_stations_share_x(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Section bbox bottom padding (Stage 6.14 post-shift padding)
+# Section bbox bottom padding (Stage 6.12 sparse loop shift)
 # ---------------------------------------------------------------------------
 
 
@@ -8617,7 +8617,7 @@ def test_section_bbox_has_bottom_padding(fixture):
     edge, so the invariant is ``bbox_bot >= max(station.y) +
     section_y_padding``.
 
-    ``_shift_and_propagate_loop_stations`` (Stage 6.14) can move a sparse
+    ``_shift_sparse_loop_stations_to_clear_bundle`` (Stage 6.12) can move a sparse
     loop station like ``grea`` further down, so the padding has to be
     restored after it: a bbox sitting ~5px below ``grea``'s centre rather
     than ``section_y_padding`` (50px) is the failure this rules out.
@@ -8978,7 +8978,7 @@ def test_side_entered_vertical_section_top_not_below_feeder_neighbour(fixture):
 
 
 # ---------------------------------------------------------------------------
-# Inter-row gap accommodates grown bboxes from Stage 6.14 shifts
+# Inter-row gap accommodates bboxes grown by the Stage 6.12 sparse loop shift
 # ---------------------------------------------------------------------------
 
 
@@ -8988,7 +8988,7 @@ def test_row_gap_accommodates_bypass(fixture):
     row ``r + 1`` sections' bbox tops must be at least
     ``section_y_gap`` for every column-overlapping pair.
 
-    When ``_shift_and_propagate_loop_stations`` grows an
+    When ``_shift_sparse_loop_stations_to_clear_bundle`` grows an
     upper-row section's bbox downward (e.g. section 3 in the
     differentialabundance pipeline, around ``grea``), the row offset
     computed by ``_compute_section_offsets`` from the pre-shift bbox

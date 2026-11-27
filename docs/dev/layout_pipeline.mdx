@@ -173,7 +173,10 @@ The remaining geometric details follow: loop-side X recenter, bbox shrink and gr
 - **Stages 6.7 to 6.9**: Re-center full-bundle columns around the row's final trunk Y, then restore the off-track-above-consumer and row top-align invariants that the recenter breaks.
   All are gated on `center_ports`.
 - **Stages 6.10 to 6.12**: Pin single-station downstream columns to their unique upstream Y, auto-balance content around the trunk, then re-center loop-side stations on their loop midpoint in an X-axis pass.
-  Stage 6.12 is the last stage that moves a station within its row, so the lane plan is decided at its close.
+  Stage 6.12 then settles the in-row half-pitch offsets, reading the X the re-center settled.
+  It shifts a sparse loop-side station onto a half-pitch Y where a busier sibling's inbound bundle would pass through its marker, and compacts symmetric legacy diamonds onto half-pitch offsets under `diamond_style='symmetric'`.
+  Last, it seats a half-pitch branch on a full row when its mirrored partner has gone, which keeps an isolated branch from sitting between grid rows.
+  Stage 6.12 is the last stage that moves a station within its section, except the Stage 6.17 planned-fan re-apply, so the lane plan is decided at its close.
 - **Stage 6.12a**: Grow an LR or RL section's left and right bbox edges so its perpendicular TOP and BOTTOM ports keep the designed inset from them.
   It reaches each port's outermost lane in the lane plan, so it runs after the plan is decided.
   This is the X-axis rotation of the clearance the Y sizing keeps for a TB or BT section's LEFT and RIGHT ports.
@@ -184,8 +187,7 @@ The remaining geometric details follow: loop-side X recenter, bbox shrink and gr
   A grid column's sections do not share a trunk X. Leveling boxes whose content starts at different X therefore buys an aligned edge at the price of an empty band.
   Stations and the right edge stay put, while LEFT ports ride the edge out to the column line.
 - **Stage 6.12c**: Grow TB-section bbox bottoms to match downstream LR and RL targets, reading each target station's pill span from the lane plan.
-- **Stages 6.13 to 6.14**: Shrink bbox bottoms to content and close vertical slack between rows in one two-phase helper, then shift sparse loop-side stations onto half-pitch Ys to clear bundle pass-throughs.
-  The same helper pushes lower rows down internally when a shift grew a bbox.
+- **Stages 6.13 to 6.14**: Shrink bbox bottoms to content and close vertical slack between rows, then push lower rows down where the Stage 6.12 sparse loop shift grew a bbox.
 - **Stage 6.15a**: Fit bbox tops to content, symmetric with the bottom shrink in Stage 6.13.
   It grows a bbox top to a full `section_y_padding` above its highest marker when fan re-distribution lifted a branch above the line the box was sized for (#406).
   It also shrinks an empty band that the transient row-top flush left above content.
@@ -198,8 +200,6 @@ The remaining geometric details follow: loop-side X recenter, bbox shrink and gr
   Re-run the alignment, for TB and BT only, and re-anchor junctions to the settled port Ys.
 - **Stage 6.17**: Re-materialize complete semantic fan frames on their settled centerlines without resizing their sections or row mates.
   Two-way plans under `diamond_style='symmetric'` keep mirrored half-pitch lanes even when one branch is the topology's unique continuation.
-  Unsupported symmetric diamonds then receive the legacy half-pitch compaction.
-- **Stage 6.18**: Expand a half-pitch branch to a full row when its mirrored partner has gone, which keeps an isolated branch from sitting between grid rows.
 - **Stage 6.18a**: Refit the top of each planned fan section after its final content placement.
   The refit only removes empty space.
   It leaves intact any top band used by a port or bypass route, and never aligns unrelated sections.

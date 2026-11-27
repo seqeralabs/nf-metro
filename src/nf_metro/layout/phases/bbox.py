@@ -313,8 +313,8 @@ def push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> 
     """Push lower-row sections down when an upper-row bbox grows.
 
     Shared helper called by layout stages that may grow a section's ``bbox_h``
-    downward after row offsets are already fixed (``_shift_and_propagate_loop_
-    stations`` at Stage 6.14, and the Stage 6.15a top-padding restore).  Row
+    downward after row offsets are already fixed (Stage 6.14, after the Stage
+    6.12 sparse loop shift, and the Stage 6.15a top-padding restore).  Row
     offsets were fixed earlier by ``_compute_section_offsets`` from pre-grow
     bbox heights, so the section below a grown one can end up sitting closer
     than the gap the boundary owes.

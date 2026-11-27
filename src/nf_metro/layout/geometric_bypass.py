@@ -10,15 +10,15 @@ with vertical spread clears it on a parallel track.
 
 This pass closes that gap by working from the laid-out geometry.  After
 a first layout pass it routes the edges and finds every segment that
-crosses the marker of a station it does not consume (the condition the
-Stage 6.14 guard raises on).  For the in-section cases the bypass-V idiom
-can express, it inserts a helper and re-lays out so a bow is drawn around
-the marker - but only keeps that second layout when it is an improvement
-(fewer crossings, no new fold-back, no new curve defect); otherwise the
-helpers are removed so a render the idiom cannot cleanly fix is left
-exactly as it was.  Because detection is geometric the pass fires only
-where a crossing genuinely occurs, so a clean render gains no helpers and
-is laid out exactly once.
+crosses the marker of a station it does not consume (the condition
+``_guard_no_line_crosses_non_consumer`` raises on).  For the in-section
+cases the bypass-V idiom can express, it inserts a helper and re-lays out
+so a bow is drawn around the marker - but only keeps that second layout
+when it is an improvement (fewer crossings, no new fold-back, no new curve
+defect); otherwise the helpers are removed so a render the idiom cannot
+cleanly fix is left exactly as it was.  Because detection is geometric the
+pass fires only where a crossing genuinely occurs, so a clean render gains
+no helpers and is laid out exactly once.
 """
 
 from __future__ import annotations

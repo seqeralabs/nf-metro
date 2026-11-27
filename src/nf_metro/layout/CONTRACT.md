@@ -172,7 +172,7 @@ bisection runner skips them earlier; see `_BISECTION_FIRST_VALID` in
 |---|---|---|
 | `_guard_stations_in_sections` | after Stage 5.3 | Stage 5.2's off-track lift moves stations above the section bbox; Stage 5.3 grows the bbox to enclose them. |
 | `_guard_no_station_overlap` | after Stage 6.12 | It reads station offsets, which read the lane plan decided at the close of Stage 6.12. Pre-snap fan placement can also sit a fraction of a pitch off the row grid until Stage 6.4's snap pulls every station onto the grid on distinct same-column slots. |
-| `_guard_no_line_crosses_non_consumer` | after Stage 6.14 | A sparse loop-side station sits on the trunk Y until Stage 6.14 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
+| `_guard_no_line_crosses_non_consumer` | after Stage 6.12 | A sparse loop-side station sits on the trunk Y until Stage 6.12 shifts it to a half-grid offset; before that, sibling line bundles pass through its marker bbox. |
 
 Three further guards are excluded from the bisection set entirely
 (meaningful only at the final boundary); the `_run_pass_c_guards`
@@ -267,10 +267,11 @@ pass:
   by the grid-group port snap (Stage 4.2-4.4), fan re-centre (6.3/6.7), and
   grid snap (6.4).
 - `graph.half_grid_station_ids` - written by Stage 6.3 (`center_ports` only),
-  Stage 6.4's own midpoint restore and Stage 6.17
-  (`diamond_style='symmetric'`); read by the Stage 6.4 grid snap, which must
-  skip these half-pitch stations. Stage 6.18 both reads the set and clears the
-  marking off any station it seats back on a full row, so the post-layout
+  Stage 6.4's own midpoint restore, the Stage 6.12 symmetric diamond
+  compaction (`diamond_style='symmetric'`) and the planned-fan placement
+  (plan-owned stations only); read by the Stage 6.4 grid snap, which must
+  skip these half-pitch stations. The Stage 6.12 orphan expansion both reads
+  the set and clears the marking off any station it seats back on a full row, so the post-layout
   readers (the straddle guard, the co-fanned drop-clearance rule in
   `routing/intra_handlers.py`) see only stations still at half pitch. A mark
   that a settled layout alone can make goes to
@@ -937,8 +938,9 @@ in pipeline order.
 - **Related tests**: `test_symfan_pairs_share_y`.
 - **Lifecycle:** invariant - 2-branch symfan pairs keep their half-pitch
   offsets at the final boundary (Stage 6.4 skips
-  `graph.half_grid_station_ids`); only Stage 6.18 may seat one on a full
-  row, and only once its straddling partner has moved away.
+  `graph.half_grid_station_ids`); only the Stage 6.12 orphan expansion may
+  seat one on a full row, and only once its straddling partner has moved
+  away.
 
 ### Stage 6.4: snap all Y to grid (engine.py)
 - **Purpose**: Final pass snapping every station and port Y to the
@@ -1022,8 +1024,8 @@ in pipeline order.
   `if center_ports:` block.
 - **Lifecycle:** invariant - full-bundle columns are symmetric around
   the row's final trunk Y at the boundary; no later stage re-fans them,
-  though Stage 6.18 seats a half-pitch member on a full row once its
-  straddling partner has moved away.
+  though the Stage 6.12 orphan expansion seats a half-pitch member on a full
+  row once its straddling partner has moved away.
   *liftable:* no - one-shot, order-dependent (computes against the final
   trunk Y, so a premature run is wrong).
 
@@ -1182,28 +1184,106 @@ in pipeline order.
 - **Lifecycle:** invariant - section content is balanced around the
   trunk (siblings above >= below, where movable) at the final boundary.
 
-### Stage 6.12: recenter loop side stations
-- **Purpose**: Recompute the X of fan-out side stations (one trunk
-  predecessor, one trunk successor - "loop side" stations like propd,
-  dream, DESeq2 around limma) to the midpoint of their actual diagonal
-  corner Xs from the routing geometry.
-- **Helper**: `_recenter_loop_side_stations` (`phases/balancing.py`).
-- **Precondition**: All Y phases done; routing geometry derivable.
-- **Postcondition**: Loop side stations sit at the visual centre of
-  their horizontal loop run, or as near it as leaves both fanned diagonals
-  their `fan_stagger_needs` room, measured to each neighbour's settled X.
+### Stage 6.12: recenter loop side stations, then settle in-row half-pitch offsets
+- **Purpose**: The last in-row placement, four movers in this order, each
+  reading the positions the one before it leaves:
+  1. Recompute the X of fan-out side stations (one trunk predecessor, one
+     trunk successor - "loop side" stations like propd, dream, DESeq2 around
+     limma) to the midpoint of their actual diagonal corner Xs from the
+     routing geometry.
+  2. Shift sparse loop-side stations (one inbound, one outbound, single-line
+     consumer) onto a half-pitch Y when sharing the full-row Y with a busier
+     sibling whose inbound bundle would otherwise breeze past the sparse
+     station's marker.  The bundle's span is read from the station Xs step 1
+     settled.  A shift may grow the section's bbox downward; Stage 6.14
+     pushes the rows below clear of it.
+  3. Under `diamond_style='symmetric'`, compact each clean 2-way fork-join
+     diamond that no fan plan owns (`_iter_symmetric_diamonds`) onto
+     half-pitch offsets, half the section's row pitch (`_section_row_pitch`)
+     either side of the fork's Y, so the diamond reads as a tight
+     one-grid-unit bubble rather than straddling the trunk at full pitch (as
+     tall as a 3-way fan with an empty trunk row between its branches).
+     Per-diamond, so a diamond compacts even when it shares a section with a
+     wider fan (which keeps its full-pitch slots) and regardless of
+     `center_ports`.  Records the branches on
+     `MetroGraph.half_grid_station_ids`.  The compaction only moves branches
+     inward toward the trunk, so it never breaks bbox containment.
+  4. Seat orphaned half-pitch stations on a full row.  A half-pitch offset
+     encodes one side of a symmetric pair straddling the section trunk, so
+     the pair reads as one compact grid unit.  Stage 6.10's
+     `_align_terminus_to_upstream` may pull a terminus member onto its
+     producer's trunk Y, leaving the other member holding an offset that
+     straddles nothing and rendering as a branch stranded between two grid
+     rows.  `_straddles_nothing` mirrors each marked station's offset about
+     the section's LR/RL port anchor; with no station at the mirrored slot,
+     the branch is seated one full row from the anchor on the side it
+     already sits, its half-grid marking cleared, and the section bbox grown
+     over the moved branch alone.  Stations marked half-grid whose Y is
+     already a whole number of rows from the anchor are left alone.  A
+     Stage 6.4 centreline has no mirror member, so the fork hub and its
+     midpoint trunk are exempt, and so is every plan-owned station.
+- **Helpers**: `_recenter_loop_side_stations` and
+  `_shift_sparse_loop_stations_to_clear_bundle` (`phases/balancing.py`),
+  `_apply_half_grid_symmetric_diamonds` and
+  `_expand_orphaned_half_grid_stations` (`phases/fan_bundles.py`), the last
+  sharing `_half_grid_frame` / `_straddles_nothing` with the invariant test.
+- **Precondition**: All Y phases done; routing geometry derivable.  The
+  orphan expansion reads final half-grid marks: every pass that places or
+  dissolves a half-pitch pair has run before it, and the only later writer of
+  marks, the Stage 6.17 planned-fan re-apply, marks plan-owned stations
+  alone, which the expansion skips.  Its occupancy read of plan-owned
+  stations (`_section_occupants`) is final on the curated and 8k corpora but
+  not by construction: Stage 6.17 re-materialises those stations after the
+  seal, and nothing yet stops that re-apply moving a station into or out of
+  a mirrored slot the expansion read.  The expansion's frame anchor
+  (`_section_lr_port_anchor_y`) is final relative to its section, except
+  where the section has no LR/RL entry and the anchor is an LR/RL exit port
+  that Stage 6.16's TB-entry clamp (`_clamp_tb_entry_port`) later pulls onto
+  the topmost station feeding a downstream TB section's entry.  There the
+  seat reads an interim anchor, and the row a lone half-pitch station is
+  seated onto follows that interim value (witness
+  `tests/data/orphan_expansion_anchor/w2_00263.mmd`, held as a strict xfail
+  by `test_the_orphan_expansion_reads_a_final_anchor`).
+- **Postcondition**: Loop side stations sit at the visual centre of their
+  horizontal loop run, or as near it as leaves both fanned diagonals their
+  `fan_stagger_needs` room, measured to each neighbour's settled X.
   Routing's bubble centring keeps the same bound on every station it moves,
   its column-alignment drag included: one pass in a fixed order, each move
-  seated against the moves before it.
-- **Invariants preserved**: Station Y. Pure-side-branch classification
-  is strict (see `test_loop_recenter_only_for_pure_side_branches`).
+  seated against the moves before it.  Sparse single-line loop stations whose
+  row Y conflicts with a busier sibling's bundle sit at a half-pitch offset.
+  Each symmetric legacy diamond straddles its fork's Y at half pitch, its
+  branch ids recorded in `graph.half_grid_station_ids`.  No station in
+  `graph.half_grid_station_ids` sits half a pitch off its section's LR/RL
+  port anchor with the mirrored slot empty.
+- **Invariants preserved**: Trunk station Y, busy sibling Y, bundle Y, ports,
+  bbox containment, and wider fan full-pitch slots.  Pure-side-branch
+  classification is strict (see
+  `test_loop_recenter_only_for_pure_side_branches`).  Deliberately not
+  preserved: the half-grid marker set (a seated station's id is discarded,
+  so the post-layout readers see only stations still at half pitch) and the
+  section bbox extent, which grows over a shifted or seated station.  No
+  runtime `_guard_*` arms the orphan postcondition:
+  `test_half_grid_stations_straddle_in_pairs` covers it across the corpus
+  without the abort risk a live guard would add to novel input.
 - **Related tests**: `test_fan_station_centered_on_loop`,
   `test_loop_recenter_only_for_pure_side_branches`,
-  `test_loop_column_stations_share_x`.
-- **Lifecycle:** invariant - loop-side stations sit at the visual centre
-  of their loop run at the final boundary.
+  `test_loop_column_stations_share_x`,
+  `test_lines_dont_cross_non_consumer_markers`,
+  `test_no_icon_overlaps_line_path`,
+  `test_symmetric_diamond_compacts_to_half_pitch`,
+  `test_symmetric_diamond_both_branches_deviate`,
+  `test_half_grid_stations_straddle_in_pairs`,
+  `test_no_station_moves_within_its_section_after_the_seal`,
+  `_guard_symmetric_diamond_branches_straddle_trunk` and
+  `_guard_sparse_loop_station_clears_column_neighbour`.
+- **Lifecycle:** invariant - at the final boundary loop-side stations sit at
+  the visual centre of their loop run, sparse loop stations and symmetric
+  diamond branches keep their half-pitch offsets, and a seated orphan keeps
+  its full-row Y.  The cleared marker reaches the next `_layout_once` pass,
+  which re-derives the marks from scratch.
 - **Closes with**: the lane plan decision (`seal_lane_plan`, see "Lane plan
-  record"): this is the last stage that moves a station within its row.
+  record"): no stage after it moves a station within its section except the
+  Stage 6.17 planned-fan re-apply.
 
 ### Stage 6.12a: reserve the perpendicular-port edge inset on X
 - **Purpose**: Grow a horizontal-flow (LR/RL) section's left and right
@@ -1345,32 +1425,25 @@ in pipeline order.
   `test_section_bbox_matches_content_extent`.
 - **Lifecycle:** invariant - content-hugging bbox bottoms and correct
   inter-row gaps hold at the final boundary (maintained by Stage 6.14,
-  which restores the gap via `push_lower_rows_after_bbox_grow` whenever
-  it grows a bbox downward). *liftable:* no - one-shot, order-dependent
+  whose `push_lower_rows_after_bbox_grow` restores the gap below any box
+  the Stage 6.12 sparse loop shift grew). *liftable:* no - one-shot, order-dependent
   (computes against the final content extent).
 
-### Stage 6.14: shift and propagate loop stations
-- **Purpose**: Shift sparse loop-side stations (one inbound, one
-  outbound, single-line consumer) onto a half-pitch Y when sharing
-  the full-row Y with a busier sibling whose inbound bundle would
-  otherwise breeze-past the sparse station's marker.  When a shift
-  grows a section's bbox downward, push lower-row sections down
-  internally to restore `section_y_gap`.
-- **Helper**: `_shift_and_propagate_loop_stations`
-  (calls `push_lower_rows_after_bbox_grow` when any bbox grew).
-- **Precondition**: Bundle Ys final.
-- **Postcondition**: Sparse single-line loop stations whose row Y
-  conflicts with a busier sibling's bundle move to a half-pitch
-  offset (may grow bbox downward).  Row gaps preserved across any
-  bbox grow.
-- **Invariants preserved**: Busy sibling Y. Bundle Y. Within-row Ys
-  of unaffected sections.
-- **Related tests**: `test_lines_dont_cross_non_consumer_markers`,
-  `test_no_icon_overlaps_line_path`,
-  `test_row_gap_accommodates_bypass`.
-- **Lifecycle:** invariant - sparse loop-side stations keep their
-  half-pitch offset at the final boundary; row gaps preserved across any
-  bbox grow.
+### Stage 6.14: push lower rows clear of the sparse loop shift
+- **Purpose**: The Stage 6.12 sparse loop shift may grow a section's bbox
+  downward, and row offsets were fixed from the pre-grow heights, so the
+  section below a grown one can sit closer than the gap the boundary owes.
+  Push lower-row sections (with their stations, ports and the junctions
+  those ports anchor) down to restore `section_y_gap`.
+- **Helper**: `push_lower_rows_after_bbox_grow` (`phases/bbox.py`).
+- **Precondition**: Stage 6.13's shrink and tighten done.
+- **Postcondition**: Row gaps preserved across any bbox grow.
+- **Invariants preserved**: Station positions within each section (a push
+  translates whole rows). Bbox heights.
+- **Related tests**: `test_row_gap_accommodates_bypass`,
+  `test_section_bbox_has_bottom_padding`.
+- **Lifecycle:** invariant - row gaps preserved across any bbox grow at the
+  final boundary.
 
 ### Stage 6.15a: fit bbox tops to content (grow and shrink)
 - **Purpose**: Size each bbox top to `section_y_padding` above its highest
@@ -1473,75 +1546,26 @@ in pipeline order.
   `_position_junctions` remains axis-generic because every junction depends on
   its final port positions.
 
-### Stage 6.17: semantic fan settlement and symmetric compaction (engine.py)
+### Stage 6.17: semantic fan settlement (engine.py)
 - **Purpose**: Re-materialise every planned semantic fan against its settled
   centreline. Under `diamond_style='symmetric'`, a planned two-way fan keeps
   mirrored half-pitch lanes around that centreline even when topology identifies
-  one branch as the unique continuation. For unsupported legacy fans, compact
-  each clean 2-way fork-join diamond (`_iter_symmetric_diamonds`) onto
-  half-pitch offsets, half the section's row pitch (`_section_row_pitch`)
-  either side of the trunk, so the diamond reads as a tight
-  one-grid-unit bubble rather than straddling the trunk at full pitch
-  (as tall as a 3-way fan with an empty trunk row between its branches).
-  Per-diamond, so a diamond compacts even when it shares a section with a
-  wider fan (which keeps its full-pitch slots) and regardless of
-  `center_ports`. Records the branches on
-  `MetroGraph.half_grid_station_ids`. Runs after every trunk-settling
-  pass, so the branches straddle the section trunk's final Y exactly; the
-  compaction only moves them inward toward the trunk, so it never breaks bbox
-  containment.
+  one branch as the unique continuation. This is the one stage after the lane
+  plan's seal that moves a station within its section.
 - **Helpers**: `_snapshot_planned_fan_centrelines` captures the settled frame,
-  `_apply_planned_fan_geometry` materialises it, then
-  `_apply_half_grid_symmetric_diamonds` for symmetric legacy geometry.
+  then `_apply_planned_fan_geometry` materialises it.
 - **Precondition**: Trunk Ys and section bboxes settled (post-6.16).
 - **Postcondition**: Each planned station realises its immutable relative frame.
-  Each symmetric two-way fan straddles one centreline at half pitch; legacy
-  diamond branch IDs are recorded in `graph.half_grid_station_ids`.
-- **Invariants preserved**: Trunk station Y, ports, section bboxes, unrelated
-  row-mate bbox tops, and wider fan full-pitch slots.
-- **Related tests**: `test_symmetric_diamond_compacts_to_half_pitch`,
-  `test_symmetric_diamond_both_branches_deviate`,
+  Each symmetric two-way planned fan straddles one centreline at half pitch;
+  its half-pitch members are recorded in `graph.half_grid_station_ids`.
+- **Invariants preserved**: Trunk station Y, ports, section bboxes, and
+  unrelated row-mate bbox tops.
+- **Related tests**:
   `test_symmetric_style_keeps_planned_two_way_fan_on_shared_centreline`,
-  `test_planned_fan_does_not_level_unrelated_row_bbox_tops`,
-  `_guard_symmetric_diamond_branches_straddle_trunk`, and
+  `test_planned_fan_does_not_level_unrelated_row_bbox_tops`, and
   `_guard_planned_fan_frame_realised`.
-- **Lifecycle:** invariant - symmetric diamond branches keep their
-  half-pitch offsets at the final boundary; only Stage 6.18 may move one,
-  and only when its straddling partner is gone.
-
-### Stage 6.18: orphaned half-pitch expansion (engine.py)
-- **Purpose**: A half-pitch offset encodes one side of a symmetric pair
-  straddling the section trunk, so the pair reads as one compact grid
-  unit. Stage 6.10's `_align_terminus_to_upstream` may pull a terminus
-  member onto its producer's trunk Y, leaving the other member holding an
-  offset that straddles nothing and rendering as a branch stranded
-  between two grid rows. `_straddles_nothing` mirrors each marked
-  station's offset about the section's LR/RL port anchor; with no station
-  at the mirrored slot, the branch is seated one full row from the anchor
-  on the side it already sits, its half-grid marking cleared, and the
-  section bbox grown over the moved branch alone. Stations marked
-  half-grid whose settled Y is already a whole number of rows from the
-  anchor are left alone. A Stage 6.4 centreline has no mirror member, so
-  the fork hub and its midpoint trunk are exempt.
-- **Helper**: `_expand_orphaned_half_grid_stations`
-  (`phases/fan_bundles.py`), sharing `_half_grid_frame` /
-  `_straddles_nothing` with the invariant test.
-- **Precondition**: Every pass that places or dissolves a half-pitch pair
-  has run (post-6.17), so the half-grid marks are final.
-- **Postcondition**: No station in `graph.half_grid_station_ids` sits half
-  a pitch off its section's LR/RL port anchor with the mirrored slot
-  empty.
-- **Invariants preserved**: Trunk station Y, ports, bbox containment.
-  Deliberately not preserved: the half-grid marker set (the seated
-  station's id is discarded, so the post-layout readers see only stations
-  still at half pitch) and the section bbox extent, which grows over the
-  seated branch. No runtime `_guard_*` arms this postcondition:
-  `test_half_grid_stations_straddle_in_pairs` covers it across the corpus
-  without the abort risk a live guard would add to novel input.
-- **Related tests**: `test_half_grid_stations_straddle_in_pairs`.
-- **Lifecycle:** invariant - the expanded branch keeps its full-row Y at
-  the final boundary (no later Y mutation). The cleared marker reaches the
-  next `_layout_once` pass, which re-derives the marks from scratch.
+- **Lifecycle:** invariant - each planned station keeps its relative frame at
+  the final boundary.
 
 ### Stage 6.18a: refit planned fan bbox bands (engine.py)
 - **Purpose**: Stage 6.17 can move planned fan content after the general bbox
@@ -1555,8 +1579,7 @@ in pipeline order.
   `push_lower_rows_after_bbox_grow`, then
   `_snapshot_struct_heights_below_top` (all `phases/bbox.py`), scoped
   by `planned_fan_layout_section_ids` (`phases/planned_fans.py`).
-- **Precondition**: Planned fan geometry and half-pitch expansion are settled
-  (post-6.18).
+- **Precondition**: Planned fan geometry is settled (post-6.17).
 - **Postcondition**: A planned fan section with an unused top band has exactly
   `section_y_padding` above its highest visible content; every planned fan
   section keeps a full padding band on both Y edges, the row boundary above it
@@ -1638,8 +1661,8 @@ through the record's draw accessors (`planned_offsets` in
   in pin order where the piece carries no other line.  `start_layout`,
   called at the top of `_layout_once`, clears the previous layout's record.
 - **Precondition**: Station coordinates, section boxes, grid cells and cell
-  packs as they stand at the close of Stage 6.12, the last stage that moves a
-  station within its row, and the fan plans (`graph.fan_plans`) installed at
+  packs as they stand at the close of Stage 6.12, after which only the Stage
+  6.17 planned-fan re-apply moves a station within its section, and the fan plans (`graph.fan_plans`) installed at
   the top of `_layout_once`.  No stage before it reads a lane: the box sizers
   that need lanes (Stages 6.12a to 6.12c) run after it, and validation's
   checkpoint guards that read offsets or routes are first due at
@@ -1659,15 +1682,15 @@ through the record's draw accessors (`planned_offsets` in
   offsets run of the layout, and routing and rendering after it, read the
   decided record rather than rebuilding it, and a layout validated with
   `validate=True` decides the same record at the same stage as without.
-  Rail-mode layouts hold no record.  Stages 6.13 to 6.17 still move positions
-  the record read on a few maps (#2171); a layout's record is not rebuilt for
-  them.
+  Rail-mode layouts hold no record.  Row stacking (Stages 6.13 to 6.16) and the
+  Stage 6.17 planned-fan re-apply move positions the record read on a few maps
+  (#2171); a layout's record is not rebuilt for them.
 - **Side-entry U-turn sides**: `PortOrderBuilder.u_turn_side` is the one
   owner of the side a U-turn into a side entry passes on, decided here from
   structure and placement as they stand at the close of Stage 6.12.  It reads
   each box's lateral faces no further than the section padding beyond the
   section's content, so the bundle sizing of Stages 6.13 and 6.15a cannot move
-  its inputs.  Stages 6.14, 6.15a, 6.17 and 6.18 and envelope settlement never
+  its inputs.  Stages 6.14, 6.15a and 6.17 and envelope settlement never
   re-decide the side; routing reads it (the RIGHT- and LEFT-entry gap-above
   traverses, the far-left U-turn wrap, `draws_over_top_loop` and the exit turn
   it opens with) with no fallback of its own.  Linked U-turns (opposite runs
