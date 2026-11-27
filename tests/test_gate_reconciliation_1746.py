@@ -50,8 +50,9 @@ from nf_metro.layout.settlement_demand import (
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, PortSide
 from nf_metro.render import svg as render_svg
-from nf_metro.render.animate import _build_line_motion_paths
+from nf_metro.render.animate import build_animation_timeline
 from nf_metro.render.svg import _plan_decision_fingerprint, build_observed_render_plan
+from nf_metro.themes import THEMES
 
 ROOT = Path(__file__).resolve().parent.parent
 TOPOLOGIES = ROOT / "examples" / "topologies"
@@ -249,7 +250,8 @@ def test_flow_exit_fed_junction_freezes_its_cross_member_source_turn() -> None:
 
 def test_source_turnout_animation_uses_the_same_concentric_radii() -> None:
     graph, offsets, routes = _routed("same_destination_short_overlap")
-    paths = _build_line_motion_paths(graph, routes, offsets)
+    timeline = build_animation_timeline(graph, routes, offsets, THEMES["nfcore"])
+    paths = {(d.line_id, d.track.d_attr) for d in timeline.dots}
 
     assert any(
         line_id == "reads" and "L 192.00 124.00 Q 202.00 124.00 202.00 134.00" in path

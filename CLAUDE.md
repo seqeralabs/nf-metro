@@ -150,7 +150,7 @@ Any env with the project importable works. Prefer pointing `PYTHONPATH` at the w
 
 - Test fixtures: `tests/fixtures/`
 - Example pipelines: `examples/` (including `rnaseq_sections.mmd` with manual grid and `rnaseq_auto.mmd` with fully inferred layout)
-- Topology stress tests: `examples/topologies/*.mmd` - 284 fixtures covering fan-out, fan-in, diamonds, folds, mixed port sides, etc. See `examples/topologies/README.md` for the structural-class index and known issues; it catalogues all of them, and `scripts/list_topology_fixtures.py` reports any fixture missing from it. The test sweep globs the directory rather than reading the README, so a fixture is exercised by every validator check whether or not it is catalogued - adding one changes the invariant suite, and the full suite must be run.
+- Topology stress tests: `examples/topologies/*.mmd` - fixtures covering fan-out, fan-in, diamonds, folds, mixed port sides, etc. See `examples/topologies/README.md` for the structural-class index and known issues; it catalogues all of them, and `scripts/list_topology_fixtures.py` reports any fixture missing from it. The test sweep globs the directory rather than reading the README, so a fixture is exercised by every validator check whether or not it is catalogued - adding one changes the invariant suite, and the full suite must be run.
 - `tests/layout_validator.py` - Programmatic layout checks (section overlap, station containment, port positioning, edge waypoints).
 - `tests/test_topology_validation.py` - Parametrized tests running all validator checks against every topology fixture.
 - `scripts/render_topologies.py` - Batch render all fixtures to `/tmp/nf_metro_topology_renders/`.

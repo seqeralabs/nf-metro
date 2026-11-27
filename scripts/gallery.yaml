@@ -582,6 +582,14 @@ gallery:
       same downstream join). The source is centred between its two consumers, which
       straddle it symmetrically, rather than staying collinear with one branch while the
       other peels off (#1223)."
+  - id: source_sibling_vs_fork_peel_lane
+    source_dir: examples/topologies
+    category: Fan-out and Fan-in
+    description:
+      "Two sources share a column: Reads forks its QC line onto a branch station,
+      while Genome's Reference line runs on to Quantify. Genome sits clear of the lane
+      the QC branch peels into, so the Reference line never runs through the QC marker,
+      whichever of the two lines is declared first (#2192)."
   - id: trunk_through_fan
     source_dir: examples/topologies
     category: Fan-out and Fan-in
