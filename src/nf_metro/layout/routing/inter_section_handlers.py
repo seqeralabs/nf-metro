@@ -3720,6 +3720,7 @@ def _bypass_geometry(
     # row, so this only applies to a route landing on a real section entry port.
     src_off = _get_offset(ctx, edge.source, edge.line_id)
     tgt_entry = graph.ports.get(edge.target)
+    on_leg = False
     if cross_row and _is_row_level_bottom_row_climb(
         graph, edge, src_row, tgt_row, src_col, tgt_col
     ):
@@ -3730,6 +3731,7 @@ def _bypass_geometry(
         # double up here.
         base_y = sy + src_off
         nest_offset = 0.0
+        on_leg = True
     elif (
         src_row is not None
         and tgt_row is not None
@@ -3752,6 +3754,7 @@ def _bypass_geometry(
         # the span, so run straight along it and turn up once at the target.
         base_y = sy + src_off
         nest_offset = 0.0
+        on_leg = True
 
     # A bypass branch of a junction fan traverses the fan's one shared below-row
     # band (the deepest sibling's ``bypass_bottom_y``), so its trunk coincides
@@ -3775,14 +3778,20 @@ def _bypass_geometry(
 
     # The step off the source leg down onto the trunk is two formed corners
     # with a vertical run between them, so it needs a full radius of runway at
-    # each end.  A section bottom that leaves less than that -- the source
-    # already sitting most of the way down to the traverse's clearance lane --
-    # is deepened to exactly ``2 * curve_radius``, the shallowest step the
-    # corners can be drawn at without the bundle builder halving their radius.
+    # each end.  A trunk that steps down off the leg by less than that, or that
+    # runs below the source port yet a wide lane offset leaves level with the
+    # leg or above it, is deepened to exactly ``2 * curve_radius`` below the
+    # leg: the shallowest step the corners can be drawn at without the bundle
+    # builder halving their radius.  Only the source-track cases above run on
+    # the leg.
     src_leg_y = sy + src_off
     step_runway = 2 * ctx.curve_radius
     step = base_y + nest_offset - src_leg_y
-    if COORD_TOLERANCE < step < step_runway - COORD_TOLERANCE:
+    if (
+        not on_leg
+        and step < step_runway - COORD_TOLERANCE
+        and (step > COORD_TOLERANCE or base_y > sy + COORD_TOLERANCE)
+    ):
         base_y = src_leg_y + step_runway - nest_offset
 
     # Determine actual vertical direction at each gap from the geometry.
