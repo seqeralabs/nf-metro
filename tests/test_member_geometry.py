@@ -1091,7 +1091,6 @@ def test_seed_77_compiles_atomic_single_lane_components() -> None:
     graph, first = _observe(path)
     _routes, _moves, provisional_plan = _route_edges(
         graph,
-        DIAGONAL_RUN,
         CURVE_RADIUS,
         compute_station_offsets(graph),
         observe_plan=True,

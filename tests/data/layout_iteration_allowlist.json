@@ -60,154 +60,154 @@
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_align_merge_fed_confluence_to_band",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_bundle_divergent_distinct_traverses",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_center_bubble_stations",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_clear_bypass_v_label_strikes",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_clear_merge_trunk_opposite_arm",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_coincide_fanout_opening_descents",
         "removed_by": "7q (K10)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_coincide_merge_fanout_pivots",
         "removed_by": "7q (K10)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_coincide_same_line_fanout_traverses",
         "removed_by": "7q (K10)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_coincide_same_line_tracks",
         "removed_by": "7q (K10)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_hold_runs_in_corridor_clearance",
         "removed_by": "7u (K14)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_materialize_gap_slots",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_materialize_trunk_slots",
         "removed_by": "7q (K4r)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_nest_bypass_above_over_top_wrap",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_reconcile_port_peeloff_risers",
         "removed_by": "7q (K2x)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
-        "callee": "_rederive_semantic_end_corners",
+        "site": "routing/core.py:_route_edges_in_context",
+        "callee": "_size_concentric_cohorts",
         "removed_by": "7s (K1r)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_separate_declared_opposing_gap_bundles",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_separate_fused_cotravelling_runs",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_separate_opposing_inter_row_trunks",
         "removed_by": "7r (K7)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_settle_same_destination_approach_bundles",
         "removed_by": "7q (K6)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_spread_diagonal_bundles",
         "removed_by": "unassigned",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_stagger_convergent_distinct_lines",
         "removed_by": "7q (K11)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
       },
       {
         "rule": "route-postpass",
-        "site": "routing/core.py:_route_edges",
+        "site": "routing/core.py:_route_edges_in_context",
         "callee": "_unify_coincident_corner_radii",
         "removed_by": "7s (K1r)",
         "replacement": "the plan states the route's coordinate; emission seats it there and no pass rewrites it afterwards"
@@ -310,7 +310,7 @@
       {
         "rule": "later-pass-read",
         "site": "routing/member_geometry.py:_size_patched_corners",
-        "callee": "_rederive_semantic_end_corners",
+        "callee": "_size_concentric_cohorts",
         "removed_by": "unassigned",
         "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
       },
@@ -387,7 +387,7 @@
       {
         "rule": "later-pass-read",
         "site": "routing/member_geometry.py:build_member_geometry_execution",
-        "callee": "_rederive_semantic_end_corners",
+        "callee": "_size_concentric_cohorts",
         "removed_by": "unassigned",
         "replacement": "the plan states the final route coordinates; planning does not run emission passes on copies of the routes to learn them"
       },
@@ -488,11 +488,11 @@
       "_materialize_trunk_slots",
       "_nest_bypass_above_over_top_wrap",
       "_reconcile_port_peeloff_risers",
-      "_rederive_semantic_end_corners",
       "_separate_declared_opposing_gap_bundles",
       "_separate_fused_cotravelling_runs",
       "_separate_opposing_inter_row_trunks",
       "_settle_same_destination_approach_bundles",
+      "_size_concentric_cohorts",
       "_spread_diagonal_bundles",
       "_stagger_convergent_distinct_lines",
       "_unify_coincident_corner_radii"

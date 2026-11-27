@@ -45,8 +45,9 @@ from the source on each run:
   ``assert_exit_turn_snapshot`` at least three times sequences the passes that
   run on emitted routes.
 * **later passes**: the routing table, the ``routing/core.py`` functions that
-  call it (``route_edges`` and its variants), the public runners of
-  ``routing/offsets.py`` (``compute_station_offsets``), and every pass the
+  call it, directly or through one another (``route_edges`` and its
+  variants), the public runners of ``routing/offsets.py``
+  (``compute_station_offsets``), and every pass the
   routing table runs on the emitted routes.  They run after placement, so a call
   from outside the table, such as a planner running a pass on a copy of the
   routes, reads a later stage.
@@ -235,11 +236,13 @@ RENDER_MODULES = frozenset(
         "constants.py",
         "driver.py",
         "font_embed.py",
+        "glyphs.py",
         "html.py",
         "icons.py",
         "legend.py",
         "manifest.py",
         "ns.py",
+        "palette.py",
         "path_geometry.py",
         "plan.py",
         "raster.py",
@@ -673,15 +676,19 @@ def build_registry(
             and len(snapshot_checks) >= MIN_SNAPSHOT_CHECKS_FOR_ROUTING_TABLE
         ):
             reg.routing_tables.add(func.name)
+    table_callers = set(reg.routing_tables)
+    while added := {
+        f.name
+        for f in funcs
+        if f.module == ROUTING
+        and f.name not in table_callers
+        and any(_call_name(c) in table_callers for c in _calls(f))
+    }:
+        table_callers |= added
     reg.later_passes = {
         f.name
         for f in funcs
-        if f.name in reg.routing_tables
-        or (
-            f.module == ROUTING
-            and any(_call_name(c) in reg.routing_tables for c in _calls(f))
-        )
-        or (f.module == OFFSETS and f.name in reg.runners)
+        if f.name in table_callers or (f.module == OFFSETS and f.name in reg.runners)
     }
     reg.table_postpasses = {
         _call_name(call) or ""

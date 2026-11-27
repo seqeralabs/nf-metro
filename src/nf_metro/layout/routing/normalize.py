@@ -118,6 +118,7 @@ from nf_metro.layout.routing.context import (
 )
 from nf_metro.layout.routing.corners import (
     _corner_travel_units,
+    bend_nests_across_edges,
     concentric_corner_radius_at,
     concentric_reference_radius_at,
     corner_radius_budget,
@@ -1246,6 +1247,22 @@ class _Cohort(NamedTuple):
     right_angle: bool
     # Every member's curve must meet this leg at one point.
     shared_leg: _Leg | None = None
+    # A cross-edge family seats only with every member at the base radius or
+    # wider, else its end-key cohorts are sized in its place.
+    across_edges: bool = False
+    fallback: tuple[_Cohort, ...] = ()
+
+
+@dataclass(frozen=True)
+class CrossEdgeNesting:
+    """Link right-angle corners of distinct edges that bend together.
+
+    A family holding a corner of a route whose ``id`` is in *fixed_route_ids*
+    is left out: that radius may not change, and nesting the rest of the
+    family without it would leave the bend off-centre.
+    """
+
+    fixed_route_ids: frozenset[int] = frozenset()
 
 
 def _right_angle_directions(
@@ -1264,15 +1281,34 @@ def _right_angle_directions(
 _CornerKeys = defaultdict[tuple[object, ...], list[_ConcentricCorner]]
 
 
+def _right_angle_corner(
+    route: RoutedPath,
+    points: list[tuple[float, float]],
+    rank: int,
+    incoming: Direction,
+    outgoing: Direction,
+) -> _ConcentricCorner:
+    in_vec, out_vec = direction_vector(incoming), direction_vector(outgoing)
+    return _ConcentricCorner(
+        route,
+        rank,
+        points,
+        (float(in_vec[0]), float(in_vec[1])),
+        (float(out_vec[0]), float(out_vec[1])),
+    )
+
+
 def _keyed_concentric_corners(
     routes: list[RoutedPath],
     station_offsets: Mapping[tuple[str, str], float],
-) -> tuple[_CornerKeys, _CornerKeys]:
+) -> tuple[_CornerKeys, _CornerKeys, list[_ConcentricCorner]]:
     """The right-angle and the diagonal corners that may turn with others,
     each keyed so only corners turning the same way at the same kind of place
-    share a key."""
+    share a key, and every other right-angle corner of a handler-sized route
+    but its exit-turn corner."""
     right_angle: _CornerKeys = defaultdict(list)
     diagonal: _CornerKeys = defaultdict(list)
+    middles: list[_ConcentricCorner] = []
     for route in routes:
         if len(route.points) < 3:
             continue
@@ -1294,6 +1330,7 @@ def _keyed_concentric_corners(
             )
         if route.curve_radii is None or not right_angles:
             continue
+
         for kind, owner, (rank, incoming, outgoing) in (
             ("source", route.edge.source, right_angles[0]),
             ("target", route.edge.target, right_angles[-1]),
@@ -1302,17 +1339,15 @@ def _keyed_concentric_corners(
                 kind == "source" and route.exit_lane_transition_plan_id is not None
             ) or (kind == "target" and route.exit_turn_segment_rank == rank):
                 continue
-            in_vec, out_vec = direction_vector(incoming), direction_vector(outgoing)
             right_angle[kind, owner, incoming, outgoing].append(
-                _ConcentricCorner(
-                    route,
-                    rank,
-                    points,
-                    (float(in_vec[0]), float(in_vec[1])),
-                    (float(out_vec[0]), float(out_vec[1])),
-                )
+                _right_angle_corner(route, points, rank, incoming, outgoing)
             )
-    return right_angle, diagonal
+        middles.extend(
+            _right_angle_corner(route, points, rank, incoming, outgoing)
+            for rank, incoming, outgoing in right_angles[1:-1]
+            if route.exit_turn_segment_rank != rank
+        )
+    return right_angle, diagonal, middles
 
 
 def _translation_components(
@@ -1374,6 +1409,7 @@ def _concentric_corner_cohorts(
     station_offsets: Mapping[tuple[str, str], float],
     respect_owned_corners: bool,
     pitch: float,
+    cross_edge: CrossEdgeNesting | None = None,
 ) -> list[_Cohort]:
     """Group the bundle corners that turn together into cohorts.
 
@@ -1390,8 +1426,14 @@ def _concentric_corner_cohorts(
     route its handler left unsized: the plan records that route's radii as
     ``None``, which later passes read as not handler-sized, so only the final
     post-emission sizing may give it radii.
+
+    Given *cross_edge*, right-angle corners on two or more edges that
+    :func:`_cross_edge_families` links form one family cohort instead, seated
+    only with every member at the base radius or wider and otherwise replaced
+    by its members' end-key cohorts.  It takes the place of its first end-key
+    cohort, or follows every end-key cohort when it holds none.
     """
-    right_angle, diagonal = _keyed_concentric_corners(routes, station_offsets)
+    right_angle, diagonal, middles = _keyed_concentric_corners(routes, station_offsets)
 
     def eligible(group: list[_ConcentricCorner]) -> bool:
         return (
@@ -1409,11 +1451,49 @@ def _concentric_corner_cohorts(
             )
         )
 
-    cohorts = [
-        _Cohort(component, True)
+    components = [
+        component
         for corners in right_angle.values()
         for component in _translation_components(corners)
-        if eligible(component)
+    ]
+    families = (
+        []
+        if cross_edge is None
+        else [
+            family
+            for family in _cross_edge_families(components, middles, pitch)
+            if eligible(family)
+            and not any(id(m.route) in cross_edge.fixed_route_ids for m in family)
+        ]
+    )
+    family_of = {
+        (id(member.route), member.rank): index
+        for index, family in enumerate(families)
+        for member in family
+    }
+    fallbacks: list[list[_Cohort]] = [[] for _ in families]
+    cohorts: list[_Cohort | int] = []
+    for component in components:
+        index = family_of.get((id(component[0].route), component[0].rank))
+        if index is None:
+            if eligible(component):
+                cohorts.append(_Cohort(component, True))
+            continue
+        if index not in cohorts:
+            cohorts.append(index)
+        if eligible(component):
+            fallbacks[index].append(_Cohort(component, True))
+    cohorts.extend(index for index in range(len(families)) if index not in cohorts)
+    sized = [
+        entry
+        if isinstance(entry, _Cohort)
+        else _Cohort(
+            families[entry],
+            True,
+            across_edges=True,
+            fallback=tuple(fallbacks[entry]),
+        )
+        for entry in cohorts
     ]
     diagonal_groups = [
         group
@@ -1424,10 +1504,84 @@ def _concentric_corner_cohorts(
     for groups, shared_leg in _fused_diagonal_families(diagonal_groups):
         family = [member for group in groups for member in group]
         if shared_leg is not None and eligible(family):
-            cohorts.append(_Cohort(family, False, shared_leg))
+            sized.append(_Cohort(family, False, shared_leg))
             continue
-        cohorts.extend(_Cohort(group, False) for group in groups if eligible(group))
-    return cohorts
+        sized.extend(_Cohort(group, False) for group in groups if eligible(group))
+    return sized
+
+
+def _corners_nest(a: _ConcentricCorner, b: _ConcentricCorner, pitch: float) -> bool:
+    """Whether two corners turning one bend nest as one corner or as lanes.
+
+    The same line at one vertex is one corner drawn by overlaid routes; distinct
+    lines nest by :func:`bend_nests_across_edges`.
+    """
+    if a.route.line_id == b.route.line_id:
+        point_a, point_b = a.points[a.rank], b.points[b.rank]
+        return (
+            abs(point_a[0] - point_b[0]) <= COORD_TOLERANCE
+            and abs(point_a[1] - point_b[1]) <= COORD_TOLERANCE
+        )
+    return bend_nests_across_edges(
+        a.points[a.rank - 1 : a.rank + 2],
+        b.points[b.rank - 1 : b.rank + 2],
+        a.incoming,
+        a.outgoing,
+        pitch,
+    )
+
+
+def _cross_edge_families(
+    components: list[list[_ConcentricCorner]],
+    middles: list[_ConcentricCorner],
+    pitch: float,
+) -> list[list[_ConcentricCorner]]:
+    """Right-angle corners nesting as one bend across two or more edges.
+
+    A family is a connected set of corners under two links: membership of one
+    end-key translation component, and :func:`_corners_nest` between corners
+    turning the same bend.  A corner traversed backwards turns the same bend.
+    Families come in the order of their first corner, end-key corners first,
+    members in that order.
+    """
+    members: dict[tuple[int, int], _ConcentricCorner] = {}
+    for corner in [*(m for component in components for m in component), *middles]:
+        members.setdefault((id(corner.route), corner.rank), corner)
+    keys = list(members)
+    linked: Graph[tuple[int, int]] = Graph()
+    linked.add_nodes_from(keys)
+    for component in components:
+        linked.add_edges_from(
+            itertools.pairwise((id(m.route), m.rank) for m in component)
+        )
+    by_bend: defaultdict[tuple[float, float], list[tuple[int, int]]] = defaultdict(list)
+    for key, corner in members.items():
+        by_bend[
+            (
+                round(corner.outgoing[0] - corner.incoming[0], 3),
+                round(corner.outgoing[1] - corner.incoming[1], 3),
+            )
+        ].append(key)
+    for bend in by_bend.values():
+        for index, a in enumerate(bend):
+            for b in bend[index + 1 :]:
+                if _corners_nest(members[a], members[b], pitch):
+                    linked.add_edge(a, b)
+    position = {key: index for index, key in enumerate(keys)}
+    families = [
+        [members[key] for key in sorted(component, key=position.__getitem__)]
+        for component in connected_components(linked)
+        if len(
+            {
+                (members[key].route.edge.source, members[key].route.edge.target)
+                for key in component
+            }
+        )
+        > 1
+    ]
+    return sorted(
+        families, key=lambda family: position[(id(family[0].route), family[0].rank)]
+    )
 
 
 def _fused_diagonal_families(
@@ -1511,7 +1665,8 @@ def _size_concentric_cohorts(
     pitch: float,
     *,
     respect_owned_corners: bool = True,
-) -> None:
+    cross_edge: CrossEdgeNesting | None = None,
+) -> list[list[tuple[RoutedPath, int]]]:
     """Size every cohort of bundle corners about one shared centre.
 
     Each lane's radius is the innermost lane's plus its :func:`turn_shift`
@@ -1529,55 +1684,93 @@ def _size_concentric_cohorts(
     corners at the base radius is so split evenly rather than left to
     whichever corner is sized first.  A corner the leg is not shared with
     counts at its own radius and is never written.
+
+    *cross_edge* adds the cross-edge families of
+    :func:`_concentric_corner_cohorts`.  Returns each cohort written, as its
+    ``(route, rank)`` members.
     """
-    cohorts = [
-        (cohort, *_cohort_shifts(cohort))
-        for cohort in _concentric_corner_cohorts(
-            routes, station_offsets, respect_owned_corners, pitch
-        )
-    ]
+    cohorts = _concentric_corner_cohorts(
+        routes, station_offsets, respect_owned_corners, pitch, cross_edge
+    )
+    shifted = {
+        id(cohort): _cohort_shifts(cohort)
+        for top in cohorts
+        for cohort in (top, *top.fallback)
+    }
     sized_by = {
         (id(member.route), member.rank - 1): _SizedBy(order, shift, cohort.right_angle)
-        for order, (cohort, _inner, shifts) in enumerate(cohorts)
-        for member, shift in zip(cohort.members, shifts)
+        for order, top in enumerate(cohorts)
+        for cohort in (*top.fallback, top)
+        for member, shift in zip(cohort.members, shifted[id(cohort)][1])
     }
-    for order, (cohort, inner_vertex, shifts) in enumerate(cohorts):
-        prepared: list[_PreparedCorner] = []
-        budgets: list[tuple[float, float]] = []
-        ceiling = curve_radius
-        for member, shift in zip(cohort.members, shifts):
-            radius_index = member.rank - 1
-            radii = padded_curve_radii(
-                member.points, member.route.curve_radii, curve_radius
+    written: list[list[tuple[RoutedPath, int]]] = []
+    for order, top in enumerate(cohorts):
+        for cohort in (top, *top.fallback):
+            if _size_cohort(
+                cohort,
+                *shifted[id(cohort)],
+                order,
+                sized_by,
+                curve_radius,
+                respect_owned_corners,
+            ):
+                written.append([(m.route, m.rank) for m in cohort.members])
+                if cohort is top:
+                    break
+    return written
+
+
+def _size_cohort(
+    cohort: _Cohort,
+    inner_vertex: tuple[float, float],
+    shifts: list[float],
+    order: int,
+    sized_by: Mapping[tuple[int, int], _SizedBy],
+    curve_radius: float,
+    respect_owned_corners: bool,
+) -> bool:
+    """Write *cohort*'s radii about one shared centre; ``False``, writing
+    nothing, when no reference fits every lane or seats a family at its floor."""
+    prepared: list[_PreparedCorner] = []
+    budgets: list[tuple[float, float]] = []
+    ceiling = curve_radius
+    for member, shift in zip(cohort.members, shifts):
+        radius_index = member.rank - 1
+        radii = padded_curve_radii(
+            member.points, member.route.curve_radii, curve_radius
+        )
+        counted, shared = (
+            (radii, [])
+            if cohort.right_angle
+            else _shared_far_corners(
+                member, shift, radii, order, sized_by, respect_owned_corners
             )
-            counted, shared = (
-                (radii, [])
-                if cohort.right_angle
-                else _shared_far_corners(
-                    member, shift, radii, order, sized_by, respect_owned_corners
-                )
+        )
+        budgets.append(
+            (corner_radius_budget(member.points, counted, radius_index), shift)
+        )
+        ceiling = max(ceiling, radii[radius_index] - shift)
+        prepared.append(_PreparedCorner(member, radius_index, shift, radii, shared))
+    reference = largest_concentric_reference(ceiling, budgets)
+    if reference is None or (
+        cohort.across_edges and reference < curve_radius - COORD_TOLERANCE_FINE
+    ):
+        return False
+    for member, radius_index, shift, radii, shared in prepared:
+        route = member.route
+        route.curve_radii = radii
+        route.curve_radii[radius_index] = reference_anchored_radius(shift, reference)
+        for neighbour, leg in shared:
+            route.curve_radii[neighbour] = shared_leg_radius(
+                route.curve_radii[neighbour], leg, route.curve_radii[radius_index]
             )
-            budgets.append(
-                (corner_radius_budget(member.points, counted, radius_index), shift)
+        if cohort.right_angle:
+            member.route.record_concentric_corner(
+                radius_index,
+                member.points[member.rank][0] - inner_vertex[0],
+                reference,
             )
-            ceiling = max(ceiling, radii[radius_index] - shift)
-            prepared.append(_PreparedCorner(member, radius_index, shift, radii, shared))
-        reference = largest_concentric_reference(ceiling, budgets)
-        if reference is None:
-            continue
-        for member, radius_index, shift, radii, shared in prepared:
-            radii[radius_index] = reference_anchored_radius(shift, reference)
-            for neighbour, leg in shared:
-                radii[neighbour] = shared_leg_radius(
-                    radii[neighbour], leg, radii[radius_index]
-                )
-            member.route.curve_radii = radii
-            if cohort.right_angle:
-                member.route.record_concentric_corner(
-                    radius_index,
-                    member.points[member.rank][0] - inner_vertex[0],
-                    reference,
-                )
+    return True
 
 
 def _shared_far_corners(

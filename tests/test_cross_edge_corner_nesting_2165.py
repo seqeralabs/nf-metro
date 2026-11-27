@@ -33,7 +33,7 @@ from nf_metro.layout.routing.invariants import (
 )
 from nf_metro.layout.routing.normalize import (
     CrossEdgeNesting,
-    _rederive_semantic_end_corners,
+    _size_concentric_cohorts,
 )
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render import svg
@@ -190,12 +190,13 @@ def test_cross_edge_bend_nests_in_every_flow_direction(
     routes = [outer, inner]
     assert check_cross_edge_corners_concentric(MetroGraph(), routes, {})
 
-    _rederive_semantic_end_corners(
+    _size_concentric_cohorts(
         routes,
         CURVE_RADIUS,
         {},
+        OFFSET_STEP,
         respect_owned_corners=False,
-        cross_edge=CrossEdgeNesting(OFFSET_STEP),
+        cross_edge=CrossEdgeNesting(),
     )
 
     assert outer.curve_radii == [CURVE_RADIUS + OFFSET_STEP]

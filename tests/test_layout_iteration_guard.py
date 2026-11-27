@@ -188,7 +188,7 @@ def test_registry_is_derived_from_the_source(live):
     Pins entry points that no allowlist entry targets, plus count floors."""
     reg, _ = live
     assert "_compute_section_layout" in reg.tables
-    assert "_route_edges" in reg.routing_tables
+    assert "_route_edges_in_context" in reg.routing_tables
     assert len(reg.table_phases) > 50
     assert reg.offset_writers == set()
     assert "compute_layout" in reg.runners
