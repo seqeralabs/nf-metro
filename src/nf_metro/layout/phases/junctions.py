@@ -124,6 +124,24 @@ def derived_junction_positions(graph: MetroGraph) -> dict[str, tuple[float, floa
     return _junction_positions(graph)
 
 
+def junction_anchor_port(graph: MetroGraph, jid: str) -> str | None:
+    """The port :func:`_junction_positions` derives *jid*'s position from.
+
+    A merge junction stands on its entry port's lead-in and a fan-out junction
+    on its exit port's row; ``None`` for a junction neither describes.
+    """
+    topology = build_route_topology_query(graph)
+    if topology is None:
+        return None
+    convergence = topology.convergence_for_junction(jid)
+    if convergence is not None:
+        entry = graph.ports.get(convergence.entry_port_id)
+        if entry is not None and entry.is_entry:
+            return entry.id
+    divergence = topology.divergence_for_junction(jid)
+    return divergence.exit_port_id if divergence is not None else None
+
+
 def _position_junctions(graph: MetroGraph) -> None:
     for jid, (x, y) in _junction_positions(graph).items():
         junction = graph.stations[jid]

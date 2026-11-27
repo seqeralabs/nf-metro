@@ -22,7 +22,7 @@ from nf_metro.layout.phases.fan_bundles import (
     _station_rooted_fans,
     _symmetric_reconvergence_joins,
 )
-from nf_metro.layout.phases.junctions import _position_junctions
+from nf_metro.layout.phases.junctions import _position_junctions, junction_anchor_port
 from nf_metro.layout.phases.ports import _set_port_y
 from nf_metro.parser.model import MetroGraph, PortSide
 
@@ -401,7 +401,9 @@ def _tie_directions(
     to the group's other stations (see :func:`_tie_relations`); failing that,
     the direction its feeders sit in, then its consumers; then the direction
     whose levelled neighbours carry more of its lines (see
-    :func:`_levelled_line_counts`); failing that, up.
+    :func:`_levelled_line_counts`); then the direction that carries on a level
+    run reaching it from outside the snap (see :func:`_level_run_direction`);
+    failing that, up.
     """
     ys = {sid: graph.stations[sid].y for sid in candidate_ids}
     tied = sorted(sid for sid, y in ys.items() if _is_slot_tie(y, origin, pitch))
@@ -428,7 +430,11 @@ def _tie_directions(
             graph, component, group_ids, ys, partner_ys, pitch
         )
         direction = _component_tie_direction(
-            feeder_relations, consumer_relations, half, line_counts
+            feeder_relations,
+            consumer_relations,
+            half,
+            line_counts,
+            _level_run_direction(graph, component, group_ids, tied_set),
         )
         for sid in component:
             directions[sid] = direction
@@ -532,11 +538,13 @@ def _component_tie_direction(
     consumer_relations: list[tuple[float, float]],
     half: float,
     line_counts: dict[int, int],
+    level_run: int,
 ) -> int:
     """The direction levelling more relations; else toward feeders, consumers.
 
     Failing those, the direction whose levelled neighbours carry more of the
-    component's lines (``line_counts``); failing that, up.
+    component's lines (``line_counts``); then the direction that carries on a
+    level run from outside the snap (``level_run``); failing that, up.
     """
 
     def levelled(direction: int) -> int:
@@ -554,7 +562,66 @@ def _component_tie_direction(
             return _UP if net < 0 else _DOWN
     if line_counts[_UP] != line_counts[_DOWN]:
         return _UP if line_counts[_UP] > line_counts[_DOWN] else _DOWN
+    if level_run:
+        return level_run
     return _UP
+
+
+def _level_run_direction(
+    graph: MetroGraph, component: list[str], group_ids: set[str], tied: set[str]
+) -> int:
+    """The snap direction that carries on a level run reaching the component.
+
+    A route reaching a tied member level from a neighbour the snap leaves in
+    place keeps that row until it turns off toward the side its far end lies
+    on.  Snapping the member half a pitch the other way lets the route cross
+    rows once, in the sense it already travels; snapping toward the far end
+    makes it turn back within half a pitch.  A station of another row group's
+    section stays; a junction stays unless the port it is derived from
+    (:func:`junction_anchor_port`) is one of the group's tied stations (*tied*),
+    which carries it along.  0 when no such run exists or the runs disagree.
+    """
+    members = set(component)
+    sections = {graph.stations[sid].section_id for sid in group_ids}
+    junction_ids = graph.junction_ids
+    steps: tuple[dict[str, set[str]], dict[str, set[str]]] = ({}, {})
+    for edge in graph.edges:
+        steps[0].setdefault(edge.target, set()).add(edge.source)
+        steps[1].setdefault(edge.source, set()).add(edge.target)
+
+    def stays(p: str) -> bool:
+        if p in junction_ids:
+            anchor = junction_anchor_port(graph, p)
+            return anchor is not None and anchor not in tied
+        return graph.stations[p].section_id not in sections
+
+    votes: set[int] = set()
+    for sid in component:
+        y = graph.stations[sid].y
+
+        def level(p: str) -> bool:
+            return abs(graph.stations[p].y - y) <= _SNAP_TOLERANCE_PX
+
+        for step in steps:
+            run = [
+                p
+                for p in step.get(sid, set())
+                if p in graph.stations and level(p) and stays(p)
+            ]
+            seen: set[str] = set()
+            while run:
+                p = run.pop()
+                if p in seen or p in members:
+                    continue
+                seen.add(p)
+                for q in step.get(p, set()):
+                    if q not in graph.stations:
+                        continue
+                    if level(q):
+                        run.append(q)
+                    else:
+                        votes.add(_DOWN if graph.stations[q].y < y else _UP)
+    return votes.pop() if len(votes) == 1 else 0
 
 
 def _levelled_line_counts(
