@@ -2985,6 +2985,23 @@ SAME_DESTINATION_VERTICAL_CONVERGENCE = (
 )
 
 
+def _slots_by_station(carriers) -> dict[str, dict[str, int]]:  # type: ignore[no-untyped-def]
+    return {
+        carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
+        for carrier in carriers
+    }
+
+
+def _owned_carrier_slots(graph: MetroGraph) -> dict[str, dict[str, int]]:
+    """Carrier slots of every fan plan that owns geometry on *graph*."""
+    return _slots_by_station(
+        carrier
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+        for carrier in plan.offset_carriers
+    )
+
+
 def _forked_source_convergence(s3_direction: str = "LR") -> str:
     """``same_destination_vertical_convergence`` with a leaf forked off ``n0_1``.
 
@@ -3025,12 +3042,7 @@ def test_a_carrier_keeps_its_upstream_carriers_lane_for_a_line_handed_back() -> 
 def test_a_line_handed_back_along_a_run_holds_one_lane(s3_direction: str) -> None:
     graph = parse_metro_mermaid(_forked_source_convergence(s3_direction))
     compute_layout(graph)
-    carriers = {
-        carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
-        for plan in graph.fan_plans
-        if plan.owns_geometry
-        for carrier in plan.offset_carriers
-    }
+    carriers = _owned_carrier_slots(graph)
     assert {carriers[n]["lower"] for n in ("n3_0", "n3_1", "n3_2")} == {1}
     lanes = recorded_lane_plan(graph).tracks.lanes
     assert len({lanes[(n, "lower")] for n in ("n3_0", "n3_1", "n3_2")}) == 1
@@ -3045,12 +3057,7 @@ def _carriers_of_every_plan(
 
     def record(*args, **kwargs):  # type: ignore[no-untyped-def]
         carriers = offset_carriers(*args, **kwargs)
-        seated.append(
-            {
-                carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
-                for carrier in carriers
-            }
-        )
+        seated.append(_slots_by_station(carriers))
         return carriers
 
     monkeypatch.setattr(fan_plans, "_offset_carriers", record)
@@ -3093,20 +3100,14 @@ def test_a_line_that_rejoins_a_run_by_its_own_path_keeps_that_paths_lane(
 
 def test_a_line_that_leaves_for_another_row_packs_where_it_starts_again() -> None:
     """``l2`` leaves Sec 1's entry for N1.2's row, so at N1.3 it starts a path
-    of its own: it packs beside ``l4`` instead of holding its entry lane and
-    leaving an empty lane in N1.3's marker."""
+    of its own: it packs beside ``l4`` in N1.3's marker."""
     graph = parse_metro_mermaid(
         (
             ROOT / "examples" / "topologies" / "fanout_line_reused_nonadjacent_leg.mmd"
         ).read_text()
     )
     compute_layout(graph)
-    carriers = {
-        carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
-        for plan in graph.fan_plans
-        if plan.owns_geometry
-        for carrier in plan.offset_carriers
-    }
+    carriers = _owned_carrier_slots(graph)
     assert carriers["s1__entry_left_2"]["l2"] == 2
     assert carriers["n1_3"] == {"l4": 0, "l2": 1}
 

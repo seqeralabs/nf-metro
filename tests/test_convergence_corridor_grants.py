@@ -844,7 +844,7 @@ def _off_run_opening_fixture():
         plans=plans,
         query=convergences._query(plans, execution.query._edge_order),
     )
-    _targets, requests = convergence_corridor_requests(plans, graph, ctx)
+    _, requests = convergence_corridor_requests(plans, graph, ctx)
     return execution, tuple(_unbounded(request) for request in requests)
 
 
