@@ -119,7 +119,12 @@ off the run feeding its first node in its own travel along the run (a node
 of another part of the same level run, read through bypass-V helpers, is not
 off it), or for a line nothing feeds there, of the nearest consumer its last
 node leaves to.  A line a perpendicular entry of the section turns into the
-run upstream of its first node keeps a near-zero key on its port's side.
+run upstream of its first node keeps a near-zero key on its port's side,
+unless the section's lanes follow line priority and the line bypasses: it
+leaves a station of the run for a node off it and rides back onto the level
+run downstream, where another of the run's lines carries on past that
+station.  It then ranks by the side it leaves to, outside the lines arriving
+there, so its lanes agree with the side placement opens the bypass toward.
 Lines arriving from one side at one lateral nest by where they leave their
 sources (read through bypass-V helpers): the farther upstream, the farther
 from that side.  A line that parts
@@ -207,6 +212,7 @@ from nf_metro.layout.geometry import (
     flow_entry_side,
     lanes_run_along_y,
     perpendicular_port_sides,
+    section_lanes_follow_line_priority,
 )
 from nf_metro.layout.port_order_plan import (
     ApproachKind,
@@ -2010,6 +2016,18 @@ class _Tracks:
             and self.along(source, sid)
             < self.along(carriers[0], sid) - SAME_Y_TOLERANCE
         ):
+            bypass = (
+                self._bypass_side(run, lid, carriers, on_level)
+                if section_lanes_follow_line_priority(graph, graph.sections[sid])
+                else None
+            )
+            if bypass is not None:
+                return _Arrival(
+                    bypass + (_OUTSIDE if bypass > 0 else -_OUTSIDE),
+                    neighbour,
+                    None,
+                    None,
+                )
             return _Arrival(side * _TURNED_IN, neighbour, None, None)
         nest = None
         if abs(side) > _SIDED and rank == 0:
@@ -2050,6 +2068,48 @@ class _Tracks:
                     None,
                 )
         return _Arrival(side, neighbour, nest, carriers[0] if rank == 0 else None)
+
+    def _bypass_side(
+        self,
+        run: _Run,
+        lid: str,
+        carriers: Sequence[str],
+        on_level: Callable[[str], bool],
+    ) -> float | None:
+        """The lane-frame lateral of the first node off the run on which *lid*
+        leaves one of its carriers and rides back onto the run's level run
+        downstream, where another of the run's lines carries on past that
+        carrier; ``None`` for no such bypass."""
+        sec, sid = run.sec, run.sec.id
+        sign = self.frames(sid).secondary_sign
+        for c in carriers:
+            staying = any(
+                m != lid
+                and any(
+                    t in run.member_set or on_level(t) for t in sec.outs.get((c, m), ())
+                )
+                for m in run.present
+            )
+            if not staying:
+                continue
+            for t in sorted(sec.outs.get((c, lid), ())):
+                if t in run.member_set or on_level(t):
+                    continue
+                node, seen = t, {c}
+                while not on_level(node) and node not in seen:
+                    seen.add(node)
+                    nxt = sec.outs.get((node, lid), [])
+                    if len(nxt) != 1:
+                        break
+                    node = nxt[0]
+                if (
+                    on_level(node)
+                    and self.along(node, sid) > self.along(c, sid) + SAME_Y_TOLERANCE
+                ):
+                    lateral = round(sign * (self.lateral(t, sid) - run.lateral), 1)
+                    if abs(lateral) > _SIDED:
+                        return lateral
+        return None
 
     def _part_pins(self, run: _Run, fixed: Mapping[str, int]) -> dict[str, int]:
         """Lanes the run's lines keep from an earlier part of their level run,

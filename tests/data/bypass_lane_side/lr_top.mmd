@@ -1,0 +1,26 @@
+%%metro title: Hidden bypass lane side (LR section entered from the top by one line)
+%%metro style: dark
+%%metro line: line1 | Line 1 | #d0006f
+%%metro line: line2 | Line 2 | #f0ab00
+%%metro grid: a | 0,0
+%%metro grid: s | 0,1
+graph LR
+    subgraph a [Prep]
+        %%metro exit: bottom | line1
+        in1[in1]
+        prep[prep]
+        in1 -->|line1| prep
+    end
+    subgraph s [Section]
+        %%metro direction: LR
+        %%metro entry: top | line1
+        step1[step1]
+        step2[step2]
+        step3[step3]
+        _skip
+        step1 -->|line1,line2| step2
+        step2 -->|line1,line2| step3
+        step1 -->|line1| _skip
+        _skip -->|line1| step3
+    end
+    prep -->|line1| step1

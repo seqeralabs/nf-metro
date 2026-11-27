@@ -360,8 +360,9 @@ def section_lane_sign(
 def section_lanes_follow_line_priority(graph: MetroGraph, section: Section) -> bool:
     """Whether *section* stacks its lanes in line-priority order.
 
-    A seam delivering several lines imposes its own lane order; with at most one
-    line entering, the lane plan leaves the lanes on priority.
+    A seam delivering several lines imposes its own lane order.  With at most
+    one line entering, the lane plan lays a bypass's lines on the side its
+    placement opens toward.
     """
     entering = {
         edge.line_id
