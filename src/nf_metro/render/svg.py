@@ -2369,7 +2369,7 @@ def _settle_render_geometry(
         station_offsets, routes, route_plan, labels
     )
     _reserve_group_band_space(graph, theme, station_offsets, labels)
-    if render_header_collision(graph) and not graph.has_rail_sections:
+    if render_header_collision(graph):
         station_offsets, routes, route_plan = _resettle(
             allow_clearance_requirements=bool(
                 route_plan.boundary_clearance_requirements
@@ -2384,19 +2384,10 @@ def _settle_render_geometry(
     frozen_routes = routes
     frozen_plan = route_plan
 
-    # A rail layout pitches its rows to the interchange idiom rather than to
-    # ``section_y_gap``, and holds runs between them collinear; widening one of
-    # its row boundaries to the declared gap turns a flat run into a staircase.
-    # So the clearance a boundary owes is a demand only where the gap is what
-    # sets the pitch.
     def _measure_clearance(
         graph: MetroGraph,
     ) -> tuple[BoundaryClearanceDemand, ...]:
-        row_demands = (
-            ()
-            if graph.has_rail_sections
-            else measure_row_gap_clearance(graph, section_y_gap)
-        )
+        row_demands = measure_row_gap_clearance(graph, section_y_gap)
         return row_demands + measure_boundary_clearance_requirements(
             graph, frozen_plan.boundary_clearance_requirements
         )

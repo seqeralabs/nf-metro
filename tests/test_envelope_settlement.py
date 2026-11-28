@@ -69,7 +69,6 @@ from nf_metro.render import svg as render_svg_module
 from nf_metro.render.svg import (
     _assert_settlement_decisions_frozen,
     _attach_published_reservation_attribution,
-    _route_decision_fingerprint,
     _settled_render_graph,
     build_observed_render_plan,
 )
@@ -2028,14 +2027,9 @@ WRAP_GROWN_CLEARANCE_CORPUS = (
 # raises no clearance demand at all, so they hold on a no-op as well as a payment.
 CLEARANCE_CORPUS = (LABEL_WRAP_ROW_GAP, *WRAP_GROWN_CLEARANCE_CORPUS)
 
+
 # Rail layouts, whose row pitch is the interchange idiom's rather than the
 # declared section gap's.
-RAIL_CORPUS = (
-    ROOT / "examples" / "sarek_metro.mmd",
-    ROOT / "tests" / "fixtures" / "rail_pitch_vs_labels.mmd",
-)
-
-
 def _clearance(section_y_gap: float = SECTION_Y_GAP):
     return partial(measure_row_gap_clearance, section_y_gap=section_y_gap)
 
@@ -2246,52 +2240,6 @@ def test_a_clearance_translation_never_narrows_a_separation(path: Path) -> None:
         assert gap >= before_rows[key] - 0.01, f"row gap {key} narrowed"
     for key, gap in _column_gaps(graph).items():
         assert gap >= before_columns[key] - 0.01, f"column gap {key} narrowed"
-
-
-@pytest.mark.parametrize("path", RAIL_CORPUS, ids=lambda item: item.name)
-def test_a_rail_layout_keeps_the_row_pitch_its_idiom_set(path: Path) -> None:
-    """Why the clearance demand is not raised for a rail layout.
-
-    Rail mode pitches adjacent rows so that a line runs between them without
-    turning.  Widening one of those boundaries to the declared section gap breaks
-    that collinearity -- the inter-row runs acquire a diagonal, which is a route
-    topology change and not the coordinate translation this stage is allowed -- so
-    the render refuses it outright.  Defeating the exclusion is how that is
-    measured rather than asserted, and it is what keeps the exclusion from being
-    a vacuous one.
-    """
-
-    def observe(graph):
-        reanchor_junctions(graph)
-        offsets = compute_station_offsets(graph)
-        return observe_route_edges(graph, station_offsets=offsets)
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        source = prepare_graph(path.read_text(), source_dir=str(path.parent))
-        assert source.has_rail_sections
-        settled = _settled_render_graph(source, resolve_theme(source))
-        held = observe(settled)
-        before = _route_decision_fingerprint(held.routes)
-
-        # The exclusion is load-bearing: the boundary really does owe clearance.
-        (demand,) = measure_row_gap_clearance(settled, SECTION_Y_GAP)
-        assert demand.deficit > 0
-
-        settlement = settle_route_envelopes(settled, held.plan, clearance=_clearance())
-        after = _route_decision_fingerprint(observe(settled).routes)
-
-    (translation,) = settlement.translations
-    assert translation.clearance is not None
-    assert translation.boundary == demand.boundary
-
-    # Flat inter-row runs the idiom drew become staircases, which is a decision
-    # change the settlement contract forbids rather than a translation.
-    changed = [(was, now) for was, now in zip(before, after) if was != now]
-    assert changed, "paying the demand changed no route, so nothing was protected"
-    for was, now in changed:
-        assert len(was[4]) == 1, "the held run was not a single flat segment"
-        assert len(now[4]) == 3, "the run did not become a staircase"
 
 
 def test_a_user_theme_past_every_built_in_widens_the_canvas_clearance() -> None:

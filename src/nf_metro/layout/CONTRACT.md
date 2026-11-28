@@ -1979,10 +1979,8 @@ They are design evidence, not part of this specification.
   by the strict post-grant ledger. The demand vocabulary is
   `layout/settlement_demand.py`, held apart from settlement so a layout phase
   can state a demand without importing the routing stack the ledger is built on.
-  Rail layouts raise no clearance demand: their row pitch comes from the
-  interchange idiom rather than the declared section gap, and widening one of
-  their boundaries to that gap turns a flat inter-row run into a staircase --
-  a decision change, which `_assert_settlement_decisions_frozen` refuses.
+  A per-section rail panel is laid once and moves only rigidly with its box,
+  so paying a demand at its boundary translates it like any section.
 - **The two demands can cover either axis.** The reservation ledger is settled
   on both: `_settle_axis` runs once per axis and every row-gap and column-gap
   claim is measured. Generic box-growth clearance remains row-only because
