@@ -73,6 +73,29 @@ def shift_section(
             port.y += dy
     section.bbox_x += dx
     section.bbox_y += dy
+    shift_section_rails(graph, section, dy)
+
+
+def shift_section_rails(graph: MetroGraph, section: Section, dy: float) -> None:
+    """Move a section's rail centrelines and its stations' rail spans by *dy*.
+
+    Both are absolute Ys held beside the station positions, so every rigid
+    move of a section's stations carries them along.
+    """
+    if not dy:
+        return
+    rails = graph._rail_y.get(section.id)
+    if rails is not None:
+        graph._rail_y[section.id] = {lid: y + dy for lid, y in rails.items()}
+    for sid in section.station_ids:
+        st = graph.stations.get(sid)
+        if st is None:
+            continue
+        if st.rail_top_y is not None:
+            st.rail_top_y += dy
+        if st.rail_bottom_y is not None:
+            st.rail_bottom_y += dy
+        st.rail_used_ys = [y + dy for y in st.rail_used_ys]
 
 
 def iter_section_overlaps(

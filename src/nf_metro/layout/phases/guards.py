@@ -1986,7 +1986,8 @@ def _guard_rail_interior_as_laid(graph: MetroGraph, phase: str) -> None:
     read that interior, so a moved rail station draws off its rails.  The
     engine runs this live at the seal and at layout end, so a mover no stage
     exempts fails closed on any input, and after every stage under validate
-    to name the stage that moved it.
+    to name the stage that moved it.  It stays off the render chokepoint:
+    render-time label growth legitimately resizes a section box after layout.
     """
     if graph.line_spread is LineSpread.RAILS:
         return
@@ -6070,7 +6071,6 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_independent_components_disjoint, "A"),
     GuardSpec(_guard_multi_section_cell_packed, "A"),
     GuardSpec(_guard_no_same_row_backward_feed, "A"),
-    GuardSpec(_guard_rail_interior_as_laid, "A"),
     GuardSpec(_guard_anchors_frozen_during_placement, "B"),
     GuardSpec(_guard_bypass_v_flat_visible, "B"),
     GuardSpec(_guard_centered_line_spread_balanced, "B"),
@@ -6124,6 +6124,7 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
         ),
     ),
     GuardSpec(_guard_rail_above_label_band, "B"),
+    GuardSpec(_guard_rail_interior_as_laid, "B"),
     GuardSpec(_guard_rail_one_station_per_column, "B"),
     GuardSpec(_guard_rail_stations_seat_on_rails, "B"),
     GuardSpec(

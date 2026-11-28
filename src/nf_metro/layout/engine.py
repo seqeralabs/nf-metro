@@ -209,6 +209,11 @@ from nf_metro.layout.phases.spacing import (
     _spread_bump,
     _warn_if_pinned_x_spacing_crowds_labels,
 )
+from nf_metro.layout.rail_mode import (
+    lay_section_rails,
+    place_laid_rails,
+    position_rail_section_ports,
+)
 from nf_metro.layout.routing.context import is_far_side_around_below_left_entry
 from nf_metro.layout.title_band import apply_title_band_lift
 from nf_metro.parser.model import (
@@ -683,14 +688,6 @@ def _compute_layout_scaled(
         section_x_gap=section_x_gap,
         section_y_gap=section_y_gap,
         validate=validate,
-    )
-
-    _retrofit_section_rails_phase(
-        graph,
-        x_spacing=x_spacing,
-        y_spacing=y_spacing,
-        section_x_padding=section_x_padding,
-        section_y_padding=section_y_padding,
     )
 
     # Record the bypassed-station label box behind each bypass V so the router
@@ -1243,61 +1240,6 @@ def _apply_label_strike_clearance(
         _relay(validate_layout=validate)
 
 
-def _retrofit_section_rails_phase(
-    graph: MetroGraph,
-    *,
-    x_spacing: float,
-    y_spacing: float,
-    section_x_padding: float,
-    section_y_padding: float,
-) -> None:
-    """Overwrite each rail-flagged section's internal geometry with rail layout.
-
-    The normal pipeline has positioned every section's bbox and inter-section
-    ports; this replaces only the *internal* geometry of rail-flagged sections
-    (rails + spanning pills), anchored at the bbox the placement chose.  Non-rail
-    sections and all inter-section placement keep the normal machinery.
-    """
-    rail_section_ids = [
-        sid
-        for sid, mode in graph.line_spread_overrides.items()
-        if mode is LineSpread.RAILS
-    ]
-    if not rail_section_ids or graph.line_spread is LineSpread.RAILS:
-        return
-
-    from nf_metro.layout.labels import diagonal_label_pitch_by_section
-    from nf_metro.layout.rail_mode import (
-        measure_rail_lay,
-        rail_section_members,
-        retrofit_section_rails,
-    )
-
-    section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
-    # Rails sit one base grid pitch apart and their labels hang above or below
-    # the bundle, so the diagonal-label widening of the global y_spacing (the
-    # spread loop, for between-station label clearance) must not also push the
-    # rails apart.  Column X still uses the label-aware pitch, where horizontal
-    # label room genuinely matters.
-    rail_pitch = getattr(graph, "_base_y_spacing", y_spacing)
-    for sid in rail_section_ids:
-        section = graph.sections.get(sid)
-        if section is None:
-            continue
-        retrofit_section_rails(
-            graph,
-            section,
-            x_spacing=section_pitch_map.get(sid, x_spacing),
-            y_spacing=rail_pitch,
-            section_x_padding=section_x_padding,
-            section_y_padding=section_y_padding,
-        )
-        stations, ports = rail_section_members(graph, section)
-        graph._rail_lay[sid] = measure_rail_lay(
-            section, stations, graph._rail_y.get(sid, {}), ports
-        )
-
-
 # A rail panel's stations reach the graph at the Stage 2.1 globalisation, so
 # its lay is checkable from there on.
 _RAIL_LAY_HELD_STAGES = frozenset(
@@ -1562,6 +1504,7 @@ def _compute_section_layout(
     graph._stages_completed = []
     graph._validate_active = validate
     graph._rail_lay = {}
+    graph._rail_y = {}
 
     # ---- Stage 1 - Section construction (local coords) ------------------
     # Lay out each section internally, snap row Y grids, place sections on
@@ -1574,7 +1517,24 @@ def _compute_section_layout(
     section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
     continuation_predecessors = continuation_track_predecessors(graph)
     section_subgraphs: dict[str, MetroGraph] = {}
+    # Rails sit one base grid pitch apart (their labels hang above or below
+    # the bundle), so the spread loop's diagonal-label widening of an
+    # auto-resolved y_spacing does not reach them; a pinned y_spacing is the
+    # pitch itself.
+    rail_pitch = (
+        graph._base_y_spacing if graph._base_y_spacing is not None else y_spacing
+    )
     for sec_id, section in graph.sections.items():
+        if graph.is_rail_section(sec_id):
+            section_subgraphs[sec_id] = lay_section_rails(
+                graph,
+                section,
+                x_spacing=section_pitch_map.get(sec_id, x_spacing),
+                y_spacing=rail_pitch,
+                section_x_padding=section_x_padding,
+                section_y_padding=section_y_padding,
+            )
+            continue
         sub = _layout_single_section(
             graph,
             section,
@@ -1600,6 +1560,8 @@ def _compute_section_layout(
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
     for sec_id, sub in section_subgraphs.items():
+        if graph.is_rail_section(sec_id):
+            continue
         reserve_fan_stagger_runway(
             graph,
             sub,
@@ -1676,6 +1638,8 @@ def _compute_section_layout(
         # Update section bbox to global coords
         section.bbox_x += section.offset_x + x_offset
         section.bbox_y += section.offset_y + y_offset
+        if graph.is_rail_section(sec_id):
+            place_laid_rails(graph, section, sub, section.offset_y + y_offset)
 
     _snap(graph, "2.1")
     if validate:
@@ -1691,7 +1655,10 @@ def _compute_section_layout(
 
     # Stage 3.1: Position ports on section boundaries (after bbox is in global coords)
     for sec_id, section in graph.sections.items():
-        position_ports(section, graph)
+        if graph.is_rail_section(sec_id):
+            position_rail_section_ports(graph, section)
+        else:
+            position_ports(section, graph)
 
     _snap(graph, "3.1")
     if validate:

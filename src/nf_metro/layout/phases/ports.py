@@ -202,7 +202,7 @@ def _align_entry_ports(graph: MetroGraph, vertical_only: bool = False) -> None:
             continue
 
         entry_section = graph.sections.get(port.section_id)
-        if not entry_section:
+        if not entry_section or graph.is_rail_section(entry_section.id):
             continue
 
         if vertical_only and lanes_run_along_y(entry_section.direction):
@@ -859,7 +859,9 @@ def _align_ports_to_downstream(graph: MetroGraph) -> None:
         if not entry_port_obj:
             continue
         entry_section = graph.sections.get(entry_port_obj.section_id)
-        if not entry_section:
+        if not entry_section or graph.is_rail_section(entry_section.id):
+            continue
+        if graph.is_rail_section(exit_section.id):
             continue
 
         # Skip cross-row connections (different grid rows)
@@ -955,7 +957,7 @@ def _snap_sole_layer_stations_to_ports(graph: MetroGraph) -> None:
     for section in graph.sections.values():
         # Only applies to horizontal (LR/RL) sections where ports
         # are on LEFT/RIGHT and the free axis is Y.
-        if section.direction not in ("LR", "RL"):
+        if section.direction not in ("LR", "RL") or graph.is_rail_section(section.id):
             continue
 
         # Skip grid-group sections: their stations are on a shared Y
@@ -1857,6 +1859,11 @@ def _clamp_tb_entry_port(
         target_y = top_src_y
     else:
         target_y = max_y
+
+    # A rail section's ports are seated by the rail owner, so a run fed from
+    # one keeps its rail Y and meets the clamped port on a bend.
+    if exit_pid in graph.ports and graph.station_is_rail(exit_pid):
+        return target_y
 
     # Pull source up to maintain straight horizontal run
     src.y = target_y

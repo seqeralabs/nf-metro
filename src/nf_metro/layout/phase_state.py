@@ -323,26 +323,32 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
     ),
     "_rail_y": PhaseFieldSpec(
         name="_rail_y",
-        writer_stage=RAIL_LAYOUT,
-        reader_stages=(POST_LAYOUT,),
+        writer_stage="1.1",
+        reader_stages=("3.1", "6.12", POST_LAYOUT),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
-            "per-section {line_id: rail_y} map produced by the opt-in rail-mode "
-            "layout; the rail router, label placement, and rail guards read it "
-            "and fall back to the empty default when rail mode is off"
+            "per-section {line_id: rail_y} map: a per-section rail section's "
+            "entry is laid at Stage 1.1 into the section subgraph and reaches "
+            "the graph at Stage 2.1, the map being cleared when each "
+            "positioning pass starts; whole-graph rail mode (RAIL_LAYOUT) "
+            "writes every entry.  Stage 3.1 seats rail ports on it, the lane "
+            "plan reads a rail section's lanes from it at the 6.12 seal, and "
+            "the rail router, label placement and rail guards read it, "
+            "falling back to the empty default when rail mode is off"
         ),
     ),
     "_rail_lay": PhaseFieldSpec(
         name="_rail_lay",
-        writer_stage=POST_LAYOUT,
+        writer_stage="1.1",
         reader_stages=("6.12", POST_LAYOUT),
         enforcement=FieldEnforcement.FALLBACK,
         why=(
-            "each per-section rail panel's interior and ports relative to its "
-            "box, recorded by the rail owner when it lays the panel and cleared "
-            "when each positioning pass starts; the rail-interior guard reads it "
-            "at the Stage 6.12 seal and at layout end, and a rail section with "
-            "no record fails it"
+            "each per-section rail panel's interior relative to its box, "
+            "recorded by the rail lay at Stage 1.1 and joined by its ports when "
+            "Stage 3.1 seats them, cleared when each positioning pass starts; "
+            "the rail-interior guard reads it at the Stage 6.12 seal and at "
+            "layout end (after every stage from 2.1 under validate), and a "
+            "rail section with no record fails it"
         ),
     ),
     "_defer_final_guards": PhaseFieldSpec(

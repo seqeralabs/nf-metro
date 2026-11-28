@@ -314,6 +314,7 @@
   "convergences.py::variable.owner_kind is not CorridorScalarOwnerKind.CONVERGENCE_TRUNK::#1",
   "core.py::for handler, _builder in _LOCAL_EDGE_DISPATCH:::#1",
   "core.py::for handler, builder in _LOCAL_EDGE_DISPATCH:::#1",
+  "core.py::if _emission_skip(edge, ctx, rail_internal) is not None:::#1",
   "core.py::if is_inter_section_edge(edge, source, target, ctx):::#1",
   "core.py::if rail_execution is not None:::#1",
   "core.py::if result is not None:::#1",

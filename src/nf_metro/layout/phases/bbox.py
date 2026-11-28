@@ -716,7 +716,7 @@ def _shrink_bboxes_to_content_bottom(
 
     offsets = compute_station_offsets(graph)
     for section in graph.sections.values():
-        if section.bbox_h <= 0:
+        if section.bbox_h <= 0 or graph.is_rail_section(section.id):
             continue
         content_bot = _predict_section_content_bottom(
             graph, section, section_y_padding, offsets
@@ -993,10 +993,9 @@ def _shared_anchor_runway_runs(
     instead.
 
     Two kinds of section break the run either way.  A rail-flagged one, because
-    its internal geometry is re-derived from its bbox downstream
-    (:func:`...engine._retrofit_section_rails_phase`), so growing its anchored
-    edge slides its stations along with it rather than widening a runway in front
-    of them.  And one whose exit port rides the edge under test, because that
+    its box size is the rail lay's decision (the rail-interior guard holds it),
+    so it has no runway for a column mate to level.  And one whose exit port
+    rides the edge under test, because that
     port's coordinate is where the inter-section route leaves and the clearances
     downstream of it are measured from there -- a cosmetic levelling must not
     move it.
@@ -1205,7 +1204,7 @@ def _fit_bboxes_to_content_top(
 
     offsets = compute_station_offsets(graph)
     for section in graph.sections.values():
-        if section.bbox_h <= 0:
+        if section.bbox_h <= 0 or graph.is_rail_section(section.id):
             continue
         target = _section_fit_top(
             graph, section, section_y_padding, section_y_gap, offsets

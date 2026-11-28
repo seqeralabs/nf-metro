@@ -36,6 +36,7 @@ RAIL_FIXTURES = (
     "examples/topologies/rail_symmetric_fork_join_spans.mmd",
     "tests/fixtures/rail_marked_single_line.mmd",
     "tests/fixtures/rail_pitch_vs_labels.mmd",
+    "tests/data/rail_witnesses/rail_section_fed_by_a_trunk.mmd",
 )
 OPTION_SETS: dict[str, dict[str, object]] = {
     "default": {},
@@ -205,3 +206,91 @@ def test_under_validate_the_guard_names_the_stage_that_moved_a_rail_station(
     ):
         warnings.simplefilter("ignore")
         engine_module.compute_layout(graph, validate=True)
+
+
+WITNESSES = ROOT / "tests" / "data" / "rail_witnesses"
+
+
+def _witness(name: str, **opts: object) -> MetroGraph:
+    path = WITNESSES / name
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return api.prepare_graph(path.read_text(), layout_options=opts or None)
+
+
+def _rail_mean(graph: MetroGraph, port_id: str) -> float:
+    rails = graph._rail_y[graph.ports[port_id].section_id]
+    ys = [rails[lid] for lid in graph.station_lines_ordered(port_id)]
+    return sum(ys) / len(ys)
+
+
+def test_a_fold_entry_clamp_leaves_the_rail_exit_feeding_it_on_its_rails():
+    """The clamp seating a TB entry above its first station pulls a feeder up
+    to keep the run straight, but a rail section's exit port is the rail
+    owner's.  The render of this witness aborts later on its fold threshold,
+    so the property is held at layout level."""
+    graph = _witness("rail_exit_feeds_fold_entry.mmd", fold_threshold=4)
+    assert graph.sections["s3"].direction == "TB"
+    exit_id = next(iter(graph.sections["s2"].exit_ports))
+    assert graph.stations[exit_id].y == pytest.approx(_rail_mean(graph, exit_id))
+
+
+def test_a_rail_section_on_a_fold_column_keeps_left_to_right_flow():
+    """Grid inference would turn this section into a TB fold bridge; rails
+    run left to right, so its direction is locked before inference and its
+    ports face opposite ends of the rails."""
+    from nf_metro.parser.mermaid import parse_metro_mermaid as parse
+    from nf_metro.parser.model import PortSide
+    from nf_metro.parser.provenance import DecisionReason
+
+    text = (WITNESSES / "rail_section_on_fold_column.mmd").read_text()
+    plain = parse(text.replace("%%metro line_spread: rails | s8\n", ""))
+    assert plain.sections["s8"].direction == "TB"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        graph = parse(text)
+    decision = graph.layout_provenance.direction_decision("s8")
+    assert graph.sections["s8"].direction == "LR"
+    assert decision.locked and decision.reason is DecisionReason.RAIL_SECTION_DIRECTION
+    sides = {graph.ports[p].side for p in graph.sections["s8"].port_ids}
+    assert sides == {PortSide.LEFT, PortSide.RIGHT}
+
+
+@pytest.mark.parametrize("side", ["TOP", "BOTTOM"])
+def test_a_rail_port_off_the_rail_ends_is_refused(side):
+    from nf_metro.layout.rail_mode import position_rail_section_ports
+    from nf_metro.parser.model import PortSide
+
+    graph = _witness("rail_exit_feeds_fold_entry.mmd", fold_threshold=4)
+    section = graph.sections["s2"]
+    graph.ports[next(iter(section.exit_ports))].side = PortSide[side]
+    with pytest.raises(ValueError, match="rails run left to right"):
+        position_rail_section_ports(graph, section)
+
+
+def test_the_rail_lay_writes_nothing_onto_the_graph_before_stage_2_1(monkeypatch):
+    """Until Stage 2.1 every section's graph stations hold the previous pass;
+    the rail lay keeps its local coordinates in the subgraph it returns."""
+    real = engine_module.lay_section_rails
+    unchanged: list[bool] = []
+
+    def state(graph: MetroGraph, sid: str) -> tuple:
+        sec = graph.sections[sid]
+        return (
+            dict(graph._rail_y),
+            [
+                (st.x, st.y, st.rail_top_y, st.rail_bottom_y, tuple(st.rail_used_ys))
+                for n in sec.station_ids
+                if (st := graph.stations[n]) is not None
+            ],
+        )
+
+    def lay(graph: MetroGraph, section, **kw):
+        before = state(graph, section.id)
+        sub = real(graph, section, **kw)
+        unchanged.append(state(graph, section.id) == before)
+        return sub
+
+    monkeypatch.setattr(engine_module, "lay_section_rails", lay)
+    _sarek()
+    assert unchanged and all(unchanged)

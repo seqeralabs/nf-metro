@@ -1207,7 +1207,11 @@ def _recenter_loop_side_stations(graph: MetroGraph) -> None:
     fork_stations, join_stations = _fork_join_station_sets(graph)
 
     for section in graph.sections.values():
-        if section.bbox_h <= 0 or section.direction not in ("LR", "RL"):
+        if (
+            section.bbox_h <= 0
+            or section.direction not in ("LR", "RL")
+            or graph.is_rail_section(section.id)
+        ):
             continue
         _recenter_section_loop_sides(graph, section, fork_stations, join_stations)
 

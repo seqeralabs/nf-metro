@@ -83,18 +83,26 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     """
     if y_spacing <= 0:
         return
+    # A rail panel's stations and ports belong to the rail owner, so none is
+    # protected, restored, carried or held here.
+    rail = graph.station_is_rail
     # Map each convergence station/port to the set of source Ys it
     # converges (recorded pre-snap so the midpoint can be restored
     # after sources move).
-    convergence_sources = _convergence_source_ys(graph)
+    convergence_sources = {
+        t: srcs for t, srcs in _convergence_source_ys(graph).items() if not rail(t)
+    }
     # A trunkless symmetric entry fan's reconvergence join is a convergence the
     # midpoint restore must also protect and recentre, even though one arm's
     # extra hop keeps it out of the ordinary source-midpoint set above.
     for join_id, src_ids in _symmetric_reconvergence_joins(graph).items():
-        convergence_sources.setdefault(join_id, src_ids)
+        if not rail(join_id):
+            convergence_sources.setdefault(join_id, src_ids)
     # Under center_ports a trunkless fan-in entry port rides the same
     # protect-and-restore onto the midpoint of the targets it serves.
-    entry_fan_ports = _entry_fan_centre_ports(graph)
+    entry_fan_ports = {
+        p: tgts for p, tgts in _entry_fan_centre_ports(graph).items() if not rail(p)
+    }
     for port_id, target_ids in entry_fan_ports.items():
         convergence_sources.setdefault(port_id, target_ids)
     # Same idea for the diverging side: record each fork hub's target set
@@ -102,14 +110,23 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     # Narrowed to hubs already centred pre-snap (see
     # ``_divergence_midpoint_targets``) so a fan-out deliberately biased
     # toward one branch is left on its snapped grid slot.
-    divergence_targets = _divergence_midpoint_targets(graph, convergence_sources)
+    divergence_targets = {
+        h: tgts
+        for h, tgts in _divergence_midpoint_targets(graph, convergence_sources).items()
+        if not rail(h)
+    }
     # The trunk running into the fork hub and out of the join shares their
     # centreline pre-snap, and must be recorded before the snap rounds each
     # member to its own row and that co-linearity stops being readable.
-    trunk_followers = _centreline_trunk_followers(
-        graph, divergence_targets, convergence_sources
+    trunk_followers = {
+        h: [f for f in fs if not rail(f)]
+        for h, fs in _centreline_trunk_followers(
+            graph, divergence_targets, convergence_sources
+        ).items()
+    }
+    held_exits = frozenset(
+        p for p in _exits_level_with_their_bundle(graph) if not rail(p)
     )
-    held_exits = _exits_level_with_their_bundle(graph)
     groups: dict[object, tuple[float, list[str]]] = {}
     grouped_ids: set[str] = set()
     require_phase_field(graph, "_row_y_grid_info")
@@ -119,7 +136,7 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         groups[("row", row)] = (pitch, sec_ids)
         grouped_ids.update(sec_ids)
     for sec in graph.sections.values():
-        if sec.id not in grouped_ids:
+        if sec.id not in grouped_ids and not graph.is_rail_section(sec.id):
             groups[("solo", sec.id)] = (y_spacing, [sec.id])
 
     for pitch, sec_ids in groups.values():

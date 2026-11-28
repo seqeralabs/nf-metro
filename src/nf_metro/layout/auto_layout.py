@@ -229,6 +229,7 @@ def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> No
     max_station_columns: fold into a new row when the cumulative station
     layer count across sections in a row exceeds this threshold.
     """
+    _lock_rail_section_directions(graph)
     if len(graph.sections) <= 1:
         graph.section_dag = SectionDAG(successors={}, predecessors={}, edge_lines={})
         graph.layout_provenance.complete_section_inference(graph, set())
@@ -265,6 +266,25 @@ def infer_section_layout(graph: MetroGraph, max_station_columns: int = 15) -> No
         convergence_sections,
     )
     graph.layout_provenance.complete_section_inference(graph, fold_sections)
+
+
+def _lock_rail_section_directions(graph: MetroGraph) -> None:
+    """Commit every rail section to left-to-right flow before inference.
+
+    Rails run left to right only, so a rail section's direction is not a grid
+    signal to infer: locking it keeps the grid, its folds and its port sides
+    consistent with the panel the rail owner lays.  An author-owned direction
+    is left for the rail lay to accept or refuse.
+    """
+    for sid in graph.sections:
+        if not graph.is_rail_section(sid):
+            continue
+        if graph.layout_provenance.author_owns_direction(sid):
+            continue
+        graph.sections[sid].direction = "LR"
+        graph.layout_provenance.record_inferred_direction(
+            sid, "LR", DecisionReason.RAIL_SECTION_DIRECTION, locked=True
+        )
 
 
 def _build_section_dag(

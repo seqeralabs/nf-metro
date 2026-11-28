@@ -2062,5 +2062,9 @@
   "normalize.py::if not trunk_depths_contiguous(trunk_ys, n, step):::#1": {
     "note": "Witnessed only by `tests/data/gate_witnesses/f8400987.mmd` within the gate corpus (outside it, `tests/fixtures/hash_seed_determinism/seed_15.mmd` and `regressions/cohort_grant_beside_seated_runs.mmd` still reach it). Since main's #2192 source-row seat (`ordering.py`) merged under the lane plan, f8400987 no longer reaches it. Reachable; open until the #2192 merge conflicts (S6 on #2094) are resolved.",
     "status": "needs-review"
+  },
+  "core.py::if _emission_skip(edge, ctx, rail_internal) is not None:::#1": {
+    "note": "Co-row planning asks for the feeder of every edge whose source and target sit on different rows, and a rail section's internal edges belong to the rail router, so this arm declines them. A rail section lays each line on one rail from Stage 1.1, so its internal edges reach co-row planning only when two stations on one rail feed a station off it, which needs one line on two paths (e.g. bqsr -->|a| hc, bqsr -->|a| dv, hc -->|a| merge, dv -->|a| merge, bqsr -->|b| mt, mt -->|b| merge in a 'line_spread: rails | calling' section). Rail mode draws both paths on the one rail, so no gallery fixture carries that topology.",
+    "status": "needs-review"
   }
 }

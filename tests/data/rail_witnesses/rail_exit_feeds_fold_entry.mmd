@@ -1,0 +1,24 @@
+%%metro title: rail exit feeding a fold entry
+%%metro line: a | A | #e41a1c
+%%metro line: b | B | #377eb8
+%%metro line_spread: rails | s2
+graph LR
+    subgraph s1 [One]
+        a1[a1] -->|a,b| a2[a2]
+    end
+    subgraph s2 [Two]
+        b1[b1] -->|a,b| b2[b2]
+    end
+    subgraph s3 [Three]
+        c1[c1] -->|a,b| c2[c2]
+    end
+    subgraph s4 [Four]
+        d1[d1] -->|a,b| d2[d2]
+    end
+    subgraph s5 [Five]
+        e1[e1] -->|a,b| e2[e2]
+    end
+    a2 -->|a,b| b1
+    b2 -->|a,b| c1
+    c2 -->|a,b| d1
+    d2 -->|a,b| e1

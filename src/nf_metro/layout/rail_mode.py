@@ -10,9 +10,14 @@ bundling to one Y; they converge only at a genuine fan-in/out to a single
 node (e.g. a file terminus all lines reach), eased in with 45-degree
 diagonals.
 
-This module is a self-contained pipeline, run by ``compute_layout`` only for
-sections whose ``line_spread`` resolves to ``rails`` (``graph.is_rail_section``),
-so the normal layout path is untouched for every other section.
+This module is the one owner of a rail section's interior.  Whole-graph rail
+mode (``compute_rail_layout``) lays every section here instead of running the
+numbered section pipeline.  In a mixed map each rail section is laid once at
+Stage 1.1 (``lay_section_rails``), so the section pipeline sizes the grid from
+its rail box and never computes a normal interior for it, and its ports are
+seated at Stage 3.1 (``position_rail_section_ports``); later stages move the
+panel only rigidly with its box, which ``_guard_rail_interior_as_laid`` holds
+against the recorded lay (``RailLay``).
 
 Scope (MVP): LR sections.  Each section's lines get rails centred about the
 section trunk Y; stations are placed one per column in declaration-priority
@@ -24,10 +29,19 @@ dedicated rail-mode router (see ``routing/rail.py``) can draw straight rails.
 
 from __future__ import annotations
 
-__all__ = ["RailLay", "compute_rail_layout", "measure_rail_lay", "rail_lay_drift"]
+__all__ = [
+    "RailLay",
+    "compute_rail_layout",
+    "lay_section_rails",
+    "measure_rail_lay",
+    "place_laid_rails",
+    "position_rail_section_ports",
+    "rail_lay_drift",
+    "rail_section_members",
+]
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE_FINE,
@@ -40,6 +54,7 @@ from nf_metro.layout.constants import (
     Y_OFFSET,
     graph_offset_step,
 )
+from nf_metro.layout.geometry import shift_section_rails
 from nf_metro.layout.pass_metrics import (
     active_metrics,
     inter_row_edge_clearance,
@@ -219,6 +234,7 @@ def compute_rail_layout(
             graph,
             section,
             rail_y,
+            placed=graph.stations,
             x_spacing=x_spacing,
             x_offset=x_offset,
             section_top=cursor_top,
@@ -276,80 +292,96 @@ def _connector_gap(
     return band - SECTION_HEADER_PROTRUSION
 
 
-def retrofit_section_rails(
+def lay_section_rails(
     graph: MetroGraph,
     section: Section,
     *,
     x_spacing: float = X_SPACING,
     y_spacing: float,
-    section_x_padding: float | None = None,
-    section_y_padding: float | None = None,
-) -> None:
-    """Re-lay one already-placed section as parallel rails (per-section mode).
+    section_x_padding: float,
+    section_y_padding: float,
+) -> MetroGraph:
+    """Lay one rail section of a mixed map as parallel rails (Stage 1.1).
 
-    The normal layout pipeline has already positioned this section's bbox via
-    section placement.  This function overwrites the section's *internal*
-    geometry (station X/Y, rail spans, used-Ys) and its internal edge routing
-    with the rail-mode layout, anchored at the section's existing bbox
-    top-left, and resizes the bbox to hug the resulting rails.  Inter-section
-    placement, ports, and routing are left to the normal machinery.
-
-    Used by ``compute_layout`` for a section that resolves to ``rails`` while
-    the graph-wide default is some other mode (the per-section override case).
+    The rail owner lays the panel once, in section-local coordinates: the
+    first column on the local origin and the box top one padding above the
+    content, as a normal section's first station and box sit.  The returned
+    section subgraph carries the laid stations, rail spans and rails
+    (``sub._rail_y``), so section placement sizes the grid from the rail box
+    and Stage 2.1 globalises the panel like any section; the graph's own
+    stations and rail map are left untouched until then.  The lay is recorded
+    in ``graph._rail_lay`` for the rail-interior guard.
     """
-    if section_x_padding is None:
-        section_x_padding = active_metrics().section_x_padding
-    if section_y_padding is None:
-        section_y_padding = active_metrics().section_y_padding
-    # ``_layout_section_rails`` anchors the box top at
-    # ``section_top + SECTION_HEADER_PROTRUSION`` and positions stations from
-    # ``x_offset``; feeding it the placement-chosen bbox top-left (offsetting
-    # the header protrusion back out) keeps the box where placement put it
-    # while the rails fill it.
-    box_left = section.bbox_x
-    box_top = section.bbox_y
-    rail_y = graph._rail_y
+    from nf_metro.layout.phases._common import _build_section_subgraph
+
+    sub = _build_section_subgraph(graph, section)
     _layout_section_rails(
         graph,
         section,
-        rail_y,
+        sub._rail_y,
+        placed=sub.stations,
         x_spacing=x_spacing,
-        x_offset=box_left,
-        section_top=box_top - SECTION_HEADER_PROTRUSION,
+        x_offset=0.0,
+        section_top=-section_y_padding - SECTION_HEADER_PROTRUSION,
         section_x_padding=section_x_padding,
         section_y_padding=section_y_padding,
         y_spacing=y_spacing,
+        first_column_x=0.0,
     )
+    graph._rail_lay[section.id] = measure_rail_lay(
+        section, sub.stations, sub._rail_y[section.id], {}
+    )
+    return sub
 
-    # Re-position this section's own ports onto their line rails so the normal
-    # router still draws sensible inter-section legs (no-op when the rail
-    # section is disconnected, which is the supported case).
-    _position_section_ports(graph, section, rail_y.get(section.id, {}))
 
-
-def _position_section_ports(
-    graph: MetroGraph,
-    section: Section,
-    per_line: dict[str, float],
+def place_laid_rails(
+    graph: MetroGraph, section: Section, sub: MetroGraph, dy: float
 ) -> None:
-    """Snap one rail section's boundary ports onto their connecting line rail."""
-    for port_id in section.port_ids:
+    """Carry a laid rail panel's spans and rails from its subgraph onto the
+    graph at Stage 2.1, translated by the section's global offset *dy*."""
+    for sid, local in sub.stations.items():
+        st = graph.stations[sid]
+        st.rail_used_ys = list(local.rail_used_ys)
+        st.rail_top_y = local.rail_top_y
+        st.rail_bottom_y = local.rail_bottom_y
+    graph._rail_y[section.id] = dict(sub._rail_y[section.id])
+    shift_section_rails(graph, section, dy)
+
+
+def position_rail_section_ports(graph: MetroGraph, section: Section) -> None:
+    """Seat one rail section's boundary ports on their lines' rails (Stage 3.1).
+
+    A LEFT/RIGHT port sits on its box edge at the mean of its lines' rails;
+    the seated ports join the section's rail lay.  Rails run left to right,
+    so a TOP/BOTTOM port has no rail edge to sit on and is refused.
+    """
+    per_line = graph._rail_y[section.id]
+    for port_id in sorted(section.port_ids):
         port = graph.ports.get(port_id)
         st = graph.stations.get(port_id)
         if port is None or st is None:
             continue
-        lines = graph.station_lines_ordered(port_id)
-        ys = [per_line[lid] for lid in lines if lid in per_line]
-        if ys:
-            st.y = sum(ys) / len(ys)
         if port.side is PortSide.LEFT:
             st.x = section.bbox_x
         elif port.side is PortSide.RIGHT:
             st.x = section.bbox_x + section.bbox_w
         else:
-            st.x = section.bbox_x + section.bbox_w / 2
+            raise ValueError(
+                f"rail-mode section {section.id!r} has a {port.side.value} port "
+                f"{port_id!r}; rails run left to right, so a rail section's "
+                "connections enter and leave through its left and right sides."
+            )
+        lines = graph.station_lines_ordered(port_id)
+        ys = [per_line[lid] for lid in lines if lid in per_line]
+        if ys:
+            st.y = sum(ys) / len(ys)
         port.x = st.x
         port.y = st.y
+    _stations, ports = rail_section_members(graph, section)
+    graph._rail_lay[section.id] = replace(
+        graph._rail_lay[section.id],
+        ports=measure_rail_lay(section, {}, {}, ports).ports,
+    )
 
 
 def _layout_section_rails(
@@ -357,14 +389,22 @@ def _layout_section_rails(
     section: Section,
     rail_y: dict[str, dict[str, float]],
     *,
+    placed: Mapping[str, Station],
     x_spacing: float,
     x_offset: float,
     section_top: float,
     section_x_padding: float,
     section_y_padding: float,
     y_spacing: float,
+    first_column_x: float | None = None,
 ) -> float:
-    """Lay out one section's rails and stations; return its bbox bottom Y."""
+    """Lay out one section's rails and stations; return its bbox bottom Y.
+
+    Station attributes and topology are read from *graph*; the laid
+    coordinates and rail spans are written onto *placed*'s stations.  With
+    *first_column_x* the box left follows from the first column instead of
+    *x_offset*.
+    """
     lines = _section_lines_in_order(graph, section)
     # Lines sharing a legend_combo collapse onto a single rail slot (a tight
     # bundle), so the slot count - not the line count - drives rail spacing and
@@ -527,6 +567,8 @@ def _layout_section_rails(
         need = terminus_icon_flow_reach(st) + ICON_BBOX_MARGIN
         head_icon_extra = max(head_icon_extra, need - section_x_padding)
     head_icon_extra = max(0.0, head_icon_extra)
+    if first_column_x is not None:
+        x_offset = first_column_x - section_x_padding - head_icon_extra
 
     def _col_x(col: float) -> float:
         x = x_offset + section_x_padding + head_icon_extra + col * x_spacing
@@ -537,9 +579,10 @@ def _layout_section_rails(
         return x
 
     for sid in real_ids:
-        st = graph.stations[sid]
+        src = graph.stations[sid]
+        st = placed[sid]
 
-        if st.off_track:
+        if src.off_track:
             # Park above the rails just to the left of the consumer column, so
             # the router draws a short, clean S-curve down into the rail rather
             # than a long diagonal traverse from the section head.  The consumer's
@@ -553,7 +596,7 @@ def _layout_section_rails(
             st.layer = consumer_col
             st.x = _col_x(feed_col)
             st.y = off_track_y + (
-                OFFTRACK_TERMINUS_NUB_CLEARANCE if st.is_captioned_terminus else 0.0
+                OFFTRACK_TERMINUS_NUB_CLEARANCE if src.is_captioned_terminus else 0.0
             )
             st.track = 0.0
             st.rail_used_ys = []
@@ -581,7 +624,7 @@ def _layout_section_rails(
         # line widths) rather than a single line.  The slots are ordered by each
         # line's rail Y so the fan never crosses; the terminus bar caps the
         # bundle.  A single-line terminus stays a point.
-        is_blank_terminus = st.is_blank_terminus
+        is_blank_terminus = src.is_blank_terminus
         if is_blank_terminus:
             n = len(ys)
             if n > 1:
@@ -643,15 +686,18 @@ def _layout_section_rails(
     section.bbox_y = bbox_y
     section.bbox_w = bbox_w
     section.bbox_h = bbox_h
-    if section.direction != "LR" and graph.layout_provenance.author_owns_direction(
-        section.id
-    ):
+    if section.direction != "LR":
+        if graph.layout_provenance.author_owns_direction(section.id):
+            raise ValueError(
+                f"rail-mode section {section.id!r} declares direction "
+                f"{section.direction!r}; rail mode lays rails left-to-right only. "
+                "Drop the %%metro direction: directive or the rail idiom."
+            )
         raise ValueError(
-            f"rail-mode section {section.id!r} declares direction "
-            f"{section.direction!r}; rail mode lays rails left-to-right only. "
-            "Drop the %%metro direction: directive or the rail idiom."
+            f"rail-mode section {section.id!r} reached the rail lay with "
+            f"direction {section.direction!r}; the grid stage locks a rail "
+            "section to left-to-right."
         )
-    section.direction = "LR"
 
     return bbox_y + bbox_h
 
