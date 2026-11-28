@@ -2028,8 +2028,6 @@ WRAP_GROWN_CLEARANCE_CORPUS = (
 CLEARANCE_CORPUS = (LABEL_WRAP_ROW_GAP, *WRAP_GROWN_CLEARANCE_CORPUS)
 
 
-# Rail layouts, whose row pitch is the interchange idiom's rather than the
-# declared section gap's.
 def _clearance(section_y_gap: float = SECTION_Y_GAP):
     return partial(measure_row_gap_clearance, section_y_gap=section_y_gap)
 
