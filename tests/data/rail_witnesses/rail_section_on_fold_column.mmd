@@ -1,0 +1,44 @@
+%%metro title: rail section on the fold column
+%%metro line: a | A | #e41a1c
+%%metro line: b | B | #377eb8
+%%metro line_spread: rails | s8
+graph LR
+    subgraph s1 [Sec 1]
+        n1a[n1a] -->|a,b| n1b[n1b]
+    end
+    subgraph s2 [Sec 2]
+        n2a[n2a] -->|a,b| n2b[n2b]
+    end
+    subgraph s3 [Sec 3]
+        n3a[n3a] -->|a,b| n3b[n3b]
+    end
+    subgraph s4 [Sec 4]
+        n4a[n4a] -->|a,b| n4b[n4b]
+    end
+    subgraph s5 [Sec 5]
+        n5a[n5a] -->|a,b| n5b[n5b]
+    end
+    subgraph s6 [Sec 6]
+        n6a[n6a] -->|a,b| n6b[n6b]
+    end
+    subgraph s7 [Sec 7]
+        n7a[n7a] -->|a,b| n7b[n7b]
+    end
+    subgraph s8 [Sec 8]
+        n8a[n8a] -->|a,b| n8b[n8b]
+    end
+    subgraph s9 [Sec 9]
+        n9a[n9a] -->|a,b| n9b[n9b]
+    end
+    subgraph s10 [Sec 10]
+        n10a[n10a] -->|a,b| n10b[n10b]
+    end
+    n1b -->|a,b| n2a
+    n2b -->|a,b| n3a
+    n3b -->|a,b| n4a
+    n4b -->|a,b| n5a
+    n5b -->|a,b| n6a
+    n6b -->|a,b| n7a
+    n7b -->|a,b| n8a
+    n8b -->|a,b| n9a
+    n9b -->|a,b| n10a

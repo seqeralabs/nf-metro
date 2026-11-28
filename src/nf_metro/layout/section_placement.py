@@ -281,7 +281,12 @@ def _compute_section_offsets(
     _pack_cells(scoped, packs, col_offsets, col_widths, right_align_cols, section_x_gap)
 
     _finalize_spanning_sections(
-        scoped, col_widths, row_heights, section_x_gap, section_y_gap
+        scoped,
+        col_widths,
+        row_heights,
+        section_x_gap,
+        section_y_gap,
+        rail_ids={sid for sid in scoped if graph.is_rail_section(sid)},
     )
 
     return min_col, max_col
@@ -476,12 +481,14 @@ def _finalize_spanning_sections(
     row_heights: dict[int, float],
     section_x_gap: float,
     section_y_gap: float,
+    rail_ids: set[str],
 ) -> None:
     """Align spanning-section left edges to their column and size their bbox.
 
     A section that spans multiple columns may have a different local bbox_x
     from internal layout, offsetting its left edge from single-span sections
-    in the same starting column.
+    in the same starting column.  A rail section keeps the box its rails
+    were laid in.
     """
     for section in scoped.values():
         if section.grid_col_span <= 1:
@@ -496,6 +503,8 @@ def _finalize_spanning_sections(
         current_left = section.offset_x + section.bbox_x
         if abs(current_left - target_left) > SAME_COORD_TOLERANCE:
             section.offset_x -= current_left - target_left
+        if section.id in rail_ids:
+            continue
 
         rspan = section.grid_row_span
         if rspan > 1:

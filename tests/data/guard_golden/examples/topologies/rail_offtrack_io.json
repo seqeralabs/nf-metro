@@ -1,4 +1,6 @@
 {
   "raised": null,
-  "trace": []
+  "trace": [
+    "_guard_rail_interior_as_laid|at layout end"
+  ]
 }

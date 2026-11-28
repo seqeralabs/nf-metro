@@ -44,6 +44,7 @@ class DecisionReason(str, Enum):
     EXPLICIT_GRID_DEFAULT_DIRECTION = "explicit-grid-default-direction"
     TALL_ANCHOR_GRID = "tall-anchor-grid"
     TALL_ANCHOR_DIRECTION = "tall-anchor-direction"
+    RAIL_SECTION_DIRECTION = "rail-section-direction"
     FOLD_BRIDGE_DIRECTION = "fold-bridge-direction"
     FLOW_REORIENTED_DIRECTION = "flow-reoriented-direction"
     AUTO_ENTRY_SIDE = "auto-entry-side"

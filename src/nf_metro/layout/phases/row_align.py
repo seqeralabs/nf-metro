@@ -67,7 +67,11 @@ def _group_sections_by_row(
     for sec_id in section_subgraphs:
         section = graph.sections[sec_id]
         row = row_assign.get(sec_id, -1)
-        if row < 0 or not lanes_run_along_y(section.direction):
+        if (
+            row < 0
+            or not lanes_run_along_y(section.direction)
+            or graph.is_rail_section(sec_id)
+        ):
             continue
         groups[(row, section.direction)].append(sec_id)
     return groups
@@ -1232,7 +1236,11 @@ def _compact_row_content_to_bbox_top(
     """
     row_sections: dict[int, list[Section]] = defaultdict(list)
     for section in graph.sections.values():
-        if section.bbox_h <= 0 or section.grid_row < 0:
+        if (
+            section.bbox_h <= 0
+            or section.grid_row < 0
+            or graph.is_rail_section(section.id)
+        ):
             continue
         row_sections[section.grid_row].append(section)
 

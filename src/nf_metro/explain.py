@@ -270,6 +270,12 @@ def _add_direction_decisions(
                 "The tall-anchor packer selected horizontal flow and locked it "
                 "so later direction inference cannot rotate the stacked chain."
             )
+        elif provenance.reason is DecisionReason.RAIL_SECTION_DIRECTION:
+            rule = provenance.reason.value
+            detail = (
+                "Rails run left to right, so the section's horizontal flow is "
+                "locked before direction inference reads the grid."
+            )
         elif provenance.reason is DecisionReason.FLOW_REORIENTED_DIRECTION:
             rule = provenance.reason.value
             detail = (

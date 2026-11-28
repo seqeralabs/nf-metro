@@ -1482,6 +1482,11 @@ class _Tracks:
             return False
         self.busy.add(section_id)
         graph = self.graph
+        if graph.is_rail_section(section_id):
+            self._rail_section(section_id)
+            self.busy.discard(section_id)
+            self.done.add(section_id)
+            return True
         entry_orders: dict[str, list[str]] = {}
         for port_id in graph.sections[section_id].entry_ports:
             if port_id not in graph.ports:
@@ -1535,6 +1540,24 @@ class _Tracks:
         self.busy.discard(section_id)
         self.done.add(section_id)
         return True
+
+    def _rail_section(self, section_id: str) -> None:
+        """A rail section's lanes are its rails, read from the rail owner's
+        assignment: a station's line takes its rail's index, top rail first,
+        and a port's bundle takes its lines in rail order.  Every line in a
+        rail section has a rail, so a line without one is a broken lay."""
+        graph = self.graph
+        rails = graph._rail_y[section_id]
+        rank = {
+            lid: i
+            for i, lid in enumerate(sorted(rails, key=lambda lid: (rails[lid], lid)))
+        }
+        for node, st in graph.stations.items():
+            if st.section_id != section_id:
+                continue
+            lines = sorted(graph.station_lines(node), key=rank.__getitem__)
+            for k, lid in enumerate(lines):
+                self.lanes[(node, lid)] = k if node in graph.ports else rank[lid]
 
     def _runs(self, section_id: str) -> _Section:
         graph = self.graph

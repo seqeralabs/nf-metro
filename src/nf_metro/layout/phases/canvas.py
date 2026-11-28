@@ -6,6 +6,7 @@ from collections.abc import Callable
 from functools import cache
 
 from nf_metro.layout.auto_layout import _transitive_successors
+from nf_metro.layout.geometry import shift_section_rails
 from nf_metro.layout.phases.bbox import _min_section_bbox_top
 from nf_metro.parser.model import MetroGraph
 
@@ -267,24 +268,16 @@ def translate_graph(graph: MetroGraph, dx: float, dy: float) -> None:
     for st in graph.stations.values():
         st.x += dx
         st.y += dy
-        if st.rail_top_y is not None:
-            st.rail_top_y += dy
-        if st.rail_bottom_y is not None:
-            st.rail_bottom_y += dy
-        st.rail_used_ys = [y + dy for y in st.rail_used_ys]
     for section in graph.sections.values():
         section.bbox_x += dx
         section.bbox_y += dy
+        shift_section_rails(graph, section, dy)
     for port in graph.ports.values():
         port.x += dx
         port.y += dy
     graph.bypass_label_obstacles = {
         sid: (x0 + dx, y0 + dy, x1 + dx, y1 + dy)
         for sid, (x0, y0, x1, y1) in graph.bypass_label_obstacles.items()
-    }
-    graph._rail_y = {
-        sid: {line_id: y + dy for line_id, y in rails.items()}
-        for sid, rails in graph._rail_y.items()
     }
     graph._placement_ref_y = {sid: y + dy for sid, y in graph._placement_ref_y.items()}
     graph._placement_ref_bbox_top = {

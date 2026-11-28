@@ -1,0 +1,19 @@
+%%metro title: rail section fed by a trunk
+%%metro label_angle: 45
+%%metro line: a | A | #ff0000
+%%metro line: b | B | #0000ff
+%%metro line_spread: rails | rails_sec
+graph LR
+    subgraph normal [Normal]
+        n1[Trim]
+        n2[Align]
+        n3[Sort]
+        n1 -->|a| n2
+        n2 -->|a| n3
+    end
+    subgraph rails_sec [Rails]
+        r1[CallerOne]
+        r2[CallerTwo]
+        r1 -->|a,b| r2
+    end
+    n3 -->|a| r1

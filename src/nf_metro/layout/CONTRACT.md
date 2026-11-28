@@ -325,9 +325,20 @@ runtime check either:
   `FLOW_REORIENTED_DIRECTION` decision in `graph.layout_provenance`; the
   explicit-grid direction guard accepts a non-LR direction only with that
   typed reason, instead of a second section set.
-- `graph._rail_y` - the per-section `{line_id: rail_y}` map produced by the
-  opt-in rail-mode layout; read by the rail router, label placement, and rail
-  guards, empty when rail mode is off.
+- `graph._rail_y` - the per-section `{line_id: rail_y}` map. A per-section
+  rail section's entry is laid at Stage 1.1 and reaches the graph at Stage
+  2.1 (the map is cleared when each positioning pass starts); whole-graph
+  rail mode writes every entry. Read by Stage 3.1's rail port seating, the
+  lane plan at the 6.12 seal (a rail section's lanes are its rails), the rail
+  router, label placement and the rail guards; empty when rail mode is off.
+- `graph._rail_lay` - each per-section rail panel's stations, rails, rail
+  spans and box size relative to its box, as the rail owner laid them at
+  Stage 1.1, joined by its boundary ports at Stage 3.1; cleared when each
+  positioning pass starts. The live
+  `_guard_rail_interior_as_laid` reads it at the Stage 6.12 seal and at layout
+  end (and after every stage from 2.1 under validate) and fails closed when a
+  rail section has no record or a later stage reshaped it; a rigid translation
+  of the panel with its box passes.
 - `graph._defer_final_guards` / `graph._after_final_deferred` - pass-control
   flags `compute_layout` uses so the final-geometry guards defer while the
   layout passes run, then validate the settled, band-lifted geometry once.
@@ -355,7 +366,17 @@ in pipeline order.
 ### Stage 1.1: internal section layout
 - **Purpose**: Lay out each section's real stations in section-local
   coordinates via layer/track assignment.
-- **Helper**: `_layout_single_section` (`phases/single_section.py`).
+- **Helper**: `_layout_single_section` (`phases/single_section.py`); a
+  per-section rail section is laid instead by its rail owner,
+  `lay_section_rails` (`rail_mode.py`), and never gets a normal-section
+  interior.
+- **Rail sections**: The rail lay places the stations on their rails, the
+  rail spans and the box in section-local coordinates (first column on the
+  local origin), into the returned subgraph only: the graph's stations and
+  `graph._rail_y` stay as the previous pass left them until Stage 2.1. It
+  records the panel in `graph._rail_lay`. The grid stage (`auto_layout`)
+  locks every rail section's direction to LR before inference
+  (`RAIL_SECTION_DIRECTION`); the lay refuses any other direction.
 - **Precondition**: Parser has populated `graph.sections`, `graph.stations`,
   `graph.edges`. Section directions and grid positions inferred by
   `auto_layout`. Ports exist in the graph but are not yet positioned.
@@ -394,6 +415,8 @@ in pipeline order.
   `y_spacing` steps along a vertical flow, and the bbox flow-axis size grows
   by the same amount. `graph._row_y_grid_info` stores grid metadata for the
   debug overlay.
+- **Rail sections**: Left out of the row Y-grid groups and of the stagger
+  reservation; their pitch is the rail lay's.
 - **Invariants preserved**: Isolated stations (sole layer occupants
   with off-grid Y) keep original Y - hub centering survives. Bbox
   cross-axis size and station cross-axis positions unchanged by the
@@ -432,6 +455,9 @@ in pipeline order.
   (ascending min original row, then descending size, then smallest
   section id), left-aligned and separated by `section_y_gap`. Any
   explicit grid override falls back to the shared single-grid path.
+- **Rail sections**: The grid is sized from the rail box. A spanning rail
+  section takes its column's left edge but keeps the box its rails were
+  laid in: the span fill does not stretch it.
 - **Invariants preserved**: Station local coords unchanged. Bboxes
   still local-coord.
 - **Runtime guard**: `_guard_independent_components_disjoint` (under
@@ -479,7 +505,9 @@ in pipeline order.
   `x_offset`, `y_offset` final.
 - **Postcondition**: Every real station's `x, y` and every section's
   `bbox_x, bbox_y` are global. `bbox_w, bbox_h` unchanged. Section
-  subgraphs (local-coord) still exist but are not used downstream.
+  subgraphs (local-coord) still exist but are not used downstream. A rail
+  section's rail spans and `graph._rail_y` entry reach the graph here,
+  translated with its stations (`place_laid_rails`).
 - **Invariants preserved**: Ports remain unpositioned. Junctions
   unpositioned.
 - **Validate guards run after**: finite coords, stations-in-sections,
@@ -492,7 +520,11 @@ in pipeline order.
 ### Stage 3.1: position ports on section boundaries
 - **Purpose**: Place every port on its section's bbox edge at the
   section's nominal centre line for its side.
-- **Helper**: `position_ports` in `section_placement.py`.
+- **Helper**: `position_ports` in `section_placement.py`; a rail section's
+  ports are seated by its rail owner, `position_rail_section_ports`
+  (`rail_mode.py`): LEFT/RIGHT on the box edge at the mean of their lines'
+  rails, joining `graph._rail_lay`. A TOP/BOTTOM rail port raises, since
+  rails run left to right.
 - **Precondition**: Section bboxes in global coords (Stage 2.1).
 - **Postcondition**: Every port station's `(x, y)` lies on the bbox
   edge corresponding to its side, within `GUARD_TOLERANCE`. Ports
@@ -1344,9 +1376,9 @@ in pipeline order.
   (which keeps `min_inter_section_gap()` of inter-column corridor). Members
   of a packed cell are out of scope: they sit side-by-side along X inside
   one cell, so no common vertical edge exists. Two kinds of section break a
-  run: a rail-flagged one, because `_retrofit_section_rails_phase`
-  re-derives its interior from its bbox, so growing its edge would slide
-  its stations rather than widen a runway in front of them; and one whose
+  run: a rail-flagged one, because its box size is the rail lay's decision
+  (held by `_guard_rail_interior_as_laid`), so it has no runway to level;
+  and one whose
   exit port rides the edge under test, because that port's coordinate is
   where the inter-section route leaves and the clearances downstream of it
   are measured from there.
@@ -1644,7 +1676,13 @@ through the record's draw accessors (`planned_offsets` in
   every port's line order and same-band entry approach, the far-side
   approaches, the track plan (every in-section `(node, line)`'s lane, from
   which each exit's order is read, and every perpendicular port's offsets), and
-  each rail-section port's origin (the middle of its own lanes).
+  each rail-section port's origin (the middle of its own lanes).  A
+  per-section rail section's lanes are read from its rail assignment
+  (`graph._rail_y`): a station's line takes its rail's index, top rail
+  first, and a port's lines take rail order; none is derived from placement,
+  and a line with no rail raises.  The live `_guard_rail_interior_as_laid`
+  runs right after the decision, so the record never reads a rail interior
+  a stage reshaped.
 - **Helpers**: `seal_lane_plan` (`layout/lane_plan.py`), called by the engine
   at the close of Stage 6.12 (`LANE_PLAN_STAGE`) and once a sectionless layout
   is placed, builds the record with `build_lane_plan` and keeps it on the
@@ -1941,10 +1979,8 @@ They are design evidence, not part of this specification.
   by the strict post-grant ledger. The demand vocabulary is
   `layout/settlement_demand.py`, held apart from settlement so a layout phase
   can state a demand without importing the routing stack the ledger is built on.
-  Rail layouts raise no clearance demand: their row pitch comes from the
-  interchange idiom rather than the declared section gap, and widening one of
-  their boundaries to that gap turns a flat inter-row run into a staircase --
-  a decision change, which `_assert_settlement_decisions_frozen` refuses.
+  A per-section rail panel is laid once and moves only rigidly with its box,
+  so paying a demand at its boundary translates it like any section.
 - **The two demands can cover either axis.** The reservation ledger is settled
   on both: `_settle_axis` runs once per axis and every row-gap and column-gap
   claim is measured. Generic box-growth clearance remains row-only because

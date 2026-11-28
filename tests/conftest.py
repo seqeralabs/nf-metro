@@ -136,9 +136,9 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
     exercise the same fixtures.
 
     Fixtures with a ``rails`` line-spread section are excluded: a rail section's
-    internal geometry is produced by the self-contained rail pipeline (which
-    overwrites the normal content-placement phases), so the per-phase
-    idempotence/purity contract those tests assert does not apply to it.
+    internal geometry is laid by the rail owner, which the content-placement
+    phases leave alone, so the per-phase idempotence/purity contract those
+    tests assert does not describe it.
     """
 
     def _uses_rails(path: Path) -> bool:
