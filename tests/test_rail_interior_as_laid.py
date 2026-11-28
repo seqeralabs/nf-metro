@@ -58,6 +58,23 @@ OPTION_SETS: dict[str, dict[str, object]] = {
         "stroke_scale": 0.6,
         "compact_offsets": False,
     },
+    "tight_rows_untracked": {
+        "stroke_scale": 1.5,
+        "section_y_gap": 20.0,
+        "track_gap": 0.0,
+        "x_spacing": 40.0,
+    },
+    "centred_untracked_wide": {
+        "track_gap": 0.0,
+        "center_ports": True,
+        "x_spacing": 80.0,
+    },
+    "pinned_folded_compact": {
+        "y_spacing": 60.0,
+        "compact_offsets": True,
+        "fold_threshold": 6,
+        "stroke_scale": 2.0,
+    },
 }
 _MOVED = 0.01
 
@@ -143,6 +160,29 @@ def test_rail_panel_moves_only_rigidly_after_it_is_laid(rel, opts_id, monkeypatc
 def test_the_lane_plan_describes_the_rail_panel_drawn(rel, monkeypatch):
     graph, _seen = _lay_out(rel, {}, monkeypatch)
     assert build_lane_plan(graph) == graph._lane_plan
+
+
+@pytest.mark.parametrize("rel", RAIL_FIXTURES)
+def test_a_rail_sections_lanes_are_its_rails(rel, monkeypatch):
+    """Each line's lane in a rail section is its rail's index, top rail
+    first, as the rail owner assigned it, never a lane derived from
+    placement."""
+    graph, _seen = _lay_out(rel, {}, monkeypatch)
+    lanes = graph._lane_plan.tracks.lanes
+    checked = 0
+    for sid in graph.sections:
+        if not graph.is_rail_section(sid):
+            continue
+        rails = graph._rail_y[sid]
+        order = sorted(rails, key=lambda lid: (rails[lid], lid))
+        rank = {lid: i for i, lid in enumerate(order)}
+        for node in graph.sections[sid].station_ids:
+            if node in graph.ports or graph.stations[node].is_port:
+                continue
+            for lid in graph.station_lines(node):
+                assert lanes[(node, lid)] == rank[lid], (rel, node, lid)
+                checked += 1
+    assert checked
 
 
 def _sarek() -> MetroGraph:
