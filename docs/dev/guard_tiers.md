@@ -49,6 +49,15 @@ It requires exact contact between a feeder and its trunk.
 Its Tier-A counterpart allows a small tolerance, because an alternate routing handler can produce a valid map without exact contact.
 Every other guard and check is reachable from `compute_layout` or rendering.
 
+The corridor-cohort shadow oracle in `tests/cohort_shadow_oracle.py` is a Tier C harness rather than a registered check.
+It draws the compiling observation under production's conditions, publishes every compiled cohort plan at its compile site with the observation's own plan as the ledger, then requires the render invariants to pass and the drawn routes to match the plan on every owned segment point and corner.
+Its ratchet, `tests/data/cohort_shadow_ratchet.txt`, holds the repository maps it fails.
+
+The lane plan staleness oracle in `tests/test_lane_plan_staleness.py` is another Tier C harness.
+It rebuilds the lane plan after every stage that follows the plan's decision at the close of stage 6.12.
+The box sizers at stages 6.12a to 6.12c must leave it unchanged on every curated map.
+Its shrink-only list, `tests/data/lane_plan_stale_rows.json`, holds the maps where row stacking (stages 6.13 to 6.17) later moves a position the plan read, each owned by #2171.
+
 ## Registries
 
 The classification is data rather than prose:
@@ -106,7 +115,7 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 | `_guard_ports_clear_unanchored_box_edges`                | A    |     7.9 | final only                                |
 | `_guard_no_station_overlap`                              | A    |    13.5 | bisection (first valid: after Stage 6.4)  |
 | `_guard_no_coincident_station_coords`                    | A    |     3.3 | bisection (first valid: after Stage 6.4)  |
-| `_guard_no_line_crosses_non_consumer`                    | A    |    74.7 | bisection (first valid: after Stage 6.14) |
+| `_guard_no_line_crosses_non_consumer`                    | A    |    74.7 | bisection (first valid: after Stage 6.12) |
 | `_guard_station_x_column_drift`                          | A    |     6.0 | bisection (first valid: start)            |
 | `_guard_row_trunk_cy_consistent`                         | B    |    12.1 | final-only                                |
 | `_guard_off_track_clear_of_anchor`                       | B    |     3.5 | final-only                                |
@@ -188,11 +197,6 @@ python scripts/guard_cost_audit.py --json /tmp/guard_cost.json
 They therefore carry no `needs` or `bisection_safe` dispatch data, only their tier and any `issue_pin` and `narrow_reason`.
 Their costs are not measured separately, because each is a single structural pass.
 
-`_guard_canvas_margin_settled` is the one inline guard whose tier does not describe its gating.
-The render's canvas-margin move loop calls it on every render, not only under `validate=True`.
-Its input is the shortfall a move left behind, which exists nowhere else.
-It cannot join the dispatched Tier-A set the render chokepoint runs.
-
 | guard                                         | tier | role                                                                        |
 | --------------------------------------------- | ---- | --------------------------------------------------------------------------- |
 | `_guard_stations_within_bbox`                 | A    | Always-on postcondition: every station center lies within its section bbox. |
@@ -202,7 +206,6 @@ It cannot join the dispatched Tier-A set the render chokepoint runs.
 | `_guard_independent_components_disjoint`      | A    | Independently-stacked components do not overlap.                            |
 | `_guard_no_same_row_backward_feed`            | A    | A same-row inter-section edge does not run against source flow.             |
 | `_guard_anchors_frozen_during_placement`      | B    | Content placement leaves resolved anchors fixed.                            |
-| `_guard_canvas_margin_settled`                | B    | No left/top canvas margin outlives the render moves that own it (`#1769`).  |
 | `_guard_bypass_v_flat_visible`                | B    | Every bypass V keeps a visible horizontal run through its X.                |
 | `_guard_centered_line_spread_balanced`        | B    | A `centered` section's weave balances about its trunk.                      |
 | `_guard_file_icon_no_name_label`              | B    | A file-icon station gets no separate node-name label.                       |
@@ -216,6 +219,7 @@ It cannot join the dispatched Tier-A set the render chokepoint runs.
 | `_guard_off_track_input_column_stack`         | B    | Single-trunk off-track inputs hug their consumer column (`#651`).           |
 | `_guard_off_track_not_hub`                    | B    | No off-track station has edges on both sides (`#1295`).                     |
 | `_guard_rail_above_label_band`                | B    | A rail section reserves room above its top rail for labels.                 |
+| `_guard_rail_interior_as_laid`                | B    | A rail panel keeps its laid interior; live at the 6.12 seal and layout end. |
 | `_guard_rail_one_station_per_column`          | B    | Rails place one distinct station per column.                                |
 | `_guard_rail_stations_seat_on_rails`          | B    | Rail stations seat on their lines' fixed rails.                             |
 | `_guard_single_trunk_off_track_step`          | B    | Single-trunk sections lift off-track stations by the base pitch (`#580`).   |

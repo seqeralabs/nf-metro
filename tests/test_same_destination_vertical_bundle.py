@@ -15,6 +15,7 @@ from nf_metro.layout.constants import (
     EDGE_TO_BUNDLE_CLEARANCE,
     graph_offset_step,
 )
+from nf_metro.layout.lane_plan import build_lane_plan
 from nf_metro.layout.routing import common as routing_common
 from nf_metro.layout.routing import compute_station_offsets, normalize, route_edges
 from nf_metro.layout.routing import invariants as routing_invariants
@@ -67,15 +68,15 @@ def test_seed_72_bundles_same_destination_verticals_at_four_pixel_pitch() -> Non
         (256.0, 124.0),
         (256.0, 196.0),
         (564.0, 196.0),
-        (564.0, 124.0),
-        (662.0, 124.0),
+        (564.0, 120.0),
+        (662.0, 120.0),
     )
     assert purple.curve_radii == (18.0, 10.0, 10.0, 14.0)
     assert blue.points == (
         (530.0, 506.0),
         (568.0, 506.0),
-        (568.0, 128.0),
-        (662.0, 128.0),
+        (568.0, 124.0),
+        (662.0, 124.0),
     )
     assert blue.curve_radii == (14.0, 10.0)
     assert blue.points[1][0] - purple.points[3][0] == 4.0
@@ -90,9 +91,9 @@ def test_seed_72_bundles_same_destination_verticals_at_four_pixel_pitch() -> Non
     assert (
         max(purple_straight[0], blue_straight[0]),
         min(purple_straight[1], blue_straight[1]),
-    ) == (138.0, 186.0)
-    assert _arc_centre(purple, 3) == pytest.approx((578.0, 138.0))
-    assert _arc_centre(blue, 1) == pytest.approx((578.0, 138.0))
+    ) == (134.0, 186.0)
+    assert _arc_centre(purple, 3) == pytest.approx((578.0, 134.0))
+    assert _arc_centre(blue, 1) == pytest.approx((578.0, 134.0))
     assert nearby.points[3][0] == 546.0
 
 
@@ -456,6 +457,8 @@ def test_same_target_vertical_bundle_guard_is_fail_loud_and_non_vacuous() -> Non
     violations = checker(graph, routes)
     assert {violation.line_id for violation in violations} == {"a"}
 
+    # The render guards read the lane plan a layout seals before routing.
+    graph._lane_plan = build_lane_plan(graph)
     with pytest.raises(
         routing_invariants.CurveInvariantError,
         match="same-destination final vertical bundle",
@@ -481,8 +484,8 @@ def test_same_target_vertical_bundle_guard_catches_seed_72_prefix() -> None:
         is_inter_section=True,
         curve_radii=list(observed_blue.curve_radii),
     )
-    purple.points[3] = (558.0, 196.0)
-    purple.points[4] = (558.0, 124.0)
+    purple.points[3] = (558.0, purple.points[3][1])
+    purple.points[4] = (558.0, purple.points[4][1])
     checker = getattr(
         routing_invariants, "check_same_destination_approach_bundle", None
     )

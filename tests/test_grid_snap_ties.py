@@ -50,7 +50,7 @@ def _offsets(pitch: float) -> tuple[float, ...]:
     return (*(round(k * pitch, 1) for k in OFFSET_PITCHES), *OFFSETS_PX)
 
 
-_SnapCall = tuple[MetroGraph, float, list[str], dict[str, list[str]]]
+_SnapCall = tuple[MetroGraph, float, list[str], dict[str, list[str]], frozenset[str]]
 
 
 def _group_snap_calls(text: str, source_dir: Path = EXAMPLES) -> list[_SnapCall]:
@@ -58,9 +58,9 @@ def _group_snap_calls(text: str, source_dir: Path = EXAMPLES) -> list[_SnapCall]
     calls: list[_SnapCall] = []
     original = grid_snap._snap_group_to_grid
 
-    def record(graph, pitch, sec_ids, convergence_sources):
-        calls.append(deepcopy((graph, pitch, sec_ids, convergence_sources)))
-        original(graph, pitch, sec_ids, convergence_sources)
+    def record(graph, pitch, sec_ids, convergence_sources, held_exits):
+        calls.append(deepcopy((graph, pitch, sec_ids, convergence_sources, held_exits)))
+        original(graph, pitch, sec_ids, convergence_sources, held_exits)
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(grid_snap, "_snap_group_to_grid", record)
@@ -92,9 +92,11 @@ def _tied_ids(graph: MetroGraph, sec_ids: list[str], pitch: float) -> set[str]:
 
 
 def _snapped(call: _SnapCall, dy: float) -> dict[str, float]:
-    graph, pitch, sec_ids, convergence_sources = deepcopy(call)
+    graph, pitch, sec_ids, convergence_sources, held_exits = deepcopy(call)
     translate_graph(graph, 0.0, dy)
-    grid_snap._snap_group_to_grid(graph, pitch, sec_ids, convergence_sources)
+    grid_snap._snap_group_to_grid(
+        graph, pitch, sec_ids, convergence_sources, held_exits
+    )
     return {
         sid: graph.stations[sid].y - dy for sid in _group_station_ids(graph, sec_ids)
     }
@@ -141,7 +143,7 @@ def _tied_fans(graph: MetroGraph, tied: set[str]) -> list[list[str]]:
 @pytest.mark.parametrize("fixture", TIED_FIXTURES)
 def test_tied_fan_moves_as_one(fixture: str) -> None:
     for call in _tied_calls(fixture):
-        graph, pitch, sec_ids, _ = call
+        graph, pitch, sec_ids, *_ = call
         before = {
             sid: graph.stations[sid].y for sid in _group_station_ids(graph, sec_ids)
         }
@@ -175,7 +177,7 @@ graph LR
 def test_tied_two_branch_fan_keeps_its_spacing() -> None:
     """Both branches midway between slots snap the same way, one pitch apart."""
     (call,) = [c for c in _group_snap_calls(FAN) if "s" in c[2]]
-    graph, _pitch, sec_ids, _ = call
+    graph, _pitch, sec_ids, *_ = call
     pitch = 40.0
     trunk = 100.0
     for sid in ("src", "hub", "join", "sink"):
@@ -183,7 +185,7 @@ def test_tied_two_branch_fan_keeps_its_spacing() -> None:
     graph.stations["up"].y = trunk - pitch / 2.0
     graph.stations["down"].y = trunk + pitch / 2.0
     graph.stations["down"].x = graph.stations["up"].x
-    frozen = (graph, pitch, sec_ids, {})
+    frozen = (graph, pitch, sec_ids, {}, frozenset())
     for dy in (0.0, *_offsets(pitch)):
         snapped = _snapped(frozen, dy)
         spacing = snapped["down"] - snapped["up"]
@@ -195,12 +197,12 @@ TB_EXIT = Path(__file__).parent / "fixtures" / "tb_exit_terminal_on_carrier.mmd"
 
 
 def _reflected(call: _SnapCall) -> _SnapCall:
-    graph, pitch, sec_ids, convergence_sources = deepcopy(call)
+    graph, pitch, sec_ids, convergence_sources, held_exits = deepcopy(call)
     for st in graph.stations.values():
         st.y = -st.y
     for port in graph.ports.values():
         port.y = -port.y
-    return graph, pitch, sec_ids, convergence_sources
+    return graph, pitch, sec_ids, convergence_sources, held_exits
 
 
 @pytest.mark.parametrize("reflect", [False, True], ids=["as-drawn", "reflected"])
@@ -221,3 +223,83 @@ def test_unlevelled_tie_rides_with_the_station_more_lines_reach(reflect: bool) -
         assert snapped["te__entry_left_7"] == pytest.approx(
             snapped["te_counts_prep"], abs=ORIGIN_ROUNDING_PX
         ), (dy, snapped["te__entry_left_7"], snapped["te_counts_prep"])
+
+
+DRAFT_OFF_LANE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "regressions"
+    / "approach_order_draft_off_lane.mmd"
+)
+
+
+def _draft_off_lane_call() -> _SnapCall:
+    call = next(
+        c
+        for c in _group_snap_calls(DRAFT_OFF_LANE.read_text(), DRAFT_OFF_LANE.parent)
+        if c[2] == ["sec1"]
+    )
+    assert {"s1n0", "sec1__entry_left_2"} <= _tied_ids(call[0], call[2], call[1])
+    return call
+
+
+def _level_run_vote(call: _SnapCall, component: list[str]) -> int:
+    graph, pitch, sec_ids, *_ = call
+    group_ids = set(_group_station_ids(graph, sec_ids))
+    return grid_snap._level_run_direction(
+        graph, component, group_ids, _tied_ids(graph, sec_ids, pitch)
+    )
+
+
+@pytest.mark.parametrize("reflect", [False, True], ids=["as-drawn", "reflected"])
+def test_an_unlevelled_tie_carries_on_the_level_run_reaching_it(reflect: bool) -> None:
+    """Sec1's entry and first station sit midway between slots, level with
+    the fan-out junction below sec0's bottom exit, whose feed descends into
+    that row.  Nothing else decides the tie, so the pair snaps on down (up,
+    reflected) and the feed crosses rows once rather than turning back."""
+    call = _draft_off_lane_call()
+    frozen = _reflected(call) if reflect else call
+    pitch = call[1]
+    tied_y = frozen[0].stations["s1n0"].y
+    onward = tied_y + (-pitch if reflect else pitch) / 2.0
+    for dy in (0.0, *_offsets(pitch)):
+        snapped = _snapped(frozen, dy)
+        assert snapped["s1n0"] == pytest.approx(onward, abs=ORIGIN_ROUNDING_PX), dy
+        assert snapped["sec1__entry_left_2"] == pytest.approx(
+            onward, abs=ORIGIN_ROUNDING_PX
+        ), dy
+
+
+def test_a_junction_its_tied_anchor_carries_gives_no_vote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """__junction_4 holds its row only while the exit port it is derived from
+    does not snap with the tie; anchored on a tied station of the group, it
+    moves with the snap and the run through it votes for nothing."""
+    call = _draft_off_lane_call()
+    component = ["s1n0", "sec1__entry_left_2"]
+    assert _level_run_vote(call, component) == grid_snap._DOWN
+    monkeypatch.setattr(
+        grid_snap, "junction_anchor_port", lambda _graph, _jid: "sec1__entry_left_2"
+    )
+    assert _level_run_vote(call, component) == 0
+
+
+def test_a_merge_junction_on_a_tied_entry_gives_no_vote() -> None:
+    """genomic_pipeline's Reporting entry ties level with the merge junctions
+    on its own lead-in, which follow the entry through the snap."""
+    path = EXAMPLES / "genomic_pipeline.mmd"
+    call = next(
+        c
+        for c in _group_snap_calls(path.read_text(), path.parent)
+        if c[2] == ["reporting"]
+    )
+    graph = call[0]
+    assert "reporting__entry_left_7" in _tied_ids(graph, call[2], call[1])
+    merges = {
+        e.source
+        for e in graph.edges
+        if e.target == "reporting__entry_left_7" and e.source in graph.junction_ids
+    }
+    assert merges
+    assert _level_run_vote(call, ["reporting__entry_left_7"]) == 0

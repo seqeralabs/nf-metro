@@ -1,0 +1,18 @@
+{
+ "owner": "#2171",
+ "replacement": "row stacking translates a feeder, its entry port and the junctions between them as one, so no stage after 6.12 re-decides an alignment the lane plan read",
+ "rows": {
+  "tests/fixtures/hash_seed_determinism/seed_15.mmd": [
+   "6.13"
+  ],
+  "tests/fixtures/hash_seed_determinism/seed_41.mmd": [
+   "6.13"
+  ],
+  "tests/fixtures/hash_seed_determinism/seed_77.mmd": [
+   "6.13"
+  ],
+  "tests/fixtures/regressions/departure_order_fork_two_feeders.mmd": [
+   "6.16"
+  ]
+ }
+}

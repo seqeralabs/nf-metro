@@ -67,6 +67,10 @@ if TYPE_CHECKING:
     )
     from nf_metro.layout.routing.common import RoutedPath
     from nf_metro.layout.routing.context import _EdgeKey, _RoutingCtx
+    from nf_metro.layout.routing.corridor_cohort_integration import (
+        AcceptedCorridorCohortPlan,
+        CorridorCohortLedger,
+    )
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
     from nf_metro.layout.settlement_demand import BoundaryClearanceRequirement
 
@@ -140,8 +144,12 @@ class SettlementStage(str, Enum):
     """Stable vocabulary for observing settlement progress.
 
     A render emits only ``DISCOVERY``, ``GENERAL_SETTLEMENT``, ``COHORT_FINAL``
-    and ``VALIDATION``.  The other four members are reserved vocabulary that no
-    production path may emit, which
+    and ``VALIDATION``; the corridor-cohort aperture observation, and the
+    re-route drawing its grant, each record ``GENERAL_SETTLEMENT``.
+    ``FINAL_SOLVE`` is emitted by the corridor cohort
+    compiler when it is handed a settlement trace.  ``COHORT_INTENT``,
+    ``APERTURE_SETTLEMENT`` and ``TYPED_MATERIALIZATION`` remain reserved
+    vocabulary no production path emits, which
     ``tests/test_corridor_cohort_integration.py`` asserts.
     """
 
@@ -340,6 +348,20 @@ class RouteMemberGeometryPlan:
             for channel in self.gap_channels
         ):
             raise ValueError("member geometry plan channel disagrees with its segment")
+
+    def translated(self, move: CanvasMove) -> RouteMemberGeometryPlan:
+        return dataclasses.replace(
+            self,
+            points=tuple(translate_point(point, move) for point in self.points),
+            gap_channels=tuple(
+                dataclasses.replace(
+                    channel,
+                    start=translate_point(channel.start, move),
+                    end=translate_point(channel.end, move),
+                )
+                for channel in self.gap_channels
+            ),
+        )
 
     @property
     def owned_segment_ranks(self) -> tuple[int, ...]:
@@ -571,7 +593,6 @@ ROUTE_SYSTEM_COMPATIBILITY_REASONS: Mapping[str, Mapping[str, CompatibilityFamil
                     "fixed-anchor-owned-by-another-plan",
                     "entry-bundle-owns-the-shared-seam-lanes",
                     "lane-arms-pinned-to-overlapping-corners",
-                    "linear-entry-frame-ownership-conflict",
                     "merge-branch-shares-the-descent-corner",
                     "overlapping-planned-turn-axes",
                     "shared-source-ownership-conflict",
@@ -862,6 +883,25 @@ class DemandAxis(str, Enum):
         answers 0, leaving a caller that can receive it to rule it out first.
         """
         return 1 if self is DemandAxis.Y else 0
+
+
+CanvasMove: TypeAlias = tuple[float, float]
+"""A uniform move of the whole map, ``(dx, dy)``."""
+
+
+def translate_point(
+    point: tuple[float, float], move: CanvasMove
+) -> tuple[float, float]:
+    return point[0] + move[0], point[1] + move[1]
+
+
+def translate_coordinate(value: float, axis: DemandAxis, move: CanvasMove) -> float:
+    """*value*, a canvas coordinate on *axis*, after *move*."""
+    return value + move[axis.point_index]
+
+
+def _run_axis(direction: Direction) -> DemandAxis:
+    return DemandAxis.X if direction in {Direction.R, Direction.L} else DemandAxis.Y
 
 
 class KeepOutClass(str, Enum):
@@ -1166,12 +1206,9 @@ class ExitSourceLane:
     member_ids: tuple[EmissionMemberId, ...]
     station_ids: tuple[str, ...]
     input_offset: float
-    planned_offset: float
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.input_offset) or not math.isfinite(
-            self.planned_offset
-        ):
+        if not math.isfinite(self.input_offset):
             raise ValueError("exit source-lane offsets must be finite")
 
 
@@ -1311,6 +1348,10 @@ class ExitTurnPlan:
     disposition: ExitTurnDisposition
     legacy_reason: str | None
     provenance: tuple[ReservationDecisionRef, ...]
+    nest_order: tuple[str, ...] = ()
+    """The member lines in the order they turn off the source run, along its
+    travel: their axes read along the run.  Two of the plan's start legs nest
+    by it at a shared corner, a later turn-off outer along the run."""
 
     def __post_init__(self) -> None:
         planned = self.disposition is ExitTurnDisposition.PLANNED
@@ -1340,6 +1381,44 @@ class ExitTurnPlan:
             raise ValueError("exit turn has no source axis")
         if planned and self.source_axis is not expected_axis:
             raise ValueError("planned exit turn has inconsistent source orientation")
+
+    def translated(self, move: CanvasMove) -> ExitTurnPlan:
+        return dataclasses.replace(
+            self,
+            lane_transitions=tuple(
+                dataclasses.replace(
+                    item,
+                    source_point=translate_point(item.source_point, move),
+                    target_point=translate_point(item.target_point, move),
+                )
+                for item in self.lane_transitions
+            ),
+            axes=tuple(
+                dataclasses.replace(
+                    axis,
+                    coordinate=translate_coordinate(axis.coordinate, axis.axis, move),
+                    fixed_anchor_coordinate=(
+                        None
+                        if axis.fixed_anchor_coordinate is None
+                        else translate_coordinate(
+                            axis.fixed_anchor_coordinate, axis.axis, move
+                        )
+                    ),
+                )
+                for axis in self.axes
+            ),
+            assignments=tuple(
+                item
+                if item.launch_coordinate is None or item.run_direction is None
+                else dataclasses.replace(
+                    item,
+                    launch_coordinate=translate_coordinate(
+                        item.launch_coordinate, _run_axis(item.run_direction), move
+                    ),
+                )
+                for item in self.assignments
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2288,6 +2367,85 @@ class ConvergencePlan:
     def owns_geometry(self) -> bool:
         return self.disposition is ConvergenceDisposition.PLANNED
 
+    def translated(self, move: CanvasMove) -> ConvergencePlan:
+        trunk = self.trunk_axis
+        if trunk is not None:
+            travel = trunk.axis
+            across = DemandAxis.Y if travel is DemandAxis.X else DemandAxis.X
+
+            def along(value: float | None, axis: DemandAxis) -> float | None:
+                return (
+                    None if value is None else translate_coordinate(value, axis, move)
+                )
+
+            trunk = dataclasses.replace(
+                trunk,
+                coordinate=translate_coordinate(trunk.coordinate, across, move),
+                extent_start=translate_coordinate(trunk.extent_start, travel, move),
+                extent_end=translate_coordinate(trunk.extent_end, travel, move),
+                source_flank_coordinate=translate_coordinate(
+                    trunk.source_flank_coordinate, across, move
+                ),
+                target_flank_coordinate=translate_coordinate(
+                    trunk.target_flank_coordinate, across, move
+                ),
+                source_endpoint_coordinate=along(
+                    trunk.source_endpoint_coordinate, travel
+                ),
+                target_endpoint_coordinate=along(
+                    trunk.target_endpoint_coordinate, travel
+                ),
+            )
+        return dataclasses.replace(
+            self,
+            trunk_axis=trunk,
+            landings=tuple(
+                dataclasses.replace(
+                    item,
+                    join_point=translate_point(item.join_point, move),
+                    opening_turn_coordinate=(
+                        None
+                        if item.opening_turn_coordinate is None
+                        else translate_coordinate(
+                            item.opening_turn_coordinate, DemandAxis.X, move
+                        )
+                    ),
+                    opening_turn_segment=(
+                        None
+                        if item.opening_turn_segment is None
+                        else (
+                            translate_point(item.opening_turn_segment[0], move),
+                            translate_point(item.opening_turn_segment[1], move),
+                        )
+                    ),
+                    cross_run_start_coordinate=(
+                        None
+                        if item.cross_run_start_coordinate is None
+                        else translate_coordinate(
+                            item.cross_run_start_coordinate,
+                            DemandAxis.Y
+                            if item.approach_axis is DemandAxis.X
+                            else DemandAxis.X,
+                            move,
+                        )
+                    ),
+                )
+                for item in self.landings
+            ),
+            outgoing_continuations=tuple(
+                dataclasses.replace(
+                    item,
+                    start_point=translate_point(item.start_point, move),
+                    end_point=translate_point(item.end_point, move),
+                )
+                for item in self.outgoing_continuations
+            ),
+            endpoint_ownership=tuple(
+                dataclasses.replace(item, endpoint=translate_point(item.endpoint, move))
+                for item in self.endpoint_ownership
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class RouteSystem:
@@ -2456,6 +2614,40 @@ class RoutePlan:
     boundary_clearance_owner_ids: tuple[str, ...] = ()
     """Systems whose member geometry owns a settled boundary-clearance cohort."""
     settlement_trace: SettlementStageTrace = SettlementStageTrace()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None
+    """The corridor-cohort plan the observation that compiled it accepted.
+
+    Present only on the plan of an observation that ran the compiler; a pass
+    that reads it never compiles again."""
+
+    def translated(self, move: CanvasMove) -> RoutePlan:
+        """This plan for the whole map moved by *move*.
+
+        Every canvas coordinate the records hold moves by the same amount and
+        every length, offset and identity stays, so the result is the record
+        the same decisions publish when laid out at the moved position.
+        """
+        accepted = self.accepted_corridor_cohort_plan
+        return dataclasses.replace(
+            self,
+            exit_turn_plans=tuple(
+                item.translated(move) for item in self.exit_turn_plans
+            ),
+            convergence_plans=tuple(
+                item.translated(move) for item in self.convergence_plans
+            ),
+            member_geometry_plans=tuple(
+                item.translated(move) for item in self.member_geometry_plans
+            ),
+            reservations=tuple(item.translated(move) for item in self.reservations),
+            realised_reservations=tuple(
+                item.translated(move) for item in self.realised_reservations
+            ),
+            accepted_corridor_cohort_plan=(
+                None if accepted is None else accepted.translated(move)
+            ),
+        )
 
 
 @dataclass(slots=True)
@@ -2702,6 +2894,8 @@ class RoutePlanObserver:
     boundary_clearance_owner_ids: frozenset[str] = frozenset()
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = ()
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = ()
+    corridor_cohort_ledger: CorridorCohortLedger | None = None
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None
     _family_by_edge: dict[_EdgeKey, RouteFamilyId] = field(default_factory=dict)
     _merge_skips: dict[_EdgeKey, _EdgeKey | None] = field(default_factory=dict)
 
@@ -2753,6 +2947,8 @@ def build_route_plan_observer(
     boundary_clearance_owner_ids: frozenset[str] = frozenset(),
     member_geometry_plans: tuple[RouteMemberGeometryPlan, ...] = (),
     exit_turn_dispositions: tuple[tuple[ExitTurnPlanId, str | None], ...] = (),
+    corridor_cohort_ledger: CorridorCohortLedger | None = None,
+    accepted_corridor_cohort_plan: AcceptedCorridorCohortPlan | None = None,
 ) -> RoutePlanObserver:
     """Create one transient observer after settled routing context construction."""
     return RoutePlanObserver(
@@ -2772,6 +2968,8 @@ def build_route_plan_observer(
         boundary_clearance_owner_ids=boundary_clearance_owner_ids,
         member_geometry_plans=member_geometry_plans,
         exit_turn_dispositions=exit_turn_dispositions,
+        corridor_cohort_ledger=corridor_cohort_ledger,
+        accepted_corridor_cohort_plan=accepted_corridor_cohort_plan,
     )
 
 
@@ -3259,6 +3457,8 @@ def _build_route_plan(
             provenance=_plan_provenance(graph, ()),
             curve_radius=active_curve_radius(),
             diagnostics=fan_diagnostics,
+            corridor_cohort_ledger=observer.corridor_cohort_ledger,
+            accepted_corridor_cohort_plan=observer.accepted_corridor_cohort_plan,
         )
 
     topology = scaffold.topology
@@ -3549,6 +3749,8 @@ def _build_route_plan(
         boundary_clearance_owner_ids=tuple(
             sorted(observer.boundary_clearance_owner_ids)
         ),
+        corridor_cohort_ledger=observer.corridor_cohort_ledger,
+        accepted_corridor_cohort_plan=observer.accepted_corridor_cohort_plan,
     )
     from nf_metro.layout.route_reservations import attach_route_reservations
 
@@ -3667,6 +3869,7 @@ def _validate_exit_turn_assignment(
     axes: Mapping[ExitTurnAxisId, ExitTurnAxis],
     endpoint_groups: Mapping[EndpointGroupId, ResolvedEndpointGroup],
     section_grids: Mapping[str, GridCell],
+    line_ranks: Mapping[str, int],
 ) -> None:
     member = members[assignment.member_id]
     lane = lanes.get(assignment.source_lane_rank)
@@ -3756,7 +3959,7 @@ def _validate_exit_turn_assignment(
     if axis is not None and (
         assignment.member_id not in axis.claimant_member_ids
         or axis.line_id != lane.line_id
-        or axis.rank != lane.rank
+        or axis.rank != line_ranks[lane.line_id]
         or axis.axis is not exit_turn_plan.source_axis
         or axis.coordinate_regime is not CoordinateRegime.LAYOUT_CANVAS
     ):
@@ -3841,35 +4044,6 @@ def _validate_exit_turn_demands(
             raise ValueError("exit-turn lane-transition demand is inconsistent")
 
 
-def _expected_source_lane_gaps(
-    plan: RoutePlan, exit_turn_plan: ExitTurnPlan
-) -> tuple[float, ...]:
-    """The offset each adjacent source-lane pair must span, in lane order.
-
-    Lanes normally compact to one ``spacing`` step per rank.  Where a planned
-    fan states the offsets of this exit source, its frame decides the pitch
-    instead: a fan holds one slot per line identity it carries anywhere in its
-    system, so a slot whose line is absent at this station is reserved rather
-    than forgotten, and the pair straddling it spans as many steps as the
-    fan's own slots are apart.
-    """
-    slots = {
-        assignment.line_id: assignment.slot
-        for fan_plan in plan.fan_plans
-        if fan_plan.owns_geometry
-        for carrier in fan_plan.offset_carriers
-        if carrier.station_id == exit_turn_plan.source_id
-        for assignment in carrier.assignments
-    }
-    lines = tuple(lane.line_id for lane in exit_turn_plan.source_lanes)
-    if any(line_id not in slots for line_id in lines):
-        return tuple(exit_turn_plan.spacing for _line in lines[1:])
-    return tuple(
-        abs(slots[right] - slots[left]) * exit_turn_plan.spacing
-        for left, right in zip(lines, lines[1:])
-    )
-
-
 def _validate_planned_exit_turn_resources(
     plan: RoutePlan,
     exit_turn_plan: ExitTurnPlan,
@@ -3902,13 +4076,6 @@ def _validate_planned_exit_turn_resources(
         expected_span,
     ):
         raise ValueError("exit-turn plan has inconsistent provenance")
-    offsets = tuple(lane.planned_offset for lane in exit_turn_plan.source_lanes)
-    expected_gaps = _expected_source_lane_gaps(plan, exit_turn_plan)
-    if any(
-        abs(abs(right - left) - gap) > 1e-6
-        for (left, right), gap in zip(zip(offsets, offsets[1:]), expected_gaps)
-    ):
-        raise ValueError("planned exit-turn source lanes are not compact")
     turning_assignment_ids = tuple(
         item.member_id
         for item in exit_turn_plan.assignments
@@ -3996,16 +4163,9 @@ def _validate_planned_exit_turn_resources(
     ):
         raise ValueError("exit-turn axes have inconsistent cohort membership")
     if any(
-        (right.input_offset - left.input_offset)
-        * (right.planned_offset - left.planned_offset)
-        <= 0
-        or abs(abs(right.planned_offset - left.planned_offset) - gap) > 1e-6
-        for (left, right), gap in zip(
-            zip(
-                exit_turn_plan.source_lanes,
-                exit_turn_plan.source_lanes[1:],
-            ),
-            expected_gaps,
+        right.input_offset == left.input_offset
+        for left, right in zip(
+            exit_turn_plan.source_lanes, exit_turn_plan.source_lanes[1:]
         )
     ):
         raise ValueError("exit-turn source lanes do not preserve travel order")
@@ -4020,11 +4180,18 @@ def _validate_planned_exit_turn_resources(
         unique_axes = tuple(dict.fromkeys(cohort_axes))
         unique_axes = tuple(sorted(unique_axes, key=lambda axis: axis.rank))
         progression = right_normal_axis_sign(turn_direction)
+        spacing = exit_turn_plan.spacing
+        planned = {lane.rank: lane.input_offset for lane in exit_turn_plan.source_lanes}
         if any(
             abs(
                 right.coordinate
                 - left.coordinate
-                - progression * exit_turn_plan.spacing
+                - progression
+                * (
+                    spacing
+                    + abs(planned[right.rank] - planned[left.rank])
+                    - (right.rank - left.rank) * spacing
+                )
             )
             > 1e-6
             for left, right in zip(unique_axes, unique_axes[1:])
@@ -4203,7 +4370,7 @@ def _validate_exit_source_lanes(
                 owner = station_owners.setdefault(key, exit_turn_plan.id)
                 if owner != exit_turn_plan.id:
                     raise ValueError("exit-turn station lane has more than one owner")
-        elif lane.station_ids or lane.planned_offset != lane.input_offset:
+        elif lane.station_ids:
             raise ValueError("legacy exit-turn source lane cannot own offsets")
     lane_by_line = {lane.line_id: lane for lane in exit_turn_plan.source_lanes}
     return lane_by_rank, lane_by_line
@@ -4236,6 +4403,7 @@ def _validate_exit_turn_assignments(
     axes = {axis.id: axis for axis in exit_turn_plan.axes}
     if len(axes) != len(exit_turn_plan.axes):
         raise ValueError("exit-turn plan contains duplicate axes")
+    line_ranks = {lane.line_id: lane.rank for lane in exit_turn_plan.source_lanes}
     for assignment in exit_turn_plan.assignments:
         _validate_exit_turn_assignment(
             exit_turn_plan,
@@ -4245,6 +4413,7 @@ def _validate_exit_turn_assignments(
             axes,
             endpoint_groups,
             section_grids,
+            line_ranks,
         )
     return axes
 
@@ -4286,8 +4455,8 @@ def _validate_exit_lane_transitions(
             or transition.diagonal_run <= 0
             or transition.source_runway <= 0
             or transition.target_runway <= 0
-            or (source_owned and transition.source_lane_offset != lane.planned_offset)
-            or (target_owned and transition.target_lane_offset != lane.planned_offset)
+            or (source_owned and transition.source_lane_offset != lane.input_offset)
+            or (target_owned and transition.target_lane_offset != lane.input_offset)
         ):
             raise ValueError("exit-turn lane transition is inconsistent")
         owner = transition_owners.setdefault(transition.edge, exit_turn_plan.id)
@@ -5146,11 +5315,19 @@ def _json_value(value: object) -> object:
         return value.value
     if isinstance(value, tuple):
         return [_json_value(item) for item in value]
+    if isinstance(value, frozenset):
+        # Set iteration order depends on the hash seed; the JSON form is the
+        # one canonical key every element type shares.
+        return [_json_value(item) for item in sorted(value, key=_canonical_json)]
     if isinstance(value, (str, int, float, bool, type(None))):
         return value
     raise TypeError(f"route plan contains unsupported {type(value).__name__}")
 
 
+def _canonical_json(value: object) -> str:
+    return json.dumps(_json_value(value), sort_keys=True, separators=(",", ":"))
+
+
 def serialize_route_plan(plan: RoutePlan) -> str:
     """Return the canonical JSON representation of one immutable plan."""
-    return json.dumps(_json_value(plan), sort_keys=True, separators=(",", ":"))
+    return _canonical_json(plan)

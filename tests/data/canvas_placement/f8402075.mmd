@@ -1,0 +1,38 @@
+%%metro title: Fuzz 8402075
+%%metro line: l0 | Report_Assemble | #e6194b
+%%metro line: l1 | Vcf | #3cb44b
+
+graph LR
+    subgraph sec0 [Vcf 0]
+        %%metro direction: TB
+        s0n1[POLISH]
+    end
+    subgraph sec1 [Gather 1]
+        s1n0[vcf]
+        s1n1[call]
+        s1n2[align_report]
+        s1n0 -->|l0| s1n1
+        s1n1 -->|l0| s1n2
+    end
+    subgraph sec2 [Export 2]
+        %%metro entry: right | l0
+        s2n1[merge]
+        s2n2[fastqc_trim]
+        s2n1 -->|l0| s2n2
+    end
+    subgraph sec3 [Polish 3]
+        %%metro direction: TB
+        %%metro exit: right | l1
+        s3n0[cluster_call]
+        s3n1[stats]
+        s3n0 -->|l1| s3n1
+    end
+    subgraph sec4 [Report_Qc 4]
+        %%metro entry: left | l1
+        s4n0[qc]
+        s4n1[quant_classify]
+        s4n0 -->|l1| s4n1
+    end
+    s0n1 -->|l0| s1n0
+    s1n2 -->|l0| s2n1
+    s3n1 -->|l1| s4n0

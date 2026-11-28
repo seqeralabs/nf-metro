@@ -1,0 +1,30 @@
+%%metro title: Parent / Qc / Child Pipeline
+%%metro style: dark
+%%metro line_order: span
+%%metro line: main | Main | #2db572
+%%metro line: spur | Spur | #f5c542
+%%metro line: parent_child | Parent - Child | #0570b0
+
+graph LR
+    subgraph parent [Parent]
+        prepare([Prepare])
+    end
+
+    subgraph qc [Qc]
+        fastqc([Fastqc])
+    end
+
+    subgraph child [Child]
+        align([Align])
+        sort([Sort])
+    end
+
+    subgraph parent_2 [Parent]
+        summarise([Summarise])
+    end
+
+    %% Inter-section edges
+    prepare -->|main| fastqc
+    align -->|main| summarise
+    prepare -->|parent_child| align
+    fastqc -->|spur| sort

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import nf_metro.layout.fan_plans as fan_plans
+import nf_metro.layout.lane_plan as lane_plan
 from nf_metro.api import prepare_graph
 from nf_metro.layout.constants import (
     INTER_ROW_EDGE_CLEARANCE,
@@ -35,6 +36,7 @@ from nf_metro.layout.fan_plans import (
 )
 from nf_metro.layout.geometry import AxisFrame
 from nf_metro.layout.labels import place_labels
+from nf_metro.layout.lane_plan import recorded_lane_plan
 from nf_metro.layout.phases.guards import (
     PhaseInvariantError,
     _guard_planned_fan_frame_realised,
@@ -71,7 +73,6 @@ from nf_metro.layout.routing.common import (
     iter_vertical_segments,
 )
 from nf_metro.layout.routing.invariants import check_gap_channels_materialized
-from nf_metro.layout.routing.offsets import _apply_planned_fan_offsets
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 from nf_metro.parser.route_topology import (
@@ -1757,46 +1758,6 @@ def test_solo_trunk_branch_offsets_are_frozen_in_the_plan() -> None:
     }
 
 
-def test_runtime_applies_only_frozen_fan_offset_assignments() -> None:
-    path = ROOT / "examples" / "topologies" / "junction_entry_align.mmd"
-    graph = parse_metro_mermaid(path.read_text())
-    compute_layout(graph, validate=True)
-    sentinel = 999.0
-    initial = {
-        (station_id, line_id): sentinel
-        for station_id in graph.stations
-        for line_id in graph.station_lines(station_id)
-    }
-    expected = {
-        (carrier.station_id, assignment.line_id): assignment.slot * 4.0
-        for plan in graph.fan_plans
-        if plan.owns_geometry
-        for carrier in plan.offset_carriers
-        for assignment in carrier.assignments
-    }
-
-    before_mutation = SimpleNamespace(
-        graph=graph,
-        offsets=initial.copy(),
-        offset_step=4.0,
-    )
-    _apply_planned_fan_offsets(before_mutation)
-    assert {
-        key: value
-        for key, value in before_mutation.offsets.items()
-        if value != sentinel
-    } == expected
-
-    graph.junction_ids.add("da1")
-    after_mutation = SimpleNamespace(
-        graph=graph,
-        offsets=initial.copy(),
-        offset_step=4.0,
-    )
-    _apply_planned_fan_offsets(after_mutation)
-    assert after_mutation.offsets == before_mutation.offsets
-
-
 def test_partial_offset_carrier_retains_absolute_slots() -> None:
     path = ROOT / "examples" / "topologies" / "junction_entry_collision.mmd"
     graph = parse_metro_mermaid(path.read_text())
@@ -2888,3 +2849,298 @@ def test_lane_seat_keys_number_seats_in_landing_order() -> None:
         fan_lane_offsets(("a", "b"), 10.0, "a", (0, 0))
     with pytest.raises(ValueError, match="do not cover every branch"):
         fan_lane_offsets(("a", "b"), 10.0, "a", (0,))
+
+
+CROSSING_BRANCHES = (
+    ROOT / "tests" / "data" / "fan_carriers" / "crossing_branches_at_entry.mmd"
+)
+
+
+def _branch(rank: int, *edges: tuple[str, str, str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        rank=rank,
+        resolved_paths=(
+            tuple(
+                SimpleNamespace(source=s, target=t, line_id=lid) for s, t, lid in edges
+            ),
+        ),
+    )
+
+
+def _carrier_ids(branches: list[SimpleNamespace]) -> set[str]:
+    graph = parse_metro_mermaid(
+        "%%metro line: x | X | #ff0000\n"
+        "%%metro line: y | Y | #0000ff\n"
+        "graph LR\n"
+        "    a -->|x,y| b\n"
+        "    p -->|x,y| m\n    m -->|x,y| q\n"
+        "    r -->|x,y| s\n"
+    )
+    carriers = fan_plans._offset_carriers(
+        graph,
+        branches=branches,
+        offset_line_order=("x", "y"),
+        shared_paths=(),
+        shared_station_ids=(),
+        upstream_carriers=(),
+        offset_sign=1,
+    )
+    return {carrier.station_id for carrier in carriers}
+
+
+def test_branches_sharing_a_neighbour_at_a_station_make_it_a_carrier() -> None:
+    assert _carrier_ids([_branch(0, ("a", "b", "x")), _branch(1, ("a", "b", "y"))]) == {
+        "a",
+        "b",
+    }
+
+
+def test_branches_only_crossing_at_a_station_leave_it_free() -> None:
+    assert (
+        _carrier_ids(
+            [
+                _branch(0, ("p", "m", "x"), ("m", "q", "x")),
+                _branch(1, ("r", "m", "y"), ("m", "s", "y")),
+            ]
+        )
+        == set()
+    )
+
+
+def test_crossing_branches_hold_distinct_lanes_at_the_entry_they_cross() -> None:
+    """Qc's spur and Parent's parent_child only cross at Child's entry: the
+    entry carries no fan slot, and the hand-overs at Fastqc and Align keep
+    theirs.  parent_child holds the lane on one side of main at the entry,
+    so Fastqc hands spur the lane on the other, and spur runs on it straight
+    into Child."""
+    graph = parse_metro_mermaid(CROSSING_BRANCHES.read_text())
+    compute_layout(graph, validate=True)
+    carriers = {
+        carrier.station_id: {slot.line_id: slot.slot for slot in carrier.assignments}
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+        for carrier in plan.offset_carriers
+    }
+    assert "child__entry_left_5" not in carriers
+    assert carriers["fastqc"] == {"main": 0, "spur": -1}
+    assert carriers["align"] == {"main": 0, "parent_child": 1}
+    lanes = recorded_lane_plan(graph).tracks.lanes
+    assert (
+        lanes[("fastqc", "spur")]
+        == lanes[("qc__exit_right_2", "spur")]
+        == lanes[("child__entry_left_5", "spur")]
+        != lanes[("child__entry_left_5", "parent_child")]
+    )
+
+
+FLAT_LEVER_SINGLE = (
+    ROOT
+    / "tests"
+    / "data"
+    / "bypass_label_obstacles"
+    / "flat_lever_collinear_retry_single.mmd"
+)
+
+
+@pytest.mark.parametrize(
+    ("downstream_lines", "expected"),
+    [
+        (("l0", "l1", "l3", "l4"), {"l0": 0, "l4": 1, "l3": 2, "l1": 3}),
+        (("l0", "l3"), {"l0": 0, "l3": 2}),
+    ],
+    ids=["born_line_takes_a_free_lane", "departed_line_leaves_its_lane_empty"],
+)
+def test_a_carrier_keeps_its_upstream_carriers_lanes_along_a_run(
+    downstream_lines: tuple[str, ...], expected: dict[str, int]
+) -> None:
+    graph = parse_metro_mermaid(FLAT_LEVER_SINGLE.read_text())
+    carriers = {
+        "s0n0": frozenset({"l0", "l3", "l4"}),
+        "s0n1": frozenset(downstream_lines),
+    }
+
+    slots = fan_plans._run_consistent_slots(graph, ("l0", "l1", "l4", "l3"), carriers)
+
+    assert slots["s0n0"] == {"l0": 0, "l4": 1, "l3": 2}
+    assert slots["s0n1"] == expected
+
+
+def test_a_fan_line_holds_one_slot_along_each_run() -> None:
+    graph = parse_metro_mermaid(FLAT_LEVER_SINGLE.read_text())
+    compute_layout(graph)
+    (carriers,) = (
+        {
+            carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
+            for carrier in plan.offset_carriers
+        }
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+    )
+    upstream, downstream = carriers["s0n0"], carriers["s0n1"]
+    assert {lid: downstream[lid] for lid in upstream} == upstream
+
+
+SAME_DESTINATION_VERTICAL_CONVERGENCE = (
+    ROOT / "examples" / "topologies" / "same_destination_vertical_convergence.mmd"
+)
+
+
+def _slots_by_station(carriers) -> dict[str, dict[str, int]]:  # type: ignore[no-untyped-def]
+    return {
+        carrier.station_id: {a.line_id: a.slot for a in carrier.assignments}
+        for carrier in carriers
+    }
+
+
+def _owned_carrier_slots(graph: MetroGraph) -> dict[str, dict[str, int]]:
+    """Carrier slots of every fan plan that owns geometry on *graph*."""
+    return _slots_by_station(
+        carrier
+        for plan in graph.fan_plans
+        if plan.owns_geometry
+        for carrier in plan.offset_carriers
+    )
+
+
+def _forked_source_convergence(s3_direction: str = "LR") -> str:
+    """``same_destination_vertical_convergence`` with a leaf forked off ``n0_1``.
+
+    The leaf makes ``n0_1`` a fan fork whose plan owns ``s3``'s level run, on
+    which ``lower`` hands over to ``upper`` at ``n3_1`` and ``upper`` hands back
+    to ``lower`` at ``n3_2``: ``lower`` meets the run twice with ``upper``
+    between.
+    """
+    text = SAME_DESTINATION_VERTICAL_CONVERGENCE.read_text()
+    anchor = "        n0_0 -->|scaffold| n0_1\n"
+    header = "    subgraph s3 [Lower feeder]\n"
+    assert anchor in text and header in text
+    text = text.replace(header, f"{header}        %%metro direction: {s3_direction}\n")
+    return text.replace(
+        anchor, anchor + "        leaf[Leaf]\n        n0_1 -->|scaffold| leaf\n"
+    )
+
+
+def test_a_carrier_keeps_its_upstream_carriers_lane_for_a_line_handed_back() -> None:
+    graph = parse_metro_mermaid(_forked_source_convergence())
+    carriers = {
+        "n3_0": frozenset({"scaffold", "lower"}),
+        "n3_1": frozenset({"upper", "lower"}),
+        "n3_2": frozenset({"upper", "lower"}),
+    }
+
+    slots = fan_plans._run_consistent_slots(
+        graph,
+        ("scaffold", "obstacle_feed", "obstacle", "upper", "feeder", "lower"),
+        carriers,
+    )
+
+    assert slots["n3_0"] == {"scaffold": 0, "lower": 1}
+    assert slots["n3_1"] == slots["n3_2"] == {"lower": 1, "upper": 3}
+
+
+@pytest.mark.parametrize("s3_direction", ["LR", "RL", "TB", "BT"])
+def test_a_line_handed_back_along_a_run_holds_one_lane(s3_direction: str) -> None:
+    graph = parse_metro_mermaid(_forked_source_convergence(s3_direction))
+    compute_layout(graph)
+    carriers = _owned_carrier_slots(graph)
+    assert {carriers[n]["lower"] for n in ("n3_0", "n3_1", "n3_2")} == {1}
+    lanes = recorded_lane_plan(graph).tracks.lanes
+    assert len({lanes[(n, "lower")] for n in ("n3_0", "n3_1", "n3_2")}) == 1
+
+
+def _carriers_of_every_plan(
+    monkeypatch: pytest.MonkeyPatch, path: Path
+) -> list[dict[str, dict[str, int]]]:
+    """Each fan plan's carrier slots on *path*, owning geometry or not."""
+    seated: list[dict[str, dict[str, int]]] = []
+    offset_carriers = fan_plans._offset_carriers
+
+    def record(*args, **kwargs):  # type: ignore[no-untyped-def]
+        carriers = offset_carriers(*args, **kwargs)
+        seated.append(_slots_by_station(carriers))
+        return carriers
+
+    monkeypatch.setattr(fan_plans, "_offset_carriers", record)
+    compute_layout(parse_metro_mermaid(path.read_text()))
+    return seated
+
+
+def test_every_plan_seats_a_handed_back_line_on_one_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the unedited map no plan owns ``s3``, so its carriers reach no
+    geometry; every plan that seats them still gives ``lower`` one lane."""
+    plans = _carriers_of_every_plan(monkeypatch, SAME_DESTINATION_VERTICAL_CONVERGENCE)
+
+    runs = [plan for plan in plans if {"n3_1", "n3_2"} <= plan.keys()]
+    assert runs
+    for plan in runs:
+        assert plan["n3_1"]["lower"] == plan["n3_2"]["lower"]
+
+
+def test_a_line_that_rejoins_a_run_by_its_own_path_keeps_that_paths_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``l3`` stops at FASTQC, whose run carries ``l0`` on to bin_index, and
+    reaches bin_index along its own path from pca through vcf.  The plan
+    whose run is FASTQC to bin_index does not hand ``l3`` FASTQC's lane, so
+    every plan seats ``l3`` at bin_index where its own path brings it."""
+    plans = _carriers_of_every_plan(
+        monkeypatch,
+        ROOT / "tests" / "data" / "fan_carriers" / "line_rejoining_by_its_own_path.mmd",
+    )
+
+    seated = [plan for plan in plans if "s2n3" in plan]
+    assert len(seated) >= 2
+    assert any(
+        plan["s2n2"]["l3"] != plan["s2n3"]["l3"] for plan in seated if "s2n2" in plan
+    )
+    assert len({plan["s2n3"]["l3"] for plan in seated}) == 1
+
+
+def test_a_line_that_leaves_for_another_row_packs_where_it_starts_again() -> None:
+    """``l2`` leaves Sec 1's entry for N1.2's row, so at N1.3 it starts a path
+    of its own: it packs beside ``l4`` in N1.3's marker."""
+    graph = parse_metro_mermaid(
+        (
+            ROOT / "examples" / "topologies" / "fanout_line_reused_nonadjacent_leg.mmd"
+        ).read_text()
+    )
+    compute_layout(graph)
+    carriers = _owned_carrier_slots(graph)
+    assert carriers["s1__entry_left_2"]["l2"] == 2
+    assert carriers["n1_3"] == {"l4": 0, "l2": 1}
+
+
+@pytest.mark.parametrize("holder_ahead", [True, False])
+def test_a_departing_name_takes_the_side_its_next_meeting_leaves_free(
+    holder_ahead: bool,
+) -> None:
+    graph = parse_metro_mermaid(CROSSING_BRANCHES.read_text())
+    carriers = {
+        "fastqc": frozenset({"main", "spur"}),
+        "align": frozenset({"main", "parent_child"}),
+    }
+    if holder_ahead:
+        carriers["__junction_6"] = frozenset({"main", "parent_child"})
+    slots = fan_plans._run_consistent_slots(
+        graph, ("main", "spur", "parent_child"), carriers
+    )
+
+    fan_plans._seat_departures_on_the_free_side(graph, carriers, slots)
+
+    assert slots["fastqc"] == {"main": 0, "spur": -1 if holder_ahead else 1}
+
+
+def test_carriers_disagreeing_on_a_line_along_one_run_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Disagreeing(lane_plan._Tracks):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            self.fan_slots[("child__entry_left_5", "parent_child")] = 2
+
+    monkeypatch.setattr(lane_plan, "_Tracks", Disagreeing)
+    graph = parse_metro_mermaid(CROSSING_BRANCHES.read_text())
+    with pytest.raises(RuntimeError, match="one lane per line"):
+        compute_layout(graph)

@@ -1,0 +1,22 @@
+%%metro title: Fuzz 8400149
+%%metro line: l0 | Qc_Report | #e6194b
+%%metro line: l1 | Export_Stats | #3cb44b
+%%metro line: l2 | Markdup_Gather | #4363d8
+%%metro line: l3 | Fastqc | #f58231
+%%metro line: l4 | Annotate | #911eb4
+
+graph LR
+    subgraph sec0 [Classify 0]
+        s0n0[gather]
+        s0n1[polish]
+        s0n0 -->|l0,l1,l2,l4| s0n1
+    end
+    subgraph sec1 [Bin 1]
+        %%metro direction: TB
+        s1n0[VCF]
+        s1n1[summarise_annotate_gather]
+        s1n0 -->|l3,l4| s1n1
+    end
+    s0n1 -->|l0,l2,l3,l4| s1n0
+    s0n0 -->|l0| s1n1
+    s0n1 -->|l2| s1n1

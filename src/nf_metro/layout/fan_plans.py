@@ -1391,7 +1391,13 @@ def _offset_carriers(
     upstream_carriers: Sequence[FanOffsetCarrier],
     offset_sign: int,
 ) -> tuple[FanOffsetCarrier, ...]:
-    """Freeze stations whose fan-line permutation is structurally shared."""
+    """Freeze stations whose fan-line permutation is structurally shared.
+
+    A station two branches meet at shares their permutation only where they
+    also share a neighbour there; branches that merely cross at a station
+    pack their lines from different first lanes, which would give one line
+    two slots along a straight run.
+    """
     if not offset_line_order:
         return ()
 
@@ -1420,13 +1426,18 @@ def _offset_carriers(
     branch_incidence: dict[str, dict[int, set[str]]] = defaultdict(
         lambda: defaultdict(set)
     )
+    neighbours: dict[str, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
     for branch in branches:
         for path in branch.resolved_paths:
             for edge in path:
                 branch_incidence[edge.source][branch.rank].add(edge.line_id)
                 branch_incidence[edge.target][branch.rank].add(edge.line_id)
+                neighbours[edge.source][branch.rank].add(edge.target)
+                neighbours[edge.target][branch.rank].add(edge.source)
     for station_id, by_branch in branch_incidence.items():
-        if len(by_branch) < 2 and not _seats_a_retag(graph, station_id):
+        ends = list(neighbours[station_id].values())
+        shared = any(a & b for i, a in enumerate(ends) for b in ends[i + 1 :])
+        if not shared and not _seats_a_retag(graph, station_id):
             continue
         add_station(
             station_id,
@@ -1436,14 +1447,220 @@ def _offset_carriers(
     if not carrier_lines:
         return ()
     section_lines = _section_line_index(graph)
+    kept = {
+        station_id: frozenset(lines)
+        for station_id, lines in carrier_lines.items()
+        if not _rides_foreign_line_corridor(graph, station_id, fan_lines, section_lines)
+    }
+    slots = _run_consistent_slots(graph, offset_line_order, kept)
+    _seat_departures_on_the_free_side(graph, kept, slots)
     return tuple(
         FanOffsetCarrier(
             station_id=station_id,
-            assignments=_contiguous_assignments(offset_line_order, lines, offset_sign),
+            assignments=tuple(
+                FanOffsetAssignment(line_id, slots[station_id][line_id] * offset_sign)
+                for line_id in offset_line_order
+                if line_id in lines
+            ),
         )
-        for station_id, lines in carrier_lines.items()
-        if not _rides_foreign_line_corridor(graph, station_id, fan_lines, section_lines)
+        for station_id, lines in kept.items()
     )
+
+
+def _next_carriers_on_run(
+    graph: MetroGraph,
+    carriers: Mapping[str, frozenset[str]],
+    station_id: str,
+    line_id: str,
+) -> set[str]:
+    """Carriers of *line_id* its run reaches first from *station_id*.
+
+    The run stays in *station_id*'s section, passing through junctions and
+    through stations that carry no fan slot; any carrier ends it.
+    """
+    section_id = graph.section_for_station(station_id)
+    found: set[str] = set()
+    seen = {station_id}
+    stack = [station_id]
+    while stack:
+        for edge in graph.edges_from(stack.pop()):
+            target = edge.target
+            if edge.line_id != line_id or target in seen:
+                continue
+            if (
+                graph.section_for_station(target) != section_id
+                and target not in graph.junction_ids
+            ):
+                continue
+            seen.add(target)
+            if target not in carriers:
+                stack.append(target)
+            elif line_id in carriers[target]:
+                found.add(target)
+    return found
+
+
+def _hands_back(
+    graph: MetroGraph, upstream_id: str, station_id: str, line_id: str
+) -> bool:
+    """Whether *line_id* stops at *upstream_id* and starts again at *station_id*."""
+    return not any(
+        edge.line_id == line_id for edge in graph.edges_from(upstream_id)
+    ) and not any(edge.line_id == line_id for edge in graph.edges_to(station_id))
+
+
+def _run_consistent_slots(
+    graph: MetroGraph,
+    offset_line_order: Sequence[str],
+    carriers: Mapping[str, frozenset[str]],
+) -> dict[str, dict[str, int]]:
+    """Unsigned frame lane of each fan line at each carrier.
+
+    A carrier whose runs arrive from exactly one upstream carrier keeps that
+    carrier's lane for every line run between them, and for a line the
+    upstream carrier hands over and this one takes back (it leaves the one by
+    no edge and reaches the other by none), so a line holds one lane along its
+    run even where another name carries the run between.  Any other line the
+    two share inherits nothing: leaving the upstream carrier by an edge, or
+    reaching this one by an edge, it travels a path of its own past the run,
+    so its upstream lane says nothing about where it rides here.  The
+    carrier's other lines take the lowest free lanes from its first frame
+    lane, in frame order; a lane a departed line held stays empty rather than
+    letting a later line slide sideways into it mid-straight.  A chain head,
+    or a join fed by several carriers, packs its lines on consecutive lanes
+    from its first frame lane; where that disagrees with a feeder along one
+    run, the lane plan refuses the run.
+    """
+    rank = {line_id: index for index, line_id in enumerate(offset_line_order)}
+    feeds: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    successors: dict[str, set[str]] = defaultdict(set)
+    for station_id in sorted(carriers):
+        for line_id in sorted(carriers[station_id], key=rank.__getitem__):
+            for target in _next_carriers_on_run(graph, carriers, station_id, line_id):
+                feeds[target].append((station_id, line_id))
+                successors[station_id].add(target)
+    pending = {
+        station_id: len({source for source, _ in feeds[station_id]})
+        for station_id in carriers
+    }
+    queue = deque(sorted(c for c, count in pending.items() if not count))
+    order: list[str] = []
+    while queue:
+        station_id = queue.popleft()
+        order.append(station_id)
+        for target in sorted(successors[station_id]):
+            pending[target] -= 1
+            if not pending[target]:
+                queue.append(target)
+    order += sorted(set(carriers).difference(order))
+
+    slots: dict[str, dict[str, int]] = {}
+    for station_id in order:
+        lines = sorted(carriers[station_id], key=rank.__getitem__)
+        sources = {source for source, _ in feeds[station_id]}
+        inherited: dict[str, int] = {}
+        if len(sources) == 1:
+            (source,) = sources
+            upstream = slots.get(source, {})
+            inherited = {
+                line_id: upstream[line_id]
+                for _source, line_id in feeds[station_id]
+                if line_id in upstream
+            }
+            for line_id in lines:
+                if line_id in upstream and _hands_back(
+                    graph, source, station_id, line_id
+                ):
+                    inherited[line_id] = upstream[line_id]
+        lane = rank[lines[0]]
+        if not inherited:
+            slots[station_id] = {
+                line_id: lane + index for index, line_id in enumerate(lines)
+            }
+            continue
+        taken = set(inherited.values())
+        for line_id in lines:
+            if line_id in inherited:
+                continue
+            while lane in taken:
+                lane += 1
+            inherited[line_id] = lane
+            taken.add(lane)
+        slots[station_id] = inherited
+    return slots
+
+
+def _seat_departures_on_the_free_side(
+    graph: MetroGraph,
+    carriers: Mapping[str, frozenset[str]],
+    slots: dict[str, dict[str, int]],
+) -> None:
+    """Seat each hand-over's departing name on the side its next meeting leaves free.
+
+    A hand-over carrier seats its departing name one lane beside the arriving
+    one.  Where the departing line next meets another fan line, at a station
+    past every carrier, a lane that line unambiguously holds there is taken;
+    the departure takes the opposite adjacent lane when that one is not, so it
+    runs on without stepping across the holder.  Every holder is read from
+    the slots before any departure moves.
+    """
+
+    def relays(station_id: str) -> bool:
+        return station_id in graph.ports or station_id in graph.junction_ids
+
+    def run_past_carriers(start: str, line_id: str) -> set[str]:
+        found: set[str] = set()
+        stack = [start]
+        while stack:
+            current = stack.pop()
+            for edge in graph.edges_from(current):
+                target = edge.target
+                if edge.line_id != line_id or target in found or target in carriers:
+                    continue
+                if not (
+                    relays(current)
+                    or relays(target)
+                    or graph.section_for_station(target)
+                    == graph.section_for_station(current)
+                ):
+                    continue
+                found.add(target)
+                stack.append(target)
+        return found
+
+    held: dict[str, dict[str, set[int]]] = defaultdict(lambda: defaultdict(set))
+    for station_id, lanes in slots.items():
+        for line_id, lane in lanes.items():
+            for reached in run_past_carriers(station_id, line_id):
+                held[reached][line_id].add(lane)
+
+    moves: dict[str, tuple[str, int]] = {}
+    for station_id, lanes in slots.items():
+        if not _seats_a_retag(graph, station_id):
+            continue
+        (arrival,) = graph.edges_to(station_id)
+        (departure,) = graph.edges_from(station_id)
+        arriving, departing = arrival.line_id, departure.line_id
+        if arriving not in lanes or departing not in lanes:
+            continue
+        beside = lanes[departing]
+        if abs(beside - lanes[arriving]) != 1:
+            continue
+        ahead = run_past_carriers(station_id, departing)
+
+        def held_ahead(lane: int, departing: str = departing) -> bool:
+            return any(
+                held_lanes == {lane}
+                for reached in ahead
+                for line_id, held_lanes in held[reached].items()
+                if line_id != departing
+            )
+
+        opposite = 2 * lanes[arriving] - beside
+        if held_ahead(beside) and not held_ahead(opposite):
+            moves[station_id] = (departing, opposite)
+    for station_id, (line_id, lane) in moves.items():
+        slots[station_id][line_id] = lane
 
 
 def _bottom_exit_source_port_id(
@@ -1660,7 +1877,9 @@ def _centreline_port_ids(
     section hands off through is on the peeled branches' run just as much as
     their landing is.  A fan with no branch on the centreline states nothing
     about which port the trunk continues through, so there it is only the
-    landings that speak.
+    landings that speak: a port branches land on from both sides of the
+    centreline carries the whole fan straddling it, so it continues the
+    centreline.
     """
     holds_the_centreline = any(branch.lane_offset in (None, 0.0) for branch in branches)
     branch_port_ids = {
@@ -1684,6 +1903,17 @@ def _centreline_port_ids(
         if branch.lane_offset in (None, 0.0)
         for port_id in branch_port_ids[branch.id]
     }
+    if not holds_the_centreline:
+        landing_sides: dict[str, set[bool]] = {}
+        for branch in branches:
+            offset = branch.lane_offset
+            if offset is None or offset == 0.0:
+                continue
+            for port_id in branch_port_ids[branch.id]:
+                landing_sides.setdefault(port_id, set()).add(offset > 0)
+        offset_only_port_ids -= {
+            port_id for port_id, sides in landing_sides.items() if len(sides) == 2
+        }
     layout_section = graph.sections.get(layout_section_id or "")
     if direction is None or layout_section is None:
         return ()

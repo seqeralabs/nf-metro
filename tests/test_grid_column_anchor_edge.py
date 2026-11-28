@@ -6,7 +6,7 @@ box top.  A grid column's sections share no trunk X and neither X edge carries
 anything comparable, so both are levelled: the space between a box edge and the
 content nearest it is that section's runway on that side, and two column mates
 only mean the same thing by it when that content stands at one X.
-``_level_column_anchor_edges`` (Stage 3.6) levels exactly those, growing the
+``_level_column_anchor_edges`` (Stage 6.12b) levels exactly those, growing the
 shorter boxes outward so interiors and the opposite edge stay put.  Column mates
 whose content starts at different X keep their own edges -- levelling those would
 buy an aligned edge at the price of an empty band the width of the difference.
@@ -128,7 +128,7 @@ def _column_runway_spreads(graph: MetroGraph) -> dict[tuple[int, float], float]:
 def test_levelling_never_spreads_a_column_runway(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No grid column comes out of Stage 3.6 with its runways further apart.
+    """No grid column comes out of Stage 6.12b with its runways further apart.
 
     The stage exists to equalise the space in front of a column's content, so
     running it must not leave any column's runways more unequal than they were

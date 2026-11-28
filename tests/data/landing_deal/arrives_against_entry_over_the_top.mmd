@@ -1,0 +1,28 @@
+%%metro title: Fuzz 8400028
+%%metro line: l0 | Summarise_Call | #e6194b
+%%metro line: l1 | Quant | #3cb44b
+
+graph LR
+    subgraph sec0 [Index_Trim 0]
+        %%metro direction: BT
+        %%metro exit: top | l0, l1
+        s0n0[annotate]
+        s0n1[classify_polish]
+        s0n2[dedup_polish]
+        s0n3[index]
+        s0n1 -->|l0,l1| s0n2
+        s0n2 -->|l0,l1| s0n3
+        s0n0 -->|l1| s0n1
+    end
+    subgraph sec1 [Pca_Normalize 1]
+        %%metro entry: right | l0, l1
+        s1n0[markdup]
+        s1n2[sort]
+        s1n3[stats]
+        s1n4[filter]
+        s1n2 -->|l0| s1n3
+        s1n3 -->|l0| s1n4
+        s1n0 -->|l1| s1n2
+    end
+    s0n3 -->|l0| s1n2
+    s0n3 -->|l1| s1n0

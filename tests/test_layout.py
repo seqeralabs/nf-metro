@@ -2139,9 +2139,9 @@ class TestPassCBisection:
         "guard_name,first_valid",
         [
             ("_guard_stations_in_sections", "after Stage 5.3"),
-            ("_guard_no_station_overlap", "after Stage 6.4"),
+            ("_guard_no_station_overlap", "after Stage 6.12"),
             ("_guard_no_coincident_station_coords", "after Stage 6.4"),
-            ("_guard_no_line_crosses_non_consumer", "after Stage 6.14"),
+            ("_guard_no_line_crosses_non_consumer", "after Stage 6.12"),
         ],
     )
     def test_bisection_first_valid_threshold(self, guard_name, first_valid):

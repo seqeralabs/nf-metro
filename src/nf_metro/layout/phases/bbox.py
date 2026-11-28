@@ -313,8 +313,8 @@ def push_lower_rows_after_bbox_grow(graph: MetroGraph, section_y_gap: float) -> 
     """Push lower-row sections down when an upper-row bbox grows.
 
     Shared helper called by layout stages that may grow a section's ``bbox_h``
-    downward after row offsets are already fixed (``_shift_and_propagate_loop_
-    stations`` at Stage 6.14, and the Stage 6.15a top-padding restore).  Row
+    downward after row offsets are already fixed (Stage 6.14, after the Stage
+    6.12 sparse loop shift, and the Stage 6.15a top-padding restore).  Row
     offsets were fixed earlier by ``_compute_section_offsets`` from pre-grow
     bbox heights, so the section below a grown one can end up sitting closer
     than the gap the boundary owes.
@@ -468,7 +468,7 @@ def _shrink_and_tighten_rows(
       row-mate (another section whose ``grid_row`` equals this
       section's starting row, accounting for the other section's
       ``grid_row_span``); trimming below a row-mate would undo
-      intentional bottom alignment from Stage 6.5 or TB-rowspan
+      intentional bottom alignment from Stage 6.12c or TB-rowspan
       neighbours.  The check is keyed on this section's STARTING row
       rather than its full row-span -- a rowspan>1 LR sidebar whose
       content fits in one row is not pinned to neighbours in the
@@ -681,7 +681,7 @@ def _shrink_bboxes_to_content_bottom(
     """
 
     def _shares_bottom_with_row_mate(section: Section) -> bool:
-        # A bottom edge shared with a row-mate is deliberate -- Stage 6.5
+        # A bottom edge shared with a row-mate is deliberate -- Stage 6.12c
         # bottom-aligns row-mates, a TB fold's bbox is grown by
         # ``section_y_gap`` so it reaches its target's bottom, and a rowspan
         # section meets the bottom of the row it spans into -- so the shrink
@@ -716,7 +716,7 @@ def _shrink_bboxes_to_content_bottom(
 
     offsets = compute_station_offsets(graph)
     for section in graph.sections.values():
-        if section.bbox_h <= 0:
+        if section.bbox_h <= 0 or graph.is_rail_section(section.id):
             continue
         content_bot = _predict_section_content_bottom(
             graph, section, section_y_padding, offsets
@@ -993,10 +993,9 @@ def _shared_anchor_runway_runs(
     instead.
 
     Two kinds of section break the run either way.  A rail-flagged one, because
-    its internal geometry is re-derived from its bbox downstream
-    (:func:`...engine._retrofit_section_rails_phase`), so growing its anchored
-    edge slides its stations along with it rather than widening a runway in front
-    of them.  And one whose exit port rides the edge under test, because that
+    its box size is the rail lay's decision (the rail-interior guard holds it),
+    so it has no runway for a column mate to level.  And one whose exit port
+    rides the edge under test, because that
     port's coordinate is where the inter-section route leaves and the clearances
     downstream of it are measured from there -- a cosmetic levelling must not
     move it.
@@ -1205,7 +1204,7 @@ def _fit_bboxes_to_content_top(
 
     offsets = compute_station_offsets(graph)
     for section in graph.sections.values():
-        if section.bbox_h <= 0:
+        if section.bbox_h <= 0 or graph.is_rail_section(section.id):
             continue
         target = _section_fit_top(
             graph, section, section_y_padding, section_y_gap, offsets

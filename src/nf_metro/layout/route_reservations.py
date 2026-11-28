@@ -35,6 +35,7 @@ from nf_metro.layout.pass_metrics import (
 )
 from nf_metro.layout.route_plan import (
     BindingKind,
+    CanvasMove,
     ConvergenceDisposition,
     ConvergencePlan,
     ConvergencePlanId,
@@ -64,6 +65,7 @@ from nf_metro.layout.route_plan import (
     SymbolicDemand,
     grid_span_for_sections,
     reservation_decision_refs,
+    translate_coordinate,
 )
 from nf_metro.layout.routing.common import Direction, RoutedPath, apply_route_offsets
 from nf_metro.layout.routing.families import RouteFamilyId
@@ -415,6 +417,27 @@ class RouteReservation:
         ):
             raise ValueError("canvas corridors require observed-run blocker scope")
 
+    def translated(self, move: CanvasMove) -> RouteReservation:
+        allocation, longitudinal = _reservation_axes(self)
+        return replace(
+            self,
+            claims=tuple(
+                replace(
+                    claim,
+                    longitudinal_start=translate_coordinate(
+                        claim.longitudinal_start, longitudinal, move
+                    ),
+                    longitudinal_end=translate_coordinate(
+                        claim.longitudinal_end, longitudinal, move
+                    ),
+                    allocation_coordinate=translate_coordinate(
+                        claim.allocation_coordinate, allocation, move
+                    ),
+                )
+                for claim in self.claims
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class RealisedRouteReservation:
@@ -462,6 +485,27 @@ class RealisedRouteReservation:
             raise ValueError("realised available width disagrees with its edges")
         if not self.negative_blocker_ids or not self.positive_blocker_ids:
             raise ValueError("realised corridor requires both boundary blockers")
+
+    def translated(self, move: CanvasMove) -> RealisedRouteReservation:
+        def across(value: float) -> float:
+            return translate_coordinate(value, self.allocation_axis, move)
+
+        def along(value: float) -> float:
+            return translate_coordinate(value, self.longitudinal_axis, move)
+
+        return replace(
+            self,
+            coordinate=across(self.coordinate),
+            longitudinal_start=along(self.longitudinal_start),
+            longitudinal_end=along(self.longitudinal_end),
+            region_start=across(self.region_start),
+            region_end=across(self.region_end),
+            occupied_start=across(self.occupied_start),
+            occupied_end=across(self.occupied_end),
+            coordinate_translations=tuple(
+                item.translated(move) for item in self.coordinate_translations
+            ),
+        )
 
 
 def canvas_edge_slack(
@@ -526,6 +570,11 @@ class ReservationCoordinateTranslation:
             raise ValueError("reservation translation must be positive")
         if set(self.fully_owned_member_ids).intersection(self.crossing_member_ids):
             raise ValueError("reservation translation member ownership overlaps")
+
+    def translated(self, move: CanvasMove) -> ReservationCoordinateTranslation:
+        return replace(
+            self, coordinate=translate_coordinate(self.coordinate, self.axis, move)
+        )
 
 
 def project_reservation_coordinate(
@@ -1337,6 +1386,47 @@ def _canvas_region_for_segment(
     return None
 
 
+def _endpoint_lead_sections(
+    graph: MetroGraph, segment: _AxisSegment, member: EmissionMember
+) -> tuple[Section, ...]:
+    """The endpoint sections whose box a route end leg runs strictly inside.
+
+    A route's first leg leaves its source section and its last leg enters its
+    target; the section counts when the leg's coordinate lies strictly inside
+    its extent across the run.
+    """
+    horizontal = segment.orientation is CorridorOrientation.HORIZONTAL
+    sections: list[Section] = []
+    for is_end, section_id in (
+        (segment.before is None, member.source.section_id),
+        (segment.after is None, member.target.section_id),
+    ):
+        section = graph.sections.get(section_id) if is_end and section_id else None
+        if section is None or section.bbox_w <= 0 or section.bbox_h <= 0:
+            continue
+        low, high = (
+            (section.bbox_y, section.bbox_y + section.bbox_h)
+            if horizontal
+            else (section.bbox_x, section.bbox_x + section.bbox_w)
+        )
+        if low + COORD_TOLERANCE < segment.coordinate < high - COORD_TOLERANCE:
+            sections.append(section)
+    return tuple(sections)
+
+
+def _gap_touches_section(
+    region: RowGapRegion | ColumnGapRegion, section: Section
+) -> bool:
+    """Whether *region*'s grid span overlaps *section*'s."""
+    if isinstance(region, RowGapRegion):
+        return grid_spans_overlap(
+            (region.upper_row, region.lower_row), section_row_span(section)
+        )
+    return grid_spans_overlap(
+        (region.left_column, region.right_column), section_column_span(section)
+    )
+
+
 def _corridor_region(
     graph: MetroGraph,
     segment: _AxisSegment,
@@ -1373,16 +1463,24 @@ def _corridor_region(
         region = _nearest_topology_region(graph, segment, span, candidates)
         if region is not None:
             return region, CorridorMeasurementScope.TOPOLOGY_SPAN
-    observed_region: CorridorRegion | None = (
+    observed_region = (
         _geometric_row_gap(graph, segment, span)
         if horizontal
         else _geometric_column_gap(graph, segment, span)
     )
-    return (
-        (observed_region, CorridorMeasurementScope.OBSERVED_RUN)
-        if observed_region is not None
-        else None
-    )
+    if observed_region is None:
+        return None
+    # The geometric search excludes only sections overlapping the coordinate,
+    # and by construction the neighbours of an end leg running inside its own
+    # endpoint's box do not, so several gaps can tie for it.  A gap that box
+    # bounds is the leg's own (the landing exclusion measures past the box); one
+    # clear of the box's grid span is an unrelated tie winner.
+    lead_sections = _endpoint_lead_sections(graph, segment, member)
+    if lead_sections and not any(
+        _gap_touches_section(observed_region, section) for section in lead_sections
+    ):
+        return None
+    return observed_region, CorridorMeasurementScope.OBSERVED_RUN
 
 
 def _horizontal_kind(

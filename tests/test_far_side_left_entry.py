@@ -5,9 +5,8 @@ the target's entry port is on its own far (LEFT) edge, the bundle leaves the
 exit travelling west, drops below every intervening section, and rises into the
 port from its outward side -- a net half-turn that transposes the bundle
 end-to-end.  ``_route_left_exit_around_below_left_entry`` routes that wrap and
-``_reorder_reconvergence`` takes the feeder's delivered order transposed once by
-the seam classifier, so the cable order dictates the destination order and no
-line crosses a bundle-mate.
+the lane plan takes the feeder's delivered order transposed once, so the cable
+order dictates the destination order and no line crosses a bundle-mate.
 """
 
 from __future__ import annotations
@@ -47,8 +46,8 @@ def _feeder_exit_for(graph, entry_port):
 def test_around_below_entry_takes_feeder_order_transposed() -> None:
     """An around-below LEFT entry receives the feeder's bundle transposed.
 
-    The half-turn reversal is delivered by the seam-classifier arrival-order pass
-    (``_reorder_reconvergence``), not a dedicated post-hoc reversal: the lines
+    The half-turn reversal is delivered by the lane plan's arrival order
+    (``build_lane_plan``), not a dedicated post-hoc reversal: the lines
     common to feeder and destination stack in the *opposite* offset order across
     the seam.
     """

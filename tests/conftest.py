@@ -136,9 +136,9 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
     exercise the same fixtures.
 
     Fixtures with a ``rails`` line-spread section are excluded: a rail section's
-    internal geometry is produced by the self-contained rail pipeline (which
-    overwrites the normal content-placement phases), so the per-phase
-    idempotence/purity contract those tests assert does not apply to it.
+    internal geometry is laid by the rail owner, which the content-placement
+    phases leave alone, so the per-phase idempotence/purity contract those
+    tests assert does not describe it.
     """
 
     def _uses_rails(path: Path) -> bool:
@@ -158,6 +158,50 @@ def content_corpus() -> list[tuple[str, Path, bool]]:
     for p in sorted(_NEXTFLOW.glob("*.mmd")):
         items.append((f"nextflow/{p.stem}", p, True))
     return items
+
+
+# Corpus ids whose validated layout aborts on the final render guards, keyed by
+# ``content_corpus`` id. The co-column BT witness is a test-only fixture, not a
+# gallery render.
+KNOWN_FINAL_GUARD_ABORTS: dict[str, str] = {
+    "tests/co_column_feeders_shared_diagonal_bt": (
+        "#1792: _guard_no_line_crosses_non_consumer (l0 on the s0n1->s0n0 bypass "
+        "crosses s0n2's marker) and _guard_fan_merge_no_partition_crossing "
+        "(l2/l0 cross at s0n0) fire; the defects are intrinsic to the test-only "
+        "BT co-column witness"
+    ),
+}
+
+
+def corpus_params(
+    corpus: list[tuple[str, Path, bool]], *, unpacked: bool = True
+) -> list:
+    """Parametrize list for a ``content_corpus`` sweep that validates the layout.
+
+    Corpus entries in :data:`KNOWN_FINAL_GUARD_ABORTS` are strict xfails on
+    ``LayoutInvariantError``. *unpacked* spreads each entry across three
+    arguments; otherwise the whole tuple is one argument.
+    """
+    from nf_metro.layout.phases.guards import LayoutInvariantError
+
+    params = []
+    for entry in corpus:
+        reason = KNOWN_FINAL_GUARD_ABORTS.get(entry[0])
+        marks = (
+            []
+            if reason is None
+            else [
+                pytest.mark.xfail(
+                    raises=LayoutInvariantError, strict=True, reason=reason
+                )
+            ]
+        )
+        params.append(
+            pytest.param(*entry, marks=marks)
+            if unpacked
+            else pytest.param(entry, marks=marks)
+        )
+    return params
 
 
 def compute_corpus_layout(path: Path, is_nextflow: bool) -> MetroGraph:
@@ -244,6 +288,12 @@ def diff_station_coords(before: Coords, after: Coords, tol: float = 1e-6) -> lis
 # --- Parse/layout helpers ---
 
 
+def _exit_turn_error() -> type[Exception]:
+    from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
+
+    return ExitTurnInvariantError
+
+
 def known_curve_abort(*issues: str, reason: str) -> pytest.MarkDecorator:
     """Strict xfail for a map whose render aborts on a tracked curve defect."""
     from nf_metro.layout.routing.invariants import CurveInvariantError
@@ -285,12 +335,13 @@ CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
         )
     ),
     "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd": (
-        known_curve_abort(
-            "#2121",
-            "#2151",
-            reason="the BT TOP exit into sec1's TOP entry crosses l0 and l1 at "
-            "both of its turns; sec4's RIGHT exit into sec5's LEFT entry "
-            "reverses l1 and l2 at the corner",
+        pytest.mark.xfail(
+            raises=_exit_turn_error(),
+            strict=True,
+            reason="ruling P (aborts on main too): #2094 line 7et (exit-turn "
+            "planner reads the record; planned != drawn at the straight "
+            "continuation): straight continuation changed source lane at sec0's "
+            "TOP exit, ahead of the tracked curve defects #2121, #2151",
         )
     ),
     "tests/fixtures/regressions/perp_exit_single_feeder_landing.mmd": (
@@ -304,7 +355,38 @@ CURVE_ABORT_FIXTURES: dict[str, pytest.MarkDecorator] = {
             "so its offset applies along the vertical leg",
         )
     ),
+    "tests/fixtures/regressions/cohort_grant_beside_seated_runs.mmd": (
+        known_curve_abort(
+            "#2149",
+            "#2155",
+            reason="__junction_6's LEFT-entry corner into sec3 pinches l0 and l1 "
+            "through non-concentric arc centres; l0 and l4 overlay on one "
+            "descent channel; l3's turn into __merge_2 rounds to radius 1 of the "
+            "10 requested",
+        )
+    ),
+    "tests/fixtures/regressions/cohort_line_split_branches.mmd": (
+        known_curve_abort(
+            "#2086",
+            "#1550",
+            reason="__junction_6's RIGHT-entry corner into sec1 crosses l3 over "
+            "l2 and pinches l0 and l3 through non-concentric arc centres; l2's "
+            "two legs from __junction_6 turn at one vertex with radii 2.6 and "
+            "18 and double over",
+        )
+    ),
 }
+
+
+# Fixtures whose routing aborts before any render, keyed by path from the repo
+# root: bypass nesting lifts a leg its member geometry plan owns, so
+# validate_member_geometry_emission rejects the second owner of that coordinate
+# (#1756). test_route_plan.py pins each abort.
+ROUTE_EMISSION_ABORT_FIXTURES = frozenset(
+    {
+        "tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd",
+    }
+)
 
 
 def is_curve_abort_fixture(path: Path) -> bool:

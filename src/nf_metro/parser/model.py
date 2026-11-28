@@ -6,14 +6,16 @@ import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple, TypedDict
+from typing import TYPE_CHECKING, ClassVar, Literal, TypedDict
 
 from nf_metro.errors import NfMetroError, UnknownInactiveLineError
 from nf_metro.parser.provenance import LayoutProvenance
 
 if TYPE_CHECKING:
     from nf_metro.layout.fan_plans import FanPlanExecution, FanPlanQuery
+    from nf_metro.layout.lane_plan import LanePlan
     from nf_metro.layout.pass_metrics import LayoutMetrics
+    from nf_metro.layout.rail_mode import RailLay
     from nf_metro.layout.route_plan import FanPlan
     from nf_metro.parser.route_topology import (
         RouteResolutionTrace,
@@ -30,19 +32,6 @@ class RowGridInfo(TypedDict):
     slot_count: int
     slot_spacing: float
     max_y_pad: float
-
-
-class PartialTrunkDescent(NamedTuple):
-    """A partial row-mate's Stage 4.8 handover descent and its two endpoint ports.
-
-    Stage 6.4 re-seats the partial's handover port ``descent`` below the carrier
-    port it hands to; carrying both port IDs lets that restore work from the
-    carrier's post-snap Y instead of blindly re-adding the descent.
-    """
-
-    partial_port: str
-    carrier_port: str
-    descent: float
 
 
 class LayoutGeometryWarning(UserWarning):
@@ -543,9 +532,7 @@ class MetroGraph:
     fan_plan_execution: FanPlanExecution | None = field(
         default=None, compare=False, repr=False
     )
-    _linear_entry_pill_lines_cache: dict[str, tuple[str, ...]] = field(
-        default_factory=dict, compare=False, repr=False
-    )
+    _lane_plan: LanePlan | None = field(default=None, compare=False, repr=False)
     groups: list[StationGroup] = field(default_factory=list)
     grid_overrides: dict[str, tuple[int, int, int, int]] = field(default_factory=dict)
     layout_provenance: LayoutProvenance = field(
@@ -748,16 +735,12 @@ class MetroGraph:
     # (``_snap_all_y_to_grid``) skips them rather than dragging them onto the row
     # group's grid origin, which a rowspan neighbour can leave fractional.
     symfan_trunk_station_ids: set[str] = field(default_factory=set, repr=False)
-    # Cross-phase channel: {section_id: PartialTrunkDescent} for a partial
-    # row-mate whose trunk Stage 4.8 (``_align_row_trunk_ys``) seats one handover
-    # lane below the row carrier so a direct port-to-port connector runs flat.
-    # Stage 6.4 (``_snap_all_y_to_grid``) may snap that sub-grid offset onto the
-    # carrier slot; the restore re-seats the partial's handover port from the
-    # carrier port's post-snap Y, so it lands right whether the snap collapsed the
-    # descent (shared row grid) or preserved it (explicit-grid solo section).
-    _partial_trunk_descents: dict[str, PartialTrunkDescent] = field(
-        default_factory=dict, repr=False
-    )
+    # Cross-phase channel: flow-side exit port IDs Stage 3.1
+    # (``_position_ports_on_boundary``) placed on their downstream bundle Y.
+    # Stage 6.4's grid snap reads it: rounding such an exit onto its own
+    # section's grid breaks the level run into its consumer by up to half a
+    # pitch, which is too short for a full-radius S.
+    downstream_anchored_exit_ids: set[str] = field(default_factory=set, repr=False)
     # Sections whose content Stage 4.8a dropped to reserve a side-entered
     # vertical consumer's entry clearance.  Their box top stayed put while the
     # content moved, so Stage 6.16 folds them into its top-refit set.
@@ -798,6 +781,9 @@ class MetroGraph:
     # rail-mode layout so the dedicated router can resolve a port's per-line
     # rail Y.  Empty when rail mode is off.
     _rail_y: dict[str, dict[str, float]] = field(default_factory=dict, repr=False)
+    # Each per-section rail panel as its rail owner laid it, relative to its
+    # box; the rail-interior guard holds every later stage to it.
+    _rail_lay: dict[str, RailLay] = field(default_factory=dict, repr=False)
     # Content pitch from compute_min_y_spacing, before the spread loop widens
     # y_spacing for diagonal labels.  A single-trunk section's off-track lift
     # step uses this base pitch so a widened pitch doesn't strand the icon far

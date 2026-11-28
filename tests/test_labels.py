@@ -18,6 +18,7 @@ from nf_metro.layout.labels import (
     _avoid_diagonal_routes,
     _build_label_ctx,
     _compute_port_label_preference,
+    _edge_solo,
     _find_clear_reflow_candidate,
     _intrusion,
     _label_bbox,
@@ -25,6 +26,7 @@ from nf_metro.layout.labels import (
     _make_obstacle_placements,
     _places_label_beside_pill,
     _station_marker_boxes,
+    _trial_cost,
     _wrap_text_to_chars,
     find_wrapped_label_trunk_strikes,
     label_glyph_ink_bbox,
@@ -670,3 +672,40 @@ class TestReflowEarnsItsRowPitch:
         assert _drawn_label_texts(_laid_out(fixture))["markdup"] == (
             "sambamba\nmarkdup"
         )
+
+
+def _midpoint_section(dy: float) -> tuple[MetroGraph, list[Station]]:
+    graph = parse_metro_mermaid(
+        "%%metro line: a | A | #ff0000\n"
+        "graph LR\n"
+        "    subgraph s [S]\n"
+        "        top[Top]\n        mid[Middle station]\n        bottom[Bottom]\n"
+        "        top -->|a| mid\n        mid -->|a| bottom\n"
+        "    end\n"
+    )
+    for sid, (x, y) in {
+        "top": (0.0, 100.0),
+        "mid": (300.0, 150.0 + dy),
+        "bottom": (600.0, 200.0),
+    }.items():
+        graph.stations[sid].x, graph.stations[sid].y = x, y
+    return graph, [graph.stations[sid] for sid in ("top", "mid", "bottom")]
+
+
+@pytest.mark.parametrize("dy", [-1e-13, 0.0, 1e-13])
+def test_a_station_on_its_section_midpoint_faces_neither_way(dy: float) -> None:
+    graph, stations = _midpoint_section(dy)
+    mid = [stations[1]]
+    costs = {
+        flip: _trial_cost(
+            mid, graph, LABEL_OFFSET, None, {"s": (100.0, 200.0)}, set(), flip
+        )
+        for flip in (False, True)
+    }
+    assert costs == {False: 0.0, True: 0.0}
+
+
+def test_stations_a_float_ulp_apart_share_their_section_extreme() -> None:
+    graph, stations = _midpoint_section(0.0)
+    graph.stations["mid"].y = 100.0 + 2e-14
+    assert _edge_solo(stations, {"s": (100.0, 200.0)}) == {"s": (False, True)}

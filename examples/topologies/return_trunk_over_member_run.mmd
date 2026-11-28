@@ -1,0 +1,35 @@
+%%metro title: Return trunk over a coincident member run
+%%metro line: qc | QC | #e6194b
+%%metro line: merge | Merge | #3cb44b
+
+graph LR
+    subgraph align [Align]
+        gather[Gather]
+        index[Index]
+        gather -->|qc,merge| index
+    end
+    subgraph annotate [Annotate]
+        normalize[Normalize]
+        call[Call]
+        normalize -->|qc,merge| call
+    end
+    subgraph polish [Polish]
+        p_merge[Merge]
+        sort[Sort]
+        p_merge -->|merge| sort
+    end
+    subgraph summarise [Summarise]
+        fastqc[FastQC]
+        combine[Combine]
+        fastqc -->|merge| combine
+    end
+    subgraph export [Export]
+        bundle[Bundle]
+    end
+    index -->|qc| bundle
+    index -->|qc,merge| normalize
+    call -->|qc| bundle
+    call -->|merge| p_merge
+    sort -->|merge| fastqc
+    index -->|merge| combine
+    combine -->|merge| bundle

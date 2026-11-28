@@ -509,6 +509,39 @@ def test_interior_wrap_guard_fires_on_an_injected_crossing() -> None:
         )
 
 
+def _injected_own_section_crossing() -> tuple[MetroGraph, list[RoutedPath], dict]:
+    graph = parse_metro_mermaid(
+        (FIXTURES / "away_exit_wrap_interior_left.mmd").read_text()
+    )
+    compute_layout(graph)
+    offsets = compute_station_offsets(graph)
+    routes = route_edges(graph, station_offsets=offsets)
+    inter = next(rp for rp in routes if rp.is_inter_section)
+    tgt_sec = graph.sections[graph.section_for_station(inter.edge.target)]
+    cx = tgt_sec.bbox_x + tgt_sec.bbox_w / 2
+    cy = tgt_sec.bbox_y + tgt_sec.bbox_h / 2
+    crossing = RoutedPath(
+        edge=inter.edge,
+        line_id=inter.line_id,
+        points=[(cx - 200, cy), (cx + 200, cy)],
+        is_inter_section=True,
+    )
+    return graph, [crossing], offsets
+
+
+def test_a_route_across_its_own_section_aborts_the_default_render() -> None:
+    graph, routes, offsets = _injected_own_section_crossing()
+    with pytest.raises(LayoutInvariantError, match="instead of routing around it"):
+        assert_render_layout_invariants(graph, routes, offsets, strict=False)
+
+
+def test_a_permissive_render_warns_on_a_route_across_its_own_section() -> None:
+    graph, routes, offsets = _injected_own_section_crossing()
+    graph.permissive = True
+    with pytest.warns(PermissiveGuardWarning, match="instead of routing around it"):
+        assert_render_layout_invariants(graph, routes, offsets, strict=False)
+
+
 # A feeder rising from a row below the target into the target's TOP entry port:
 # the port faces away from the feeder, so a straight rise into it would plough
 # up through the box interior (#1522).  The leg must instead route around a side

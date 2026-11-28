@@ -1,0 +1,16 @@
+%%metro title: Rail-internal edges offered to co-row planning
+%%metro line: a | A | #e41a1c
+%%metro line: b | B | #377eb8
+%%metro line_spread: rails | calling
+graph LR
+    subgraph pre [Pre]
+        p1[p1] -->|a,b| p2[p2]
+    end
+    subgraph calling [Calling]
+        bqsr[bqsr] -->|a| hc[hc]
+        bqsr -->|a| dv[dv]
+        hc -->|a| merge[merge]
+        dv -->|a| merge
+        bqsr -->|b| mt[mt]
+        mt -->|b| merge
+    end

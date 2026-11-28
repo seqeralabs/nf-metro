@@ -1,0 +1,55 @@
+%%metro title: Fuzz 8500832
+%%metro line: l0 | Merge_Merge_Export | #e6194b
+%%metro line: l1 | Export | #3cb44b
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 1,1
+%%metro grid: sec3 | 0,2
+%%metro grid: sec4 | 0,1
+
+graph LR
+    subgraph sec0 [Export 0]
+        s0n0[classify_markdup]
+        s0n2[quant_markdup_stats]
+        s0n3[trim_markdup_index]
+        s0n4[annotate_normalize]
+        s0n0 -->|l0| s0n2
+        s0n2 -->|l0| s0n3
+        s0n3 -->|l0| s0n4
+    end
+    subgraph sec1 [Quant 1]
+        %%metro direction: RL
+        s1n0[pca]
+        s1n1[normalize_export_quant]
+        s1n0 -->|l0| s1n1
+    end
+    subgraph sec2 [Fastqc 2]
+        %%metro direction: TB
+        %%metro exit: top | l1
+        s2n0[FASTQC_BAM_SORT]
+        s2n1[report]
+        s2n0 -->|l1| s2n1
+    end
+    subgraph sec3 [Export 3]
+        s3n0[COUNT]
+        s3n2[cluster]
+        s3n3[fastqc_merge]
+        s3n4[sort_qc_align]
+        s3n0 -->|l1| s3n2
+        s3n2 -->|l1| s3n3
+        s3n3 -->|l1| s3n4
+    end
+    subgraph sec4 [Summarise 4]
+        %%metro direction: RL
+        s4n0[cluster_qc_vcf]
+        s4n1[fastqc]
+        s4n2[FASTQC]
+        s4n0 -->|l1| s4n1
+        s4n1 -->|l1| s4n2
+        s4n0 -->|l1| s4n2
+    end
+    s0n4 -->|l0| s1n0
+    s0n2 -->|l0| s4n2
+    s0n2 -->|l0| s4n2
+    s2n1 -->|l1| s3n0
+    s3n4 -->|l1| s4n0

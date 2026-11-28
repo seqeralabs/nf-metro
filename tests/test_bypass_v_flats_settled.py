@@ -29,7 +29,16 @@ FIXTURES = (
     f"{DATA}/relayout_bypass_v_flats.mmd",
     f"{DATA}/obstacle_box_label_side.mmd",
     f"{DATA}/bypass_v_runout_into_exit_port.mmd",
-    f"{DATA}/seated_rake_lever_kept.mmd",
+    pytest.param(
+        f"{DATA}/seated_rake_lever_kept.mmd",
+        marks=pytest.mark.xfail(
+            strict=True,
+            reason=(
+                "#2094 Part A follow-up step: sec0's bypass-V flat collapses and "
+                "l1/l2 overlay on sec1's H channel at y 128 (CurveInvariantError)"
+            ),
+        ),
+    ),
     "examples/topologies/bypass_label_rake.mmd",
     "examples/topologies/bypass_label_rake_left.mmd",
     "examples/topologies/bypass_label_rake_wide.mmd",

@@ -8,7 +8,6 @@ from collections import Counter
 from nf_metro.layout.constants import (
     CANVAS_GRID_SHIFT_THRESHOLD,
     COORD_TOLERANCE_FINE,
-    SAME_COORD_TOLERANCE,
 )
 from nf_metro.layout.geometry import lanes_run_along_y
 from nf_metro.layout.phase_state import require_phase_field
@@ -23,8 +22,9 @@ from nf_metro.layout.phases.fan_bundles import (
     _station_rooted_fans,
     _symmetric_reconvergence_joins,
 )
-from nf_metro.layout.phases.junctions import _position_junctions
+from nf_metro.layout.phases.junctions import _position_junctions, junction_anchor_port
 from nf_metro.layout.phases.ports import _set_port_y
+from nf_metro.layout.section_placement import _find_downstream_bundle_y
 from nf_metro.parser.model import MetroGraph, PortSide
 
 
@@ -49,12 +49,18 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
        nearest ``origin + n * pitch``, bounded by half a pitch so
        adjacency cannot flip.
 
-    Two exclusions preserve deliberate non-grid Ys:
+    Three exclusions preserve deliberate non-grid Ys:
 
     * LR/RL exit ports on TB-direction sections were placed by
       ``_resolve_tb_exit_y`` at the receiving section's entry-port Y
       (in a different row).  Snapping them to the TB's own row grid
       reintroduces the kink the alignment removed.
+    * LR/RL exit ports on horizontal-flow sections that Stage 3.1 seated on
+      their downstream bundle Y and that still line up with it.  Rounding one
+      onto its own section's grid breaks the level run into the consumer by up
+      to half a pitch, which is shorter than a full-radius S.  Such an exit
+      still takes part in tie-breaking, and once every group has snapped it
+      takes its bundle's settled Y.
     * Stations that act as a convergence point for two or more inbound
       sources at different Ys (fan-in midpoint) carry geometric meaning
       that snapping destroys.
@@ -77,18 +83,26 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     """
     if y_spacing <= 0:
         return
+    # A rail panel's stations and ports belong to the rail owner, so none is
+    # protected, restored, carried or held here.
+    rail = graph.station_is_rail
     # Map each convergence station/port to the set of source Ys it
     # converges (recorded pre-snap so the midpoint can be restored
     # after sources move).
-    convergence_sources = _convergence_source_ys(graph)
+    convergence_sources = {
+        t: srcs for t, srcs in _convergence_source_ys(graph).items() if not rail(t)
+    }
     # A trunkless symmetric entry fan's reconvergence join is a convergence the
     # midpoint restore must also protect and recentre, even though one arm's
     # extra hop keeps it out of the ordinary source-midpoint set above.
     for join_id, src_ids in _symmetric_reconvergence_joins(graph).items():
-        convergence_sources.setdefault(join_id, src_ids)
+        if not rail(join_id):
+            convergence_sources.setdefault(join_id, src_ids)
     # Under center_ports a trunkless fan-in entry port rides the same
     # protect-and-restore onto the midpoint of the targets it serves.
-    entry_fan_ports = _entry_fan_centre_ports(graph)
+    entry_fan_ports = {
+        p: tgts for p, tgts in _entry_fan_centre_ports(graph).items() if not rail(p)
+    }
     for port_id, target_ids in entry_fan_ports.items():
         convergence_sources.setdefault(port_id, target_ids)
     # Same idea for the diverging side: record each fork hub's target set
@@ -96,12 +110,22 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
     # Narrowed to hubs already centred pre-snap (see
     # ``_divergence_midpoint_targets``) so a fan-out deliberately biased
     # toward one branch is left on its snapped grid slot.
-    divergence_targets = _divergence_midpoint_targets(graph, convergence_sources)
+    divergence_targets = {
+        h: tgts
+        for h, tgts in _divergence_midpoint_targets(graph, convergence_sources).items()
+        if not rail(h)
+    }
     # The trunk running into the fork hub and out of the join shares their
     # centreline pre-snap, and must be recorded before the snap rounds each
     # member to its own row and that co-linearity stops being readable.
-    trunk_followers = _centreline_trunk_followers(
-        graph, divergence_targets, convergence_sources
+    trunk_followers = {
+        h: [f for f in fs if not rail(f)]
+        for h, fs in _centreline_trunk_followers(
+            graph, divergence_targets, convergence_sources
+        ).items()
+    }
+    held_exits = frozenset(
+        p for p in _exits_level_with_their_bundle(graph) if not rail(p)
     )
     groups: dict[object, tuple[float, list[str]]] = {}
     grouped_ids: set[str] = set()
@@ -112,19 +136,46 @@ def _snap_all_y_to_grid(graph: MetroGraph, y_spacing: float) -> None:
         groups[("row", row)] = (pitch, sec_ids)
         grouped_ids.update(sec_ids)
     for sec in graph.sections.values():
-        if sec.id not in grouped_ids:
+        if sec.id not in grouped_ids and not graph.is_rail_section(sec.id):
             groups[("solo", sec.id)] = (y_spacing, [sec.id])
 
     for pitch, sec_ids in groups.values():
-        _snap_group_to_grid(graph, pitch, sec_ids, convergence_sources)
+        _snap_group_to_grid(graph, pitch, sec_ids, convergence_sources, held_exits)
 
     section_pitch = {
         sec_id: pitch for pitch, sec_ids in groups.values() for sec_id in sec_ids
     }
     _restore_convergence_midpoints(graph, convergence_sources, section_pitch)
     _restore_divergence_midpoints(graph, divergence_targets, trunk_followers)
-    _restore_partial_trunk_descents(graph)
     _register_half_grid_entry_fan_ports(graph, entry_fan_ports)
+    for pid in sorted(held_exits):
+        section = graph.sections[graph.ports[pid].section_id]
+        anchor = _find_downstream_bundle_y(pid, section, graph)
+        if anchor is not None:
+            _set_port_y(graph, pid, anchor)
+
+
+def _exits_level_with_their_bundle(graph: MetroGraph) -> frozenset[str]:
+    """Downstream-anchored flow-side exit ports still level with that bundle.
+
+    Read before any group snaps, because the bundle's own section may snap
+    first.  A vertical-flow section's side exits are left out: they are placed
+    by ``_resolve_tb_exit_y`` and never snapped.
+    """
+    require_phase_field(graph, "downstream_anchored_exit_ids")
+    held: set[str] = set()
+    for pid in graph.downstream_anchored_exit_ids:
+        port = graph.ports.get(pid)
+        station = graph.stations.get(pid)
+        if port is None or station is None:
+            continue
+        section = graph.sections.get(port.section_id)
+        if section is None or not lanes_run_along_y(section.direction):
+            continue
+        anchor = _find_downstream_bundle_y(pid, section, graph)
+        if anchor is not None and abs(anchor - station.y) <= COORD_TOLERANCE_FINE:
+            held.add(pid)
+    return frozenset(held)
 
 
 def _register_half_grid_reconvergence_branches(graph: MetroGraph) -> None:
@@ -311,8 +362,12 @@ def _snap_group_to_grid(
     pitch: float,
     sec_ids: list[str],
     convergence_sources: dict[str, list[str]],
+    held_exits: frozenset[str],
 ) -> None:
-    """Snap one row-group's stations and LEFT/RIGHT ports to its shared grid."""
+    """Snap one row-group's stations and LEFT/RIGHT ports to its shared grid.
+
+    Ports in *held_exits* count toward tie-breaking but keep their Y.
+    """
     half = pitch / 2.0
     origin_info = _group_grid_origin(graph, sec_ids, pitch)
     if origin_info is None:
@@ -337,7 +392,8 @@ def _snap_group_to_grid(
         st = graph.stations[sid]
         target = _slot_snap(st.y, origin_r, pitch, half, tie_directions.get(sid, _UP))
         if is_port:
-            _set_port_y(graph, sid, target)
+            if sid not in held_exits:
+                _set_port_y(graph, sid, target)
             continue
         slots = column_slots.setdefault(round(st.x, 3), set())
         if round(target, 3) in slots:
@@ -403,7 +459,9 @@ def _tie_directions(
     to the group's other stations (see :func:`_tie_relations`); failing that,
     the direction its feeders sit in, then its consumers; then the direction
     whose levelled neighbours carry more of its lines (see
-    :func:`_levelled_line_counts`); failing that, up.
+    :func:`_levelled_line_counts`); then the direction that carries on a level
+    run reaching it from outside the snap (see :func:`_level_run_direction`);
+    failing that, up.
     """
     ys = {sid: graph.stations[sid].y for sid in candidate_ids}
     tied = sorted(sid for sid, y in ys.items() if _is_slot_tie(y, origin, pitch))
@@ -430,7 +488,11 @@ def _tie_directions(
             graph, component, group_ids, ys, partner_ys, pitch
         )
         direction = _component_tie_direction(
-            feeder_relations, consumer_relations, half, line_counts
+            feeder_relations,
+            consumer_relations,
+            half,
+            line_counts,
+            _level_run_direction(graph, component, group_ids, tied_set),
         )
         for sid in component:
             directions[sid] = direction
@@ -534,11 +596,13 @@ def _component_tie_direction(
     consumer_relations: list[tuple[float, float]],
     half: float,
     line_counts: dict[int, int],
+    level_run: int,
 ) -> int:
     """The direction levelling more relations; else toward feeders, consumers.
 
     Failing those, the direction whose levelled neighbours carry more of the
-    component's lines (``line_counts``); failing that, up.
+    component's lines (``line_counts``); then the direction that carries on a
+    level run from outside the snap (``level_run``); failing that, up.
     """
 
     def levelled(direction: int) -> int:
@@ -556,7 +620,66 @@ def _component_tie_direction(
             return _UP if net < 0 else _DOWN
     if line_counts[_UP] != line_counts[_DOWN]:
         return _UP if line_counts[_UP] > line_counts[_DOWN] else _DOWN
+    if level_run:
+        return level_run
     return _UP
+
+
+def _level_run_direction(
+    graph: MetroGraph, component: list[str], group_ids: set[str], tied: set[str]
+) -> int:
+    """The snap direction that carries on a level run reaching the component.
+
+    A route reaching a tied member level from a neighbour the snap leaves in
+    place keeps that row until it turns off toward the side its far end lies
+    on.  Snapping the member half a pitch the other way lets the route cross
+    rows once, in the sense it already travels; snapping toward the far end
+    makes it turn back within half a pitch.  A station of another row group's
+    section stays; a junction stays unless the port it is derived from
+    (:func:`junction_anchor_port`) is one of the group's tied stations (*tied*),
+    which carries it along.  0 when no such run exists or the runs disagree.
+    """
+    members = set(component)
+    sections = {graph.stations[sid].section_id for sid in group_ids}
+    junction_ids = graph.junction_ids
+    steps: tuple[dict[str, set[str]], dict[str, set[str]]] = ({}, {})
+    for edge in graph.edges:
+        steps[0].setdefault(edge.target, set()).add(edge.source)
+        steps[1].setdefault(edge.source, set()).add(edge.target)
+
+    def stays(p: str) -> bool:
+        if p in junction_ids:
+            anchor = junction_anchor_port(graph, p)
+            return anchor is not None and anchor not in tied
+        return graph.stations[p].section_id not in sections
+
+    votes: set[int] = set()
+    for sid in component:
+        y = graph.stations[sid].y
+
+        def level(p: str) -> bool:
+            return abs(graph.stations[p].y - y) <= _SNAP_TOLERANCE_PX
+
+        for step in steps:
+            run = [
+                p
+                for p in step.get(sid, set())
+                if p in graph.stations and level(p) and stays(p)
+            ]
+            seen: set[str] = set()
+            while run:
+                p = run.pop()
+                if p in seen or p in members:
+                    continue
+                seen.add(p)
+                for q in step.get(p, set()):
+                    if q not in graph.stations:
+                        continue
+                    if level(q):
+                        run.append(q)
+                    else:
+                        votes.add(_DOWN if graph.stations[q].y < y else _UP)
+    return votes.pop() if len(votes) == 1 else 0
 
 
 def _levelled_line_counts(
@@ -617,43 +740,6 @@ def _line_reach(
         reached.add(sid)
         frontier.extend(step.get((line_id, sid), ()))
     return reached
-
-
-def _restore_partial_trunk_descents(graph: MetroGraph) -> None:
-    """Re-seat each partial row-mate a handover lane below its carrier.
-
-    Stage 4.8 seats a partial row-mate one lane deeper than the row carrier so a
-    direct port-to-port connector runs flat.  When carrier and partial share a
-    row grid the group snap rounds that sub-grid offset onto the carrier's slot;
-    on an explicit-grid solo section it leaves it in place.  Either way the target
-    is the same: the partial's handover port sits ``descent`` below the carrier
-    port's post-snap Y.  Shifting the whole section by the gap to that target --
-    every internal station, every LR/RL port, the bbox growing downward -- lands
-    it right in both cases and is idempotent (a re-run finds zero gap), so a snap
-    that did not collapse the descent is not double-counted.
-    """
-    require_phase_field(graph, "_partial_trunk_descents")
-    for sec_id, record in graph._partial_trunk_descents.items():
-        section = graph.sections.get(sec_id)
-        partial_st = graph.stations.get(record.partial_port)
-        carrier_st = graph.stations.get(record.carrier_port)
-        if section is None or partial_st is None or carrier_st is None:
-            continue
-        delta = (carrier_st.y + record.descent) - partial_st.y
-        if delta < SAME_COORD_TOLERANCE:
-            continue
-        port_ids = section.port_ids
-        for pid in port_ids:
-            port_st = graph.stations.get(pid)
-            if port_st is not None:
-                _set_port_y(graph, pid, port_st.y + delta)
-        for sid in section.station_ids:
-            if sid in port_ids:
-                continue
-            st = graph.stations.get(sid)
-            if st is not None:
-                st.y += delta
-        section.bbox_h += delta
 
 
 def _restore_convergence_midpoints(

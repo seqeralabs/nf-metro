@@ -1,0 +1,53 @@
+%%metro title: Fuzz 8401142
+%%metro line: l0 | Gather | #e6194b
+%%metro line: l1 | Stats_Align | #3cb44b
+%%metro line: l2 | Call | #4363d8
+
+graph LR
+    subgraph sec0 [Report 0]
+        s0n0[normalize]
+        s0n1[polish_trim]
+        s0n2[classify]
+        s0n3[call]
+        s0n0 -->|l0| s0n1
+        s0n1 -->|l0| s0n2
+        s0n2 -->|l0| s0n3
+    end
+    subgraph sec1 [Report_Export 1]
+        %%metro entry: bottom | l0, l2
+        s1n0[cluster]
+        s1n1[call_dedup]
+        s1n2[trim]
+        s1n4[bam]
+        s1n0 -->|l0,l2| s1n1
+        s1n1 -->|l0,l2| s1n2
+        s1n2 -->|l0,l2| s1n4
+    end
+    subgraph sec2 [Filter 2]
+        s2n0[ASSEMBLE]
+        s2n1[FASTQC]
+        s2n2[QC]
+        s2n3[markdup]
+        s2n4[filter]
+        s2n3 -->|l1,l2| s2n4
+        s2n0 -->|l2| s2n1
+        s2n1 -->|l2| s2n2
+        s2n2 -->|l2| s2n3
+    end
+    subgraph sec3 [Gather 3]
+        s3n0[align]
+        s3n1[ASSEMBLE]
+        s3n0 -->|l2| s3n1
+    end
+    subgraph sec4 [Merge_Vcf 4]
+        %%metro entry: left | l1
+        s4n0[CLASSIFY_CLASSIFY]
+        s4n1[summarise_assemble_annotate]
+        s4n2[ANNOTATE]
+        s4n0 -->|l1| s4n1
+        s4n1 -->|l1| s4n2
+    end
+    s0n3 -->|l0,l2| s1n0
+    s2n4 -->|l1,l2| s3n0
+    s3n0 -->|l1| s4n0
+    s1n4 -->|l2| s2n0

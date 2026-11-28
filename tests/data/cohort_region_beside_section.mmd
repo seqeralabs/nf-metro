@@ -1,0 +1,36 @@
+%%metro title: A lane crossing the gap beside a section stays out of it
+%%metro line: red | Red | #e6194b
+%%metro line: green | Green | #3cb44b
+%%metro line: blue | Blue | #4363d8
+%%metro grid: upper_right | 2,0
+%%metro grid: lower_right | 2,1
+%%metro grid: lower_middle | 1,1
+
+graph LR
+    subgraph left [Left]
+        sort[sort]
+    end
+    subgraph middle [Middle]
+        call[call]
+        quant[quant]
+        pca[pca]
+    end
+    subgraph upper_right [Upper right]
+        cluster[cluster]
+        sort_pca[sort_pca]
+        annotate[annotate]
+        sort_pca -->|red| annotate
+    end
+    subgraph lower_right [Lower right]
+        sink[sink]
+        filter[filter]
+    end
+    subgraph lower_middle [Lower middle]
+        %%metro direction: RL
+        summarise[summarise]
+    end
+    sort -->|red| cluster
+    annotate -->|red| summarise
+    sort -->|green| call
+    pca -->|green| sink
+    pca -->|blue| filter

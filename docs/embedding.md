@@ -369,7 +369,7 @@ The parser raises a plain `ValueError` ad hoc for most grammar and directive pro
 
 Catch a specific row instead of the base class when the distinction matters, for example to offer "fix your fold threshold" only for `FoldThresholdError`, or to fall back to `%%metro permissive: true` semantics only for `PhaseInvariantError`.
 
-**Not** part of this hierarchy: the render step of `render_string()` also runs six self-checks (`CurveInvariantError`, `BridgeInvariantError`, `SectionHeaderClashError`, `SectionHeaderOverflowError`, `SectionHeaderBandError`, `OffsetAnchorError`) that indicate a defect in the nf-metro drawing code rather than a problem with your input.
+**Not** part of this hierarchy: the render step of `render_string()` also runs six self-checks (`CurveInvariantError`, `ConvergenceInvariantError`, `BridgeInvariantError`, `SectionHeaderClashError`, `SectionHeaderOverflowError`, `SectionHeaderBandError`) that indicate a defect in the nf-metro drawing code rather than a problem with your input.
 They stay out of `NfMetroError` on purpose.
 See the `render_string` docstring for the full list and the rationale.
 Report one if you encounter it.

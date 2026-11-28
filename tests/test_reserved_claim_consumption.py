@@ -9,8 +9,10 @@ positive_side_clearance]``.  A claimed corridor drawn outside that band was
 positioned by a geometry-derived fallback instead of its reservation, which is
 exactly what the reservation ledger exists to forbid.
 
-The whole corpus satisfies that, and every fixture is held to it with no
-exceptions. The slack is a
+Every claim in the corpus is held to that bound except those listed in
+``DRAWN_PASS_OUT_OF_BAND_CLAIMS``, whose measured overhang is pinned by
+``test_drawn_pass_exemptions_are_the_measured_overhang``; adding an exception
+is a decision to be argued for. The slack is a
 :func:`~nf_metro.layout.route_reservations.measured_distance`, so a run drawn
 flush against a band edge scores as flush rather than as overrunning it by the
 floating-point residue from subtracting two canvas coordinates.
@@ -22,16 +24,22 @@ import warnings
 from pathlib import Path
 
 import pytest
-from conftest import curve_abort_softened, is_curve_abort_fixture
+from conftest import (
+    ROUTE_EMISSION_ABORT_FIXTURES,
+    curve_abort_softened,
+    is_curve_abort_fixture,
+)
 
 from nf_metro.api import prepare_graph, resolve_theme
-from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.constants import COORD_TOLERANCE, COORD_TOLERANCE_FINE
+from nf_metro.layout.phases.guards import LayoutInvariantError
 from nf_metro.layout.route_plan import build_route_plan_query
 from nf_metro.layout.route_reservations import (
     ColumnGapRegion,
     RowGapRegion,
     drawn_corridor_containment,
 )
+from nf_metro.layout.routing.exit_turns import ExitTurnInvariantError
 from nf_metro.render.svg import build_observed_render_plan
 
 _ROOT = Path(__file__).parents[1]
@@ -51,6 +59,23 @@ _CORPUS = _corpus()
 # here, but only the first three groups are meant to stay that way: an entry
 # that is a defect rather than a category carries the issue tracking it, so the
 # allow-list cannot quietly absorb a new one.
+# Maps that abort on main as well (ruling P), each pinned to the abort it raises
+# here so a change of failure is a named one.
+PINNED_ABORTS: dict[str, tuple[type[Exception], str]] = {
+    # #2094 line 7et (exit-turn planner reads the record; planned != drawn at
+    # the straight continuation).
+    "tests/fixtures/regressions/perp_entry_column_straight_drop.mmd": (
+        ExitTurnInvariantError,
+        "straight continuation changed source lane",
+    ),
+    # #2094 Part A follow-up (loop round and enter from outside): l4 crosses a
+    # section to reach sec2's BOTTOM entry, which the guard refuses loudly.
+    "tests/fixtures/regressions/perp_entry_column_opposite_side_fan.mmd": (
+        LayoutInvariantError,
+        r"_guard_no_route_through_section\] render: line 'l4'",
+    ),
+}
+
 KNOWN_NOT_RENDERING = frozenset(
     {
         # Frozen fuzz seeds: tests/test_hash_seed_determinism.py holds each one
@@ -74,10 +99,12 @@ KNOWN_NOT_RENDERING = frozenset(
         "tests/fixtures/nextflow/unquoted_labels.mmd",
         "tests/fixtures/nextflow/variant_calling.mmd",
         "tests/fixtures/nextflow/with_subworkflows.mmd",
-        # A fan-overlay curve defect, not a category: the band-hop drop-at-junction
-        # seam this fixture pins for #1808 aborts downstream on the unrelated
-        # fan-overlay curve invariant (#1806/#1809).
-        "tests/fixtures/curve_invariant_repros/riboseq_band_hop_zero_length_seam.mmd",
+        # Defects, not a category: each aborts in routing on a second owner of a
+        # member-plan-owned coordinate (#1756).
+        *ROUTE_EMISSION_ABORT_FIXTURES,
+        # The TB twin of the port-stop fork trips the curve invariant, held by
+        # a strict xfail in tests/test_departure_lane_order.py (#1792).
+        "tests/fixtures/regressions/departure_order_fork_port_stop_tb.mmd",
     }
 )
 
@@ -93,6 +120,18 @@ WITHIN_TOLERANCE_OVERHANGS: frozenset[tuple[str, int, int]] = frozenset(
         ("examples/genomeassembly.mmd", 39, 3),
     }
 )
+
+# Claims exempt from the in-band bound below, and from nothing else: a riser
+# the engine's drawn pass seats outside its reserved band on a map that fails
+# the curve invariant, so the overhang is that pass's own geometry rather than
+# a claim a plan positioned.
+DRAWN_PASS_OUT_OF_BAND_CLAIMS: frozenset[tuple[str, int, int]] = frozenset()
+
+# How far outside its band each exempt claim is drawn.  The exemption covers
+# exactly this overhang, so a claim that drifts further out reddens
+# ``test_drawn_pass_exemptions_are_the_measured_overhang`` instead of hiding
+# behind the exemption.
+DRAWN_PASS_OUT_OF_BAND_OVERHANG_PX = 2.0
 
 
 def _claim_overhangs(path: Path) -> dict[tuple[int, int], tuple[float, str]] | None:
@@ -162,6 +201,17 @@ def _out_of_band_claims(path: Path) -> dict[tuple[int, int], str] | None:
 )
 def test_realised_gap_claims_are_drawn_in_their_reserved_band(path: Path) -> None:
     rel = str(path.relative_to(_ROOT))
+    if rel in PINNED_ABORTS:
+        error, match = PINNED_ABORTS[rel]
+        with (
+            warnings.catch_warnings(),
+            curve_abort_softened(is_curve_abort_fixture(path)),
+            pytest.raises(error, match=match),
+        ):
+            warnings.simplefilter("ignore")
+            graph = prepare_graph(path.read_text(), source_dir=str(path.parent))
+            build_observed_render_plan(graph, resolve_theme(graph))
+        return
     violations = _out_of_band_claims(path)
     if violations is None:
         if rel in KNOWN_NOT_RENDERING:
@@ -172,6 +222,11 @@ def test_realised_gap_claims_are_drawn_in_their_reserved_band(path: Path) -> Non
             "the regression or add it to KNOWN_NOT_RENDERING with the reason it "
             "cannot render."
         )
+    violations = {
+        key: message
+        for key, message in violations.items()
+        if (rel, *key) not in DRAWN_PASS_OUT_OF_BAND_CLAIMS
+    }
     assert not violations, (
         "a claim drawn outside its reserved band was positioned by a "
         "geometry-derived fallback rather than by its reservation:\n"
@@ -215,6 +270,32 @@ def test_claims_drawn_within_one_tolerance_of_their_band_are_the_recorded_ones(
             )
             if short <= COORD_TOLERANCE
         )
+    )
+
+
+@pytest.mark.parametrize(
+    ("rel", "path_rank", "segment_rank"), sorted(DRAWN_PASS_OUT_OF_BAND_CLAIMS)
+)
+def test_drawn_pass_exemptions_are_the_measured_overhang(
+    rel: str, path_rank: int, segment_rank: int
+) -> None:
+    """Each exempt claim is drawn out of band, by exactly the recorded overhang.
+
+    An exemption that no longer fires is stale, and one whose claim has moved
+    further out than recorded is growing; both fail here rather than passing
+    silently through the skip in the bound above.
+    """
+    overhangs = _claim_overhangs(_ROOT / rel)
+    assert overhangs is not None, f"{rel} does not render"
+    assert (path_rank, segment_rank) in overhangs, (
+        f"{rel} claim (path {path_rank}, segment {segment_rank}) is drawn in "
+        "its band, so its DRAWN_PASS_OUT_OF_BAND_CLAIMS entry is stale"
+    )
+    short, message = overhangs[path_rank, segment_rank]
+    assert short > COORD_TOLERANCE, message
+    assert abs(short - DRAWN_PASS_OUT_OF_BAND_OVERHANG_PX) <= COORD_TOLERANCE_FINE, (
+        f"drawn {short:.2f}px outside its band, recorded "
+        f"{DRAWN_PASS_OUT_OF_BAND_OVERHANG_PX:.2f}px: {message}"
     )
 
 

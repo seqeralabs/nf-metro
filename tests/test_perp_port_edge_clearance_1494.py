@@ -12,7 +12,7 @@ above-left position is never clear, so the placement chain falls through to
 port toward the top edge, and it reserves ``perp_port_edge_clearance()`` so the
 port stops short of it.  The rotated case -- a horizontal flow's TOP/BOTTOM port
 approaching a vertical edge -- is held by ``_reserve_perp_port_edge_inset``
-(Stage 3.5), which grows the edge instead.
+(Stage 6.12a), which grows the edge instead.
 
 Every clearance here is measured from the port's outermost *drawn* lane, not from
 the port station: the bundle crossing a port is staggered off it along exactly

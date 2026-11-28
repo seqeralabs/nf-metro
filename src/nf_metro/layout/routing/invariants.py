@@ -55,6 +55,11 @@ from nf_metro.layout.geometry import (
     lanes_run_along_y,
     point_to_polyline_distance,
 )
+from nf_metro.layout.lane_plan import (
+    entry_crossed_pairs,
+    entry_crossing_lines,
+    recorded_crossing_pairs,
+)
 from nf_metro.layout.pass_metrics import (
     active_curve_radius,
     bypass_clearance,
@@ -69,6 +74,7 @@ from nf_metro.layout.route_topology import (
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
+    NO_LANDING_ORDERS,
     CorridorLane,
     Direction,
     HTrunkSeg,
@@ -105,6 +111,7 @@ from nf_metro.layout.routing.common import (
     port_peeloff_tail,
     resolve_section,
     same_destination_approach_slots,
+    segment_direction,
     segments_properly_cross,
     tail_on_slot,
     trunk_segment_crossings,
@@ -397,13 +404,15 @@ def _opening_turn(pts: Sequence[tuple[float, float]]) -> _OpeningTurn | None:
     opening = opening_horizontal_vertical(pts)
     if opening is None:
         return None
-    (x0, y0), (x1, y1), (_x2, y2) = opening
-    run_dir = horizontal_direction(x1 - x0)
+    (_x0, y0), (x1, _y1), _end = opening
+    run_dir = segment_direction(opening[0], opening[1])
+    turn_dir = segment_direction(opening[1], opening[2])
+    assert run_dir is not None and turn_dir is not None
     return _OpeningTurn(
         run_y=y0,
         turn_x=x1,
         run_dir=run_dir,
-        turn_dir=vertical_direction(y2 - y1),
+        turn_dir=turn_dir,
         corridor_y=_reversed_corridor_y(pts, run_dir),
     )
 
@@ -1491,6 +1500,24 @@ def classify_merge_port_feeders(
     return horizontal, below, above
 
 
+def _feeding_exits(graph: MetroGraph, port_id: str, line_id: str) -> set[str]:
+    """The exit ports *line_id* reaches *port_id* from, through junctions."""
+    found: set[str] = set()
+    seen: set[str] = set()
+    stack = [port_id]
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_to(node):
+            if edge.line_id != line_id or edge.source in seen:
+                continue
+            seen.add(edge.source)
+            if edge.source in graph.junction_ids:
+                stack.append(edge.source)
+            elif edge.source in graph.ports and not graph.ports[edge.source].is_entry:
+                found.add(edge.source)
+    return found
+
+
 def check_merge_port_approach_side(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     offsets: dict[tuple[str, str], float],
@@ -1500,7 +1527,9 @@ def check_merge_port_approach_side(
     For every reconvergence merge port (see
     :func:`classify_merge_port_feeders`), a line rising from below must
     sit at or below every horizontal co-traveller, and a line descending
-    from above must sit at or above every horizontal co-traveller.
+    from above must sit at or above every horizontal co-traveller.  A
+    co-traveller leaving one exit port in the joiner's bundle bounds nothing:
+    the two keep that exit's order across the seam.
     """
     violations: list[MergePortApproachViolation] = []
     for port_id in graph.ports:
@@ -1508,10 +1537,23 @@ def check_merge_port_approach_side(
         if classified is None:
             continue
         horizontal, below, above = classified
-        horiz_offs = [offsets.get((port_id, lid), 0.0) for lid in horizontal]
-        max_horiz = max(horiz_offs)
-        min_horiz = min(horiz_offs)
+        exits = {
+            lid: _feeding_exits(graph, port_id, lid)
+            for lid in {*horizontal, *below, *above}
+        }
+
+        def bounds(joiner: str) -> list[float]:
+            return [
+                offsets.get((port_id, lid), 0.0)
+                for lid in horizontal
+                if not exits[lid] & exits[joiner]
+            ]
+
         for lid in below:
+            bound = bounds(lid)
+            if not bound:
+                continue
+            max_horiz = max(bound)
             off = offsets.get((port_id, lid), 0.0)
             if off < max_horiz - COORD_TOLERANCE_FINE:
                 violations.append(
@@ -1524,6 +1566,10 @@ def check_merge_port_approach_side(
                     )
                 )
         for lid in above:
+            bound = bounds(lid)
+            if not bound:
+                continue
+            min_horiz = min(bound)
             off = offsets.get((port_id, lid), 0.0)
             if off > min_horiz + COORD_TOLERANCE_FINE:
                 violations.append(
@@ -1647,8 +1693,9 @@ def check_convergence_shallow_feeder_concentric(
     holds at any flow-side entry of an LR or RL section where same-row bypass
     lines join flat feeders (:func:`same_row_bypass_entry`): each bypass line
     must sit on the side of the flat band it arrives from, below it when it
-    climbs in and above it when it comes down.  Mirrors the gating of
-    ``_order_convergence_entry_ports``, which assigns the slot.
+    climbs in and above it when it comes down.  The lane plan's port orders
+    (``build_lane_plan``) assign the slot.  A pair of lines the lane plan
+    records crossing at the entry (:func:`entry_crossed_pairs`) is exempt.
     """
     from nf_metro.layout.routing.offsets import (
         _convergence_feeders,
@@ -1678,7 +1725,7 @@ def check_convergence_shallow_feeder_concentric(
             shallow = [lid for lid, _, is_bypass in feeders if not is_bypass]
             bypass = [lid for lid, _, is_bypass in feeders if is_bypass]
         else:
-            entry = same_row_bypass_entry(graph, port_id, offsets)
+            entry = same_row_bypass_entry(graph, port_id)
             if entry is None:
                 continue
             shallow, bypass = list(entry.flat), list(entry.rising)
@@ -1686,26 +1733,39 @@ def check_convergence_shallow_feeder_concentric(
         if not shallow:
             continue
         lane = {lid: offsets.get((port_id, lid), 0.0) for lid in graph.lines}
-        if bypass:
-            max_shallow = max(lane[lid] for lid in shallow)
-            min_bypass = min(lane[lid] for lid in bypass)
-            if max_shallow > min_bypass + COORD_TOLERANCE_FINE:
-                messages.append(
-                    f"convergence entry {port_id!r}: shallow feeder sits at offset "
-                    f"{max_shallow:.1f}, port-far of the climbing risers (min "
-                    f"{min_bypass:.1f}); it weaves across the turning bundle "
-                    f"instead of nesting on top"
-                )
-        if descending:
-            min_shallow = min(lane[lid] for lid in shallow)
-            max_descending = max(lane[lid] for lid in descending)
-            if max_descending > min_shallow - COORD_TOLERANCE_FINE:
-                messages.append(
-                    f"convergence entry {port_id!r}: a line coming down into the "
-                    f"port sits at offset {max_descending:.1f}, not above the "
-                    f"flat feeders (min {min_shallow:.1f}); it crosses them to "
-                    f"reach its lane"
-                )
+        crossed = entry_crossed_pairs(graph, port_id)
+        weaving = [
+            (lane[s], lane[b])
+            for s in shallow
+            for b in bypass
+            if lane[s] > lane[b] + COORD_TOLERANCE_FINE
+            and frozenset((s, b)) not in crossed
+        ]
+        if weaving:
+            max_shallow = max(s for s, _b in weaving)
+            min_bypass = min(b for _s, b in weaving)
+            messages.append(
+                f"convergence entry {port_id!r}: shallow feeder sits at offset "
+                f"{max_shallow:.1f}, port-far of the climbing risers (min "
+                f"{min_bypass:.1f}); it weaves across the turning bundle "
+                f"instead of nesting on top"
+            )
+        crossing = [
+            (lane[s], lane[d])
+            for s in shallow
+            for d in descending
+            if lane[d] > lane[s] - COORD_TOLERANCE_FINE
+            and frozenset((s, d)) not in crossed
+        ]
+        if crossing:
+            min_shallow = min(s for s, _d in crossing)
+            max_descending = max(d for _s, d in crossing)
+            messages.append(
+                f"convergence entry {port_id!r}: a line coming down into the "
+                f"port sits at offset {max_descending:.1f}, not above the "
+                f"flat feeders (min {min_shallow:.1f}); it crosses them to "
+                f"reach its lane"
+            )
     return messages
 
 
@@ -1870,6 +1930,59 @@ def _entry_order_reference(
     return consumer.id if consumer is not None else entry_id
 
 
+def _leaves_the_row(
+    graph: MetroGraph,
+    reference_id: str,
+    exit_port_id: str,
+    line_id: str,
+) -> bool:
+    """Whether *line_id* reaches a station off *reference_id*'s lane-axis
+    coordinate inside the exit's section on its way to *exit_port_id*."""
+    section_id = graph.ports[exit_port_id].section_id
+    lateral = "y" if lanes_run_along_y(graph.sections[section_id].direction) else "x"
+    level = getattr(graph.stations[reference_id], lateral)
+    seen = {reference_id}
+    stack = [reference_id]
+    while stack:
+        node = stack.pop()
+        for edge in graph.edges_from(node):
+            target = edge.target
+            if edge.line_id != line_id or target in seen or target == exit_port_id:
+                continue
+            station = graph.stations[target]
+            if station.section_id != section_id:
+                continue
+            seen.add(target)
+            if not station.is_port and abs(getattr(station, lateral) - level) > (
+                COORD_TOLERANCE
+            ):
+                return True
+            stack.append(target)
+    return False
+
+
+def _reversals_all_leave_the_row(
+    graph: MetroGraph,
+    reference_id: str,
+    exit_port_id: str,
+    entry_order: tuple[str, ...],
+    exit_order: tuple[str, ...],
+) -> bool:
+    """Whether every pair *exit_order* reverses from *entry_order* is two
+    lines that both leave the entry's row inside the section."""
+    rank = {lid: i for i, lid in enumerate(exit_order)}
+    leaves = {
+        lid: _leaves_the_row(graph, reference_id, exit_port_id, lid)
+        for lid in entry_order
+    }
+    return all(
+        leaves[a] and leaves[b]
+        for i, a in enumerate(entry_order)
+        for b in entry_order[i + 1 :]
+        if rank[a] > rank[b]
+    )
+
+
 def check_exit_inherits_entry_bundle_order(
     graph,  # noqa: ANN001 - MetroGraph (avoid import cycle)
     offsets: dict[tuple[str, str], float],
@@ -1890,6 +2003,11 @@ def check_exit_inherits_entry_bundle_order(
 
     The order an exit inherits comes from :func:`_entry_order_reference`, which
     for a perpendicular entry is the trunk rather than the port itself.
+
+    Two lines that both leave the entry's row inside the section part there
+    and take their own order, which the plan rejoins them in: their pair is
+    not held to the entry's order.  A line running level through the section
+    keeps its order against every other line.
     """
 
     def _order(port_id: str, lines: set[str]) -> tuple[str, ...]:
@@ -1920,6 +2038,10 @@ def check_exit_inherits_entry_bundle_order(
         through_entry_order = _order(reference_id, through_lines)
         through_exit_order = _order(port_id, through_lines)
         if through_entry_order != through_exit_order:
+            if _reversals_all_leave_the_row(
+                graph, reference_id, port_id, through_entry_order, through_exit_order
+            ):
+                continue
             violations.append(
                 ExitBundleOrderViolation(
                     section_id=section.id,
@@ -2491,7 +2613,8 @@ def check_partial_branch_offset_gaps(
     across the section, so its interior gaps are deliberate and this
     check stays a no-op there.  The narrower non-compact rule -- no slot
     reserved for a line the section does not carry at all -- is settled
-    in ``offsets._close_section_dead_lanes`` rather than reported here.
+    by the lane plan's track lanes (``build_lane_plan``) rather than reported
+    here.
     """
     if not graph.compact_offsets:
         return []
@@ -3839,12 +3962,14 @@ def check_no_dogleg_crosses_exempt_trunk(
     if not exempt:
         return []
     violations: list[DoglegCrossesExemptTrunk] = []
+    k = {id(r): (r.edge.source, r.edge.target, r.line_id) for r in routes}
+    forced = recorded_crossing_pairs(graph) if graph is not None else frozenset()
     for rp in routes:
         if not rp.is_inter_section or rp.normalize_exempt:
             continue
         for rank, seg in iter_horizontal_trunks(rp):
             for erp, exempt_rank, eseg in exempt:
-                if erp.line_id == rp.line_id:
+                if erp.line_id == rp.line_id or (k[id(rp)], k[id(erp)]) in forced:
                     continue
                 if abs(seg.y - eseg.y) >= 2 * OFFSET_STEP:
                     continue
@@ -4370,6 +4495,133 @@ def check_concentric_bundle_corners(
                 )
             )
     return violations
+
+
+_Point = tuple[float, float]
+
+
+@dataclass(frozen=True)
+class NonNestedCornerPair:
+    """Two lines' corners that bend together a few lanes apart off one arc centre.
+
+    The outer corner is the one farther from the shared bend's centre, so a
+    concentric pair has ``outer_radius == inner_radius + lane_gap``.
+    """
+
+    outer_line: str
+    outer_edge: tuple[str, str]
+    outer_xy: tuple[float, float]
+    outer_radius: float
+    inner_line: str
+    inner_edge: tuple[str, str]
+    inner_xy: tuple[float, float]
+    inner_radius: float
+    lane_gap: float
+    centre_spread: float
+
+    def message(self) -> str:
+        """Human-readable summary of the pair."""
+        return (
+            f"non-nested corners: {self.outer_line!r} "
+            f"{self.outer_edge[0]!r}->{self.outer_edge[1]!r} at "
+            f"({self.outer_xy[0]:.1f},{self.outer_xy[1]:.1f}) r="
+            f"{self.outer_radius:.1f} bends {self.lane_gap:.1f}px outside "
+            f"{self.inner_line!r} {self.inner_edge[0]!r}->{self.inner_edge[1]!r} "
+            f"at ({self.inner_xy[0]:.1f},{self.inner_xy[1]:.1f}) r="
+            f"{self.inner_radius:.1f}; their arc centres are "
+            f"{self.centre_spread:.1f}px apart"
+        )
+
+
+def check_cross_edge_corners_concentric(
+    graph: MetroGraph,
+    routes: list[RoutedPath],
+    offsets: dict[tuple[str, str], float],
+) -> list[NonNestedCornerPair]:
+    """Return corner pairs of distinct lines that translate a bend together off-centre.
+
+    Any two routes are compared, whatever edges they belong to, which is what
+    sets this apart from :func:`check_concentric_bundle_corners`: corners on
+    unrelated edges that turn the same way and nest as lanes of one bundle by
+    :func:`~nf_metro.layout.routing.corners.bend_nests_across_edges`, the
+    predicate the routing nests them by, must share an arc centre.  A corner
+    traversed in the opposite direction shares the bend.  Each physical pair is
+    reported once, however many same-line routes overlay either corner.
+    """
+    from nf_metro.layout.routing.corners import bend_nests_across_edges
+
+    offset_step = graph_offset_step(graph)
+    by_bend: defaultdict[
+        _Point, list[tuple[RoutedPath, list[_Point], float, _Point, _Point]]
+    ] = defaultdict(list)
+    for route in routes:
+        points = apply_route_offsets(route, offsets)
+        radii = _resolved_corner_radii(route, points)
+        for rank in range(1, len(points) - 1):
+            if not is_orthogonal_turn(points[rank - 1], points[rank], points[rank + 1]):
+                continue
+            incoming = _segment_unit(points[rank - 1], points[rank])
+            outgoing = _segment_unit(points[rank], points[rank + 1])
+            assert incoming is not None and outgoing is not None
+            bend = (outgoing[0] - incoming[0], outgoing[1] - incoming[1])
+            by_bend[bend].append(
+                (
+                    route,
+                    points[rank - 1 : rank + 2],
+                    radii[rank - 1],
+                    incoming,
+                    outgoing,
+                )
+            )
+
+    found: dict[frozenset[tuple[str, float, float]], NonNestedCornerPair] = {}
+    for bend, corners in by_bend.items():
+        for index, (route_a, corner_a, radius_a, incoming, outgoing) in enumerate(
+            corners
+        ):
+            for route_b, corner_b, radius_b, _incoming, _outgoing in corners[
+                index + 1 :
+            ]:
+                if route_a.line_id == route_b.line_id or not bend_nests_across_edges(
+                    corner_a, corner_b, incoming, outgoing, offset_step
+                ):
+                    continue
+                point_a, point_b = corner_a[1], corner_b[1]
+                lane_gap = abs(point_b[0] - point_a[0])
+                translated = _translated_corner(
+                    point_a, radius_a, point_b, radius_b, incoming, outgoing
+                )
+                if translated is None or translated[2] <= _CONCENTRIC_CENTRE_TOLERANCE:
+                    continue
+                key = frozenset(
+                    (
+                        (route_a.line_id, round(point_a[0], 1), round(point_a[1], 1)),
+                        (route_b.line_id, round(point_b[0], 1), round(point_b[1], 1)),
+                    )
+                )
+                if key in found:
+                    continue
+                toward_centre = (point_b[0] - point_a[0]) * bend[0] + (
+                    point_b[1] - point_a[1]
+                ) * bend[1]
+                outer, inner = (
+                    ((route_a, point_a, radius_a), (route_b, point_b, radius_b))
+                    if toward_centre > 0
+                    else ((route_b, point_b, radius_b), (route_a, point_a, radius_a))
+                )
+                found[key] = NonNestedCornerPair(
+                    outer_line=outer[0].line_id,
+                    outer_edge=(outer[0].edge.source, outer[0].edge.target),
+                    outer_xy=outer[1],
+                    outer_radius=outer[2],
+                    inner_line=inner[0].line_id,
+                    inner_edge=(inner[0].edge.source, inner[0].edge.target),
+                    inner_xy=inner[1],
+                    inner_radius=inner[2],
+                    lane_gap=lane_gap,
+                    centre_spread=translated[2],
+                )
+    return list(found.values())
 
 
 def _fan_corner_observations(
@@ -6819,15 +7071,17 @@ def check_peeloff_concentric(
     graph: MetroGraph,
     routes: list[RoutedPath],
     curve_radius: float | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[PeeloffBundleCrossing | LooseDestinationTail]:
     """Return peel-off bundles that do not nest into one band at a LEFT entry port.
 
     Every contiguous concentric peel-off bundle - lines sharing one bypass trunk
     rising into a common LEFT entry port - owes the band
     :class:`PeeloffBundleCrossing` describes.  That band is set up front by
-    ``_convergence_line_order`` (riser peel-x) and
-    ``_order_convergence_entry_ports`` (port slots), so the bundle nests through
-    the standard layout path rather than by repair here.
+    ``_convergence_line_order`` (riser peel-x) and the lane plan's port
+    orders (port slots), so the bundle nests through
+    the standard layout path rather than by repair here.  A port in
+    *landing_orders* owes the band in the order the plan lands it.
     """
     if curve_radius is None:
         curve_radius = active_curve_radius()
@@ -6861,7 +7115,7 @@ def check_peeloff_concentric(
             )
         if loose:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(bundle, step, landing_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -6883,7 +7137,7 @@ def check_peeloff_concentric(
         )
         if key in checked:
             continue
-        targets = peeloff_target_slots(bundle, step)
+        targets = peeloff_target_slots(bundle, step, landing_orders)
         for line_id, tail in bundle.per_line.items():
             slot = targets[line_id]
             if not tail_on_slot(tail, slot):
@@ -7034,24 +7288,47 @@ class CurveInvariantError(RuntimeError):
     """
 
 
+def _outside_recorded_crossings(
+    graph: MetroGraph,
+    routes: Sequence[RoutedPath],
+    violations: list[BundleOrderViolation],
+) -> list[BundleOrderViolation]:
+    """*violations* less each pair a recorded entry crossing exchanges on the
+    last segment into its entry
+    (:func:`~nf_metro.layout.lane_plan.entry_crossing_lines`)."""
+    last = {(r.edge.source, r.edge.target): len(r.points) - 2 for r in routes}
+    return [
+        violation
+        for violation in violations
+        if violation.segment_index
+        != last.get((violation.edge_source, violation.edge_target))
+        or not {violation.line_a, violation.line_b}
+        <= entry_crossing_lines(graph, violation.edge_target)
+    ]
+
+
 def render_curve_violations(
     graph: MetroGraph,
     routes: list[RoutedPath],
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> list[tuple[str, Sequence[_HasMessage]]]:
     """Every render-time curve check, labelled, with the violations it finds.
 
     The check set :func:`assert_render_curve_invariants` enforces on every
-    render.
+    render.  *landing_orders* holds the landing order the routes' plan decided
+    for each port it lands whole.
     """
     if curve_radius is None:
         curve_radius = active_curve_radius()
     return [
         (
             "bundle order (line crosses its bundle-mate)",
-            check_bundle_order_preserved(routes),
+            _outside_recorded_crossings(
+                graph, routes, check_bundle_order_preserved(routes)
+            ),
         ),
         (
             "non-concentric bundle corner",
@@ -7127,7 +7404,7 @@ def render_curve_violations(
         ),
         (
             "peel-off bundle braids into port",
-            check_peeloff_concentric(graph, routes, curve_radius),
+            check_peeloff_concentric(graph, routes, curve_radius, landing_orders),
         ),
         (
             "opposing feeder confluence changes lane order",
@@ -7163,6 +7440,7 @@ def assert_render_curve_invariants(
     offsets: dict[tuple[str, str], float],
     *,
     curve_radius: float | None = None,
+    landing_orders: Mapping[str, Sequence[str]] = NO_LANDING_ORDERS,
 ) -> None:
     """Raise :class:`CurveInvariantError` if the final render routes are defective.
 
@@ -7193,11 +7471,19 @@ def assert_render_curve_invariants(
     builder cannot always make clean.  A failure every one of whose named routes
     is such a lead-in downgrades to a warning naming the actionable fix; every
     other failure in the map aborts.
+
+    *landing_orders* is the plan's landing order for each port it decided
+    (:func:`~nf_metro.layout.routing.landing_deal.planned_landing_orders` of
+    the plan that emitted *routes*).
     """
     if curve_radius is None:
         curve_radius = active_curve_radius()
     named_checks = render_curve_violations(
-        graph, routes, offsets, curve_radius=curve_radius
+        graph,
+        routes,
+        offsets,
+        curve_radius=curve_radius,
+        landing_orders=landing_orders,
     )
     # A permissive render warns on every failure below, so nothing is bridged.
     bridged_ports: set[str] = (
@@ -7492,6 +7778,19 @@ CHECK_REGISTRY: tuple[GuardSpec, ...] = (
             "to the plan, exactly as `check_no_fused_cotravelling_lines` reasons."
         ),
     ),
+    _check_spec(
+        check_cross_edge_corners_concentric,
+        "C",
+        issue_pin=("#2165",),
+        narrow_reason=(
+            "A corpus oracle over corner nesting rather than a render guard: a "
+            "non-nested pair renders without aborting, and failing repository "
+            "maps are held by a ratchet, so a render guard would abort maps "
+            "that are imperfect rather than undrawable. Restricted to distinct "
+            "lines whose corners turn together a whole one to three lanes "
+            "apart, every leg longer than that gap."
+        ),
+    ),
 )
 
 
@@ -7518,6 +7817,7 @@ __all__ = [
     "MergeFeederOffTrunk",
     "MergePortApproachViolation",
     "NonConcentricCornerViolation",
+    "NonNestedCornerPair",
     "LooseDestinationTail",
     "LooseSameDestinationFinalVertical",
     "OpposingGapChannelCrowding",
@@ -7550,6 +7850,7 @@ __all__ = [
     "check_same_destination_approach_bundle",
     "check_trunks_declared",
     "check_concentric_bundle_corners",
+    "check_cross_edge_corners_concentric",
     "check_bundle_corner_radius_floor",
     "check_standard_source_bundle_corner_inputs",
     "check_coincident_corner_radii",

@@ -15,7 +15,7 @@ from single_axis_ratchet import single_axis_sites, single_axis_sites_from_source
 
 _LAYOUT_DIR = Path(__file__).resolve().parents[1] / "src" / "nf_metro" / "layout"
 
-_BASELINE = {"x": 26, "y": 47}
+_BASELINE = {"x": 25, "y": 47}
 
 _EXEMPTIONS = {
     "geometry.py::section_row_span": (

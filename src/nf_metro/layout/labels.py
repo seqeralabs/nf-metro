@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     COLLISION_MULTIPLIER,
+    COORD_TOLERANCE_FINE,
     DESCENDER_CLEARANCE,
     DIAGONAL_SLOPE_RATIO,
     LABEL_BBOX_MARGIN,
@@ -1026,10 +1027,9 @@ def _edge_solo(
     Returns a dict mapping section_id -> (lo_solo, hi_solo).  The edge
     station override (prefer outward labels) should only apply when the
     extreme Y has a single station; otherwise it kills alternation on
-    crowded tracks.
+    crowded tracks.  Stations within ``COORD_TOLERANCE_FINE`` of an extreme
+    share it, so float noise in translated coordinates cannot split a row.
     """
-    from collections import Counter
-
     result: dict[str, tuple[bool, bool]] = {}
     sec_ys: dict[str, list[float]] = {}
     for s in stations:
@@ -1038,8 +1038,10 @@ def _edge_solo(
 
     for sec_id, ys in sec_ys.items():
         y_lo, y_hi = section_y_range[sec_id]
-        counts = Counter(ys)
-        result[sec_id] = (counts.get(y_lo, 0) == 1, counts.get(y_hi, 0) == 1)
+        result[sec_id] = (
+            sum(abs(y - y_lo) <= COORD_TOLERANCE_FINE for y in ys) == 1,
+            sum(abs(y - y_hi) <= COORD_TOLERANCE_FINE for y in ys) == 1,
+        )
 
     return result
 
@@ -1215,7 +1217,9 @@ def _trial_cost(
     costs 1, each push (still colliding after flip) costs 2.  A small
     fractional penalty is added for labels that face inward (toward the
     section's Y center, i.e. into the route-line bundle), weighted by
-    label width so the longest labels dominate the tiebreaker.
+    label width so the longest labels dominate the tiebreaker.  A station
+    within ``COORD_TOLERANCE_FINE`` of the center faces neither way, so
+    float noise in translated coordinates cannot pick its side.
     """
     solo = _edge_solo(stations, section_y_range)
 
@@ -1303,9 +1307,10 @@ def _trial_cost(
         # the section Y center, i.e. into the route-line bundle),
         # weighted by label width so longer labels drive the decision.
         if y_mid is not None and y_lo < y_hi:  # type: ignore[possibly-undefined]
-            if not candidate.above and station.y < y_mid:
+            off_mid = station.y - y_mid
+            if not candidate.above and off_mid < -COORD_TOLERANCE_FINE:
                 cost += label_text_width(station.label) * 0.001
-            elif candidate.above and station.y > y_mid:
+            elif candidate.above and off_mid > COORD_TOLERANCE_FINE:
                 cost += label_text_width(station.label) * 0.001
 
         placements.append(candidate)

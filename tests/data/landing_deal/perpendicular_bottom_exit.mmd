@@ -1,0 +1,33 @@
+%%metro title: Fuzz 8400059
+%%metro style: nfcore
+%%metro line: l0 | Index | #e6194b
+%%metro line: l1 | Bam_Export | #3cb44b
+%%metro line: l2 | Bam_Align_Annotate | #4363d8
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 0,1
+
+graph LR
+    subgraph sec0 [Pca 0]
+        s0n0[REPORT]
+        s0n1[call]
+        s0n0 -->|l1,l2| s0n1
+    end
+    subgraph sec1 [Report 1]
+        %%metro exit: bottom | l0, l2
+        s1n0[pca_classify]
+        s1n1[export]
+        s1n0 -->|l0,l1,l2| s1n1
+    end
+    subgraph sec2 [Dedup 2]
+        %%metro direction: TB
+        s2n0[vcf]
+        s2n1[annotate_summarise_polish]
+        s2n2[classify_summarise_gather]
+        s2n3[quant]
+        s2n0 -->|l0,l2| s2n1
+        s2n1 -->|l0,l2| s2n2
+        s2n2 -->|l0,l2| s2n3
+    end
+    s1n1 -->|l0,l2| s2n0
+    s0n1 -->|l1,l2| s1n0

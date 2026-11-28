@@ -22,15 +22,17 @@ from itertools import combinations
 from pathlib import Path
 from typing import NamedTuple
 
+import networkx as nx
 import pytest
 from conftest import render_with_downgrades
 from layout_validator import _segments_cross, validate_layout
 from orientation_transform import Orientation, all_orientations, transform_source
 
 from nf_metro.layout.geometry import lanes_run_along_y, segment_intersects_bbox
-from nf_metro.layout.ordering import _seat_contender
+from nf_metro.layout.ordering import _claimed_peel_lane, _seat_contender
 from nf_metro.layout.phases._common import _station_marker_bbox
 from nf_metro.layout.routing import compute_station_offsets
+from nf_metro.parser import parse_metro_mermaid
 from nf_metro.parser.model import MetroGraph
 from nf_metro.render.validate import drawn_segments, parse_route_polylines
 
@@ -96,9 +98,6 @@ _KNOWN_DEFECTS = {
     "test_no_guard_downgrade": {
         ("fed_fork_across_sections", o): _CORRIDOR for o in _TB + _BT
     },
-    "test_no_line_crosses_another": {
-        ("fed_fork_across_sections", o): _CORRIDOR for o in _TB
-    },
     "test_contender_shapes_stay_clear": {
         **{
             (f"centered_{order}", o): _CENTRED_TB_ABORT
@@ -107,11 +106,7 @@ _KNOWN_DEFECTS = {
         },
         **{
             (shape, o): _STACKED_FEED
-            for shape in [
-                *(f"flat_frame_{order}" for order in DECLARATION_ORDERS),
-                *_FED_SHAPES,
-                _AUTO_GRID,
-            ]
+            for shape in [*_FED_SHAPES, _AUTO_GRID]
             for o in _TB
         },
         **{
@@ -523,6 +518,29 @@ def test_contender_lines_to_one_join_share_a_row(orientation: Orientation) -> No
     assert 2 * len(spots) == len(helpers), (
         f"'n6' lines split across rows: {sorted(spots)}"
     )
+
+
+@pytest.mark.parametrize("with_sibling", [True, False])
+def test_a_fork_claims_a_peel_lane_only_beside_a_sibling_source(
+    with_sibling: bool,
+) -> None:
+    fixture = FIXTURES["source_fork"]
+    graph = parse_metro_mermaid(fixture.path.read_text())
+    section = nx.DiGraph(
+        (e.source, e.target)
+        for e in graph.edges
+        if graph.stations[e.source].section_id == "analysis"
+        and graph.stations[e.target].section_id == "analysis"
+    )
+    if not with_sibling:
+        section.remove_node(fixture.sibling)
+    line_base = {"main": 0.0, "qc": 1.0, "ref": 2.0}
+
+    lane = _claimed_peel_lane(
+        fixture.peel, 1.0, section, {fixture.fork: 0.0}, graph, line_base
+    )
+
+    assert lane == (1.0 if with_sibling else None)
 
 
 @contextmanager

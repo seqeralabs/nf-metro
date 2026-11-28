@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from nf_metro.layout.constants import (
     COORD_TOLERANCE,
@@ -32,6 +32,7 @@ from nf_metro.layout.route_topology import (
     merge_fanout_junction_ids,
 )
 from nf_metro.layout.routing.common import (
+    EXIT_SIDE_DIRECTION,
     Direction,
     RoutedPath,
     _h_segment_penetrates_section,
@@ -42,13 +43,10 @@ from nf_metro.layout.routing.common import (
     merge_trunk_force_cross_row,
     resolve_section,
     resolve_section_colrow,
+    right_normal_axis_sign,
     row_bottom_edge,
     row_top_edge,
     vertical_flow_sections,
-)
-from nf_metro.layout.routing.perp_columns import (
-    PerpEntryColumn,
-    settled_perp_entry_columns,
 )
 from nf_metro.layout.routing.reserved_bands import ReservedCorridors
 from nf_metro.layout.routing.reversal import (
@@ -71,6 +69,7 @@ from nf_metro.parser.route_topology import (
 
 if TYPE_CHECKING:
     from nf_metro.layout.route_plan import ExitTurnPlanId
+    from nf_metro.layout.routing.co_row import CoRowDiagonalGroup
     from nf_metro.layout.routing.convergences import ConvergencePlanExecutionQuery
     from nf_metro.layout.routing.exit_turns import ExitTurnPlanQuery
     from nf_metro.layout.routing.system_emission import RouteSystemEmissionExecution
@@ -267,12 +266,14 @@ class _RoutingCtx:
     route_systems: RouteSystemEmissionExecution | None = None
     skip_edges: set[_EdgeKey] = field(default_factory=set)
     built_routes: list[RoutedPath] = field(default_factory=list)
+    co_row_diagonal_groups: Mapping[_EdgeKey, CoRowDiagonalGroup] = field(
+        default_factory=dict
+    )
     boundary_clearance_requirements: list[BoundaryClearanceRequirement] = field(
         default_factory=list
     )
     """Room handlers asked settlement for, published with the route plan."""
     junction_fan_info: dict[_EdgeKey, tuple[int, int]] = field(default_factory=dict)
-    perp_entry_columns: Mapping[str, PerpEntryColumn] = field(default_factory=dict)
     fan_corridors: dict[str, FanCorridor] = field(default_factory=dict)
     section_trunk_y: dict[str, float] = field(default_factory=dict)
     merge_fanouts: set[str] = field(default_factory=set)
@@ -437,10 +438,9 @@ def _build_routing_context(
     all_x = [s.x for s in graph.stations.values()]
     fold_x = max(all_x) if all_x else 0
 
-    # Junctions fed by BOTTOM exit ports
     bottom_exit_junction_ports: dict[str, str] = {}
     for divergence_id, exit_port_id in divergence_exit_ports.items():
-        if graph.ports[exit_port_id].side is PortSide.BOTTOM:
+        if graph.ports[exit_port_id].side in (PortSide.TOP, PortSide.BOTTOM):
             bottom_exit_junction_ports[divergence_id] = exit_port_id
     bottom_exit_junctions = set(bottom_exit_junction_ports)
 
@@ -477,6 +477,7 @@ def _build_routing_context(
         divergence_sources,
         line_priority,
         skip_edges=all_exclude,
+        station_offsets=station_offsets,
         topology=topology,
     )
     resolved_offset_step = (
@@ -514,11 +515,6 @@ def _build_routing_context(
         curve_radius=curve_radius,
         validate_final_route_frames=validate_final_route_frames,
         junction_fan_info=junction_fan_info,
-        perp_entry_columns=(
-            {}
-            if station_offsets is None
-            else settled_perp_entry_columns(graph, station_offsets)
-        ),
         fan_corridors=fan_corridors,
         skip_edges=merge.skip_edges,
         section_trunk_y=section_trunk_y,
@@ -685,26 +681,6 @@ def port_lane_coord(
     return station_lane_coord(frame, port, offset)
 
 
-def port_arrival_order(
-    graph: MetroGraph,
-    port: Station,
-    station_offsets: Mapping[tuple[str, str], float],
-    positive_fan: set[str] | None = None,
-) -> list[str]:
-    """Lines at *port* in the order they cross its edge (arrival order).
-
-    Ties (two lines sharing a lane coordinate) break on line id, so the order is
-    independent of the input line listing.
-    """
-    return sorted(
-        graph.station_lines(port.id),
-        key=lambda lid: (
-            port_lane_coord(graph, port, lid, station_offsets, positive_fan),
-            lid,
-        ),
-    )
-
-
 def _entry_port_for_line(
     graph: MetroGraph, section: Section, line_id: str
 ) -> Station | None:
@@ -805,22 +781,31 @@ def _has_intervening_sections(
     src_col: int,
     tgt_col: int,
     src_row: int | None = None,
+    axis: Literal["x", "y"] = "x",
 ) -> bool:
-    """Check if any same-row sections exist in columns strictly between src and tgt."""
+    """Check if any same-row sections exist in columns strictly between src and tgt.
+
+    Along ``axis="y"`` the grid is read transposed: *src_col* and *tgt_col* are
+    rows and *src_row* is the column the sections must share.
+    """
     lo, hi = min(src_col, tgt_col), max(src_col, tgt_col)
     for s in graph.sections.values():
-        if s.bbox_w > 0 and lo < s.grid_col < hi:
-            if src_row is None or s.grid_row == src_row:
+        along, lane = (
+            (s.grid_col, s.grid_row) if axis == "x" else (s.grid_row, s.grid_col)
+        )
+        if s.bbox_w > 0 and lo < along < hi:
+            if src_row is None or lane == src_row:
                 return True
     return False
 
 
 def _intervening_section_obstructs(
     graph: MetroGraph,
-    src_col: int,
+    src_col: int | None,
     src_row: int | None,
-    tgt_col: int,
+    tgt_col: int | None,
     tgt_row: int | None,
+    axis: Literal["x", "y"] = "x",
 ) -> bool:
     """Whether a multi-column hop is blocked by a section in a column it spans.
 
@@ -828,17 +813,23 @@ def _intervening_section_obstructs(
     whose horizontal leg runs at the target entry Y - the target row, plowed
     through even when the source row is clear. Only meaningful when the columns
     are more than one apart; an adjacent hop has no column between them to
-    intervene.
+    intervene.  Along ``axis="y"`` the same test reads a vertical hop, rows and
+    columns exchanged.
     """
-    if abs(tgt_col - src_col) <= 1:
+    src, tgt, src_lane, tgt_lane = (
+        (src_col, tgt_col, src_row, tgt_row)
+        if axis == "x"
+        else (src_row, tgt_row, src_col, tgt_col)
+    )
+    if src is None or tgt is None or abs(tgt - src) <= 1:
         return False
-    if _has_intervening_sections(graph, src_col, tgt_col, src_row):
+    if _has_intervening_sections(graph, src, tgt, src_lane, axis):
         return True
     return (
-        src_row is not None
-        and tgt_row is not None
-        and tgt_row != src_row
-        and _has_intervening_sections(graph, src_col, tgt_col, tgt_row)
+        src_lane is not None
+        and tgt_lane is not None
+        and tgt_lane != src_lane
+        and _has_intervening_sections(graph, src, tgt, tgt_lane, axis)
     )
 
 
@@ -943,6 +934,33 @@ def _hop_needs_bypass(graph: MetroGraph, src: HopEnd, tgt: HopEnd) -> BypassNeed
     )
 
 
+def boxed_fanout_junction(graph: MetroGraph, node_id: str, diverges: bool) -> bool:
+    """Whether *node_id*, a junction that *diverges*, sits in a packed
+    section, boxed in by its cell-mates."""
+    if not diverges:
+        return False
+    home = resolve_section(graph, graph.stations[node_id])
+    return home is not None and graph.is_packed_section(home.id)
+
+
+def packed_cell_same_row_bypass(
+    entry_side: PortSide | None,
+    need: BypassNeed,
+    rows: tuple[int | None, int | None],
+    boxed_fanout_source: bool,
+) -> bool:
+    """Whether a hop into an entry on *entry_side* is a packed-cell same-row
+    bypass: a LEFT entry on the hop's own grid row (*rows*: the source's,
+    the target's) with a packed cell-mate standing on either endpoint's Y,
+    unless the mate blocks the source row of a fan-out junction its packed
+    section boxes in (the band-hop takes that one)."""
+    blocks = need.cellmate_blocks_source_row or need.cellmate_blocks_target_row
+    held_back = need.cellmate_blocks_source_row and boxed_fanout_source
+    return (
+        entry_side is PortSide.LEFT and blocks and rows[0] == rows[1] and not held_back
+    )
+
+
 def _adjacent_feeder_reaches_merge_directly(
     graph: MetroGraph, feeder: HopEnd, merge: HopEnd, channel_y: float
 ) -> bool:
@@ -974,9 +992,8 @@ def is_far_side_around_below_left_entry(graph: MetroGraph, port: Port) -> bool:
     westward, drops below every box, and rises into the far-side port from its
     outward side -- a half-turn that transposes the bundle end-to-end.  Routed
     by ``_route_left_exit_around_below_left_entry``; the destination section takes
-    the feeder's delivered order transposed once by the seam classifier
-    (``_reorder_reconvergence``) and the layout reserves left clearance for the
-    wrap.
+    the feeder's delivered order transposed once by the lane plan
+    (``build_lane_plan``) and the layout reserves left clearance for the wrap.
 
     Pure topology (grid columns, port sides, intervening sections), so it reads
     the same before global coordinates are assigned and after.
@@ -1005,48 +1022,9 @@ def is_near_vertical_drop(dx: float, dy: float) -> bool:
     """Whether a junction-to-entry hop is the near-vertical same-column drop.
 
     The hop is within ``JUNCTION_MARGIN`` horizontally and far steeper than it is
-    wide.  Shared by the routing dispatch
-    (``_InterFacts.is_near_vertical_same_col_junction``) and the offset-reversal
-    predicate so the two cannot drift.
+    wide.
     """
     return abs(dx) <= JUNCTION_MARGIN + COORD_TOLERANCE and abs(dy) > abs(dx) * 3
-
-
-def is_near_vertical_junction_right_entry(graph: MetroGraph, port: Port) -> bool:
-    """Whether *port* is a RIGHT entry a multi-line fan-out junction drops into.
-
-    Detected so the section's line order can be reversed to match the descent's
-    transpose (see ``_reverse_near_vertical_junction_right_entry_offsets``).  The
-    same near-vertical geometry the routing dispatch deflects to the standard
-    drop (``_InterFacts.takes_near_vertical_junction_drop``): the junction and
-    port share a grid column, the junction overhangs the port's outward edge, the
-    drop is near-vertical, and at least two lines descend together (mirroring the
-    dispatch's ``f.n >= 2``; a lone line has no bundle to transpose).
-    """
-    if not (port.is_entry and port.side is PortSide.RIGHT):
-        return False
-    psec = graph.section_for_port(port)
-    pst = graph.stations.get(port.id)
-    if pst is None:
-        return False
-    lines_by_source: dict[str, set[str]] = defaultdict(set)
-    for edge in graph.edges_to(port.id):
-        lines_by_source[edge.source].add(edge.line_id)
-    for source, lines in lines_by_source.items():
-        jst = graph.stations.get(source)
-        if (
-            source not in graph.junction_ids
-            or jst is None
-            or _resolve_section_col(graph, jst) != psec.grid_col
-        ):
-            continue
-        if (
-            len(lines) >= 2
-            and jst.x >= pst.x - COORD_TOLERANCE
-            and is_near_vertical_drop(pst.x - jst.x, pst.y - jst.y)
-        ):
-            return True
-    return False
 
 
 def _compute_bypass_gap_indices(
@@ -1156,8 +1134,43 @@ def _compute_bypass_gap_indices(
         g1_j, g1_n = gap1_idx.get(ek, (0, 1))
         g2_j, g2_n = gap2_idx.get(ek, (0, 1))
         result[ek] = (g1_j, g1_n, g2_j, g2_n)
-
     return result
+
+
+def _junction_lead(graph: MetroGraph, jid: str) -> Direction:
+    """Direction of the exit run fan junction *jid* continues: the side of
+    the exit port feeding it."""
+    return EXIT_SIDE_DIRECTION[graph.ports[graph.edges_to(jid)[0].source].side]
+
+
+def fan_turning_slots(ctx: _RoutingCtx, jid: str) -> set[int]:
+    """Slots of junction *jid*'s fan held by lines that turn through its corner.
+
+    A line whose every branch reaches the same or the next grid cell along the
+    junction's lead on the lane it holds at the junction runs straight on.
+    """
+    branches = {
+        key: slot for key, slot in ctx.junction_fan_info.items() if key[0] == jid
+    }
+    if not ctx.station_offsets:
+        return {i for i, _n in branches.values()}
+    graph = ctx.graph
+    across = 1 if _junction_lead(graph, jid) in (Direction.L, Direction.R) else 0
+    jst = graph.stations[jid]
+    cell = _resolve_section_colrow(graph, jst)[1 - across]
+    turning: set[str] = set()
+    for key in branches:
+        edge = ctx.edge_by_key[key]
+        tgt = graph.station_for_edge_target(edge)
+        tgt_cell = _resolve_section_colrow(graph, tgt)[1 - across]
+        lane = (jst.x, jst.y)[across] + ctx.station_offsets[(jid, edge.line_id)]
+        tgt_lane = (tgt.x, tgt.y)[across] + ctx.station_offsets.get(
+            (edge.target, edge.line_id), 0.0
+        )
+        assert cell is not None and tgt_cell is not None
+        if abs(tgt_cell - cell) > 1 or abs(tgt_lane - lane) > COORD_TOLERANCE:
+            turning.add(edge.line_id)
+    return {i for (_s, _t, lid), (i, _n) in branches.items() if lid in turning}
 
 
 def _compute_junction_fan_info(
@@ -1166,6 +1179,7 @@ def _compute_junction_fan_info(
     line_priority: dict[str, int],
     skip_edges: set[tuple[str, str, str]] | None = None,
     topology: RouteTopologyQuery | None = None,
+    station_offsets: Mapping[tuple[str, str], float] | None = None,
 ) -> dict[tuple[str, str, str], tuple[int, int]]:
     """Unified fan-out positions for junctions with mixed-direction edges.
 
@@ -1326,7 +1340,7 @@ def _compute_junction_fan_info(
         if not outgoing or not needs_unified:
             continue
 
-        # Assign one position per unique line_id (sorted by priority).
+        # Assign one position per unique line_id.
         # All edges of the same line share that position, including
         # edges previously SKIPPED for the bundle.  This makes a merge
         # branch route share the same source-side fan position as a
@@ -1337,18 +1351,26 @@ def _compute_junction_fan_info(
             for e in graph.edges_from(jid)
             if graph.station_for_edge_target(e).is_port or e.target in junction_ids
         ]
-        # A clean divergence (distinct lines peeling to disjoint targets) is
-        # ordered outermost-to-innermost by reach so the descent X order stays
-        # in phase with the source-section bundle's lead-in Y order; every other
-        # fan (co-travelling bundles, mixed targets) keeps declaration order.
-        peel_order = fanout_divergence_peel_order(graph, jid, line_priority, topology)
-        if peel_order is not None:
-            line_ids = peel_order
-        else:
+        # Each line's slot follows its planned lane at the junction, read
+        # travel-left first, so the descent X order is in phase with the lead-in
+        # it arrives on.  A rail layout plans no per-line offsets: there a clean
+        # divergence (distinct lines peeling to disjoint targets) is ordered
+        # outermost-to-innermost by reach and every other fan keeps declaration
+        # order.
+        fan_lines = {e.line_id for e in all_outgoing}
+        if station_offsets:
+            sign = right_normal_axis_sign(_junction_lead(graph, jid))
             line_ids = sorted(
-                {e.line_id for e in all_outgoing},
-                key=lambda lid: line_priority.get(lid, 0),
+                fan_lines,
+                key=lambda lid: (
+                    sign * station_offsets[(jid, lid)],
+                    line_priority.get(lid, 0),
+                ),
             )
+        else:
+            line_ids = fanout_divergence_peel_order(
+                graph, jid, line_priority, topology
+            ) or sorted(fan_lines, key=lambda lid: line_priority.get(lid, 0))
         line_pos = {lid: i for i, lid in enumerate(line_ids)}
         n = len(line_ids)
 
@@ -1358,7 +1380,6 @@ def _compute_junction_fan_info(
                     line_pos[edge.line_id],
                     n,
                 )
-
     return result
 
 

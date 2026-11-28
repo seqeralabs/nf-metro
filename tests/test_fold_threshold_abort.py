@@ -28,7 +28,8 @@ from nf_metro.layout.routing.convergences import ConvergenceInvariantError
 from nf_metro.layout.routing.invariants import CurveInvariantError
 from nf_metro.render import render_svg
 from nf_metro.render.section_header import SectionHeaderClashError
-from nf_metro.themes import THEMES
+from nf_metro.render.svg import build_render_plan
+from nf_metro.themes import THEMES, resolve_theme
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 
@@ -57,7 +58,6 @@ def _render_at(name: str, fold: int | None) -> None:
 # Both internal abort paths (CurveInvariantError, SectionHeaderClashError) are
 # represented; off_track_input_above_consumer is the header-clash case.
 COMPRESSED_ABORTS = [
-    ("reconverge_reversed_fold", 1),
     ("off_track_input_above_consumer", 1),
     ("mixed_bundle_column", 1),
     ("upward_bypass", 1),
@@ -67,6 +67,7 @@ COMPRESSED_ABORTS = [
 COMPRESSED_RENDERS = [
     ("fold_fan_across", 1),
     ("fold_stacked_branch", 1),
+    ("reconverge_reversed_fold", 1),
 ]
 
 
@@ -111,3 +112,28 @@ def test_uncompressed_layout_does_not_reframe() -> None:
     # internal error, never reframed.  Rendering must simply succeed.
     _render_at("variant_calling", 99)
     _render_at("rnaseq_auto", 99)
+
+
+@pytest.mark.parametrize("name", ("fold_stacked_branch", "reconverge_reversed_fold"))
+def test_a_junction_branch_leaves_on_its_feeding_exits_side(name: str) -> None:
+    """Folded to one column, ``integration``'s LEFT exit feeds a fan-out
+    junction whose ``protein`` branch reaches ``tech_qc``'s RIGHT entry a row
+    below.  The branch leaves westward like the exit feeding it and never
+    turns back east toward ``integration``."""
+    path = _find(name)
+    graph = prepare_graph(
+        path.read_text(),
+        layout_options={"fold_threshold": 1},
+        source_dir=str(path.parent),
+    )
+    plan = build_render_plan(graph, resolve_theme(graph, "light"))
+    (points,) = (
+        points
+        for route, points in zip(plan.routes, plan.route_polylines)
+        if route.line_id == "protein"
+        and route.edge.source in graph.junction_ids
+        and route.edge.target.startswith("tech_qc__entry_right")
+    )
+    xs = [x for x, _y in points]
+    assert xs[1] < xs[0]
+    assert max(xs) == xs[0]

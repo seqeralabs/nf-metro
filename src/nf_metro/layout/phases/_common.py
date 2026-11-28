@@ -13,12 +13,10 @@ from nf_metro.layout.constants import (
     COORD_GROUP_DIGITS_COARSE,
     COORD_GROUP_DIGITS_FINE,
     COORD_TOLERANCE,
-    COORD_TOLERANCE_FINE,
     MIN_BUNDLE_EDGE_CLEARANCE,
     PERP_PORT_EDGE_INSET,
     PORT_BOUNDARY_CROSSING_TOL,
     SAME_COORD_TOLERANCE,
-    graph_offset_step,
 )
 from nf_metro.layout.geometry import (
     AxisFrame,
@@ -32,7 +30,6 @@ from nf_metro.layout.route_topology import divergence_junction_sources
 from nf_metro.parser.model import (
     FLOW_DIRECTIONS,
     Edge,
-    LineSpread,
     MetroGraph,
     Port,
     PortSide,
@@ -850,50 +847,14 @@ def _trunk_symmetric_fan_ids(graph: MetroGraph, section: Section) -> set[str]:
     return result
 
 
-def _linear_entry_pill_lines(
-    graph: MetroGraph,
-    sid: str,
-    offsets: Mapping[tuple[str, str], float],
-) -> tuple[str, ...] | None:
-    """Return the inherited cohort defining an accepted entry-frame pill."""
-    if graph.compact_offsets or graph.line_spread is LineSpread.RAILS:
-        return None
-    station = graph.stations.get(sid)
-    if station is None or station.section_id is None or station.is_port:
-        return None
-    inherited = graph._linear_entry_pill_lines_cache.get(sid)
-    # Mirrors the >=2-lane guard in _cache_linear_entry_pill_lines (offsets.py).
-    if inherited is None or len(inherited) < 2:
-        return None
-    inherited_set = set(inherited)
-    served = tuple(graph.station_lines(sid))
-    local = tuple(line_id for line_id in served if line_id not in inherited_set)
-    if len(local) != 1 or not inherited_set.issubset(served):
-        return None
-    try:
-        ordered = sorted(offsets[sid, line_id] for line_id in inherited)
-    except KeyError:
-        return None
-    step = graph_offset_step(graph)
-    if any(
-        abs(right - left - step) > COORD_TOLERANCE_FINE
-        for left, right in zip(ordered, ordered[1:])
-    ):
-        return None
-    local_offset = offsets.get((sid, local[0]))
-    if local_offset is None or not (
-        abs(local_offset - (ordered[0] - step)) <= COORD_TOLERANCE_FINE
-        or abs(local_offset - (ordered[-1] + step)) <= COORD_TOLERANCE_FINE
-    ):
-        return None
-    return inherited
-
-
 def _station_bundle_offset_span(
-    graph: MetroGraph, sid: str, offsets: dict[tuple[str, str], float]
+    graph: MetroGraph, sid: str, offsets: Mapping[tuple[str, str], float]
 ) -> tuple[float, float]:
     """Min/max per-line Y offset ``sid``'s drawn bundle pill spans around
     its anchor lane, ``(0.0, 0.0)`` for a station with no lines.
+
+    The pill covers every line that stops at the station, one beginning or
+    ending there included; a line only passing the station's lane is not one.
 
     A multi-line bundle's per-line offsets need not be centred on the
     anchor -- the default non-compact assignment gives each line a
@@ -903,10 +864,7 @@ def _station_bundle_offset_span(
     targets in :mod:`...bbox`, so the room a padding constant reserves
     matches what the marker pill actually spans.
     """
-    line_ids = _linear_entry_pill_lines(graph, sid, offsets)
-    if line_ids is None:
-        line_ids = tuple(graph.station_lines(sid))
-    line_offs = [offsets.get((sid, lid), 0.0) for lid in line_ids]
+    line_offs = [offsets.get((sid, lid), 0.0) for lid in graph.station_lines(sid)]
     if not line_offs:
         return 0.0, 0.0
     return min(line_offs), max(line_offs)
@@ -1451,14 +1409,19 @@ def _side_entered_vertical_feeder_pairs(
 
 
 def _section_lr_port_anchor_y(graph: MetroGraph, section: Section) -> float | None:
-    """The section's frozen trunk anchor: its LR/RL entry port Y, or the
-    exit port Y when there is no LR/RL entry port.
+    """The section's trunk anchor: its LR/RL entry port Y, or the exit port
+    Y when there is no LR/RL entry port.
 
     Unlike :func:`_section_trunk_y` (which reads an internal station's
-    current Y), this returns a port station's Y -- a frozen inter-section
-    anchor held fixed through content placement -- so content phases can
-    centre on the trunk without depending on mutable station positions.
-    Returns ``None`` when the section has no LR/RL port.
+    current Y), this returns a port station's Y, an inter-section anchor
+    content placement does not move, so content phases can centre on the
+    trunk without depending on mutable station positions.  An entry port
+    keeps its place relative to its section for the rest of the layout; an
+    exit port does not where Stage 6.16's TB-entry clamp
+    (``_clamp_tb_entry_port``) later pulls it onto the topmost station
+    feeding a downstream TB section's entry, so a reader before that stage
+    sees an interim value there.  Returns ``None`` when the section has no
+    LR/RL port.
     """
     for ports in (section.entry_ports, section.exit_ports):
         for pid in ports:

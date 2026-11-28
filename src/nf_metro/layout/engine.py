@@ -44,6 +44,7 @@ from nf_metro.layout.pass_metrics import (
     inter_row_edge_clearance,
     label_height_approx,
 )
+from nf_metro.layout.phase_state import CANONICAL_STAGE_ORDER
 
 if TYPE_CHECKING:
     from nf_metro.render.style import Theme
@@ -61,7 +62,7 @@ from nf_metro.layout.phases.balancing import (
     _fan_free_content_upward,
     _fan_source_inputs_upward,
     _recenter_loop_side_stations,
-    _shift_and_propagate_loop_stations,
+    _shift_sparse_loop_stations_to_clear_bundle,
     _snap_inter_section_port_pairs,
 )
 from nf_metro.layout.phases.bbox import (
@@ -130,6 +131,7 @@ from nf_metro.layout.phases.guards import (
     _guard_off_track_not_hub,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
+    _guard_rail_interior_as_laid,
     _guard_rail_one_station_per_column,
     _guard_rail_stations_seat_on_rails,
     _guard_section_bboxes_positive,
@@ -206,6 +208,11 @@ from nf_metro.layout.phases.spacing import (
     _residual_label_overlaps,
     _spread_bump,
     _warn_if_pinned_x_spacing_crowds_labels,
+)
+from nf_metro.layout.rail_mode import (
+    lay_section_rails,
+    place_laid_rails,
+    position_rail_section_ports,
 )
 from nf_metro.layout.routing.context import is_far_side_around_below_left_entry
 from nf_metro.layout.title_band import apply_title_band_lift
@@ -462,6 +469,8 @@ def compute_layout(
         # that never reach that checkpoint (``_after_final_deferred`` unset:
         # rail, flat) are exempt from it.
         apply_title_band_lift(graph)
+        if graph.has_rail_sections:
+            _guard_rail_interior_as_laid(graph, "at layout end")
         if validate and graph._after_final_deferred:
             _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
 
@@ -489,7 +498,7 @@ def compute_layout(
         # Must run after every layout/re-layout pass has settled: it only marks
         # half-grid station ids for post-layout invariants. Moving it earlier lets
         # the mark feed a subsequent pass's placement decisions (Stage 6.4's grid
-        # snap, Stage 6.18's orphan expansion), corrupting their geometry.
+        # snap, Stage 6.12's orphan expansion), corrupting their geometry.
         _register_half_grid_reconvergence_branches(graph)
 
 
@@ -679,14 +688,6 @@ def _compute_layout_scaled(
         section_x_gap=section_x_gap,
         section_y_gap=section_y_gap,
         validate=validate,
-    )
-
-    _retrofit_section_rails_phase(
-        graph,
-        x_spacing=x_spacing,
-        y_spacing=y_spacing,
-        section_x_padding=section_x_padding,
-        section_y_padding=section_y_padding,
     )
 
     # Record the bypassed-station label box behind each bypass V so the router
@@ -1239,51 +1240,11 @@ def _apply_label_strike_clearance(
         _relay(validate_layout=validate)
 
 
-def _retrofit_section_rails_phase(
-    graph: MetroGraph,
-    *,
-    x_spacing: float,
-    y_spacing: float,
-    section_x_padding: float,
-    section_y_padding: float,
-) -> None:
-    """Overwrite each rail-flagged section's internal geometry with rail layout.
-
-    The normal pipeline has positioned every section's bbox and inter-section
-    ports; this replaces only the *internal* geometry of rail-flagged sections
-    (rails + spanning pills), anchored at the bbox the placement chose.  Non-rail
-    sections and all inter-section placement keep the normal machinery.
-    """
-    rail_section_ids = [
-        sid
-        for sid, mode in graph.line_spread_overrides.items()
-        if mode is LineSpread.RAILS
-    ]
-    if not rail_section_ids or graph.line_spread is LineSpread.RAILS:
-        return
-
-    from nf_metro.layout.labels import diagonal_label_pitch_by_section
-    from nf_metro.layout.rail_mode import retrofit_section_rails
-
-    section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
-    # Rails sit one base grid pitch apart and their labels hang above or below
-    # the bundle, so the diagonal-label widening of the global y_spacing (the
-    # spread loop, for between-station label clearance) must not also push the
-    # rails apart.  Column X still uses the label-aware pitch, where horizontal
-    # label room genuinely matters.
-    rail_pitch = getattr(graph, "_base_y_spacing", y_spacing)
-    for sid in rail_section_ids:
-        section = graph.sections.get(sid)
-        if section is None:
-            continue
-        retrofit_section_rails(
-            graph,
-            section,
-            x_spacing=section_pitch_map.get(sid, x_spacing),
-            y_spacing=rail_pitch,
-            section_x_padding=section_x_padding,
-            section_y_padding=section_y_padding,
-        )
+# A rail panel's stations reach the graph at the Stage 2.1 globalisation, so
+# its lay is checkable from there on.
+_RAIL_LAY_HELD_STAGES = frozenset(
+    CANONICAL_STAGE_ORDER[CANONICAL_STAGE_ORDER.index("2.1") :]
+)
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:
@@ -1297,6 +1258,12 @@ def _snap(graph: MetroGraph, phase_id: str) -> None:
     capture_phase_snapshot(
         graph, phase_id, getattr(graph, "_phase_snapshots_enabled", False)
     )
+    if (
+        graph._validate_active
+        and graph.has_rail_sections
+        and phase_id in _RAIL_LAY_HELD_STAGES
+    ):
+        _guard_rail_interior_as_laid(graph, f"after Stage {phase_id}")
 
 
 def _layout_once(
@@ -1321,9 +1288,11 @@ def _layout_once(
         build_fan_plan_execution,
         install_fan_plan_execution,
     )
+    from nf_metro.layout.lane_plan import seal_lane_plan, start_layout
     from nf_metro.parser.route_topology import build_route_topology_query
 
     graph._cross_column_perp_bridge_ports.clear()
+    start_layout(graph)
     topology = build_route_topology_query(graph)
     if topology is not None:
         install_fan_plan_execution(
@@ -1346,6 +1315,7 @@ def _layout_once(
             x_offset=x_offset,
             y_offset=y_offset,
         )
+        seal_lane_plan(graph)
         return
 
     _compute_section_layout(
@@ -1485,11 +1455,10 @@ def _compute_section_layout(
        stay local.
     2. **Globalise** (Stage 2.1).  Single-stage coord-regime
        transition: translate stations and bboxes to canvas coordinates.
-    3. **Pass A - port positioning** (Stages 3.1 to 3.6).  Place ports
+    3. **Pass A - port positioning** (Stages 3.1 to 3.4).  Place ports
        on bbox edges, align entry ports, shift LR/RL perp-entry
        stations, align fold-section exit ports (re-flushing the rows the
-       exit move pushes down), reserve the perpendicular-port edge inset
-       on X, level a grid column's shared-runway edges.
+       exit move pushes down).
     4. **Pass B - downstream alignment & trunk-Y consolidation**
        (Stages 4.1 to 4.10).  Pull ports toward downstream content,
        snap to grid-group stations, space from termini, recompute
@@ -1501,7 +1470,9 @@ def _compute_section_layout(
     6. **Pass C - vertical settling & finishing** (Stages 6.1 to
        6.18a).  Fan content upward, snap to grid, re-anchor off-track,
        recenter full-bundle columns and restore their invariants,
-       balance content around trunk, loop-side X recenter, bbox shrink +
+       balance content around trunk, loop-side X recenter, decide the
+       lane plan, reserve the perpendicular-port edge inset on X, level a
+       grid column's shared-runway edges, align TB bbox bottoms, bbox shrink +
        row tighten / push, captioned-icon pad, fit bbox tops to content,
        re-snap the canvas grid, re-align vertical-flow entry ports and
        junctions with their settled feeders, settle semantic fans, seat
@@ -1532,6 +1503,8 @@ def _compute_section_layout(
     # both this list and _validate_active.
     graph._stages_completed = []
     graph._validate_active = validate
+    graph._rail_lay = {}
+    graph._rail_y = {}
 
     # ---- Stage 1 - Section construction (local coords) ------------------
     # Lay out each section internally, snap row Y grids, place sections on
@@ -1544,7 +1517,24 @@ def _compute_section_layout(
     section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
     continuation_predecessors = continuation_track_predecessors(graph)
     section_subgraphs: dict[str, MetroGraph] = {}
+    # Rails sit one base grid pitch apart (their labels hang above or below
+    # the bundle), so the spread loop's diagonal-label widening of an
+    # auto-resolved y_spacing does not reach them; a pinned y_spacing is the
+    # pitch itself.
+    rail_pitch = (
+        graph._base_y_spacing if graph._base_y_spacing is not None else y_spacing
+    )
     for sec_id, section in graph.sections.items():
+        if graph.is_rail_section(sec_id):
+            section_subgraphs[sec_id] = lay_section_rails(
+                graph,
+                section,
+                x_spacing=section_pitch_map.get(sec_id, x_spacing),
+                y_spacing=rail_pitch,
+                section_x_padding=section_x_padding,
+                section_y_padding=section_y_padding,
+            )
+            continue
         sub = _layout_single_section(
             graph,
             section,
@@ -1570,6 +1560,8 @@ def _compute_section_layout(
     # Stage 1.2: Align Y grids across same-row, same-direction sections
     _align_row_y_grids(graph, section_subgraphs, y_spacing, section_y_padding)
     for sec_id, sub in section_subgraphs.items():
+        if graph.is_rail_section(sec_id):
+            continue
         reserve_fan_stagger_runway(
             graph,
             sub,
@@ -1646,6 +1638,8 @@ def _compute_section_layout(
         # Update section bbox to global coords
         section.bbox_x += section.offset_x + x_offset
         section.bbox_y += section.offset_y + y_offset
+        if graph.is_rail_section(sec_id):
+            place_laid_rails(graph, section, sub, section.offset_y + y_offset)
 
     _snap(graph, "2.1")
     if validate:
@@ -1661,7 +1655,10 @@ def _compute_section_layout(
 
     # Stage 3.1: Position ports on section boundaries (after bbox is in global coords)
     for sec_id, section in graph.sections.items():
-        position_ports(section, graph)
+        if graph.is_rail_section(sec_id):
+            position_rail_section_ports(graph, section)
+        else:
+            position_ports(section, graph)
 
     _snap(graph, "3.1")
     if validate:
@@ -1694,24 +1691,6 @@ def _compute_section_layout(
     # delta, preserving entry-port alignment.
     _align_exit_ports(graph)
     _snap(graph, "3.4")
-
-    # Stage 3.5: Hold each horizontal-flow section's left and right edges clear
-    # of the perpendicular (TOP/BOTTOM) ports Stages 3.2 to 3.4 just seated
-    # along X, the rotation of the inset the Y-axis sizing keeps for a vertical
-    # flow's LEFT/RIGHT ports.  Runs here because those stages are the last to
-    # move a perpendicular port relative to its own box; a grow can widen a
-    # section into its column neighbour, so re-enforce the inter-column gaps.
-    if _reserve_perp_port_edge_inset(graph):
-        reenforce_column_gaps(graph)
-    _snap(graph, "3.5")
-
-    # Stage 3.6: Level the anchored edges of the boxes in a grid column that
-    # start their content at one X, the X mirror of the row top-align at Stage
-    # 5.3.  Runs once every X-axis box mover has settled (Stage 1.1 sizing, the
-    # Stage 3.3 runway grow, the Stage 3.5 perp inset), so the levelled edge is
-    # not re-broken by a later widen.
-    _level_column_anchor_edges(graph)
-    _snap(graph, "3.6")
 
     if validate:
         _guard_ports_on_boundaries(graph, "after top-align")
@@ -1849,7 +1828,6 @@ def _settle_pass_c(
     _stack_rows(
         graph,
         validate=validate,
-        y_spacing=y_spacing,
         section_y_padding=section_y_padding,
         section_y_gap=section_y_gap,
     )
@@ -1869,9 +1847,13 @@ def _place_pass_c_content(
     y_spacing: float,
     section_y_padding: float,
 ) -> None:
-    """Stage 5.1 through Stage 6.12: position junctions, lift off-track
-    inputs, settle vertical content, and recenter fans / loop-side
-    stations within each section."""
+    """Stage 5.1 through Stage 6.12c: position junctions, lift off-track
+    inputs, settle vertical content, recenter fans / loop-side stations
+    within each section, decide the lane plan, and size the boxes its lanes
+    reach."""
+    from nf_metro.layout.lane_plan import seal_lane_plan
+    from nf_metro.layout.section_placement import reenforce_column_gaps
+
     # ---- Stage 5 - Pass C: Junctions & off-track lift ------------------
     # All port positions are now final; Stage 5.1 positions junctions
     # once.  Stage 5.2 lifts off-track stations; Stages 5.3 to 5.5
@@ -1994,15 +1976,6 @@ def _place_pass_c_content(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.4")
 
-    # Stage 6.5: Grow TB-section bbox bottoms so they align with the
-    # downstream LR section's bbox bottom.  Without this the TB
-    # section's bbox ends right at the inter-section exit port Y,
-    # making the line look pinned to the section edge.
-    _align_tb_section_bbox_bottoms(graph, section_y_padding)
-    _snap(graph, "6.5")
-    if validate:
-        _run_pass_c_guards(graph, "after Stage 6.5")
-
     # Stage 6.6: Re-anchor off-track inputs to their consumer's final
     # (snapped) Y.  Stage 5.2's lift placed them relative to pre-snap
     # consumer Ys; snapping the consumer to the grid can shift it by
@@ -2112,22 +2085,60 @@ def _place_pass_c_content(
     # Reposition each side station to the midpoint of the two diagonal
     # corner Xs derived from the actual routing geometry.
     _run_placement_per_row(graph, validate, "6.12", _recenter_loop_side_stations)
+    # Reads each inbound bundle's span from the station Xs the recentre settles.
+    _shift_sparse_loop_stations_to_clear_bundle(graph, y_spacing, section_y_padding)
+    if graph.diamond_style == "symmetric":
+        _apply_half_grid_symmetric_diamonds(graph, y_spacing)
+    # Reads the half-grid marks, so it follows every pass that places or
+    # dissolves a half-pitch pair; the Stage 6.17 marks name only plan-owned
+    # stations, which it skips.
+    _expand_orphaned_half_grid_stations(graph, y_spacing, section_y_padding)
     _snap(graph, "6.12")
+    # Every mover of stations within a row has run: decide the lane plan.  The
+    # box sizers below read its lanes and move no station relative to another.
+    seal_lane_plan(graph)
+    if graph.has_rail_sections:
+        _guard_rail_interior_as_laid(graph, "at the Stage 6.12 seal")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.12")
+
+    # Stage 6.12a: Hold each horizontal-flow section's left and right edges
+    # clear of its perpendicular (TOP/BOTTOM) ports' outermost lanes, the
+    # rotation of the inset the Y-axis sizing keeps for a vertical flow's
+    # LEFT/RIGHT ports.  A grow can widen a section into its column neighbour,
+    # so re-enforce the inter-column gaps.
+    if _reserve_perp_port_edge_inset(graph):
+        reenforce_column_gaps(graph)
+    _snap(graph, "6.12a")
+
+    # Stage 6.12b: Level the anchored edges of the boxes in a grid column that
+    # start their content at one X, the X mirror of the row top-align at Stage
+    # 5.3.  Runs once every X-axis box mover has settled (Stage 1.1 sizing, the
+    # Stage 3.3 runway grow, the Stage 6.12a perp inset), so the levelled edge
+    # is not re-broken by a later widen.
+    _level_column_anchor_edges(graph)
+    _snap(graph, "6.12b")
+
+    # Stage 6.12c: Grow TB-section bbox bottoms so they align with the
+    # downstream LR section's bbox bottom.  Without this the TB section's bbox
+    # ends right at the inter-section exit port Y, making the line look pinned
+    # to the section edge.
+    _align_tb_section_bbox_bottoms(graph, section_y_padding)
+    _snap(graph, "6.12c")
+    if validate:
+        _run_pass_c_guards(graph, "after Stage 6.12c")
 
 
 def _stack_rows(
     graph: MetroGraph,
     *,
     validate: bool,
-    y_spacing: float,
     section_y_padding: float,
     section_y_gap: float,
 ) -> None:
     """Stage 6.13 and Stage 6.14: the cross-row inter-row stacking -- shrink
-    and tighten row-mate bboxes, then shift sparse loop-side stations and
-    propagate the resulting bbox growth to lower rows."""
+    and tighten row-mate bboxes, then push lower rows clear of any box the
+    Stage 6.12 sparse loop shift grew downward."""
     # Stage 6.13: Shrink rowspan / row-mate bboxes whose content moved
     # up after compact (e.g. ``_fan_source_inputs_upward`` lifted the
     # bottom rows away from the bbox bottom), then pull lower rows up
@@ -2139,16 +2150,10 @@ def _stack_rows(
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.13")
 
-    # Stage 6.14: Shift sparse loop-side stations (e.g. ``grea`` -- one
-    # incoming, one outgoing, single-line consumer) onto a half-grid Y
-    # when sharing the full-row Y with a busier sibling whose inbound
-    # bundle would otherwise cross the sparse station's marker bbox.
-    # When the shift grows a section's bbox downward, the helper also
-    # pushes lower-row sections down internally to restore
-    # ``section_y_gap``.
-    _shift_and_propagate_loop_stations(
-        graph, y_spacing, section_y_padding, section_y_gap
-    )
+    # Stage 6.14: The Stage 6.12 sparse loop shift may grow a box downward
+    # after row offsets were fixed from the pre-grow heights; push the rows
+    # below it down to restore ``section_y_gap``.
+    push_lower_rows_after_bbox_grow(graph, section_y_gap)
     _snap(graph, "6.14")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.14")
@@ -2251,7 +2256,7 @@ def _finalize_layout(
         _run_pass_c_guards(graph, "after Stage 6.16")
 
     # Stage 6.17: Re-materialise semantic fan frames against their settled
-    # centreline, then compact unsupported legacy diamonds where requested.
+    # centreline.
     _run_placement(
         graph,
         validate,
@@ -2259,16 +2264,7 @@ def _finalize_layout(
         _apply_planned_fan_geometry,
         _snapshot_planned_fan_centrelines(graph),
     )
-    if graph.diamond_style == "symmetric":
-        _apply_half_grid_symmetric_diamonds(graph, y_spacing)
     _snap(graph, "6.17")
-
-    # Stage 6.18: Seat orphaned half-pitch stations on a full grid row (see
-    # _expand_orphaned_half_grid_stations and CONTRACT.md Stage 6.18).  Must
-    # follow every pass that places or dissolves a half-pitch pair, so the
-    # half-grid marks are final.
-    _expand_orphaned_half_grid_stations(graph, y_spacing, section_y_padding)
-    _snap(graph, "6.18")
 
     # Stage 6.17 is a late semantic placement, downstream of the corpus-wide
     # content-top fit.  Refit only the sections whose plan-owned coordinates it

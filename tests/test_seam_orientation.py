@@ -33,7 +33,6 @@ from nf_metro.layout.constants import COORD_TOLERANCE
 from nf_metro.layout.engine import compute_layout
 from nf_metro.layout.routing.context import (
     is_far_side_around_below_left_entry,
-    is_near_vertical_junction_right_entry,
 )
 from nf_metro.layout.routing.reversal import detect_reversed_sections
 from nf_metro.layout.routing.seam import SeamOrientation, seam_orientation
@@ -86,15 +85,6 @@ CORPUS_IDS = [
     f"{f.parent.name}/{f.stem}" if f.parent.name == "topologies" else f.stem
     for f in CORPUS_FILES
 ]
-
-# Seams the legacy machinery marks reversed but the seam-local classifier
-# preserves. Keyed (fixture, feeder section, consumer section,
-# exit-side -> entry-side). Two families, both documented in seam.py:
-#   - propagated / conditional reversal carried in the delivered bundle from an
-#     upstream fold turn (the bulk), and
-#   - the near-vertical junction RIGHT entry, whose reversal turns on pixel
-#     overhang rather than sides/grid and is deferred coordinate-free.
-NEAR_VERTICAL_RESIDUAL = ("near_vertical_junction_hook", "src", "pseudo", "R->R")
 
 # The opposite direction: seams the seam-local classifier reverses and the
 # machinery does not, because the machinery carries no section-absolute flag for
@@ -165,9 +155,13 @@ EXPECTED_CLASSIFIER_ONLY_REVERSALS = frozenset(
         ),
     }
 )
+
+# Seams the legacy machinery marks reversed but the seam-local classifier
+# preserves: propagated / conditional reversal carried in the delivered bundle
+# from an upstream fold turn (documented in seam.py).  Keyed (fixture, feeder
+# section, consumer section, exit-side -> entry-side).
 EXPECTED_RESIDUALS = frozenset(
     {
-        NEAR_VERTICAL_RESIDUAL,
         # positive_fan TB (right-entry) feeding a vertical TB column below it:
         # the machinery marks the lower section as positive_fan so it draws on
         # the same +x side as the drop, but the classifier sees a vertical→vertical
@@ -250,11 +244,6 @@ EXPECTED_RESIDUALS = frozenset(
             "side_report",
             "L->R",
         ),
-        # A two-line bundle drops near-vertically from an LR row's RIGHT exit into
-        # the RIGHT entry of the RL row directly below: the machinery marks the
-        # receiver reversed off the near-vertical-junction-right-entry rule, while
-        # the classifier reads the descend->turn seam as a preserved continuation.
-        ("reversed_section_junction_reseat", "align", "quant", "R->R"),
     }
 )
 
@@ -265,7 +254,6 @@ def _machinery_reverses(graph, entry_port, sec_id, tb_sections, reversed_secs) -
         sec_id in reversed_secs
         or _machinery_is_over_top_right_entry(graph, entry_port, tb_sections)
         or is_far_side_around_below_left_entry(graph, entry_port)
-        or is_near_vertical_junction_right_entry(graph, entry_port)
     )
 
 

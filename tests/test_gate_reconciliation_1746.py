@@ -48,7 +48,7 @@ from nf_metro.layout.settlement_demand import (
     SettlementAxis,
 )
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import Edge, PortSide
+from nf_metro.parser.model import Edge, MetroGraph, Port, PortSide, Section, Station
 from nf_metro.render import svg as render_svg
 from nf_metro.render.animate import build_animation_timeline
 from nf_metro.render.svg import _plan_decision_fingerprint, build_observed_render_plan
@@ -92,11 +92,6 @@ def _normalization_context(graph, offsets):
         reversed_sections=set(),
         reserved_bands=ReservedCorridors(),
     )
-
-
-def _destination_routes(graph, routes):
-    port_id = graph.sections["target"].entry_ports[0]
-    return {route.line_id: route for route in routes if route.edge.target == port_id}
 
 
 def _displaced_approach_bundle(graph, routed, *, reverse: bool = False):
@@ -336,9 +331,99 @@ def test_invalid_drawable_turnout_shape_raises_project_invariant() -> None:
         )
 
 
+def _short_overlap_convergence():
+    """Three planned H-V-H approaches whose shared descent is only 16 px.
+
+    ``l0`` drops from a trunk far above onto lane 0 of a LEFT entry port;
+    ``l1`` and ``l2`` drop 24 px from a trunk just above onto lanes 1 and 2.
+    Their port leads share a full ``2 * CURVE_RADIUS`` runway, but the
+    vertical run all three share is shorter than that.  A route system owns
+    each descent.
+    """
+
+    def box(
+        section_id: str, col: int, row: int, x: float, y: float, w: float, h: float
+    ):
+        return Section(
+            id=section_id,
+            name=section_id,
+            direction="LR",
+            grid_col=col,
+            grid_row=row,
+            bbox_x=x,
+            bbox_y=y,
+            bbox_w=w,
+            bbox_h=h,
+        )
+
+    graph = MetroGraph(
+        sections={
+            "top": box("top", 0, 0, 60.0, 60.0, 100.0, 100.0),
+            "source": box("source", 0, 1, 60.0, 240.0, 100.0, 100.0),
+            "target": box("target", 1, 1, 210.0, 220.0, 412.0, 140.0),
+        },
+        stations={
+            "top_exit": Station(
+                "top_exit", "", section_id="top", is_port=True, x=160.0, y=120.0
+            ),
+            "source_exit": Station(
+                "source_exit", "", section_id="source", is_port=True, x=160.0, y=290.0
+            ),
+            "entry": Station(
+                "entry", "", section_id="target", is_port=True, x=210.0, y=310.0
+            ),
+        },
+        ports={
+            "top_exit": Port("top_exit", "top", PortSide.RIGHT, is_entry=False),
+            "source_exit": Port(
+                "source_exit", "source", PortSide.RIGHT, is_entry=False
+            ),
+            "entry": Port("entry", "target", PortSide.LEFT, is_entry=True),
+        },
+        edges=[
+            Edge("top_exit", "entry", "l0"),
+            Edge("source_exit", "entry", "l1"),
+            Edge("source_exit", "entry", "l2"),
+        ],
+    )
+    shapes = {
+        "l0": (
+            [(160.0, 120.0), (185.0, 120.0), (185.0, 310.0), (210.0, 310.0)],
+            [10.0, 10.0],
+        ),
+        "l1": (
+            [(160.0, 290.0), (187.0, 290.0), (187.0, 314.0), (210.0, 314.0)],
+            [14.0, 10.0],
+        ),
+        "l2": (
+            [(160.0, 294.0), (183.0, 294.0), (183.0, 318.0), (210.0, 318.0)],
+            [10.0, 14.0],
+        ),
+    }
+    routes = [
+        routing_common.RoutedPath(
+            edge=edge,
+            line_id=edge.line_id,
+            points=shapes[edge.line_id][0],
+            is_inter_section=True,
+            curve_radii=shapes[edge.line_id][1],
+            route_system_owned_segment_ranks=(1,),
+        )
+        for edge in graph.edges
+    ]
+    offsets = {("entry", "l0"): 0.0, ("entry", "l1"): 4.0, ("entry", "l2"): 8.0}
+    return graph, offsets, routes
+
+
 def test_short_same_destination_overlap_is_refused_atomically() -> None:
-    graph, offsets, routes = _routed("same_destination_short_overlap")
-    destination = _destination_routes(graph, routes)
+    """A planned convergence too short to bundle is left whole.
+
+    The stagger reseats none of the three planned descents, and the
+    same-destination check, which admits only a shared run of at least
+    ``2 * CURVE_RADIUS``, finds no bundle to report.
+    """
+    graph, offsets, routes = _short_overlap_convergence()
+    destination = {route.line_id: route for route in routes}
     tails = {
         line_id: port_peeloff_tail(route) for line_id, route in destination.items()
     }
@@ -362,7 +447,7 @@ def test_short_same_destination_overlap_is_refused_atomically() -> None:
     suffix_overlap = suffix_hi - suffix_lo
     threshold = 2 * CURVE_RADIUS - COORD_TOLERANCE
 
-    assert overlap == pytest.approx(18.0)
+    assert overlap == pytest.approx(16.0)
     assert suffix_overlap >= threshold
     assert overlap < threshold
     assert all(
@@ -376,6 +461,11 @@ def test_short_same_destination_overlap_is_refused_atomically() -> None:
     )
 
     assert routes == before
+    assert not list(
+        routing_common.iter_same_destination_approach_bundles(
+            routes, graph, graph_offset_step(graph)
+        )
+    )
     assert check_same_destination_approach_bundle(graph, routes) == []
 
 
@@ -399,15 +489,12 @@ def test_short_same_destination_overlap_settles_as_one_planned_cohort(
         ("source",),
         ("target",),
     )
-    assert requirement.required == pytest.approx(221.591)
+    assert requirement.required == pytest.approx(229.591)
     assert baseline_target_y - source_bottom == pytest.approx(219.591)
-    assert demand.deficit == pytest.approx(2.0)
-    # Every deficit at or under two quanta settles to the same width, so the
-    # coordinate below is the ledger's floor and not a measurement.  The
-    # deficit assertion above is what a 1px clearance error has to get past.
-    assert quantised_allocation(demand.deficit) == pytest.approx(2.0)
+    assert demand.deficit == pytest.approx(10.0)
+    assert quantised_allocation(demand.deficit) == pytest.approx(10.0)
     assert first.plan.graph.sections["target"].bbox_y == pytest.approx(
-        baseline_target_y + 2.0
+        baseline_target_y + 10.0
     )
     assert first.route_plan.boundary_clearance_requirements == ()
     assert len(first.route_plan.boundary_clearance_owner_ids) == 1
@@ -425,14 +512,14 @@ def test_short_same_destination_overlap_settles_as_one_planned_cohort(
         "assembly": (
             (206.0, 120.0),
             (663.0, 120.0),
-            (663.0, 567.182),
-            (696.0, 567.182),
+            (663.0, 575.182),
+            (696.0, 575.182),
         ),
         "audit": (
-            (630.0, 547.182),
-            (659.0, 547.182),
-            (659.0, 571.182),
-            (696.0, 571.182),
+            (630.0, 555.182),
+            (659.0, 555.182),
+            (659.0, 579.182),
+            (696.0, 579.182),
         ),
     }
     assert {
@@ -505,7 +592,7 @@ def test_same_row_short_overlap_settles_every_route_system_owner(
     # multiple of the settlement quantum rather than the ledger's 2px floor,
     # where any smaller measurement would settle to the same coordinate.
     expected_deficit = 10.0
-    relocated_y = 355.591
+    relocated_y = 363.591
     path = TOPOLOGIES / "same_destination_short_overlap.mmd"
     header, body = path.read_text().split("graph LR", maxsplit=1)
     replacements = {

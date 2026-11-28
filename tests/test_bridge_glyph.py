@@ -15,6 +15,7 @@ interchange or a line's approach to a station join.  These tests pin:
   ``main``), while animation motion paths flow over it unchanged.
 """
 
+import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from nf_metro.layout.routing.common import Direction, SourceTurnout
 from nf_metro.parser.mermaid import parse_metro_mermaid
 from nf_metro.parser.model import Edge, MetroGraph
 from nf_metro.render.bridges import (
+    BRIDGE_GAP_HALF,
     BRIDGE_NODE_TOLERANCE,
     BridgeBreak,
     _line_reachability,
@@ -36,6 +38,7 @@ from nf_metro.render.bridges import (
     _segment_intersection,
     compute_bridges,
 )
+from nf_metro.render.constants import BRIDGE_JOIN_TOLERANCE
 from nf_metro.render.path_geometry import materialize_source_turnout_paths
 from nf_metro.render.svg import (
     _render_edges,
@@ -191,22 +194,29 @@ def test_seed72_straight_endpoint_bridges_keep_the_full_gap() -> None:
             )
         ]
 
-    # That descent's own approach run (530 -> 568 at y=506) is crossed by two
-    # descents, at x=546 and x=554.  Its right end is a smoothed corner, whose
-    # clearance stops the gap at 552; its left end is the s3 exit port, a
-    # straight run start that imposes no clearance, so the gap keeps the full
-    # BRIDGE_GAP_HALF below the leftmost descent rather than being pulled in.
-    descent = next(
-        route
-        for route in routes
-        if route.edge.source == "s3__exit_right_2"
-        and route.edge.target == "s4__entry_left_9"
+
+def test_straight_run_start_keeps_the_full_gap_against_a_clamped_corner() -> None:
+    """``lower``'s approach run leaves the s3 exit port (617 -> 653 at y=502)
+    and is crossed by two descents, at x=637 and x=641.  Its right end is a
+    smoothed corner, whose clearance stops the gap at 637; its left end is the
+    exit port, a straight run start that imposes no clearance, so the gap keeps
+    the full BRIDGE_GAP_HALF below the leftmost descent rather than being
+    pulled in to match the clamped side."""
+    _graph, routes, polylines, bridges = _bridges(
+        TOPOLOGIES_DIR / "same_destination_vertical_convergence.mmd"
     )
-    assert bridges[id(descent)] == [
+    route, points = next(
+        (route, points)
+        for route, points in zip(routes, polylines, strict=True)
+        if route.edge.source == "s3__exit_right_4"
+        and route.edge.target == "target__entry_left_8"
+    )
+    assert points[:2] == [(617.0, 502.0), (653.0, 502.0)]
+    assert bridges[id(route)] == [
         BridgeBreak(
             seg_index=0,
-            cut_a=(540.0, 506.0),
-            cut_b=(552.0, 506.0),
+            cut_a=(637.0 - BRIDGE_GAP_HALF, 502.0),
+            cut_b=(637.0, 502.0),
         )
     ]
 
@@ -675,7 +685,8 @@ def test_issue1322_forked_arms_recross_far_from_fork_is_bridged():
     """issue #1322: two l1 arms fork at a junction and re-cross perpendicular
     ~400px away, between Branch B and Feeder L1.  A third line (l2) corners
     through the same point, making the crossing cluster non-bipartite.  A
-    bridge must still fire on the l1 crossover: the shared fork explains a
+    bridge must still fire on the l1 crossover, its gap reaching past the
+    crossover on both sides even where it also spans l2: the shared fork explains a
     meeting only at the junction, not a re-cross in open space, and the
     distinct-colour l2 corner reads apart by colour so must not veto it."""
     path = Path(__file__).parent / "fixtures" / "target_entry_runway_bypass.mmd"
@@ -726,10 +737,12 @@ def test_issue1322_forked_arms_recross_far_from_fork_is_bridged():
     ]
     assert len(crossings) == 1
     cross_x, cross_y = crossings[0]
-    assert cross_x == pytest.approx(1432, abs=1)
+    fork = graph.stations[fork_source]
+    assert math.dist((cross_x, cross_y), (fork.x, fork.y)) > BRIDGE_JOIN_TOLERANCE
     assert any(
-        (bk.cut_a[0] + bk.cut_b[0]) / 2 == pytest.approx(cross_x, abs=1)
-        and (bk.cut_a[1] + bk.cut_b[1]) / 2 == pytest.approx(cross_y, abs=1)
+        min(bk.cut_a[0], bk.cut_b[0]) <= cross_x - BRIDGE_GAP_HALF
+        and max(bk.cut_a[0], bk.cut_b[0]) >= cross_x + BRIDGE_GAP_HALF
+        and bk.cut_a[1] == pytest.approx(cross_y, abs=1)
         for bk in l1_breaks
     ), "expected an l1 crossover bridge at the Branch B / Feeder L1 crossroads"
 

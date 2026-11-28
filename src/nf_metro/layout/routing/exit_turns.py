@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TypeVar
 
 from nf_metro.layout.constants import COORD_TOLERANCE
+from nf_metro.layout.geometry import lanes_run_along_y
+from nf_metro.layout.lane_plan import gap_counter_runners
 from nf_metro.layout.pass_metrics import min_straight_edge
 from nf_metro.layout.route_plan import (
     CoordinateRegime,
@@ -59,13 +61,16 @@ from nf_metro.layout.routing.common import (
     OffsetRegime,
     RoutedPath,
     apply_route_offsets,
+    column_gap_edges,
     horizontal_direction,
+    right_normal_axis_sign,
     segment_direction,
     vertical_direction,
 )
 from nf_metro.layout.routing.context import (
     _RoutingCtx,
     _tb_x_offset,
+    fan_turning_slots,
     slot_is_available,
 )
 from nf_metro.layout.routing.families import (
@@ -84,6 +89,7 @@ from nf_metro.layout.routing.inter_section_handlers import (
     _BypassRoute,
     _inter_section_rule_for_family,
     _InterFacts,
+    _junction_exit_lane_x,
     _l_shape_fan_source_turn,
     _l_shape_mid_x,
     _left_entry_band_hop_source_seam,
@@ -94,11 +100,14 @@ from nf_metro.layout.routing.inter_section_handlers import (
     _LeftEntryRoute,
     _merge_branch_lead_x,
     _merge_entry_route_kind,
+    _merge_trunk_enters_perpendicular,
     _MergeEntryRoute,
     _perp_entry_l_geometry,
     _perp_exit_geometry,
     _perp_exit_over_geometry,
     _PerpExitGeometry,
+    _right_entry_below_channel_y,
+    _right_entry_cross_row_channel_y,
     _right_entry_over_top_geometry,
     _right_entry_wrap_geometry,
     _SourceSeam,
@@ -107,7 +116,9 @@ from nf_metro.layout.routing.inter_section_handlers import (
     bypass_line_draws_a_chained_trunk,
     cellmate_gap_drop_column,
     classify_inter_section_family,
+    draws_over_top_loop,
     left_exit_around_below_geometry,
+    loops_round_right_entry,
     packed_cell_handoff_carrier,
     perp_exit_farside_entry_wrap_geometry,
     seated_bypass_descent,
@@ -117,17 +128,11 @@ from nf_metro.layout.routing.inter_section_handlers import (
 from nf_metro.layout.routing.normalize import (
     _reseat_concentric_flanking,
 )
-from nf_metro.layout.routing.offsets import (
-    LinearEntryFrameOwnership,
-    capture_linear_entry_frame_ownership,
-    conflicting_linear_entry_frame_assignments,
-    validate_linear_entry_frame_ownership,
-)
 from nf_metro.layout.routing.orientation import (
     direction_axis,
+    direction_vector,
     get_point_coordinate,
     lateral_axis,
-    lateral_order_sign,
 )
 from nf_metro.layout.routing.perp import _perp_entry_crossing_x, _perp_riser_lateral
 from nf_metro.parser.model import Edge, MetroGraph, PortSide, Station
@@ -222,6 +227,15 @@ contests would strip its arms of the only separation they have.
 
 class ExitTurnInvariantError(RuntimeError):
     """A planned source turn was not emitted exactly as committed."""
+
+
+class DepartureTurnAxisError(ExitTurnInvariantError):
+    """A source's departure records would turn two lines on one axis, or one
+    line on two axes, of a single turn cohort.
+
+    Every turn axis belongs to exactly one line, so the plan has no geometry
+    to state for such a cohort.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -743,7 +757,7 @@ def _source_lane_order(
         for line_id, offset, _coordinate in sorted(
             values,
             key=lambda item: (
-                item[2] * lateral_order_sign(run_direction),
+                item[2] * right_normal_axis_sign(run_direction),
                 graph_rank.get(item[0], len(graph_rank)),
             ),
         )
@@ -792,7 +806,7 @@ def _bottom_exit_junction_turn_requirement(
     exit_pid, exit_sec = _bottom_exit_junction_exit_port(ctx, edge.source)
 
     def exit_x_offset(line_id: str) -> float:
-        return _tb_x_offset(ctx, exit_pid, line_id, exit_sec)
+        return _junction_exit_lane_x(ctx, exit_pid, line_id, exit_sec)
 
     members, _source_center, tgt_center = gather_tapered_bundle(ctx, edge)
     geometry = _bottom_exit_junction_geometry(
@@ -816,7 +830,7 @@ def _left_entry_wrap_turn_requirement(
     facts = _build_inter_facts(edge, src, tgt, ctx)
     wrap_kind = _left_entry_route_kind(facts)
     if wrap_kind is _LeftEntryRoute.WRAP:
-        wrap_geometry = _left_entry_wrap_geometry(ctx, edge, src, tgt, facts.i, facts.n)
+        wrap_geometry = _left_entry_wrap_geometry(facts)
     elif wrap_kind is _LeftEntryRoute.GAP_ABOVE:
         assert facts.tgt_row is not None
         wrap_geometry = _left_entry_gap_above_geometry(
@@ -843,17 +857,18 @@ def _right_entry_wrap_turn_requirement(
 ) -> _SourceTurnRequirement:
     """The turn a RIGHT-entry wrap opens with, by the leaf that draws it.
 
-    Both leaves lead horizontally out of the source and turn into a column of
-    their own: the cross-row wrap into the lead-out gap beside the source, the
-    same-row loop into the channel over the target's top.
+    Every leaf leads horizontally out of the source and turns into a column of
+    its own: the cross-row wrap into the lead-out gap beside the source, the
+    same-row loop into the channel over the target's top or, recorded round
+    below, toward the channel under the target row.
     """
     facts = _build_inter_facts(edge, src, tgt, ctx)
-    loop = (
-        _right_entry_wrap_geometry(facts).wrap
-        if facts.cross_row and facts.src_col is not None and facts.tgt_col is not None
-        else _right_entry_over_top_geometry(ctx, edge, src, tgt)
-    )
-    return _SourceTurnRequirement.from_seam(loop.seam)
+    if draws_over_top_loop(facts):
+        over_top = _right_entry_over_top_geometry(ctx, edge, src, tgt)
+        return _SourceTurnRequirement.from_seam(over_top.seam)
+    if loops_round_right_entry(facts):
+        return _right_entry_channel_turn(facts, _right_entry_below_channel_y(facts))
+    return _SourceTurnRequirement.from_seam(_right_entry_wrap_geometry(facts).wrap.seam)
 
 
 def _right_entry_cross_row_turn_requirement(
@@ -862,20 +877,38 @@ def _right_entry_cross_row_turn_requirement(
     src: Station,
     tgt: Station,
 ) -> _SourceTurnRequirement:
-    """The turn a RIGHT entry fed from the left opens with, at its wrap column."""
+    """The turn a RIGHT entry fed from the left opens with, at its wrap column:
+    toward the first channel the wrap runs in
+    (:func:`_right_entry_cross_row_channel_y`)."""
     facts = _build_inter_facts(edge, src, tgt, ctx)
-    if facts.is_left_exit:
+    if facts.is_left_fed:
         return _SourceTurnRequirement.declined(
             "unsupported-subshape:left-exit-right-entry-step"
         )
-    turn = vertical_direction(tgt.y - src.y)
+    return _right_entry_channel_turn(
+        facts,
+        _right_entry_cross_row_channel_y(facts),
+        vertical_direction(tgt.y - src.y),
+    )
+
+
+def _right_entry_channel_turn(
+    facts: _InterFacts, channel_y: float | None, fan_turn: Direction | None = None
+) -> _SourceTurnRequirement:
+    """The turn a RIGHT-entry wrap leading out to its wrap column opens with:
+    toward *channel_y*, or along *fan_turn* where the wrap drops straight in
+    (``None``).  The wrap column is fanned along *fan_turn*, else toward the
+    channel."""
+    src = facts.src
+    turn = fan_turn if channel_y is None else vertical_direction(channel_y - src.y)
+    assert turn is not None
     _fan, _size, _delta, axis = _wrap_fan_geometry(
-        ctx,
-        edge,
+        facts.ctx,
+        facts.edge,
         src,
         facts.i,
         facts.n,
-        turn,
+        turn if fan_turn is None else fan_turn,
     )
     return _SourceTurnRequirement(
         horizontal_direction(axis - src.x),
@@ -967,6 +1000,15 @@ def _route_derived_turn_requirement(
     )
 
 
+_ENTRY_COLUMN_L_SHAPES = frozenset(
+    {
+        RouteFamilyId.STANDARD_L_SHAPE,
+        RouteFamilyId.TOP_ENTRY_L_SHAPE,
+        RouteFamilyId.BOTTOM_ENTRY_L_SHAPE,
+    }
+)
+
+
 def _source_turn_requirement(
     edge: Edge,
     family_id: RouteFamilyId,
@@ -976,6 +1018,18 @@ def _source_turn_requirement(
 ) -> _SourceTurnRequirement:
     src = ctx.graph.stations[edge.source]
     tgt = ctx.graph.stations[edge.target]
+    fan = ctx.junction_fan_info.get((edge.source, edge.target, edge.line_id))
+    if (
+        fan is not None
+        and family_id not in _ENTRY_COLUMN_L_SHAPES
+        and edge.target not in ctx.merge.junctions
+        and fan_turning_slots(ctx, edge.source) == {fan[0]}
+    ):
+        # A fan's lone turning line descends in a gap slot of its own, seated
+        # with the gap's other channels rather than on the fan's stagger.  An
+        # L-shape lands on its entry's column and a merge feeder on its
+        # convergence's, so neither column is the gap's to seat.
+        return _SourceTurnRequirement.declined(GAP_ALLOCATION_PENDING)
     off_column_decline = _OFF_COLUMN_RUN_DECLINES.get(family_id)
     if off_column_decline is not None and source_run_direction not in {
         Direction.U,
@@ -1041,15 +1095,7 @@ def _source_turn_requirement(
             )
             <= COORD_TOLERANCE
         ):
-            # A dealt column puts the drop on its channel, off the port's X;
-            # ``_perp_entry_junction_straight_drop`` measures the lead-out from
-            # the junction's own column.
-            column = ctx.perp_entry_columns.get(edge.target)
-            axis = tgt.x + (
-                column.offset(edge.line_id)
-                if column is not None and column.offsets is not None
-                else 0.0
-            )
+            axis = tgt.x
             feeder_x = (
                 ctx.graph.stations[exit_port_id].x
                 if exit_port_id is not None
@@ -1209,7 +1255,9 @@ def _plain_l_shape_turn_requirement(
     turn_direction = vertical_direction(turn_delta)
     if centreline_axis is None:
         centreline_axis = _l_shape_mid_x(edge, src, tgt, len(members), ctx)
-    emitted_axis = centreline_axis + lateral_order_sign(turn_direction) * target_offset
+    emitted_axis = (
+        centreline_axis + right_normal_axis_sign(turn_direction) * target_offset
+    )
     return _SourceTurnRequirement(
         horizontal_direction(emitted_axis - src.x),
         turn_direction,
@@ -1305,6 +1353,8 @@ def _merge_trunk_turn_requirement(
         return _SourceTurnRequirement.declined(
             "entry-bundle-owns-the-shared-seam-lanes"
         )
+    if _merge_trunk_enters_perpendicular(ctx, edge):
+        return _route_derived_turn_requirement(edge, RouteFamilyId.MERGE_TRUNK, ctx)
     geometry = u_bypass_descent_geometry(edge, ctx)
     assert geometry is not None
     return _u_bypass_source_turn(edge, geometry, ctx)
@@ -1537,14 +1587,20 @@ def _source_lane_ownership(
     mismatched = [
         station_id
         for station_id in candidates
-        if abs(offsets.get((station_id, line_id), 0.0) - desired) > COORD_TOLERANCE
+        if abs(
+            _offset_across_run(graph, offsets, station_id, line_id, run_direction)
+            - desired
+        )
+        > COORD_TOLERANCE
     ]
     if not mismatched:
         return tuple(stations), (), None
     if len(candidates) != 1:
         return (), (), "ambiguous-source-lane-boundary"
     candidate = candidates[0]
-    source_lane_offset = offsets.get((candidate, line_id), 0.0)
+    source_lane_offset = _offset_across_run(
+        graph, offsets, candidate, line_id, run_direction
+    )
     target_lane_offset = desired
     source_offset = source_lane_offset
     target_offset = target_lane_offset
@@ -1553,11 +1609,15 @@ def _source_lane_ownership(
         target_offsets = dict(offsets)
         target_offsets[exit_port_id, line_id] = desired
         target_ctx = replace(ctx, station_offsets=target_offsets)
-        source_offset = _tb_x_offset(
-            source_ctx,
-            candidate,
-            line_id,
-            graph.stations[candidate].section_id,
+        source_offset = (
+            0.0
+            if source_lane_offset == 0.0
+            else _tb_x_offset(
+                source_ctx,
+                candidate,
+                line_id,
+                graph.stations[candidate].section_id,
+            )
         )
         target_offset = _tb_x_offset(
             target_ctx,
@@ -1579,6 +1639,43 @@ def _source_lane_ownership(
     if transition is None:
         return (), (), "source-lane-transition-has-no-runway"
     return tuple(stations), (transition,), None
+
+
+def _offset_across_run(
+    graph: MetroGraph,
+    offsets: Mapping[tuple[str, str], float],
+    station_id: str,
+    line_id: str,
+    run_direction: Direction,
+) -> float:
+    """*line_id*'s offset at *station_id* across a run heading
+    *run_direction*: its stored offset where the station's section lays its
+    lanes across that run, else zero, every lane then leaving the station on
+    its own coordinate across the run."""
+    section_id = graph.stations[station_id].section_id
+    assert section_id is not None
+    section = graph.sections[section_id]
+    across = lanes_run_along_y(section.direction) is (
+        direction_axis(run_direction) is DemandAxis.X
+    )
+    return offsets.get((station_id, line_id), 0.0) if across else 0.0
+
+
+def _holds_lane(
+    graph: MetroGraph,
+    offsets: Mapping[tuple[str, str], float],
+    station_id: str,
+    line_id: str,
+    desired: float,
+) -> bool:
+    """Whether *station_id* already holds *line_id* on *desired* with that
+    slot free: a continuation claims a downstream station only where the lane
+    plan keeps the line on its source lane, never relaning it."""
+    return abs(
+        offsets.get((station_id, line_id), 0.0) - desired
+    ) <= COORD_TOLERANCE and slot_is_available(
+        graph, offsets, station_id, line_id, desired
+    )
 
 
 def _continuation_lane_ownership(
@@ -1646,7 +1743,7 @@ def _continuation_lane_ownership(
 
     stations = []
     transitions = []
-    if not slot_is_available(graph, offsets, entry_id, line_id, desired):
+    if not _holds_lane(graph, offsets, entry_id, line_id, desired):
         source_lane_offset = desired
         target_lane_offset = offsets.get((entry_id, line_id), 0.0)
         source_offset = source_lane_offset
@@ -1706,7 +1803,7 @@ def _continuation_lane_ownership(
         candidate_port = graph.ports.get(candidate)
         if candidate_port is not None and not candidate_port.is_entry:
             break
-        if not slot_is_available(graph, offsets, candidate, line_id, desired):
+        if not _holds_lane(graph, offsets, candidate, line_id, desired):
             source_lane_offset = desired
             target_lane_offset = offsets.get((candidate, line_id), 0.0)
             source_offset = source_lane_offset
@@ -1930,7 +2027,7 @@ def _pinned_ladders_keep_bundle_order(
     way by construction; across two ladders only the pins say so, and pins that
     step the other way draw strokes that swap sides inside the arc.
     """
-    progression = lateral_order_sign(turn_direction)
+    progression = right_normal_axis_sign(turn_direction)
     pinned = tuple(pins)
     return all(
         first.group_id == second.group_id
@@ -1999,16 +2096,18 @@ def _turn_cohort_key_by_member(
 
 
 def _plan_turn_axes(
-    graph: MetroGraph,
     ctx: _RoutingCtx,
     plan_id: ExitTurnPlanId,
-    source_id: str,
-    exit_port_id: str,
     source_run_direction: Direction,
     ordered_lanes: tuple[tuple[str, float], ...],
     seeds: tuple[_AssignmentSeed, ...],
 ) -> _AxisPlan:
-    del graph, source_id, exit_port_id
+    lane_ranks = {line_id: i for i, (line_id, _offset) in enumerate(ordered_lanes)}
+    for seed in seeds:
+        assert seed.lane_rank == lane_ranks[seed.edge.line_id], (
+            "the route-plan checker re-derives turn ranks from the source lanes, "
+            "which carry the ordered-lane ranks"
+        )
     turning_seeds = tuple(seed for seed in seeds if seed.turn_direction is not None)
     minimum_runway = max(
         (
@@ -2059,9 +2158,27 @@ def _plan_turn_axes(
         set
     )
     for (run_direction, turn_direction, pinning_group_id), cohort in cohorts.items():
-        ranks = tuple(sorted({seed.lane_rank for seed in cohort}))
-        cohort_rank = {rank: index for index, rank in enumerate(ranks)}
-        progression = lateral_order_sign(turn_direction)
+        rank_lines = {(seed.lane_rank, seed.edge.line_id) for seed in cohort}
+        cohort_ranks = {rank for rank, _line in rank_lines}
+        cohort_lines = {line for _rank, line in rank_lines}
+        if not len(rank_lines) == len(cohort_ranks) == len(cohort_lines):
+            raise DepartureTurnAxisError(
+                f"exit turn from {cohort[0].edge.source!r} heading "
+                f"{run_direction.value} then {turn_direction.value}: its departure "
+                "records put two lines on one turn axis or one line on two, as "
+                f"(rank, line) {sorted(rank_lines)}"
+            )
+        ranks = tuple(sorted(cohort_ranks))
+        # A planned lane no line takes at the exit (one the record holds for
+        # another feeder's line) keeps its column; an exit line turning off in
+        # another cohort does not.
+        cohort_rank = {
+            rank: index
+            + abs(ordered_lanes[rank][1] - ordered_lanes[ranks[0]][1]) / ctx.offset_step
+            - (rank - ranks[0])
+            for index, rank in enumerate(ranks)
+        }
+        progression = right_normal_axis_sign(turn_direction)
         fixed_origins = tuple(
             seed.fixed_axis
             - progression * cohort_rank[seed.lane_rank] * ctx.offset_step
@@ -2134,8 +2251,8 @@ def _plan_turn_axes(
                 )
             known.add(coordinates[rank])
         for rank in ranks:
-            lane_line = ordered_lanes[rank][0]
             rank_seeds = tuple(seed for seed in cohort if seed.lane_rank == rank)
+            lane_line = rank_seeds[0].edge.line_id
             claimant_ids = tuple(seed.member_id for seed in rank_seeds)
             fixed_seed = next(
                 (
@@ -2219,13 +2336,13 @@ def _plan_lane_ownership(
     source_id: str,
     seeds: tuple[_AssignmentSeed, ...],
     ordered_lanes: tuple[tuple[str, float], ...],
-    planned_offsets: Mapping[str, float],
     source_run_direction: Direction,
 ) -> _LaneOwnership:
     assert ctx.station_offsets is not None
+    lane_offsets = dict(ordered_lanes)
     station_ids_by_line: dict[str, list[str]] = defaultdict(list)
     transitions: list[ExitLaneTransition] = []
-    for line_id, _input_offset in ordered_lanes:
+    for line_id, input_offset in ordered_lanes:
         claimant_member_ids = tuple(
             seed.member_id for seed in seeds if seed.edge.line_id == line_id
         )
@@ -2236,7 +2353,7 @@ def _plan_lane_ownership(
             source_id,
             line_id,
             claimant_member_ids,
-            planned_offsets[line_id],
+            input_offset,
             source_run_direction,
             ctx,
         )
@@ -2254,7 +2371,7 @@ def _plan_lane_ownership(
             seed.edge.target,
             seed.edge.line_id,
             seed.member_id,
-            planned_offsets[seed.edge.line_id],
+            lane_offsets[seed.edge.line_id],
             seed.run_direction or source_run_direction,
             seed.family_id,
             ctx,
@@ -2279,20 +2396,6 @@ def _plan_lane_ownership(
         tuple(transitions),
         None,
     )
-
-
-def _fan_stated_offsets(
-    graph: MetroGraph, station_id: str, offset_step: float
-) -> dict[str, float]:
-    """Per-line offsets a planned fan states for *station_id*."""
-    return {
-        assignment.line_id: assignment.slot * offset_step
-        for plan in graph.fan_plans
-        if plan.owns_geometry
-        for carrier in plan.offset_carriers
-        if carrier.station_id == station_id
-        for assignment in carrier.assignments
-    }
 
 
 def _build_group_plan(
@@ -2375,7 +2478,6 @@ def _build_group_plan(
             )
         )
     lane_rank = {line_id: rank for rank, (line_id, _offset) in enumerate(ordered_lanes)}
-    base_offset = min((offset for _line, offset in ordered_lanes), default=0.0)
 
     classification = _classify_assignment_seeds(
         graph,
@@ -2390,28 +2492,7 @@ def _build_group_plan(
     seeds = classification.seeds
     unclassified_member_ids = classification.unclassified_member_ids
     reason = reason or classification.legacy_reason
-    offsets_increase_with_rank = (
-        len(ordered_lanes) < 2 or ordered_lanes[-1][1] > ordered_lanes[0][1]
-    )
-    planned_offsets = {
-        line_id: base_offset
-        + (rank if offsets_increase_with_rank else len(ordered_lanes) - rank - 1)
-        * ctx.offset_step
-        for rank, (line_id, _input_offset) in enumerate(ordered_lanes)
-    }
-    stated_offsets = _fan_stated_offsets(graph, source_id, ctx.offset_step)
-    if all(
-        line_id in stated_offsets
-        and abs(stated_offsets[line_id] - input_offset) <= COORD_TOLERANCE
-        for line_id, input_offset in ordered_lanes
-    ):
-        # A fan reserves one slot per line identity it carries anywhere in the
-        # system, so a branch that retags its line across a leg leaves a slot
-        # here that no line occupies.  Ranking the lanes contiguously would
-        # close that gap and pull the siblings off the frame the fan stated.
-        planned_offsets = {
-            line_id: stated_offsets[line_id] for line_id, _input in ordered_lanes
-        }
+    lane_offsets = dict(ordered_lanes)
     ownership = _LaneOwnership(MappingProxyType({}), (), None)
     if reason is None:
         ownership = _plan_lane_ownership(
@@ -2421,7 +2502,6 @@ def _build_group_plan(
             source_id,
             seeds,
             ordered_lanes,
-            planned_offsets,
             run_direction,
         )
         reason = ownership.legacy_reason
@@ -2429,7 +2509,7 @@ def _build_group_plan(
         tentative_offsets = dict(ctx.station_offsets or {})
         for line_id, station_ids in ownership.station_ids_by_line.items():
             for station_id in station_ids:
-                tentative_offsets[station_id, line_id] = planned_offsets[line_id]
+                tentative_offsets[station_id, line_id] = lane_offsets[line_id]
         final_classification = _classify_assignment_seeds(
             graph,
             replace(ctx, station_offsets=tentative_offsets, built_routes=[]),
@@ -2452,11 +2532,8 @@ def _build_group_plan(
     if reason is None:
         assert run_direction is not None
         axis_plan = _plan_turn_axes(
-            graph,
             replace(ctx, station_offsets=tentative_offsets, built_routes=[]),
             plan_id,
-            source_id,
-            exit_port_id,
             run_direction,
             ordered_lanes,
             seeds,
@@ -2486,9 +2563,6 @@ def _build_group_plan(
             ),
             station_ids_by_line.get(line_id, ()),
             input_offset,
-            planned_offsets[line_id]
-            if disposition is ExitTurnDisposition.PLANNED
-            else input_offset,
         )
         for rank, (line_id, input_offset) in enumerate(ordered_lanes)
     )
@@ -2652,6 +2726,7 @@ def _build_group_plan(
         disposition,
         reason,
         decision_refs,
+        _nest_order(axes, run_direction),
     )
     diagnostic = (
         RoutePlanDiagnostic(
@@ -2676,14 +2751,29 @@ def _build_group_plan(
     )
 
 
+def _nest_order(
+    axes: Sequence[ExitTurnAxis], run_direction: Direction | None
+) -> tuple[str, ...]:
+    """The axes' lines in the order they turn off a run in *run_direction*."""
+    vector = direction_vector(run_direction) if run_direction is not None else (1, 0)
+    ordered = sorted(
+        axes,
+        key=lambda axis: (
+            axis.coordinate * (vector[0] if axis.axis is DemandAxis.X else vector[1]),
+            axis.line_id,
+        ),
+    )
+    return tuple(dict.fromkeys(axis.line_id for axis in ordered))
+
+
 def _legacy_plan(plan: ExitTurnPlan, reason: str) -> ExitTurnPlan:
     return replace(
         plan,
+        nest_order=(),
         source_lanes=tuple(
             replace(
                 lane,
                 station_ids=(),
-                planned_offset=lane.input_offset,
             )
             for lane in plan.source_lanes
         ),
@@ -2758,7 +2848,6 @@ def _cross_plan_fallback_reasons(
     assignments_by_plan: Mapping[
         ExitTurnPlanId, Mapping[ResolvedEdge, ExitTurnAssignment]
     ],
-    frame_ownership: LinearEntryFrameOwnership,
 ) -> dict[ExitTurnPlanId, str]:
     plans = tuple(plans)
     reasons: dict[ExitTurnPlanId, str] = {}
@@ -2782,20 +2871,7 @@ def _cross_plan_fallback_reasons(
                         reasons[owner] = "shared-source-ownership-conflict"
                     reasons[plan.id] = "shared-source-ownership-conflict"
                 owners.add(plan.id)
-                planned_station_offsets[key] = lane.planned_offset
-    conflicting_plan_ids = {
-        plan_id
-        for key in conflicting_linear_entry_frame_assignments(
-            planned_station_offsets, frame_ownership
-        )
-        for plan_id in station_owners[key]
-    }
-    for plan in plans:
-        if (
-            plan.disposition is ExitTurnDisposition.PLANNED
-            and plan.id in conflicting_plan_ids
-        ):
-            reasons.setdefault(plan.id, "linear-entry-frame-ownership-conflict")
+                planned_station_offsets[key] = lane.input_offset
     for plan in plans:
         if plan.disposition is not ExitTurnDisposition.PLANNED or plan.id in reasons:
             continue
@@ -2858,11 +2934,39 @@ def _cross_plan_fallback_reasons(
             for second in plan.axes[rank + 1 :]
         ):
             reasons[plan.id] = "overlapping-planned-turn-axes"
+    for plan in plans:
+        if plan.id not in reasons and _turns_beside_a_counter_runner(
+            graph, ctx, plan, assignments_by_plan[plan.id]
+        ):
+            reasons[plan.id] = GAP_ALLOCATION_PENDING
     _add_shared_axis_contention_fallbacks(
         graph, ctx, plans, assignments_by_plan, reasons
     )
     _add_station_lane_collision_fallbacks(graph, ctx, plans, reasons)
     return reasons
+
+
+def _turns_beside_a_counter_runner(
+    graph: MetroGraph,
+    ctx: _RoutingCtx,
+    plan: ExitTurnPlan,
+    assignments: Mapping[ResolvedEdge, ExitTurnAssignment],
+) -> bool:
+    """Whether a column the plan states stands on a recorded gap leg another
+    leg runs against, and the gap's joint allocation has not yet seated it."""
+    for edge, assignment in assignments.items():
+        found = gap_counter_runners(graph, edge.target, edge.line_id)
+        if not found or not found[1] or _edge_key(edge) in ctx.settled_exit_turns:
+            continue
+        left, right = column_gap_edges(graph, found[0], found[0] + 1)
+        if any(
+            assignment.member_id in axis.claimant_member_ids
+            and axis.axis is DemandAxis.X
+            and left <= axis.coordinate <= right
+            for axis in plan.axes
+        ):
+            return True
+    return False
 
 
 def _add_shared_axis_contention_fallbacks(
@@ -2993,7 +3097,7 @@ def _add_station_lane_collision_fallbacks(
                 )
                 if active:
                     plan, lane = active[0]
-                    final[line_id] = lane.planned_offset, plan.id
+                    final[line_id] = lane.input_offset, plan.id
                 else:
                     final[line_id] = (
                         (ctx.station_offsets or {}).get((station_id, line_id), 0.0),
@@ -3047,10 +3151,10 @@ def _planned_axis_cross_range(
             (edge.target, edge.line_id), 0.0
         )
         if plan.source_axis is DemandAxis.X:
-            values.extend((source.y + lane.planned_offset, target.y + target_offset))
+            values.extend((source.y + lane.input_offset, target.y + target_offset))
         else:
             source_offsets = dict(ctx.station_offsets or {})
-            source_offsets[edge.source, edge.line_id] = lane.planned_offset
+            source_offsets[edge.source, edge.line_id] = lane.input_offset
             tentative_ctx = replace(ctx, station_offsets=source_offsets)
             if assignment.planned_family_id in _PERPENDICULAR_EXIT_FAMILIES:
                 perp_geometry = _perp_exit_family_geometry(
@@ -3085,7 +3189,7 @@ def _planned_axis_cross_range(
                 def bej_exit_x_offset(
                     line_id: str, _pid: str = exit_pid, _sec: str = exit_sec
                 ) -> float:
-                    return _tb_x_offset(tentative_ctx, _pid, line_id, _sec)
+                    return _junction_exit_lane_x(tentative_ctx, _pid, line_id, _sec)
 
                 bej_members, _bej_source_center, bej_tgt_center = gather_tapered_bundle(
                     tentative_ctx, graph_edge
@@ -3251,11 +3355,6 @@ def build_exit_turn_execution(
     if scaffold is None:
         query = ExitTurnPlanQuery((), MappingProxyType({}), MappingProxyType({}))
         return ExitTurnExecution(None, (), (), (), (), query)
-    frame_ownership = (
-        capture_linear_entry_frame_ownership(graph, ctx.station_offsets)
-        if ctx.station_offsets is not None
-        else LinearEntryFrameOwnership(())
-    )
     provenance = _plan_provenance(graph, scaffold.topology.connectors)
     indexes = _build_planner_indexes(scaffold)
     built_groups = _build_group_plans(graph, ctx, scaffold, indexes, provenance)
@@ -3280,7 +3379,6 @@ def build_exit_turn_execution(
         ctx,
         plans,
         assignments_by_plan,
-        frame_ownership,
     )
     overridden_dispositions = (
         _adopt_prior_dispositions(ctx, plans, cross_plan_reasons)
@@ -3309,18 +3407,6 @@ def build_exit_turn_execution(
         assignments_by_plan,
         cross_plan_reasons,
     )
-    if ctx.station_offsets is not None:
-        trial_offsets = dict(ctx.station_offsets)
-        for plan in plans:
-            if plan.disposition is not ExitTurnDisposition.PLANNED:
-                continue
-            for lane in plan.source_lanes:
-                for station_id in lane.station_ids:
-                    trial_offsets[(station_id, lane.line_id)] = lane.planned_offset
-        validate_linear_entry_frame_ownership(trial_offsets, frame_ownership)
-        ctx.station_offsets.clear()
-        ctx.station_offsets.update(trial_offsets)
-
     plan_by_id = {plan.id: plan for plan in plans}
     owner_by_member = _index_unique_member_owners(plans)
     membership_by_edge = {}
@@ -3769,10 +3855,7 @@ def validate_exit_turn_plans(
                         )
                     )
                 if (station_id, lane.line_id) not in station_offsets or (
-                    abs(
-                        station_offsets[(station_id, lane.line_id)]
-                        - lane.planned_offset
-                    )
+                    abs(station_offsets[(station_id, lane.line_id)] - lane.input_offset)
                     > COORD_TOLERANCE
                 ):
                     raise ExitTurnInvariantError(

@@ -23,6 +23,13 @@ class SettlementAxis(Enum):
     COLUMN = "column"
 
 
+class BoundaryClearanceRequirementKind(Enum):
+    """The planner contract that owns a stable boundary requirement."""
+
+    GENERAL = "general"
+    CORRIDOR_COHORT_APERTURE = "corridor-cohort-aperture"
+
+
 @dataclass(frozen=True, slots=True)
 class BoundaryClearanceDemand:
     """Clearance one grid boundary owes between the boxes facing across it.
@@ -74,6 +81,7 @@ class BoundaryClearanceRequirement:
     negative_section_ids: tuple[str, ...]
     positive_section_ids: tuple[str, ...]
     description: str
+    kind: BoundaryClearanceRequirementKind = BoundaryClearanceRequirementKind.GENERAL
     positive_anchor_id: str = ""
 
     def __post_init__(self) -> None:

@@ -1,0 +1,39 @@
+%%metro title: Fuzz 8401267
+%%metro style: nfcore
+%%metro line: l0 | Normalize | #e6194b
+%%metro line: l1 | Merge | #3cb44b
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 2,0
+%%metro grid: sec2 | 1,0
+
+graph LR
+    subgraph sec0 [Align_Trim_Polish 0]
+        s0n0[quant_report_cluster]
+        s0n1[index_quant_fastqc]
+        s0n2[sort_align]
+        s0n4[bam]
+        s0n0 -->|l0| s0n2
+        s0n0 -->|l1| s0n1
+        s0n1 -->|l1| s0n4
+    end
+    subgraph sec1 [Filter_Polish 1]
+        %%metro direction: RL
+        %%metro exit: right | l0
+        s1n0[fastqc_filter]
+        s1n1[bin_qc_classify]
+        s1n0 -->|l0| s1n1
+    end
+    subgraph sec2 [Quant_Pca 2]
+        %%metro direction: BT
+        %%metro entry: left | l0, l1
+        s2n0[assemble_dedup]
+        s2n1[count_pca_annotate]
+        s2n2[bam]
+        s2n4[trim_fastqc_markdup]
+        s2n0 -->|l0,l1| s2n1
+        s2n1 -->|l0,l1| s2n2
+        s2n2 -->|l0,l1| s2n4
+    end
+    s0n2 -->|l0| s1n0
+    s1n1 -->|l0| s2n0
+    s0n4 -->|l1| s2n0

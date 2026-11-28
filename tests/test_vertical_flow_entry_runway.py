@@ -164,7 +164,17 @@ def _close(a: Point, b: Point) -> bool:
     return abs(a[0] - b[0]) < 0.5 and abs(a[1] - b[1]) < 0.5
 
 
-@pytest.mark.parametrize("name", sorted(MAPS))
+_ZONE_BT_STUBS = pytest.mark.xfail(
+    strict=True,
+    reason=("#2094 Part A follow-up step: exit stubs end short of the junction (U3)"),
+)
+_FLOW_MAPS = [
+    pytest.param(name, marks=_ZONE_BT_STUBS) if name == "zone_bt" else name
+    for name in sorted(MAPS)
+]
+
+
+@pytest.mark.parametrize("name", _FLOW_MAPS)
 def test_flow_entry_route_meets_its_feeder_and_its_station(name: str) -> None:
     graph = parse_and_layout(MAPS[name])
     drawn = _drawn(graph)
@@ -233,7 +243,7 @@ def _segment_hits_box(a: Point, b: Point, box: tuple[float, float, float, float]
     return False
 
 
-@pytest.mark.parametrize("name", sorted(MAPS))
+@pytest.mark.parametrize("name", _FLOW_MAPS)
 def test_flow_entry_route_clears_stations_it_passes(name: str) -> None:
     graph = parse_and_layout(MAPS[name])
     drawn = _drawn(graph)

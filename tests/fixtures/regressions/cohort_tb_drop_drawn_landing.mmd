@@ -1,0 +1,35 @@
+%%metro title: Cohort Tb Drop Drawn Landing
+%%metro line: l0 | Quant | #e6194b
+%%metro line: l1 | Bam | #3cb44b
+%%metro line: l2 | Fastqc | #4363d8
+graph LR
+    subgraph sec0 [Summarise_Bin 0]
+        s0n2 -->|l2| s0n3
+        s0n3 -->|l2| s0n4
+    end
+    subgraph sec1 [Count_Annotate_Qc 1]
+        s1n0 -->|l2| s1n1
+        s1n1 -->|l2| s1n2
+    end
+    subgraph sec2 [Call 2]
+        %%metro exit: right | l3
+        s2n0[assemble_fastqc_call]
+        s2n1[NORMALIZE_FASTQC]
+    end
+    subgraph sec4 [Index_Annotate 4]
+        %%metro direction: TB
+        s4n0 -->|l0| s4n1
+        s4n1 -->|l1| s4n3
+        s4n3 -->|l0| s4n4
+    end
+    subgraph sec5 [Sort 5]
+        %%metro direction: TB
+        s5n1 -->|l2| s5n2
+        s5n0 -->|l2| s5n1
+        s5n2 -->|l2| s5n3
+    end
+    s2n1 -->|l0| s4n0
+    s0n4 -->|l1| s4n0
+    s4n4 -->|l1| s5n1
+    s0n4 -->|l2| s1n0
+    s1n2 -->|l2| s2n0

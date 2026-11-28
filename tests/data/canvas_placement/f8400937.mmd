@@ -1,0 +1,49 @@
+%%metro title: Fuzz 8400937
+%%metro line: l0 | Bam | #e6194b
+%%metro line: l1 | Fastqc_Dedup_Summarise | #3cb44b
+%%metro line: l2 | Annotate | #4363d8
+%%metro line: l3 | Polish_Classify | #f58231
+%%metro grid: sec0 | 0,0
+%%metro grid: sec1 | 1,0
+%%metro grid: sec2 | 1,1
+%%metro grid: sec3 | 0,1
+
+graph LR
+    subgraph sec0 [Index_Polish 0]
+        %%metro direction: BT
+        s0n0[bin]
+        s0n1[NORMALIZE_SUMMARISE]
+        s0n2[cluster]
+        s0n3[pca]
+        s0n0 -->|l1,l3| s0n1
+        s0n1 -->|l1,l3| s0n2
+        s0n2 -->|l1,l3| s0n3
+        s0n1 -->|l3| s0n3
+    end
+    subgraph sec1 [Quant_Bam 1]
+        s1n0[annotate_merge]
+        s1n1[align]
+        s1n0 -->|l1,l3| s1n1
+    end
+    subgraph sec2 [Cluster_Bam 2]
+        %%metro direction: RL
+        s2n0[bin]
+        s2n1[polish]
+        s2n2[POLISH_ASSEMBLE]
+        s2n3[summarise]
+        s2n0 -->|l0,l1| s2n1
+        s2n1 -->|l0,l1| s2n2
+        s2n2 -->|l0,l1,l2| s2n3
+        s2n0 -->|l2| s2n2
+    end
+    subgraph sec3 [Normalize 3]
+        s3n0[classify_call]
+        s3n1[dedup]
+        s3n2[classify]
+        s3n0 -->|l0,l2| s3n1
+        s3n1 -->|l0,l1,l2| s3n2
+    end
+    s2n3 -->|l0,l1,l2| s3n0
+    s0n3 -->|l1,l3| s1n0
+    s1n1 -->|l1| s2n0
+    s2n3 -->|l1| s3n1
