@@ -1976,6 +1976,50 @@ def _guard_rail_stations_seat_on_rails(graph: MetroGraph, phase: str) -> None:
                     )
 
 
+def _guard_rail_interior_as_laid(graph: MetroGraph, phase: str) -> None:
+    """Every per-section rail panel must stay as its rail owner laid it.
+
+    The rail owner lays the panel's stations, rails, rail spans and box size,
+    and seats its boundary ports; ``graph._rail_lay`` records each relative to
+    the box.  A later stage may translate the whole panel with its box but
+    never reshape it: the lane plan sealed at Stage 6.12 and the rail router
+    read that interior, so a moved rail station draws off its rails.  The
+    engine runs this live at the seal and at layout end, so a mover no stage
+    exempts fails closed on any input, and after every stage under validate
+    to name the stage that moved it.
+    """
+    if graph.line_spread is LineSpread.RAILS:
+        return
+    from nf_metro.layout.rail_mode import (
+        measure_rail_lay,
+        rail_lay_drift,
+        rail_section_members,
+    )
+
+    for sid, section in sorted(graph.sections.items()):
+        if not graph.is_rail_section(sid):
+            continue
+        laid = graph._rail_lay.get(sid)
+        if laid is None:
+            raise PhaseInvariantError(
+                f"{phase}: rail section {sid!r} carries no rail lay, so its "
+                f"interior is not the one the rail owner laid"
+            )
+        stations, ports = rail_section_members(graph, section)
+        now = measure_rail_lay(
+            section,
+            stations,
+            graph._rail_y.get(sid, {}),
+            {pid: ports[pid] for pid in laid.ports if pid in ports},
+        )
+        drift = rail_lay_drift(laid, now)
+        if drift:
+            raise PhaseInvariantError(
+                f"{phase}: rail section {sid!r} departs from its rail lay "
+                f"relative to its box: " + "; ".join(drift[:4])
+            )
+
+
 def _guard_terminus_icons_within_bbox(graph: MetroGraph, phase: str) -> None:
     """Final phase: TB/BT terminus file icons must fit inside the section bbox.
 
@@ -6026,6 +6070,7 @@ INLINE_GUARD_REGISTRY: tuple[GuardSpec, ...] = (
     GuardSpec(_guard_independent_components_disjoint, "A"),
     GuardSpec(_guard_multi_section_cell_packed, "A"),
     GuardSpec(_guard_no_same_row_backward_feed, "A"),
+    GuardSpec(_guard_rail_interior_as_laid, "A"),
     GuardSpec(_guard_anchors_frozen_during_placement, "B"),
     GuardSpec(_guard_bypass_v_flat_visible, "B"),
     GuardSpec(_guard_centered_line_spread_balanced, "B"),

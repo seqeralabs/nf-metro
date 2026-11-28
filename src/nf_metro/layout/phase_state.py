@@ -332,6 +332,19 @@ PHASE_FIELD_REGISTRY: dict[str, PhaseFieldSpec] = {
             "and fall back to the empty default when rail mode is off"
         ),
     ),
+    "_rail_lay": PhaseFieldSpec(
+        name="_rail_lay",
+        writer_stage=POST_LAYOUT,
+        reader_stages=("6.12", POST_LAYOUT),
+        enforcement=FieldEnforcement.FALLBACK,
+        why=(
+            "each per-section rail panel's interior and ports relative to its "
+            "box, recorded by the rail owner when it lays the panel and cleared "
+            "when each positioning pass starts; the rail-interior guard reads it "
+            "at the Stage 6.12 seal and at layout end, and a rail section with "
+            "no record fails it"
+        ),
+    ),
     "_defer_final_guards": PhaseFieldSpec(
         name="_defer_final_guards",
         writer_stage=PRE_LAYOUT,

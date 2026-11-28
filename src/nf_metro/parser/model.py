@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from nf_metro.layout.fan_plans import FanPlanExecution, FanPlanQuery
     from nf_metro.layout.lane_plan import LanePlan
     from nf_metro.layout.pass_metrics import LayoutMetrics
+    from nf_metro.layout.rail_mode import RailLay
     from nf_metro.layout.route_plan import FanPlan
     from nf_metro.parser.route_topology import (
         RouteResolutionTrace,
@@ -780,6 +781,9 @@ class MetroGraph:
     # rail-mode layout so the dedicated router can resolve a port's per-line
     # rail Y.  Empty when rail mode is off.
     _rail_y: dict[str, dict[str, float]] = field(default_factory=dict, repr=False)
+    # Each per-section rail panel as its rail owner laid it, relative to its
+    # box; the rail-interior guard holds every later stage to it.
+    _rail_lay: dict[str, RailLay] = field(default_factory=dict, repr=False)
     # Content pitch from compute_min_y_spacing, before the spread loop widens
     # y_spacing for diagonal labels.  A single-trunk section's off-track lift
     # step uses this base pitch so a widened pitch doesn't strand the icon far

@@ -44,6 +44,7 @@ from nf_metro.layout.pass_metrics import (
     inter_row_edge_clearance,
     label_height_approx,
 )
+from nf_metro.layout.phase_state import CANONICAL_STAGE_ORDER
 
 if TYPE_CHECKING:
     from nf_metro.render.style import Theme
@@ -130,6 +131,7 @@ from nf_metro.layout.phases.guards import (
     _guard_off_track_not_hub,
     _guard_ports_on_boundaries,
     _guard_rail_above_label_band,
+    _guard_rail_interior_as_laid,
     _guard_rail_one_station_per_column,
     _guard_rail_stations_seat_on_rails,
     _guard_section_bboxes_positive,
@@ -462,6 +464,8 @@ def compute_layout(
         # that never reach that checkpoint (``_after_final_deferred`` unset:
         # rail, flat) are exempt from it.
         apply_title_band_lift(graph)
+        if graph.has_rail_sections:
+            _guard_rail_interior_as_laid(graph, "at layout end")
         if validate and graph._after_final_deferred:
             _run_after_final_checkpoint(graph, section_y_gap, section_y_padding)
 
@@ -1263,7 +1267,11 @@ def _retrofit_section_rails_phase(
         return
 
     from nf_metro.layout.labels import diagonal_label_pitch_by_section
-    from nf_metro.layout.rail_mode import retrofit_section_rails
+    from nf_metro.layout.rail_mode import (
+        measure_rail_lay,
+        rail_section_members,
+        retrofit_section_rails,
+    )
 
     section_pitch_map = diagonal_label_pitch_by_section(graph, x_spacing)
     # Rails sit one base grid pitch apart and their labels hang above or below
@@ -1284,6 +1292,17 @@ def _retrofit_section_rails_phase(
             section_x_padding=section_x_padding,
             section_y_padding=section_y_padding,
         )
+        stations, ports = rail_section_members(graph, section)
+        graph._rail_lay[sid] = measure_rail_lay(
+            section, stations, graph._rail_y.get(sid, {}), ports
+        )
+
+
+# A rail panel's stations reach the graph at the Stage 2.1 globalisation, so
+# its lay is checkable from there on.
+_RAIL_LAY_HELD_STAGES = frozenset(
+    CANONICAL_STAGE_ORDER[CANONICAL_STAGE_ORDER.index("2.1") :]
+)
 
 
 def _snap(graph: MetroGraph, phase_id: str) -> None:
@@ -1297,6 +1316,12 @@ def _snap(graph: MetroGraph, phase_id: str) -> None:
     capture_phase_snapshot(
         graph, phase_id, getattr(graph, "_phase_snapshots_enabled", False)
     )
+    if (
+        graph._validate_active
+        and graph.has_rail_sections
+        and phase_id in _RAIL_LAY_HELD_STAGES
+    ):
+        _guard_rail_interior_as_laid(graph, f"after Stage {phase_id}")
 
 
 def _layout_once(
@@ -1536,6 +1561,7 @@ def _compute_section_layout(
     # both this list and _validate_active.
     graph._stages_completed = []
     graph._validate_active = validate
+    graph._rail_lay = {}
 
     # ---- Stage 1 - Section construction (local coords) ------------------
     # Lay out each section internally, snap row Y grids, place sections on
@@ -2104,6 +2130,8 @@ def _place_pass_c_content(
     # Every mover of stations within a row has run: decide the lane plan.  The
     # box sizers below read its lanes and move no station relative to another.
     seal_lane_plan(graph)
+    if graph.has_rail_sections:
+        _guard_rail_interior_as_laid(graph, "at the Stage 6.12 seal")
     if validate:
         _run_pass_c_guards(graph, "after Stage 6.12")
 

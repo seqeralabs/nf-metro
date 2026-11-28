@@ -205,6 +205,7 @@ Their costs are not measured separately, because each is a single structural pas
 | `_guard_no_mixed_entry_directions`            | A    | A section's incoming lines approach from a single side.                     |
 | `_guard_independent_components_disjoint`      | A    | Independently-stacked components do not overlap.                            |
 | `_guard_no_same_row_backward_feed`            | A    | A same-row inter-section edge does not run against source flow.             |
+| `_guard_rail_interior_as_laid`                | A    | A rail panel keeps the interior and ports its rail owner laid.              |
 | `_guard_anchors_frozen_during_placement`      | B    | Content placement leaves resolved anchors fixed.                            |
 | `_guard_bypass_v_flat_visible`                | B    | Every bypass V keeps a visible horizontal run through its X.                |
 | `_guard_centered_line_spread_balanced`        | B    | A `centered` section's weave balances about its trunk.                      |

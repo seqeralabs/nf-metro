@@ -24,9 +24,13 @@ dedicated rail-mode router (see ``routing/rail.py``) can draw straight rails.
 
 from __future__ import annotations
 
-__all__ = ["compute_rail_layout"]
+__all__ = ["RailLay", "compute_rail_layout", "measure_rail_lay", "rail_lay_drift"]
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from nf_metro.layout.constants import (
+    COORD_TOLERANCE_FINE,
     OFFTRACK_TERMINUS_NUB_CLEARANCE,
     RAIL_ABOVE_LABEL_TOP_PAD,
     SECTION_HEADER_PROTRUSION,
@@ -42,8 +46,102 @@ from nf_metro.layout.pass_metrics import (
     inter_row_header_clearance,
     min_straight_edge,
 )
-from nf_metro.parser.model import MetroGraph, PortSide, Section
+from nf_metro.parser.model import MetroGraph, PortSide, Section, Station
 from nf_metro.text_metrics import TextRole
+
+_Measure = tuple[float | None, ...]
+
+
+@dataclass(frozen=True)
+class RailLay:
+    """One rail section's interior, measured from its box's top-left corner.
+
+    ``stations`` maps each real station to ``(x, y, rail_top_y, rail_bottom_y,
+    *rail_used_ys)``.  ``ports`` stays empty until the rail owner seats the
+    section's boundary ports.
+    """
+
+    size: tuple[float, float]
+    stations: Mapping[str, _Measure]
+    rails: Mapping[str, float]
+    ports: Mapping[str, tuple[float, float]] = field(default_factory=dict)
+
+
+def measure_rail_lay(
+    section: Section,
+    stations: Mapping[str, Station],
+    rails: Mapping[str, float],
+    ports: Mapping[str, Station],
+) -> RailLay:
+    """Measure *section*'s rail interior relative to its box."""
+    bx, by = section.bbox_x, section.bbox_y
+
+    def rel(y: float | None) -> float | None:
+        return None if y is None else y - by
+
+    return RailLay(
+        size=(section.bbox_w, section.bbox_h),
+        stations={
+            sid: (
+                st.x - bx,
+                st.y - by,
+                rel(st.rail_top_y),
+                rel(st.rail_bottom_y),
+                *(y - by for y in st.rail_used_ys),
+            )
+            for sid, st in stations.items()
+        },
+        rails={lid: y - by for lid, y in rails.items()},
+        ports={pid: (st.x - bx, st.y - by) for pid, st in ports.items()},
+    )
+
+
+def rail_section_members(
+    graph: MetroGraph, section: Section
+) -> tuple[dict[str, Station], dict[str, Station]]:
+    """*section*'s real stations and its boundary ports, from the graph."""
+    stations: dict[str, Station] = {}
+    ports: dict[str, Station] = {}
+    for sid in (*section.station_ids, *sorted(section.port_ids)):
+        st = graph.stations.get(sid)
+        if st is None:
+            continue
+        if sid in graph.ports:
+            ports[sid] = st
+        elif not st.is_port:
+            stations[sid] = st
+    return stations, ports
+
+
+def rail_lay_drift(laid: RailLay, now: RailLay) -> list[str]:
+    """Where *now* departs from *laid*, one line per departure."""
+
+    def same(a: _Measure, b: _Measure) -> bool:
+        return len(a) == len(b) and all(
+            (u is None and v is None)
+            or (u is not None and v is not None and abs(u - v) <= COORD_TOLERANCE_FINE)
+            for u, v in zip(a, b)
+        )
+
+    out: list[str] = []
+    if not same(laid.size, now.size):
+        out.append(f"box size {laid.size} -> {now.size}")
+    groups: list[tuple[str, Mapping[str, _Measure], Mapping[str, _Measure]]] = [
+        ("station", laid.stations, now.stations),
+        (
+            "rail",
+            {k: (v,) for k, v in laid.rails.items()},
+            {k: (v,) for k, v in now.rails.items()},
+        ),
+    ]
+    if laid.ports:
+        groups.append(("port", laid.ports, now.ports))
+    for kind, before, after in groups:
+        for key in sorted(set(before) | set(after)):
+            a, b = before.get(key), after.get(key)
+            if a is None or b is None or not same(a, b):
+                out.append(f"{kind} {key!r} {a} -> {b}")
+    return out
 
 
 def _terminus_stubs() -> float:
