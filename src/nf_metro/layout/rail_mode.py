@@ -82,6 +82,14 @@ class RailLay:
     ports: Mapping[str, tuple[float, float]] = field(default_factory=dict)
 
 
+def _measure_ports(
+    section: Section, ports: Mapping[str, Station]
+) -> dict[str, tuple[float, float]]:
+    return {
+        pid: (st.x - section.bbox_x, st.y - section.bbox_y) for pid, st in ports.items()
+    }
+
+
 def measure_rail_lay(
     section: Section,
     stations: Mapping[str, Station],
@@ -107,7 +115,7 @@ def measure_rail_lay(
             for sid, st in stations.items()
         },
         rails={lid: y - by for lid, y in rails.items()},
-        ports={pid: (st.x - bx, st.y - by) for pid, st in ports.items()},
+        ports=_measure_ports(section, ports),
     )
 
 
@@ -377,10 +385,9 @@ def position_rail_section_ports(graph: MetroGraph, section: Section) -> None:
             st.y = sum(ys) / len(ys)
         port.x = st.x
         port.y = st.y
-    _stations, ports = rail_section_members(graph, section)
+    ports = rail_section_members(graph, section)[1]
     graph._rail_lay[section.id] = replace(
-        graph._rail_lay[section.id],
-        ports=measure_rail_lay(section, {}, {}, ports).ports,
+        graph._rail_lay[section.id], ports=_measure_ports(section, ports)
     )
 
 

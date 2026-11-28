@@ -23,8 +23,10 @@ from nf_metro.layout.phases.guards import (
     PhaseInvariantError,
     _guard_rail_interior_as_laid,
 )
+from nf_metro.layout.rail_mode import position_rail_section_ports
 from nf_metro.parser.mermaid import parse_metro_mermaid
-from nf_metro.parser.model import MetroGraph
+from nf_metro.parser.model import MetroGraph, PortSide
+from nf_metro.parser.provenance import DecisionReason
 
 ROOT = Path(__file__).resolve().parents[1]
 RAIL_FIXTURES = (
@@ -279,16 +281,12 @@ def test_a_rail_section_on_a_fold_column_keeps_left_to_right_flow():
     """Grid inference would turn this section into a TB fold bridge; rails
     run left to right, so its direction is locked before inference and its
     ports face opposite ends of the rails."""
-    from nf_metro.parser.mermaid import parse_metro_mermaid as parse
-    from nf_metro.parser.model import PortSide
-    from nf_metro.parser.provenance import DecisionReason
-
     text = (WITNESSES / "rail_section_on_fold_column.mmd").read_text()
-    plain = parse(text.replace("%%metro line_spread: rails | s8\n", ""))
+    plain = parse_metro_mermaid(text.replace("%%metro line_spread: rails | s8\n", ""))
     assert plain.sections["s8"].direction == "TB"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        graph = parse(text)
+        graph = parse_metro_mermaid(text)
     decision = graph.layout_provenance.direction_decision("s8")
     assert graph.sections["s8"].direction == "LR"
     assert decision.locked and decision.reason is DecisionReason.RAIL_SECTION_DIRECTION
@@ -298,9 +296,6 @@ def test_a_rail_section_on_a_fold_column_keeps_left_to_right_flow():
 
 @pytest.mark.parametrize("side", ["TOP", "BOTTOM"])
 def test_a_rail_port_off_the_rail_ends_is_refused(side):
-    from nf_metro.layout.rail_mode import position_rail_section_ports
-    from nf_metro.parser.model import PortSide
-
     graph = _witness("rail_exit_feeds_fold_entry.mmd", fold_threshold=4)
     section = graph.sections["s2"]
     graph.ports[next(iter(section.exit_ports))].side = PortSide[side]
@@ -320,8 +315,7 @@ def test_the_rail_lay_writes_nothing_onto_the_graph_before_stage_2_1(monkeypatch
             dict(graph._rail_y),
             [
                 (st.x, st.y, st.rail_top_y, st.rail_bottom_y, tuple(st.rail_used_ys))
-                for n in sec.station_ids
-                if (st := graph.stations[n]) is not None
+                for st in map(graph.stations.__getitem__, sec.station_ids)
             ],
         )
 

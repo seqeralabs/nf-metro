@@ -1862,7 +1862,7 @@ def _clamp_tb_entry_port(
 
     # A rail section's ports are seated by the rail owner, so a run fed from
     # one keeps its rail Y and meets the clamped port on a bend.
-    if exit_pid in graph.ports and graph.station_is_rail(exit_pid):
+    if graph.station_is_rail(exit_pid):
         return target_y
 
     # Pull source up to maintain straight horizontal run
