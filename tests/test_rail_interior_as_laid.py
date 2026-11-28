@@ -250,6 +250,39 @@ def test_under_validate_the_guard_names_the_stage_that_moved_a_rail_station(
         engine_module.compute_layout(graph, validate=True)
 
 
+def _nudge_a_calling_station(graph: MetroGraph) -> None:
+    sec = graph.sections.get("calling")
+    if sec is not None:
+        sid = next(s for s in sec.station_ids if not graph.stations[s].is_port)
+        graph.stations[sid].x += 3.0
+
+
+@pytest.mark.parametrize(
+    ("mover", "where"),
+    [
+        ("_recenter_loop_side_stations", r"at the Stage 6\.12 seal"),
+        ("apply_title_band_lift", "at layout end"),
+    ],
+)
+def test_with_validate_off_the_guard_fails_closed_on_a_rail_station_mover(
+    mover, where, monkeypatch
+):
+    real = getattr(engine_module, mover)
+
+    def moving(graph: MetroGraph) -> None:
+        real(graph)
+        _nudge_a_calling_station(graph)
+
+    monkeypatch.setattr(engine_module, mover, moving)
+    graph = parse_metro_mermaid((ROOT / "examples" / "sarek_metro.mmd").read_text())
+    with (
+        warnings.catch_warnings(),
+        pytest.raises(PhaseInvariantError, match=rf"{where}: rail section"),
+    ):
+        warnings.simplefilter("ignore")
+        engine_module.compute_layout(graph, validate=False)
+
+
 WITNESSES = ROOT / "tests" / "data" / "rail_witnesses"
 
 
